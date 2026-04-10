@@ -27,9 +27,12 @@ defmodule DodoRouter.Proxy do
       log_request(project, request, result, request_id, start_time)
       broadcast_event(project, result)
 
+      # Calculate provider time (sum of all attempt latencies)
+      provider_ms = result.attempted_steps |> Enum.map(& &1[:latency_ms]) |> Enum.sum()
+
       case result.status do
         status when status in [:success, :fallback] ->
-          {:ok, result.final_response}
+          {:ok, result.final_response, %{provider_ms: provider_ms}}
 
         :error ->
           {:error, :all_providers_failed, result.attempted_steps}

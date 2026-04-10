@@ -84,6 +84,17 @@ defmodule DodoRouterWeb.LogLive.Show do
                     <td class="text-right font-mono"><%= @log.latency_ms || "-" %> ms</td>
                   </tr>
                   <tr>
+                    <td class="text-base-content/60">Provider Time</td>
+                    <td class="text-right font-mono"><%= provider_time(@log) %> ms</td>
+                  </tr>
+                  <tr>
+                    <td class="text-base-content/60">DodoRouter Overhead</td>
+                    <td class="text-right">
+                      <span class="font-mono"><%= overhead_time(@log) %> ms</span>
+                      <span class="text-success text-xs ml-1">(<%= overhead_percent(@log) %>)</span>
+                    </td>
+                  </tr>
+                  <tr>
                     <td class="text-base-content/60">Time to First Byte</td>
                     <td class="text-right font-mono"><%= @log.ttfb_ms || "-" %> ms</td>
                   </tr>
@@ -235,4 +246,23 @@ defmodule DodoRouterWeb.LogLive.Show do
       _ -> str
     end
   end
+
+  defp provider_time(%{attempted_steps: steps}) when is_list(steps) do
+    steps
+    |> Enum.map(fn step -> step["latency_ms"] || 0 end)
+    |> Enum.sum()
+  end
+  defp provider_time(_), do: 0
+
+  defp overhead_time(%{latency_ms: total} = log) when is_integer(total) do
+    total - provider_time(log)
+  end
+  defp overhead_time(_), do: 0
+
+  defp overhead_percent(%{latency_ms: total} = log) when is_integer(total) and total > 0 do
+    overhead = overhead_time(log)
+    percent = Float.round(overhead / total * 100, 1)
+    "#{percent}%"
+  end
+  defp overhead_percent(_), do: "-"
 end
