@@ -65,7 +65,7 @@ defmodule DodoRouterWeb.ProjectLive.FormComponent do
   end
 
   defp save_project(socket, :new, project_params) do
-    case Projects.create_project(project_params) do
+    case Projects.create_project(socket.assigns.current_user, project_params) do
       {:ok, project, api_key} ->
         notify_parent({:saved, project, api_key})
 

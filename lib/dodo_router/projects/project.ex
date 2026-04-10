@@ -8,6 +8,7 @@ defmodule DodoRouter.Projects.Project do
     field :api_key_hash, :string
     field :api_key_prefix, :string
 
+    belongs_to :user, DodoRouter.Accounts.User
     has_many :routing_steps, DodoRouter.Projects.RoutingStep
 
     timestamps()

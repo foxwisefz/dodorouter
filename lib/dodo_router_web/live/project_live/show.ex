@@ -8,7 +8,7 @@ defmodule DodoRouterWeb.ProjectLive.Show do
 
   @impl true
   def mount(%{"id" => id}, _session, socket) do
-    project = Projects.get_project!(id) |> Projects.with_routing_steps()
+    project = Projects.get_project!(socket.assigns.current_user, id) |> Projects.with_routing_steps()
 
     if connected?(socket) do
       Phoenix.PubSub.subscribe(DodoRouter.PubSub, "project:#{project.id}:events")
@@ -140,9 +140,9 @@ defmodule DodoRouterWeb.ProjectLive.Show do
         </div>
       </div>
 
-      <div :if={assigns[:new_api_key]} class="mt-4 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
-        <p class="font-semibold text-yellow-800">New API key - save it now:</p>
-        <code class="block mt-2 p-2 bg-yellow-100 rounded font-mono text-sm break-all">
+      <div :if={assigns[:new_api_key]} class="mt-4 p-4 bg-base-200 border border-warning rounded-lg">
+        <p class="font-semibold">New API key - save it now:</p>
+        <code class="block mt-2 p-3 bg-base-300 rounded font-mono text-sm break-all select-all">
           <%= @new_api_key %>
         </code>
       </div>

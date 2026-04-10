@@ -6,30 +6,38 @@ defmodule DodoRouter.Projects do
   import Ecto.Query
   alias DodoRouter.Repo
   alias DodoRouter.Projects.{Project, RoutingStep}
+  alias DodoRouter.Accounts.User
 
   # Project CRUD
 
-  def list_projects do
-    Repo.all(from p in Project, order_by: [desc: p.inserted_at])
+  def list_projects(%User{} = user) do
+    Repo.all(from p in Project, where: p.user_id == ^user.id, order_by: [desc: p.inserted_at])
   end
 
-  def get_project!(id), do: Repo.get!(Project, id)
+  def get_project!(%User{} = user, id) do
+    Repo.get_by!(Project, id: id, user_id: user.id)
+  end
 
-  def get_project(id), do: Repo.get(Project, id)
+  def get_project(%User{} = user, id) do
+    Repo.get_by(Project, id: id, user_id: user.id)
+  end
 
-  def get_project_by_slug(slug), do: Repo.get_by(Project, slug: slug)
+  def get_project_by_slug(%User{} = user, slug) do
+    Repo.get_by(Project, slug: slug, user_id: user.id)
+  end
 
   def get_project_by_api_key(api_key) do
     hash = Project.hash_api_key(api_key)
     Repo.get_by(Project, api_key_hash: hash)
   end
 
-  def create_project(attrs) do
+  def create_project(%User{} = user, attrs) do
     {api_key, hash, prefix} = generate_api_key()
 
     result =
       %Project{}
       |> Project.changeset(attrs)
+      |> Ecto.Changeset.put_change(:user_id, user.id)
       |> Ecto.Changeset.put_change(:api_key_hash, hash)
       |> Ecto.Changeset.put_change(:api_key_prefix, prefix)
       |> Repo.insert()

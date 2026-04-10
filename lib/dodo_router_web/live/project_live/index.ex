@@ -6,7 +6,7 @@ defmodule DodoRouterWeb.ProjectLive.Index do
 
   @impl true
   def mount(_params, _session, socket) do
-    {:ok, stream(socket, :projects, Projects.list_projects())}
+    {:ok, stream(socket, :projects, Projects.list_projects(socket.assigns.current_user))}
   end
 
   @impl true
@@ -28,7 +28,7 @@ defmodule DodoRouterWeb.ProjectLive.Index do
 
   @impl true
   def handle_event("delete", %{"id" => id}, socket) do
-    project = Projects.get_project!(id)
+    project = Projects.get_project!(socket.assigns.current_user, id)
     {:ok, _} = Projects.delete_project(project)
 
     {:noreply, stream_delete(socket, :projects, project)}
@@ -68,13 +68,14 @@ defmodule DodoRouterWeb.ProjectLive.Index do
           title={@page_title}
           action={@live_action}
           project={@project}
+          current_user={@current_user}
           patch={~p"/projects"}
         />
       </.modal>
 
-      <div :if={assigns[:show_api_key]} class="mt-4 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
-        <p class="font-semibold text-yellow-800">Save your API key - it won't be shown again:</p>
-        <code class="block mt-2 p-2 bg-yellow-100 rounded font-mono text-sm break-all">
+      <div :if={assigns[:show_api_key]} class="mt-4 p-4 bg-base-200 border border-warning rounded-lg">
+        <p class="font-semibold">Save your API key - it won't be shown again:</p>
+        <code class="block mt-2 p-3 bg-base-300 rounded font-mono text-sm break-all select-all">
           <%= @show_api_key %>
         </code>
       </div>

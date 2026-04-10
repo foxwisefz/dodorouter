@@ -5,7 +5,7 @@ defmodule DodoRouterWeb.LogLive.Index do
 
   @impl true
   def mount(_params, _session, socket) do
-    projects = Projects.list_projects()
+    projects = Projects.list_projects(socket.assigns.current_user)
 
     socket =
       socket
@@ -24,7 +24,7 @@ defmodule DodoRouterWeb.LogLive.Index do
 
     socket =
       if project_id do
-        project = Projects.get_project!(project_id)
+        project = Projects.get_project!(socket.assigns.current_user, project_id)
         logs = Logs.list_logs(project, limit: 100)
 
         socket

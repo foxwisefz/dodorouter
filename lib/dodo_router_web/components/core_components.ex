@@ -439,29 +439,27 @@ defmodule DodoRouterWeb.CoreComponents do
 
   def modal(assigns) do
     ~H"""
-    <dialog
+    <div
       id={@id}
+      phx-mounted={@show && JS.exec("data-show", to: "##{@id}")}
+      phx-remove={JS.exec("data-hide", to: "##{@id}")}
+      data-show={JS.add_class("modal-open", to: "##{@id}")}
+      data-hide={JS.remove_class("modal-open", to: "##{@id}")}
       class="modal"
-      phx-mounted={@show && show_modal(@id)}
-      phx-remove={hide_modal(@id)}
     >
       <div class="modal-box">
-        <form method="dialog">
-          <button
-            phx-click={JS.exec(@on_cancel, "phx-remove")}
-            type="button"
-            class="btn btn-sm btn-circle btn-ghost absolute right-2 top-2"
-            aria-label={gettext("close")}
-          >
-            <.icon name="hero-x-mark" class="size-5" />
-          </button>
-        </form>
+        <button
+          phx-click={@on_cancel |> JS.exec("data-hide", to: "##{@id}")}
+          type="button"
+          class="btn btn-sm btn-circle btn-ghost absolute right-2 top-2"
+          aria-label={gettext("close")}
+        >
+          <.icon name="hero-x-mark" class="size-5" />
+        </button>
         {render_slot(@inner_block)}
       </div>
-      <form method="dialog" class="modal-backdrop">
-        <button phx-click={JS.exec(@on_cancel, "phx-remove")}>close</button>
-      </form>
-    </dialog>
+      <div class="modal-backdrop" phx-click={@on_cancel |> JS.exec("data-hide", to: "##{@id}")}></div>
+    </div>
     """
   end
 
@@ -521,18 +519,6 @@ defmodule DodoRouterWeb.CoreComponents do
   end
 
   ## JS Commands
-
-  def show_modal(js \\ %JS{}, id) when is_binary(id) do
-    js
-    |> JS.dispatch("modal:open", to: "##{id}")
-    |> JS.exec("phx-mounted", to: "##{id}")
-  end
-
-  def hide_modal(js \\ %JS{}, id) do
-    js
-    |> JS.dispatch("modal:close", to: "##{id}")
-    |> JS.hide(to: "##{id}", transition: {"", "", ""})
-  end
 
   def show(js \\ %JS{}, selector) do
     JS.show(js,

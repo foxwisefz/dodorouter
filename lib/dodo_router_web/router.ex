@@ -1,6 +1,8 @@
 defmodule DodoRouterWeb.Router do
   use DodoRouterWeb, :router
 
+  import DodoRouterWeb.UserAuth
+
   pipeline :browser do
     plug :accepts, ["html"]
     plug :fetch_session
@@ -8,6 +10,7 @@ defmodule DodoRouterWeb.Router do
     plug :put_root_layout, html: {DodoRouterWeb.Layouts, :root}
     plug :protect_from_forgery
     plug :put_secure_browser_headers
+    plug :fetch_current_scope_for_user
   end
 
   pipeline :api do
@@ -26,23 +29,30 @@ defmodule DodoRouterWeb.Router do
     post "/chat/completions", ProxyController, :create
   end
 
-  # Dashboard
+  # Public routes
   scope "/", DodoRouterWeb do
     pipe_through :browser
 
     get "/", PageController, :home
+  end
 
-    live "/projects", ProjectLive.Index, :index
-    live "/projects/new", ProjectLive.Index, :new
-    live "/projects/:id", ProjectLive.Show, :show
-    live "/projects/:id/edit", ProjectLive.Show, :edit
-    live "/projects/:id/routing", ProjectLive.Show, :routing
-    live "/projects/:id/credentials", ProjectLive.Show, :credentials
+  # Dashboard (requires auth)
+  scope "/", DodoRouterWeb do
+    pipe_through [:browser, :require_authenticated_user]
 
-    live "/logs", LogLive.Index, :index
-    live "/logs/:id", LogLive.Show, :show
+    live_session :authenticated, on_mount: {DodoRouterWeb.UserAuth, :ensure_authenticated} do
+      live "/projects", ProjectLive.Index, :index
+      live "/projects/new", ProjectLive.Index, :new
+      live "/projects/:id", ProjectLive.Show, :show
+      live "/projects/:id/edit", ProjectLive.Show, :edit
+      live "/projects/:id/routing", ProjectLive.Show, :routing
+      live "/projects/:id/credentials", ProjectLive.Show, :credentials
 
-    live "/dashboard", DashboardLive, :index
+      live "/logs", LogLive.Index, :index
+      live "/logs/:id", LogLive.Show, :show
+
+      live "/dashboard", DashboardLive, :index
+    end
   end
 
   # Enable LiveDashboard and Swoosh mailbox preview in development
@@ -60,5 +70,31 @@ defmodule DodoRouterWeb.Router do
       live_dashboard "/dashboard", metrics: DodoRouterWeb.Telemetry
       forward "/mailbox", Plug.Swoosh.MailboxPreview
     end
+  end
+
+  ## Authentication routes
+
+  scope "/", DodoRouterWeb do
+    pipe_through [:browser, :redirect_if_user_is_authenticated]
+
+    get "/users/register", UserRegistrationController, :new
+    post "/users/register", UserRegistrationController, :create
+  end
+
+  scope "/", DodoRouterWeb do
+    pipe_through [:browser, :require_authenticated_user]
+
+    get "/users/settings", UserSettingsController, :edit
+    put "/users/settings", UserSettingsController, :update
+    get "/users/settings/confirm-email/:token", UserSettingsController, :confirm_email
+  end
+
+  scope "/", DodoRouterWeb do
+    pipe_through [:browser]
+
+    get "/users/log-in", UserSessionController, :new
+    get "/users/log-in/:token", UserSessionController, :confirm
+    post "/users/log-in", UserSessionController, :create
+    delete "/users/log-out", UserSessionController, :delete
   end
 end

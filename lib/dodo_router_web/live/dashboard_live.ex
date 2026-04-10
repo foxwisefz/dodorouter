@@ -7,7 +7,7 @@ defmodule DodoRouterWeb.DashboardLive do
 
   @impl true
   def mount(_params, _session, socket) do
-    projects = Projects.list_projects()
+    projects = Projects.list_projects(socket.assigns.current_user)
 
     socket =
       socket
@@ -44,7 +44,7 @@ defmodule DodoRouterWeb.DashboardLive do
 
   @impl true
   def handle_params(%{"project_id" => project_id}, _url, socket) do
-    project = Projects.get_project!(project_id)
+    project = Projects.get_project!(socket.assigns.current_user, project_id)
 
     if socket.assigns.selected_project do
       Phoenix.PubSub.unsubscribe(
