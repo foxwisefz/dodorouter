@@ -76,72 +76,99 @@ defmodule DodoRouterWeb.LogLive.Index do
   @impl true
   def render(assigns) do
     ~H"""
-    <div class="max-w-7xl mx-auto">
-      <.header>
-        Request Logs
-      </.header>
-
-      <div class="mt-6 flex gap-4 items-end">
+    <div>
+      <!-- Header -->
+      <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
         <div>
-          <label class="block text-sm font-medium text-gray-700">Project</label>
-          <select phx-change="select_project" name="project_id" class="mt-1 rounded-md border-gray-300">
-            <option value="">Select a project...</option>
-            <option :for={p <- @projects} value={p.id} selected={to_string(p.id) == @selected_project_id}>
-              <%= p.name %>
-            </option>
-          </select>
+          <h1 class="text-2xl font-bold">Request Logs</h1>
+          <p class="text-base-content/60">Browse and filter API request history</p>
         </div>
+        <select
+          phx-change="select_project"
+          name="project_id"
+          class="select select-bordered w-full sm:w-auto"
+        >
+          <option value="">Select a project...</option>
+          <option :for={p <- @projects} value={p.id} selected={to_string(p.id) == @selected_project_id}>
+            <%= p.name %>
+          </option>
+        </select>
+      </div>
 
-        <div :if={@selected_project}>
-          <label class="block text-sm font-medium text-gray-700">Status</label>
-          <select phx-change="filter" name="status" class="mt-1 rounded-md border-gray-300">
-            <option value="">All</option>
-            <option value="success" selected={@filters.status == "success"}>Success</option>
-            <option value="fallback" selected={@filters.status == "fallback"}>Fallback</option>
-            <option value="error" selected={@filters.status == "error"}>Error</option>
-          </select>
-        </div>
+      <!-- Filters -->
+      <div :if={@selected_project} class="card bg-base-100 shadow mb-6">
+        <div class="card-body py-4">
+          <div class="flex flex-wrap gap-4 items-center">
+            <span class="text-sm font-medium">Filters:</span>
 
-        <div :if={@selected_project}>
-          <label class="block text-sm font-medium text-gray-700">Call Type</label>
-          <select phx-change="filter" name="call_type" class="mt-1 rounded-md border-gray-300">
-            <option value="">All</option>
-            <option value="completion" selected={@filters.call_type == "completion"}>Completion</option>
-            <option value="tool_call" selected={@filters.call_type == "tool_call"}>Tool Call</option>
-            <option value="tool_enabled_completion" selected={@filters.call_type == "tool_enabled_completion"}>Tool Enabled</option>
-          </select>
+            <select phx-change="filter" name="status" class="select select-bordered select-sm">
+              <option value="">All Status</option>
+              <option value="success" selected={@filters.status == "success"}>Success</option>
+              <option value="fallback" selected={@filters.status == "fallback"}>Fallback</option>
+              <option value="error" selected={@filters.status == "error"}>Error</option>
+            </select>
+
+            <select phx-change="filter" name="call_type" class="select select-bordered select-sm">
+              <option value="">All Types</option>
+              <option value="completion" selected={@filters.call_type == "completion"}>Completion</option>
+              <option value="tool_call" selected={@filters.call_type == "tool_call"}>Tool Call</option>
+              <option value="tool_enabled_completion" selected={@filters.call_type == "tool_enabled_completion"}>Tool Enabled</option>
+            </select>
+          </div>
         </div>
       </div>
 
-      <div :if={@selected_project} class="mt-6">
-        <.table id="logs" rows={@streams.logs} row_click={fn {_id, log} -> JS.navigate(~p"/logs/#{log}") end}>
-          <:col :let={{_id, log}} label="Time">
-            <span class="font-mono text-xs"><%= format_time(log.inserted_at) %></span>
-          </:col>
-          <:col :let={{_id, log}} label="Status">
-            <.status_badge status={log.status} />
-          </:col>
-          <:col :let={{_id, log}} label="Provider/Model">
-            <span class="font-medium"><%= log.final_provider %></span>
-            <span class="text-gray-500">/ <%= log.final_model %></span>
-          </:col>
-          <:col :let={{_id, log}} label="Type">
-            <.call_type_badge type={log.call_type} />
-          </:col>
-          <:col :let={{_id, log}} label="Tokens">
-            <%= log.total_tokens || "-" %>
-          </:col>
-          <:col :let={{_id, log}} label="Latency">
-            <%= if log.latency_ms, do: "#{log.latency_ms}ms", else: "-" %>
-          </:col>
-          <:col :let={{_id, log}} label="Attempts">
-            <%= length(log.attempted_steps) %>
-          </:col>
-        </.table>
+      <!-- Logs Table -->
+      <div :if={@selected_project} class="card bg-base-100 shadow">
+        <div class="card-body p-0">
+          <div class="overflow-x-auto">
+            <table class="table">
+              <thead>
+                <tr>
+                  <th>Time</th>
+                  <th>Status</th>
+                  <th>Provider/Model</th>
+                  <th>Type</th>
+                  <th>Tokens</th>
+                  <th>Latency</th>
+                  <th>Attempts</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="logs" phx-update="stream">
+                <tr :for={{dom_id, log} <- @streams.logs} id={dom_id} class="hover">
+                  <td class="font-mono text-xs"><%= format_time(log.inserted_at) %></td>
+                  <td><.status_badge status={log.status} /></td>
+                  <td>
+                    <span class="font-medium"><%= log.final_provider %></span>
+                    <span class="text-base-content/60">/ <%= log.final_model %></span>
+                  </td>
+                  <td><.call_type_badge type={log.call_type} /></td>
+                  <td class="font-mono text-sm"><%= log.total_tokens || "-" %></td>
+                  <td class="font-mono text-sm"><%= if log.latency_ms, do: "#{log.latency_ms}ms", else: "-" %></td>
+                  <td class="text-center"><%= length(log.attempted_steps) %></td>
+                  <td>
+                    <.link navigate={~p"/logs/#{log}"} class="btn btn-ghost btn-xs">
+                      View
+                    </.link>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
       </div>
 
-      <div :if={!@selected_project} class="mt-12 text-center text-gray-500">
-        Select a project to view its request logs.
+      <!-- Empty State -->
+      <div :if={!@selected_project} class="hero min-h-[300px] bg-base-100 rounded-box">
+        <div class="hero-content text-center">
+          <div class="max-w-md">
+            <h1 class="text-2xl font-bold">Select a Project</h1>
+            <p class="py-4 text-base-content/60">
+              Choose a project from the dropdown above to view its request logs.
+            </p>
+          </div>
+        </div>
       </div>
     </div>
     """
@@ -150,31 +177,31 @@ defmodule DodoRouterWeb.LogLive.Index do
   defp status_badge(assigns) do
     class =
       case assigns.status do
-        "success" -> "bg-green-100 text-green-800"
-        "fallback" -> "bg-yellow-100 text-yellow-800"
-        "error" -> "bg-red-100 text-red-800"
-        _ -> "bg-gray-100 text-gray-800"
+        "success" -> "badge-success"
+        "fallback" -> "badge-warning"
+        "error" -> "badge-error"
+        _ -> "badge-ghost"
       end
 
     assigns = assign(assigns, :class, class)
 
     ~H"""
-    <span class={"px-2 py-0.5 rounded text-xs font-medium #{@class}"}><%= @status %></span>
+    <span class={"badge badge-sm #{@class}"}><%= @status %></span>
     """
   end
 
   defp call_type_badge(assigns) do
     {label, class} =
       case assigns.type do
-        "tool_call" -> {"Tool", "bg-purple-100 text-purple-800"}
-        "tool_enabled_completion" -> {"Tool+", "bg-blue-100 text-blue-800"}
-        _ -> {"Chat", "bg-gray-100 text-gray-800"}
+        "tool_call" -> {"Tool", "badge-secondary"}
+        "tool_enabled_completion" -> {"Tool+", "badge-primary"}
+        _ -> {"Chat", "badge-ghost"}
       end
 
     assigns = assign(assigns, label: label, class: class)
 
     ~H"""
-    <span class={"px-2 py-0.5 rounded text-xs font-medium #{@class}"}><%= @label %></span>
+    <span class={"badge badge-sm #{@class}"}><%= @label %></span>
     """
   end
 

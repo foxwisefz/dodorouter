@@ -106,8 +106,7 @@ defmodule DodoRouter.Projects do
     next_position = get_next_position(project)
 
     %RoutingStep{}
-    |> RoutingStep.changeset(Map.merge(attrs, %{"project_id" => project.id}))
-    |> Ecto.Changeset.put_change(:position, next_position)
+    |> RoutingStep.create_changeset(attrs, project.id, next_position)
     |> Repo.insert()
   end
 

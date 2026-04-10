@@ -20,7 +20,7 @@ defmodule DodoRouterWeb.ProjectLive.FormComponent do
       >
         <.input field={@form[:name]} type="text" label="Name" />
         <.input field={@form[:slug]} type="text" label="Slug" placeholder="my-project" />
-        <p class="text-sm text-gray-500">Lowercase letters, numbers, and dashes only</p>
+        <p class="text-sm text-base-content/60 -mt-1">Lowercase letters, numbers, and dashes only</p>
         <:actions>
           <.button phx-disable-with="Saving...">Save Project</.button>
         </:actions>

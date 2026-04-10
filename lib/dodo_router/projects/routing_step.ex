@@ -22,7 +22,7 @@ defmodule DodoRouter.Projects.RoutingStep do
   def changeset(step, attrs) do
     step
     |> cast(attrs, [:position, :provider, :model, :plan_type, :temperature, :max_tokens, :thinking_enabled, :project_id])
-    |> validate_required([:position, :provider, :model, :project_id])
+    |> validate_required([:provider, :model])
     |> validate_inclusion(:provider, @providers)
     |> validate_inclusion(:plan_type, @plan_types)
     |> validate_number(:position, greater_than_or_equal_to: 0)
@@ -30,6 +30,14 @@ defmodule DodoRouter.Projects.RoutingStep do
     |> validate_number(:max_tokens, greater_than: 0)
     |> foreign_key_constraint(:project_id)
     |> unique_constraint([:project_id, :position])
+  end
+
+  def create_changeset(step, attrs, project_id, position) do
+    step
+    |> changeset(attrs)
+    |> put_change(:project_id, project_id)
+    |> put_change(:position, position)
+    |> validate_required([:position, :project_id])
   end
 
   def providers, do: @providers

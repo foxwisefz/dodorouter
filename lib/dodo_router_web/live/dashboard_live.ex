@@ -110,122 +110,222 @@ defmodule DodoRouterWeb.DashboardLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <div class="max-w-7xl mx-auto">
-      <.header>
-        Dashboard
-        <:actions>
-          <select phx-change="select_project" name="project_id" class="rounded-md border-gray-300">
-            <option :for={p <- @projects} value={p.id} selected={@selected_project && p.id == @selected_project.id}>
-              <%= p.name %>
-            </option>
-          </select>
-        </:actions>
-      </.header>
-
-      <div :if={@selected_project && @stats} class="mt-8">
-        <div class="grid grid-cols-5 gap-4">
-          <.stat_card title="Requests (24h)" value={@stats.total_requests} />
-          <.stat_card title="Success Rate" value={success_rate(@stats)} color={success_color(@stats)} />
-          <.stat_card title="Fallback Rate" value={fallback_rate(@stats)} color="yellow" />
-          <.stat_card title="Tokens Used" value={format_number(@stats.total_tokens)} />
-          <.stat_card title="Est. Cost" value={format_cost(@stats.total_cost_usd)} />
+    <div>
+      <!-- Header -->
+      <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
+        <div>
+          <h1 class="text-2xl font-bold">Dashboard</h1>
+          <p class="text-base-content/60">Monitor your LLM proxy in real-time</p>
         </div>
+        <select
+          phx-change="select_project"
+          name="project_id"
+          class="select select-bordered w-full sm:w-auto"
+        >
+          <option :for={p <- @projects} value={p.id} selected={@selected_project && p.id == @selected_project.id}>
+            <%= p.name %>
+          </option>
+        </select>
+      </div>
 
-        <div class="mt-8 grid grid-cols-3 gap-4">
-          <.stat_card title="p50 Latency" value={format_latency(@latency_percentiles.p50)} />
-          <.stat_card title="p95 Latency" value={format_latency(@latency_percentiles.p95)} />
-          <.stat_card title="p99 Latency" value={format_latency(@latency_percentiles.p99)} />
-        </div>
+      <%= if @selected_project && @stats do %>
+        <!-- Stats Grid -->
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
+          <div class="stat bg-base-100 rounded-box shadow">
+            <div class="stat-title">Requests (24h)</div>
+            <div class="stat-value text-primary"><%= @stats.total_requests %></div>
+            <div class="stat-desc">Total API calls</div>
+          </div>
 
-        <div class="mt-8 grid grid-cols-2 gap-8">
-          <div class="bg-white border rounded-lg p-4">
-            <h3 class="font-semibold mb-4">Requests per Minute (last hour)</h3>
-            <div class="h-32 flex items-end gap-1">
-              <%= for bucket <- pad_rpm(@requests_per_minute, 60) do %>
-                <div
-                  class="flex-1 bg-blue-500 rounded-t"
-                  style={"height: #{bucket_height(bucket, @requests_per_minute)}%"}
-                  title={"#{bucket.count} requests"}
-                >
-                </div>
-              <% end %>
+          <div class="stat bg-base-100 rounded-box shadow">
+            <div class="stat-title">Success Rate</div>
+            <div class={"stat-value #{success_color(@stats)}"}><%= success_rate(@stats) %></div>
+            <div class="stat-desc"><%= @stats.successful_requests %> successful</div>
+          </div>
+
+          <div class="stat bg-base-100 rounded-box shadow">
+            <div class="stat-title">Fallback Rate</div>
+            <div class="stat-value text-warning"><%= fallback_rate(@stats) %></div>
+            <div class="stat-desc"><%= @stats.fallback_requests %> fallbacks</div>
+          </div>
+
+          <div class="stat bg-base-100 rounded-box shadow">
+            <div class="stat-title">Tokens Used</div>
+            <div class="stat-value"><%= format_number(@stats.total_tokens) %></div>
+            <div class="stat-desc">
+              <span class="text-info"><%= format_number(@stats.prompt_tokens) %></span> in /
+              <span class="text-success"><%= format_number(@stats.completion_tokens) %></span> out
             </div>
           </div>
 
-          <div class="bg-white border rounded-lg p-4">
-            <h3 class="font-semibold mb-4">By Provider (24h)</h3>
-            <div class="space-y-3">
-              <div :for={stat <- @stats_by_provider} class="flex items-center gap-4">
-                <span class="w-24 font-medium"><%= stat.provider %></span>
-                <div class="flex-1 bg-gray-100 rounded h-6 overflow-hidden">
+          <div class="stat bg-base-100 rounded-box shadow">
+            <div class="stat-title">Est. Cost</div>
+            <div class="stat-value"><%= format_cost(@stats.total_cost_usd) %></div>
+            <div class="stat-desc">Last 24 hours</div>
+          </div>
+        </div>
+
+        <!-- Latency Stats -->
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+          <div class="stat bg-base-100 rounded-box shadow">
+            <div class="stat-figure text-info">
+              <svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+            </div>
+            <div class="stat-title">p50 Latency</div>
+            <div class="stat-value text-info"><%= format_latency(@latency_percentiles.p50) %></div>
+            <div class="stat-desc">Median response time</div>
+          </div>
+
+          <div class="stat bg-base-100 rounded-box shadow">
+            <div class="stat-figure text-warning">
+              <svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+            </div>
+            <div class="stat-title">p95 Latency</div>
+            <div class="stat-value text-warning"><%= format_latency(@latency_percentiles.p95) %></div>
+            <div class="stat-desc">95th percentile</div>
+          </div>
+
+          <div class="stat bg-base-100 rounded-box shadow">
+            <div class="stat-figure text-error">
+              <svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+            </div>
+            <div class="stat-title">p99 Latency</div>
+            <div class="stat-value text-error"><%= format_latency(@latency_percentiles.p99) %></div>
+            <div class="stat-desc">99th percentile</div>
+          </div>
+        </div>
+
+        <!-- Charts Row -->
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+          <!-- Requests per Minute -->
+          <div class="card bg-base-100 shadow">
+            <div class="card-body">
+              <h2 class="card-title text-base">Requests per Minute</h2>
+              <p class="text-sm text-base-content/60">Last 60 minutes</p>
+              <div class="h-32 flex items-end gap-0.5 mt-4">
+                <%= for bucket <- pad_rpm(@requests_per_minute, 60) do %>
                   <div
-                    class="h-full bg-blue-500"
-                    style={"width: #{provider_percentage(stat, @stats)}%"}
+                    class="flex-1 bg-primary rounded-t transition-all hover:bg-primary-focus"
+                    style={"height: #{bucket_height(bucket, @requests_per_minute)}%"}
+                    title={"#{bucket.count} requests"}
                   >
                   </div>
-                </div>
-                <span class="w-16 text-right text-sm"><%= stat.total_requests %></span>
+                <% end %>
+              </div>
+            </div>
+          </div>
+
+          <!-- Provider Breakdown -->
+          <div class="card bg-base-100 shadow">
+            <div class="card-body">
+              <h2 class="card-title text-base">By Provider</h2>
+              <p class="text-sm text-base-content/60">Request distribution (24h)</p>
+              <div class="space-y-3 mt-4">
+                <%= for stat <- @stats_by_provider do %>
+                  <div class="flex items-center gap-4">
+                    <span class="w-20 font-medium text-sm"><%= stat.provider %></span>
+                    <div class="flex-1">
+                      <progress
+                        class="progress progress-primary w-full"
+                        value={stat.total_requests}
+                        max={@stats.total_requests}
+                      ></progress>
+                    </div>
+                    <span class="w-12 text-right text-sm font-mono"><%= stat.total_requests %></span>
+                  </div>
+                <% end %>
+                <p :if={Enum.empty?(@stats_by_provider)} class="text-base-content/50 text-sm">No data yet</p>
               </div>
             </div>
           </div>
         </div>
 
-        <div :if={length(@failure_breakdown) > 0} class="mt-8">
-          <div class="bg-white border rounded-lg p-4">
-            <h3 class="font-semibold mb-4">Failures (24h)</h3>
-            <.table id="failures" rows={@failure_breakdown}>
-              <:col :let={f} label="Provider"><%= f.provider %></:col>
-              <:col :let={f} label="Model"><%= f.model %></:col>
-              <:col :let={f} label="Status">
-                <span class={"px-2 py-0.5 rounded text-xs font-medium #{if f.status == "error", do: "bg-red-100 text-red-800", else: "bg-yellow-100 text-yellow-800"}"}>
-                  <%= f.status %>
+        <!-- Failures & Live Events -->
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <!-- Failures -->
+          <div :if={length(@failure_breakdown) > 0} class="card bg-base-100 shadow">
+            <div class="card-body">
+              <h2 class="card-title text-base">Failures (24h)</h2>
+              <div class="overflow-x-auto">
+                <table class="table table-sm">
+                  <thead>
+                    <tr>
+                      <th>Provider</th>
+                      <th>Model</th>
+                      <th>Status</th>
+                      <th>Count</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <%= for f <- @failure_breakdown do %>
+                      <tr>
+                        <td><%= f.provider %></td>
+                        <td class="font-mono text-xs"><%= f.model %></td>
+                        <td>
+                          <span class={"badge badge-sm #{if f.status == "error", do: "badge-error", else: "badge-warning"}"}>
+                            <%= f.status %>
+                          </span>
+                        </td>
+                        <td class="font-mono"><%= f.count %></td>
+                      </tr>
+                    <% end %>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
+          <!-- Live Events -->
+          <div class="card bg-base-100 shadow">
+            <div class="card-body">
+              <div class="flex items-center gap-2">
+                <h2 class="card-title text-base">Live Events</h2>
+                <span class="badge badge-success badge-sm gap-1">
+                  <span class="w-2 h-2 rounded-full bg-success animate-pulse"></span>
+                  Live
                 </span>
-              </:col>
-              <:col :let={f} label="Count"><%= f.count %></:col>
-            </.table>
-          </div>
-        </div>
-
-        <div class="mt-8">
-          <div class="bg-white border rounded-lg p-4">
-            <h3 class="font-semibold mb-4">Live Events</h3>
-            <div class="space-y-2 max-h-64 overflow-y-auto">
-              <div :for={event <- @live_events} class={"p-2 rounded text-sm #{event_class(event)}"}>
-                <span class="font-mono"><%= event.provider %>/<%= event.model %></span>
-                <span class="ml-4"><%= event.latency_ms %>ms</span>
-                <span :if={event.had_fallback} class="ml-2 text-orange-600">(fallback)</span>
-                <span class="float-right text-gray-500"><%= format_event_time(event.timestamp) %></span>
               </div>
-              <p :if={Enum.empty?(@live_events)} class="text-gray-500 text-sm">
-                Waiting for requests...
-              </p>
+              <div class="space-y-2 mt-4 max-h-64 overflow-y-auto">
+                <%= for event <- @live_events do %>
+                  <div class={"flex items-center justify-between p-2 rounded text-sm #{event_class(event)}"}>
+                    <div class="flex items-center gap-2">
+                      <span class={"w-2 h-2 rounded-full #{event_dot_class(event)}"}></span>
+                      <span class="font-mono"><%= event.provider %>/<%= event.model %></span>
+                      <span :if={event.had_fallback} class="badge badge-warning badge-xs">fallback</span>
+                    </div>
+                    <div class="flex items-center gap-4 text-base-content/60">
+                      <span><%= event.latency_ms %>ms</span>
+                      <span class="text-xs"><%= format_event_time(event.timestamp) %></span>
+                    </div>
+                  </div>
+                <% end %>
+                <p :if={Enum.empty?(@live_events)} class="text-base-content/50 text-sm text-center py-8">
+                  Waiting for requests...
+                </p>
+              </div>
             </div>
           </div>
         </div>
-      </div>
-
-      <div :if={!@selected_project} class="mt-12 text-center text-gray-500">
-        No projects yet. <.link navigate={~p"/projects/new"} class="text-blue-600 hover:underline">Create one</.link> to get started.
-      </div>
-    </div>
-    """
-  end
-
-  defp stat_card(assigns) do
-    color_class =
-      case assigns[:color] do
-        "green" -> "text-green-600"
-        "yellow" -> "text-yellow-600"
-        "red" -> "text-red-600"
-        _ -> ""
-      end
-
-    assigns = assign(assigns, :color_class, color_class)
-
-    ~H"""
-    <div class="p-4 bg-white border rounded-lg">
-      <p class="text-sm text-gray-500"><%= @title %></p>
-      <p class={"text-2xl font-semibold mt-1 #{@color_class}"}><%= @value %></p>
+      <% else %>
+        <!-- Empty State -->
+        <div class="hero min-h-[400px] bg-base-100 rounded-box">
+          <div class="hero-content text-center">
+            <div class="max-w-md">
+              <h1 class="text-3xl font-bold">Welcome to DodoRouter</h1>
+              <p class="py-6 text-base-content/60">
+                Create your first project to start routing LLM requests with automatic fallbacks.
+              </p>
+              <a href={~p"/projects/new"} class="btn btn-primary">Create Project</a>
+            </div>
+          </div>
+        </div>
+      <% end %>
     </div>
     """
   end
@@ -235,13 +335,13 @@ defmodule DodoRouterWeb.DashboardLive do
     "#{round(success / total * 100)}%"
   end
 
-  defp success_color(%{total_requests: 0}), do: nil
+  defp success_color(%{total_requests: 0}), do: ""
   defp success_color(%{total_requests: total, successful_requests: success}) do
     rate = success / total * 100
     cond do
-      rate >= 99 -> "green"
-      rate >= 95 -> "yellow"
-      true -> "red"
+      rate >= 99 -> "text-success"
+      rate >= 95 -> "text-warning"
+      true -> "text-error"
     end
   end
 
@@ -263,14 +363,13 @@ defmodule DodoRouterWeb.DashboardLive do
 
   defp format_event_time(dt), do: Calendar.strftime(dt, "%H:%M:%S")
 
-  defp event_class(%{status: :success}), do: "bg-green-50"
-  defp event_class(%{status: :fallback}), do: "bg-yellow-50"
-  defp event_class(_), do: "bg-red-50"
+  defp event_class(%{status: :success}), do: "bg-success/10"
+  defp event_class(%{status: :fallback}), do: "bg-warning/10"
+  defp event_class(_), do: "bg-error/10"
 
-  defp provider_percentage(_stat, %{total_requests: 0}), do: 0
-  defp provider_percentage(stat, %{total_requests: total}) do
-    round(stat.total_requests / total * 100)
-  end
+  defp event_dot_class(%{status: :success}), do: "bg-success"
+  defp event_dot_class(%{status: :fallback}), do: "bg-warning"
+  defp event_dot_class(_), do: "bg-error"
 
   defp pad_rpm(buckets, target_count) do
     existing = length(buckets)
@@ -279,9 +378,9 @@ defmodule DodoRouterWeb.DashboardLive do
   end
 
   defp bucket_height(_bucket, []), do: 0
-  defp bucket_height(%{count: 0}, _all), do: 0
+  defp bucket_height(%{count: 0}, _all), do: 2
   defp bucket_height(%{count: count}, all) do
     max_count = Enum.map(all, & &1.count) |> Enum.max(fn -> 1 end)
-    round(count / max_count * 100)
+    max(2, round(count / max_count * 100))
   end
 end
