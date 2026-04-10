@@ -1,0 +1,41 @@
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-dodo_router}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_DB: ${POSTGRES_DB:-dodo_router_prod}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-dodo_router} -d ${POSTGRES_DB:-dodo_router_prod}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  app:
+    image: gezimhoxha/dodo-router:latest
+    # Or build locally:
+    # build:
+    #   context: ..
+    #   dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "4000:4000"
+    environment:
+      DATABASE_URL: ecto://${POSTGRES_USER:-dodo_router}:${POSTGRES_PASSWORD}@db/${POSTGRES_DB:-dodo_router_prod}
+      SECRET_KEY_BASE: ${SECRET_KEY_BASE:?SECRET_KEY_BASE is required}
+      PHX_HOST: ${PHX_HOST:-localhost}
+      PORT: 4000
+      INFISICAL_TOKEN: ${INFISICAL_TOKEN:-}
+      INFISICAL_PROJECT_ID: ${INFISICAL_PROJECT_ID:-}
+      INFISICAL_ENVIRONMENT: ${INFISICAL_ENVIRONMENT:-prod}
+    depends_on:
+      db:
+        condition: service_healthy
+    command: >
+      sh -c "/app/bin/migrate && /app/bin/server"
+
+volumes:
+  postgres_data:
