@@ -1,0 +1,96 @@
+defmodule DodoRouter.Proxy do
+  @moduledoc """
+  The Proxy context - dispatches requests through the routing chain.
+  """
+
+  alias DodoRouter.Projects
+  alias DodoRouter.Projects.Project
+  alias DodoRouter.Proxy.{Adapter, FallbackChain}
+  alias DodoRouter.Logs
+
+  @doc """
+  Dispatches a request through the project's routing chain.
+
+  Returns `{:ok, response}` or `{:error, reason}`.
+  """
+  def dispatch(%Project{} = project, request, opts \\ []) do
+    request_id = Keyword.get(opts, :request_id, Ecto.UUID.generate())
+    start_time = System.monotonic_time(:millisecond)
+
+    steps = Projects.list_routing_steps(project)
+
+    if Enum.empty?(steps) do
+      {:error, :no_routing_configured}
+    else
+      result = FallbackChain.execute(request, steps, project.id, opts)
+
+      log_request(project, request, result, request_id, start_time)
+      broadcast_event(project, result)
+
+      case result.status do
+        status when status in [:success, :fallback] ->
+          {:ok, result.final_response}
+
+        :error ->
+          {:error, :all_providers_failed, result.attempted_steps}
+      end
+    end
+  end
+
+  @doc """
+  Dispatches a streaming request.
+  """
+  def dispatch_streaming(%Project{} = project, request, send_chunk) do
+    dispatch(project, request, stream: true, send_chunk: send_chunk)
+  end
+
+  defp log_request(project, request, result, request_id, start_time) do
+    latency_ms = System.monotonic_time(:millisecond) - start_time
+
+    {call_type, tools_invoked} =
+      case result.final_response do
+        nil -> {"completion", []}
+        response -> Adapter.detect_call_type(request, response)
+      end
+
+    usage = Adapter.extract_usage(result.final_response || %{})
+    last_step = List.last(result.attempted_steps)
+
+    log_attrs = %{
+      project_id: project.id,
+      request_id: request_id,
+      status: to_string(result.status),
+      attempted_steps: result.attempted_steps,
+      final_provider: last_step[:provider],
+      final_model: last_step[:model],
+      call_type: call_type,
+      tools_invoked: tools_invoked,
+      prompt_tokens: usage.prompt_tokens,
+      completion_tokens: usage.completion_tokens,
+      total_tokens: usage.total_tokens,
+      latency_ms: latency_ms,
+      ttfb_ms: get_in(result.final_response || %{}, ["_meta", "ttfb_ms"])
+    }
+
+    Logs.create_log_async(log_attrs)
+  end
+
+  defp broadcast_event(project, result) do
+    last_step = List.last(result.attempted_steps)
+
+    event = %{
+      status: result.status,
+      provider: last_step[:provider],
+      model: last_step[:model],
+      latency_ms: last_step[:latency_ms],
+      had_fallback: length(result.attempted_steps) > 1,
+      timestamp: DateTime.utc_now()
+    }
+
+    Phoenix.PubSub.broadcast(
+      DodoRouter.PubSub,
+      "project:#{project.id}:events",
+      {:proxy_event, event}
+    )
+  end
+end
