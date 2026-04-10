@@ -11,7 +11,7 @@ on:
   workflow_dispatch:
 
 env:
-  REGISTRY_IMAGE: gezimhoxha/dodo-router
+  REGISTRY_IMAGE: foxwise/dodorouter
 
 concurrency:
   group: build-${{ github.ref }}
