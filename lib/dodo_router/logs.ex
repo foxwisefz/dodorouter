@@ -7,6 +7,7 @@ defmodule DodoRouter.Logs do
   alias DodoRouter.Repo
   alias DodoRouter.Logs.RequestLog
   alias DodoRouter.Projects.Project
+  alias DodoRouter.Accounts.User
 
   # Logging
 
@@ -66,7 +67,12 @@ defmodule DodoRouter.Logs do
     |> Repo.all()
   end
 
-  def get_log!(id), do: Repo.get!(RequestLog, id)
+  def get_log!(%User{} = user, id) do
+    query = from l in RequestLog,
+      join: p in Project, on: l.project_id == p.id,
+      where: l.id == ^id and p.user_id == ^user.id
+    Repo.one!(query)
+  end
 
   def get_log_by_request_id(request_id), do: Repo.get_by(RequestLog, request_id: request_id)
 

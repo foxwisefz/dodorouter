@@ -5,7 +5,7 @@ defmodule DodoRouterWeb.LogLive.Show do
 
   @impl true
   def mount(%{"id" => id}, _session, socket) do
-    log = Logs.get_log!(id)
+    log = Logs.get_log!(socket.assigns.current_user, id)
 
     socket =
       socket
