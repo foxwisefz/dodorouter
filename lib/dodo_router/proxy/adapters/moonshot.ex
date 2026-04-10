@@ -97,15 +97,24 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
   end
 
   defp build_request_body(request, %RoutingStep{} = step) do
+    # Model always comes from routing step
+    # Client values take precedence, step defaults are fallbacks
     request
     |> Map.put("model", step.model)
-    |> maybe_put("temperature", step.temperature)
-    |> maybe_put("max_tokens", step.max_tokens)
+    |> maybe_default("temperature", step.temperature)
+    |> maybe_default("max_tokens", step.max_tokens)
+    |> maybe_default("top_p", nil)
+    |> maybe_default("frequency_penalty", nil)
+    |> maybe_default("presence_penalty", nil)
+    |> maybe_default("stop", nil)
     |> maybe_put_thinking(step)
   end
 
-  defp maybe_put(map, _key, nil), do: map
-  defp maybe_put(map, key, value), do: Map.put(map, key, value)
+  # Only set default if client didn't provide a value
+  defp maybe_default(map, _key, nil), do: map
+  defp maybe_default(map, key, default) do
+    if Map.has_key?(map, key), do: map, else: Map.put(map, key, default)
+  end
 
   defp maybe_put_thinking(body, %RoutingStep{model: "kimi-k2.5", thinking_enabled: enabled})
        when is_boolean(enabled) do
