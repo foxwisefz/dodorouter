@@ -113,9 +113,13 @@ defmodule DodoRouterWeb.ProjectLive.Show do
       :ok ->
         has_key_assign = String.to_existing_atom("has_#{provider}_key")
 
+        # Show saved indicator briefly
+        send(self(), {:clear_saved_provider, provider})
+
         {:noreply,
          socket
          |> assign(has_key_assign, true)
+         |> assign(:saved_provider, provider)
          |> put_flash(:info, "#{provider} API key saved")}
 
       {:error, :not_configured} ->
@@ -142,6 +146,19 @@ defmodule DodoRouterWeb.ProjectLive.Show do
   end
 
   @impl true
+  def handle_info({:clear_saved_provider, provider}, socket) do
+    Process.send_after(self(), {:do_clear_saved_provider, provider}, 2000)
+    {:noreply, socket}
+  end
+
+  def handle_info({:do_clear_saved_provider, provider}, socket) do
+    if socket.assigns[:saved_provider] == provider do
+      {:noreply, assign(socket, :saved_provider, nil)}
+    else
+      {:noreply, socket}
+    end
+  end
+
   def handle_info({:proxy_event, event}, socket) do
     recent_events = [event | Enum.take(socket.assigns.recent_events, 9)]
     stats = Logs.stats(socket.assigns.project)
@@ -386,7 +403,7 @@ defmodule DodoRouterWeb.ProjectLive.Show do
             </span>
             <span :if={!assigns[:has_zai_key]} class="badge badge-ghost">Not set</span>
           </div>
-          <form phx-submit="save_credential" class="flex gap-2">
+          <form phx-submit="save_credential" class="flex gap-2 items-center">
             <input type="hidden" name="provider" value="zai" />
             <input
               type="text"
@@ -399,6 +416,9 @@ defmodule DodoRouterWeb.ProjectLive.Show do
               required
             />
             <button type="submit" class="btn btn-primary">Save</button>
+            <span :if={assigns[:saved_provider] == "zai"} class="text-success font-medium animate-pulse">
+              Saved!
+            </span>
           </form>
 
           <div class="divider"></div>
@@ -414,7 +434,7 @@ defmodule DodoRouterWeb.ProjectLive.Show do
             </span>
             <span :if={!assigns[:has_moonshot_key]} class="badge badge-ghost">Not set</span>
           </div>
-          <form phx-submit="save_credential" class="flex gap-2">
+          <form phx-submit="save_credential" class="flex gap-2 items-center">
             <input type="hidden" name="provider" value="moonshot" />
             <input
               type="text"
@@ -427,6 +447,9 @@ defmodule DodoRouterWeb.ProjectLive.Show do
               required
             />
             <button type="submit" class="btn btn-primary">Save</button>
+            <span :if={assigns[:saved_provider] == "moonshot"} class="text-success font-medium animate-pulse">
+              Saved!
+            </span>
           </form>
 
           <div class="divider"></div>

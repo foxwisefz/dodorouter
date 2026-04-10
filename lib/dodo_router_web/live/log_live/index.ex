@@ -1,6 +1,8 @@
 defmodule DodoRouterWeb.LogLive.Index do
   use DodoRouterWeb, :live_view
 
+  require Logger
+
   alias DodoRouter.{Logs, Projects}
 
   @impl true
@@ -12,8 +14,9 @@ defmodule DodoRouterWeb.LogLive.Index do
       |> assign(:page_title, "Request Logs")
       |> assign(:projects, projects)
       |> assign(:selected_project_id, nil)
+      |> assign(:selected_project, nil)
       |> assign(:filters, %{status: nil, provider: nil, call_type: nil})
-      |> assign(:logs, [])
+      |> stream(:logs, [])
 
     {:ok, socket}
   end
@@ -42,8 +45,19 @@ defmodule DodoRouterWeb.LogLive.Index do
   end
 
   @impl true
-  def handle_event("select_project", %{"project_id" => project_id}, socket) do
-    {:noreply, push_patch(socket, to: ~p"/logs?project_id=#{project_id}")}
+  def handle_event("select_project", params, socket) do
+    Logger.debug("select_project params: #{inspect(params)}")
+
+    case params do
+      %{"project_id" => ""} ->
+        {:noreply, push_patch(socket, to: ~p"/logs")}
+
+      %{"project_id" => project_id} ->
+        {:noreply, push_patch(socket, to: ~p"/logs?project_id=#{project_id}")}
+
+      _ ->
+        {:noreply, socket}
+    end
   end
 
   def handle_event("filter", %{"status" => status}, socket) do
@@ -83,16 +97,17 @@ defmodule DodoRouterWeb.LogLive.Index do
           <h1 class="text-2xl font-bold">Request Logs</h1>
           <p class="text-base-content/60">Browse and filter API request history</p>
         </div>
-        <select
-          phx-change="select_project"
-          name="project_id"
-          class="select select-bordered w-full sm:w-auto"
-        >
-          <option value="">Select a project...</option>
-          <option :for={p <- @projects} value={p.id} selected={to_string(p.id) == @selected_project_id}>
-            <%= p.name %>
-          </option>
-        </select>
+        <form phx-change="select_project">
+          <select
+            name="project_id"
+            class="select select-bordered w-full sm:w-auto"
+          >
+            <option value="">Select a project...</option>
+            <option :for={p <- @projects} value={p.id} selected={to_string(p.id) == @selected_project_id}>
+              <%= p.name %>
+            </option>
+          </select>
+        </form>
       </div>
 
       <!-- Filters -->
@@ -140,13 +155,37 @@ defmodule DodoRouterWeb.LogLive.Index do
                   <td class="font-mono text-xs"><%= format_time(log.inserted_at) %></td>
                   <td><.status_badge status={log.status} /></td>
                   <td>
-                    <span class="font-medium"><%= log.final_provider %></span>
-                    <span class="text-base-content/60">/ <%= log.final_model %></span>
+                    <%= if length(log.attempted_steps) > 1 do %>
+                      <div class="flex items-center gap-1">
+                        <%= for {step, idx} <- Enum.with_index(log.attempted_steps) do %>
+                          <span class={[
+                            "text-xs px-1.5 py-0.5 rounded",
+                            step["status"] == "success" && "bg-success/20 text-success",
+                            step["status"] != "success" && "bg-error/20 text-error line-through"
+                          ]}>
+                            <%= step["provider"] %>
+                          </span>
+                          <%= if idx < length(log.attempted_steps) - 1 do %>
+                            <span class="text-base-content/40">→</span>
+                          <% end %>
+                        <% end %>
+                      </div>
+                      <div class="text-xs text-base-content/60 mt-0.5"><%= log.final_model %></div>
+                    <% else %>
+                      <span class="font-medium"><%= log.final_provider %></span>
+                      <span class="text-base-content/60">/ <%= log.final_model %></span>
+                    <% end %>
                   </td>
                   <td><.call_type_badge type={log.call_type} /></td>
                   <td class="font-mono text-sm"><%= log.total_tokens || "-" %></td>
                   <td class="font-mono text-sm"><%= if log.latency_ms, do: "#{log.latency_ms}ms", else: "-" %></td>
-                  <td class="text-center"><%= length(log.attempted_steps) %></td>
+                  <td class="text-center">
+                    <%= if length(log.attempted_steps) > 1 do %>
+                      <span class="badge badge-warning badge-sm"><%= length(log.attempted_steps) %></span>
+                    <% else %>
+                      <span class="text-base-content/50">1</span>
+                    <% end %>
+                  </td>
                   <td>
                     <.link navigate={~p"/logs/#{log}"} class="btn btn-ghost btn-xs">
                       View

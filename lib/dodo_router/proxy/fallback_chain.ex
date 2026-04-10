@@ -43,12 +43,15 @@ defmodule DodoRouter.Proxy.FallbackChain do
 
   defp run_chain(%{steps: [step | rest]} = state) do
     start_time = System.monotonic_time(:millisecond)
+    endpoint = endpoint_for(step)
 
     case execute_step(step, state) do
       {:ok, response} ->
         attempt = %{
           provider: step.provider,
           model: step.model,
+          endpoint: endpoint,
+          plan_type: step.plan_type,
           status: "success",
           latency_ms: latency(start_time)
         }
@@ -65,8 +68,12 @@ defmodule DodoRouter.Proxy.FallbackChain do
         attempt = %{
           provider: step.provider,
           model: step.model,
+          endpoint: endpoint,
+          plan_type: step.plan_type,
           status: "error",
           error: to_string(reason),
+          http_status: details[:status],
+          error_body: truncate_error(details[:body]),
           latency_ms: details[:latency_ms] || latency(start_time)
         }
 
@@ -100,6 +107,23 @@ defmodule DodoRouter.Proxy.FallbackChain do
 
   defp get_api_key("zai", project_id), do: Secrets.zai_api_key(project_id)
   defp get_api_key("moonshot", project_id), do: Secrets.moonshot_api_key(project_id)
+
+  defp endpoint_for(%RoutingStep{provider: "zai", plan_type: "coding"}),
+    do: "https://api.z.ai/api/coding/paas/v4/chat/completions"
+  defp endpoint_for(%RoutingStep{provider: "zai"}),
+    do: "https://api.z.ai/api/paas/v4/chat/completions"
+  defp endpoint_for(%RoutingStep{provider: "moonshot"}),
+    do: "https://api.moonshot.cn/v1/chat/completions"
+
+  defp truncate_error(nil), do: nil
+  defp truncate_error(body) when is_map(body) do
+    case Jason.encode(body) do
+      {:ok, json} when byte_size(json) > 500 -> String.slice(json, 0, 500) <> "..."
+      {:ok, json} -> json
+      _ -> inspect(body) |> String.slice(0, 500)
+    end
+  end
+  defp truncate_error(body), do: inspect(body) |> String.slice(0, 500)
 
   defp latency(start_time), do: System.monotonic_time(:millisecond) - start_time
 end

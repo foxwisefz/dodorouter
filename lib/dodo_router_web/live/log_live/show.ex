@@ -109,28 +109,51 @@ defmodule DodoRouterWeb.LogLive.Show do
         <div class="card bg-base-100 shadow">
           <div class="card-body">
             <h2 class="card-title text-base">Routing Chain</h2>
-            <ul class="steps steps-vertical">
+            <div class="space-y-4 mt-2">
               <%= for {attempt, idx} <- Enum.with_index(@log.attempted_steps) do %>
-                <li class={"step #{if attempt["status"] == "success", do: "step-success", else: "step-error"}"}>
-                  <div class="text-left w-full">
+                <div class={[
+                  "p-3 rounded-lg border-l-4",
+                  attempt["status"] == "success" && "bg-success/10 border-success",
+                  attempt["status"] != "success" && "bg-error/10 border-error"
+                ]}>
+                  <div class="flex items-center justify-between">
                     <div class="flex items-center gap-2">
+                      <span class="badge badge-neutral"><%= idx + 1 %></span>
                       <span class="font-medium"><%= attempt["provider"] %></span>
-                      <span class="text-base-content/60 text-sm">/ <%= attempt["model"] %></span>
+                      <span class="text-base-content/60">/ <%= attempt["model"] %></span>
+                      <span :if={attempt["plan_type"] == "coding"} class="badge badge-secondary badge-sm">coding</span>
                     </div>
-                    <div class="text-sm text-base-content/60 mt-1">
-                      <span class={"font-medium #{if attempt["status"] == "success", do: "text-success", else: "text-error"}"}>
+                    <div class="flex items-center gap-2">
+                      <span :if={attempt["http_status"]} class="badge badge-ghost badge-sm">
+                        HTTP <%= attempt["http_status"] %>
+                      </span>
+                      <span class={[
+                        "badge badge-sm",
+                        attempt["status"] == "success" && "badge-success",
+                        attempt["status"] != "success" && "badge-error"
+                      ]}>
                         <%= attempt["status"] %>
                       </span>
-                      <span class="mx-2">·</span>
-                      <span><%= attempt["latency_ms"] %>ms</span>
-                    </div>
-                    <div :if={attempt["error"]} class="text-sm text-error mt-1">
-                      <%= attempt["error"] %>
+                      <span class="font-mono text-sm"><%= attempt["latency_ms"] %>ms</span>
                     </div>
                   </div>
-                </li>
+                  <div :if={attempt["endpoint"]} class="mt-2">
+                    <code class="text-xs text-base-content/70 break-all"><%= attempt["endpoint"] %></code>
+                  </div>
+                  <div :if={attempt["error"]} class="mt-2 text-sm text-error">
+                    <strong>Error:</strong> <%= attempt["error"] %>
+                  </div>
+                  <div :if={attempt["error_body"]} class="mt-2">
+                    <details class="collapse collapse-arrow bg-base-200">
+                      <summary class="collapse-title text-xs py-1 min-h-0">Error Response</summary>
+                      <div class="collapse-content">
+                        <pre class="text-xs overflow-auto"><%= attempt["error_body"] %></pre>
+                      </div>
+                    </details>
+                  </div>
+                </div>
               <% end %>
-            </ul>
+            </div>
           </div>
         </div>
       </div>

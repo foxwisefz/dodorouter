@@ -56,10 +56,15 @@ defmodule DodoRouter.Proxy do
     usage = Adapter.extract_usage(result.final_response || %{})
     last_step = List.last(result.attempted_steps)
 
+    # Encode request/response for storage (truncate large payloads)
+    request_body = request |> truncate_body() |> Jason.encode!()
+    response_body = result.final_response |> clean_response() |> truncate_body() |> Jason.encode!()
+
     log_attrs = %{
       project_id: project.id,
       request_id: request_id,
       status: to_string(result.status),
+      http_status: if(result.status == :error, do: 502, else: 200),
       attempted_steps: result.attempted_steps,
       final_provider: last_step[:provider],
       final_model: last_step[:model],
@@ -69,10 +74,35 @@ defmodule DodoRouter.Proxy do
       completion_tokens: usage.completion_tokens,
       total_tokens: usage.total_tokens,
       latency_ms: latency_ms,
-      ttfb_ms: get_in(result.final_response || %{}, ["_meta", "ttfb_ms"])
+      ttfb_ms: get_in(result.final_response || %{}, ["_meta", "ttfb_ms"]),
+      request_body: request_body,
+      response_body: response_body
     }
 
     Logs.create_log_async(log_attrs)
+  end
+
+  defp truncate_body(nil), do: nil
+  defp truncate_body(body) when is_map(body) do
+    # Truncate message content if too long
+    case get_in(body, ["messages"]) do
+      messages when is_list(messages) ->
+        truncated_messages = Enum.map(messages, fn msg ->
+          case msg["content"] do
+            content when is_binary(content) and byte_size(content) > 1000 ->
+              Map.put(msg, "content", String.slice(content, 0, 1000) <> "... [truncated]")
+            _ -> msg
+          end
+        end)
+        Map.put(body, "messages", truncated_messages)
+      _ -> body
+    end
+  end
+
+  defp clean_response(nil), do: nil
+  defp clean_response(response) do
+    # Remove internal metadata
+    Map.delete(response, "_meta")
   end
 
   defp broadcast_event(project, result) do
