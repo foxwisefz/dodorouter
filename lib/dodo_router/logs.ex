@@ -11,13 +11,39 @@ defmodule DodoRouter.Logs do
   # Logging
 
   def create_log(attrs) do
-    %RequestLog{}
-    |> RequestLog.changeset(Map.put(attrs, :inserted_at, DateTime.utc_now()))
-    |> Repo.insert()
+    result =
+      %RequestLog{}
+      |> RequestLog.changeset(Map.put(attrs, :inserted_at, DateTime.utc_now()))
+      |> Repo.insert()
+
+    case result do
+      {:ok, log} ->
+        broadcast_log_created(log)
+        {:ok, log}
+
+      error ->
+        error
+    end
   end
 
   def create_log_async(attrs) do
     Task.start(fn -> create_log(attrs) end)
+  end
+
+  defp broadcast_log_created(log) do
+    Phoenix.PubSub.broadcast(
+      DodoRouter.PubSub,
+      "project:#{log.project_id}:logs",
+      {:log_created, log}
+    )
+  end
+
+  def subscribe_to_logs(project_id) do
+    Phoenix.PubSub.subscribe(DodoRouter.PubSub, "project:#{project_id}:logs")
+  end
+
+  def unsubscribe_from_logs(project_id) do
+    Phoenix.PubSub.unsubscribe(DodoRouter.PubSub, "project:#{project_id}:logs")
   end
 
   # Queries

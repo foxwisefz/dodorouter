@@ -22,13 +22,33 @@ defmodule DodoRouterWeb.LogLive.Index do
   end
 
   @impl true
+  def terminate(_reason, socket) do
+    if socket.assigns.selected_project_id do
+      Logs.unsubscribe_from_logs(socket.assigns.selected_project_id)
+    end
+
+    :ok
+  end
+
+  @impl true
   def handle_params(params, _url, socket) do
     project_id = params["project_id"]
+    old_project_id = socket.assigns.selected_project_id
+
+    # Unsubscribe from old project if switching
+    if old_project_id && old_project_id != project_id do
+      Logs.unsubscribe_from_logs(old_project_id)
+    end
 
     socket =
       if project_id do
         project = Projects.get_project!(socket.assigns.current_user, project_id)
         logs = Logs.list_logs(project, limit: 100)
+
+        # Subscribe to new logs for this project
+        if connected?(socket) && old_project_id != project_id do
+          Logs.subscribe_to_logs(project_id)
+        end
 
         socket
         |> assign(:selected_project_id, project_id)
@@ -42,6 +62,12 @@ defmodule DodoRouterWeb.LogLive.Index do
       end
 
     {:noreply, socket}
+  end
+
+  @impl true
+  def handle_info({:log_created, log}, socket) do
+    # Insert new log at the top of the stream
+    {:noreply, stream_insert(socket, :logs, log, at: 0)}
   end
 
   @impl true

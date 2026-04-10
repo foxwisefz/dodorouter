@@ -21,6 +21,7 @@ defmodule DodoRouterWeb.ProjectLive.Show do
       |> assign(:project, project)
       |> assign(:stats, Logs.stats(project))
       |> assign(:recent_events, [])
+      |> assign(:stats_timer, nil)
       |> assign(:has_routing_steps, length(project.routing_steps) > 0)
       |> assign(:snippet_tab, "curl")
       |> stream(:routing_steps, project.routing_steps)
@@ -161,12 +162,20 @@ defmodule DodoRouterWeb.ProjectLive.Show do
 
   def handle_info({:proxy_event, event}, socket) do
     recent_events = [event | Enum.take(socket.assigns.recent_events, 9)]
-    stats = Logs.stats(socket.assigns.project)
+
+    # Debounce stats refresh - schedule it, cancel previous timer
+    if socket.assigns[:stats_timer], do: Process.cancel_timer(socket.assigns[:stats_timer])
+    timer = Process.send_after(self(), :refresh_stats, 500)
 
     {:noreply,
      socket
      |> assign(:recent_events, recent_events)
-     |> assign(:stats, stats)}
+     |> assign(:stats_timer, timer)}
+  end
+
+  def handle_info(:refresh_stats, socket) do
+    stats = Logs.stats(socket.assigns.project)
+    {:noreply, assign(socket, :stats, stats)}
   end
 
   @impl true
