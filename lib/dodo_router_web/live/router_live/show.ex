@@ -1,30 +1,33 @@
-defmodule DodoRouterWeb.ProjectLive.Show do
+defmodule DodoRouterWeb.RouterLive.Show do
   use DodoRouterWeb, :live_view
 
   require Logger
 
-  alias DodoRouter.Projects
-  alias DodoRouter.Projects.RoutingStep
+  alias DodoRouter.Routers
+  alias DodoRouter.Routers.RoutingStep
   alias DodoRouter.Logs
-  alias DodoRouter.Secrets
+  alias DodoRouter.Providers
 
   @impl true
   def mount(%{"id" => id}, _session, socket) do
-    project = Projects.get_project!(socket.assigns.current_user, id) |> Projects.with_routing_steps()
+    router = Routers.get_router!(socket.assigns.current_user, id) |> Routers.with_routing_steps()
 
     if connected?(socket) do
-      Phoenix.PubSub.subscribe(DodoRouter.PubSub, "project:#{project.id}:events")
+      Phoenix.PubSub.subscribe(DodoRouter.PubSub, "router:#{router.id}:events")
     end
+
+    provider_keys = Providers.list_provider_keys(socket.assigns.current_user)
 
     socket =
       socket
-      |> assign(:project, project)
-      |> assign(:stats, Logs.stats(project))
+      |> assign(:router, router)
+      |> assign(:stats, Logs.stats(router))
       |> assign(:recent_events, [])
       |> assign(:stats_timer, nil)
-      |> assign(:has_routing_steps, length(project.routing_steps) > 0)
+      |> assign(:has_routing_steps, length(router.routing_steps) > 0)
       |> assign(:snippet_tab, "curl")
-      |> stream(:routing_steps, project.routing_steps)
+      |> assign(:provider_keys, provider_keys)
+      |> stream(:routing_steps, router.routing_steps)
 
     {:ok, socket}
   end
@@ -35,27 +38,18 @@ defmodule DodoRouterWeb.ProjectLive.Show do
   end
 
   defp apply_action(socket, :show, _params) do
-    assign(socket, :page_title, socket.assigns.project.name)
+    assign(socket, :page_title, socket.assigns.router.name)
   end
 
   defp apply_action(socket, :edit, _params) do
-    assign(socket, :page_title, "Edit #{socket.assigns.project.name}")
+    assign(socket, :page_title, "Edit #{socket.assigns.router.name}")
   end
 
   defp apply_action(socket, :routing, _params) do
     socket
-    |> assign(:page_title, "Routing - #{socket.assigns.project.name}")
+    |> assign(:page_title, "Routing - #{socket.assigns.router.name}")
     |> assign(:new_step, %RoutingStep{})
     |> assign(:step_provider, "zai")
-  end
-
-  defp apply_action(socket, :credentials, _params) do
-    project = socket.assigns.project
-
-    socket
-    |> assign(:page_title, "Credentials - #{project.name}")
-    |> assign(:has_zai_key, Secrets.zai_api_key(project.id) != nil)
-    |> assign(:has_moonshot_key, Secrets.moonshot_api_key(project.id) != nil)
   end
 
   @impl true
@@ -78,14 +72,14 @@ defmodule DodoRouterWeb.ProjectLive.Show do
       |> Enum.reject(fn {_k, v} -> v == "" end)
       |> Map.new()
 
-    case Projects.create_routing_step(socket.assigns.project, step_params) do
+    case Routers.create_routing_step(socket.assigns.router, step_params) do
       {:ok, step} ->
         {:noreply,
          socket
          |> stream_insert(:routing_steps, step)
          |> assign(:has_routing_steps, true)
          |> put_flash(:info, "Step added")
-         |> push_patch(to: ~p"/projects/#{socket.assigns.project}")}
+         |> push_patch(to: ~p"/routers/#{socket.assigns.router}")}
 
       {:error, changeset} ->
         errors = Ecto.Changeset.traverse_errors(changeset, fn {msg, _opts} -> msg end)
@@ -95,10 +89,10 @@ defmodule DodoRouterWeb.ProjectLive.Show do
   end
 
   def handle_event("delete_step", %{"id" => id}, socket) do
-    step = Projects.get_routing_step!(socket.assigns.project, id)
-    {:ok, _} = Projects.delete_routing_step(step)
+    step = Routers.get_routing_step!(socket.assigns.router, id)
+    {:ok, _} = Routers.delete_routing_step(step)
 
-    remaining = Projects.list_routing_steps(socket.assigns.project)
+    remaining = Routers.list_routing_steps(socket.assigns.router)
 
     {:noreply,
      socket
@@ -106,38 +100,70 @@ defmodule DodoRouterWeb.ProjectLive.Show do
      |> assign(:has_routing_steps, length(remaining) > 0)}
   end
 
-  def handle_event("save_credential", %{"provider" => provider, "api_key" => api_key}, socket) do
-    project = socket.assigns.project
-    secret_name = "#{provider}_api_key"
+  def handle_event("move_step_up", %{"id" => id}, socket) do
+    steps = Routers.list_routing_steps(socket.assigns.router)
+    step_idx = Enum.find_index(steps, &(&1.id == id))
 
-    case Secrets.put(project.id, secret_name, api_key) do
-      :ok ->
-        has_key_assign = String.to_existing_atom("has_#{provider}_key")
+    if step_idx && step_idx > 0 do
+      new_order =
+        steps
+        |> Enum.map(& &1.id)
+        |> swap_at(step_idx, step_idx - 1)
 
-        # Show saved indicator briefly
-        send(self(), {:clear_saved_provider, provider})
+      Routers.reorder_routing_steps(socket.assigns.router, new_order)
+      updated_steps = Routers.list_routing_steps(socket.assigns.router)
 
-        {:noreply,
-         socket
-         |> assign(has_key_assign, true)
-         |> assign(:saved_provider, provider)
-         |> put_flash(:info, "#{provider} API key saved")}
+      {:noreply, stream(socket, :routing_steps, updated_steps, reset: true)}
+    else
+      {:noreply, socket}
+    end
+  end
 
-      {:error, :not_configured} ->
-        {:noreply, put_flash(socket, :error, "Infisical not configured. Set INFISICAL_TOKEN and INFISICAL_PROJECT_ID env vars.")}
+  def handle_event("move_step_down", %{"id" => id}, socket) do
+    steps = Routers.list_routing_steps(socket.assigns.router)
+    step_idx = Enum.find_index(steps, &(&1.id == id))
 
-      {:error, reason} ->
-        Logger.error("Failed to save #{provider} API key: #{inspect(reason)}")
-        {:noreply, put_flash(socket, :error, "Failed to save API key: #{inspect(reason)}")}
+    if step_idx && step_idx < length(steps) - 1 do
+      new_order =
+        steps
+        |> Enum.map(& &1.id)
+        |> swap_at(step_idx, step_idx + 1)
+
+      Routers.reorder_routing_steps(socket.assigns.router, new_order)
+      updated_steps = Routers.list_routing_steps(socket.assigns.router)
+
+      {:noreply, stream(socket, :routing_steps, updated_steps, reset: true)}
+    else
+      {:noreply, socket}
+    end
+  end
+
+  defp swap_at(list, i, j) do
+    list
+    |> List.replace_at(i, Enum.at(list, j))
+    |> List.replace_at(j, Enum.at(list, i))
+  end
+
+  def handle_event("assign_key", %{"step_id" => step_id, "key_id" => key_id}, socket) do
+    step = Routers.get_routing_step!(socket.assigns.router, step_id)
+    provider_key_id = if key_id == "", do: nil, else: key_id
+
+    case Routers.update_routing_step(step, %{provider_key_id: provider_key_id}) do
+      {:ok, _updated_step} ->
+        updated_steps = Routers.list_routing_steps(socket.assigns.router)
+        {:noreply, stream(socket, :routing_steps, updated_steps, reset: true)}
+
+      {:error, _} ->
+        {:noreply, put_flash(socket, :error, "Failed to assign API key")}
     end
   end
 
   def handle_event("regenerate_api_key", _params, socket) do
-    case Projects.regenerate_api_key(socket.assigns.project) do
-      {:ok, project, api_key} ->
+    case Routers.regenerate_api_key(socket.assigns.router) do
+      {:ok, router, api_key} ->
         {:noreply,
          socket
-         |> assign(:project, project)
+         |> assign(:router, router)
          |> assign(:new_api_key, api_key)
          |> put_flash(:info, "API key regenerated")}
 
@@ -147,19 +173,6 @@ defmodule DodoRouterWeb.ProjectLive.Show do
   end
 
   @impl true
-  def handle_info({:clear_saved_provider, provider}, socket) do
-    Process.send_after(self(), {:do_clear_saved_provider, provider}, 2000)
-    {:noreply, socket}
-  end
-
-  def handle_info({:do_clear_saved_provider, provider}, socket) do
-    if socket.assigns[:saved_provider] == provider do
-      {:noreply, assign(socket, :saved_provider, nil)}
-    else
-      {:noreply, socket}
-    end
-  end
-
   def handle_info({:proxy_event, event}, socket) do
     recent_events = [event | Enum.take(socket.assigns.recent_events, 9)]
 
@@ -174,7 +187,7 @@ defmodule DodoRouterWeb.ProjectLive.Show do
   end
 
   def handle_info(:refresh_stats, socket) do
-    stats = Logs.stats(socket.assigns.project)
+    stats = Logs.stats(socket.assigns.router)
     {:noreply, assign(socket, :stats, stats)}
   end
 
@@ -186,27 +199,27 @@ defmodule DodoRouterWeb.ProjectLive.Show do
       <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
         <div>
           <div class="flex items-center gap-2">
-            <.link navigate={~p"/projects"} class="btn btn-ghost btn-sm btn-square">
+            <.link navigate={~p"/routers"} class="btn btn-ghost btn-sm btn-square">
               <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" />
               </svg>
             </.link>
-            <h1 class="text-2xl font-bold"><%= @project.name %></h1>
+            <h1 class="text-2xl font-bold"><%= @router.name %></h1>
           </div>
-          <p class="text-base-content/60 font-mono ml-10"><%= @project.slug %></p>
+          <p class="text-base-content/60 font-mono ml-10"><%= @router.slug %></p>
         </div>
         <div class="flex gap-2">
-          <.link patch={~p"/projects/#{@project}/routing"} class="btn btn-outline btn-sm">
+          <.link patch={~p"/routers/#{@router}/routing"} class="btn btn-outline btn-sm">
             <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h7" />
             </svg>
             Routing
           </.link>
-          <.link patch={~p"/projects/#{@project}/credentials"} class="btn btn-outline btn-sm">
+          <.link navigate={~p"/providers"} class="btn btn-outline btn-sm">
             <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
             </svg>
-            Credentials
+            Providers
           </.link>
         </div>
       </div>
@@ -258,19 +271,19 @@ defmodule DodoRouterWeb.ProjectLive.Show do
           </div>
 
           <div :if={@snippet_tab == "curl"} class="mockup-code text-xs mt-4">
-            <pre data-prefix="$"><code><%= raw(curl_snippet(base_url())) %></code></pre>
+            <pre data-prefix="$"><code><%= raw(curl_snippet(base_url(), @router.slug)) %></code></pre>
           </div>
 
           <div :if={@snippet_tab == "python"} class="mockup-code text-xs mt-4">
-            <pre><code><%= raw(python_snippet(base_url())) %></code></pre>
+            <pre><code><%= raw(python_snippet(base_url(), @router.slug)) %></code></pre>
           </div>
 
           <div :if={@snippet_tab == "node"} class="mockup-code text-xs mt-4">
-            <pre><code><%= raw(node_snippet(base_url())) %></code></pre>
+            <pre><code><%= raw(node_snippet(base_url(), @router.slug)) %></code></pre>
           </div>
 
           <p class="text-sm text-base-content/60 mt-3">
-            Replace <code class="text-primary">YOUR_API_KEY</code> with your project API key: <code class="font-mono"><%= @project.api_key_prefix %>...</code>
+            Replace <code class="text-primary">YOUR_API_KEY</code> with your router API key: <code class="font-mono"><%= @router.api_key_prefix %>...</code>
           </p>
         </div>
       </div>
@@ -280,21 +293,60 @@ defmodule DodoRouterWeb.ProjectLive.Show do
         <div class="card-body">
           <div class="flex items-center justify-between">
             <h2 class="card-title text-base">Routing Chain</h2>
-            <.link patch={~p"/projects/#{@project}/routing"} class="btn btn-primary btn-sm">
+            <.link patch={~p"/routers/#{@router}/routing"} class="btn btn-primary btn-sm">
               Add Step
             </.link>
           </div>
           <div id="routing-steps" phx-update="stream" class="space-y-2 mt-4">
-            <div :for={{dom_id, step} <- @streams.routing_steps} id={dom_id} class="flex items-center gap-4 p-3 bg-base-200 rounded-lg">
+            <div :for={{dom_id, step} <- @streams.routing_steps} id={dom_id} class="flex items-center gap-3 p-3 bg-base-200 rounded-lg">
               <div class="badge badge-primary badge-lg font-bold">
                 <%= step.position + 1 %>
               </div>
               <div class="flex-1">
-                <span class="font-medium"><%= step.provider %></span>
-                <span class="text-base-content/60 mx-1">/</span>
-                <span class="font-mono text-sm"><%= step.model %></span>
-                <span :if={step.plan_type == "coding"} class="badge badge-secondary badge-sm ml-2">coding</span>
-                <span :if={step.thinking_enabled} class="badge badge-accent badge-sm ml-2">thinking</span>
+                <div class="flex items-center gap-2">
+                  <span class="font-medium"><%= step.provider %></span>
+                  <span class="text-base-content/60">/</span>
+                  <span class="font-mono text-sm"><%= step.model %></span>
+                  <span :if={step.plan_type == "coding"} class="badge badge-secondary badge-sm">coding</span>
+                  <span :if={step.thinking_enabled} class="badge badge-accent badge-sm">thinking</span>
+                </div>
+                <div class="mt-1">
+                  <select
+                    phx-change="assign_key"
+                    name="key_id"
+                    class={"select select-xs #{if step.provider_key_id, do: "", else: "select-warning"}"}
+                  >
+                    <input type="hidden" name="step_id" value={step.id} />
+                    <option value="">-- Select API Key --</option>
+                    <%= for key <- @provider_keys do %>
+                      <option value={key.id} selected={step.provider_key_id == key.id}>
+                        <%= key.label %> (<%= key.provider_slug %>)
+                      </option>
+                    <% end %>
+                  </select>
+                </div>
+              </div>
+              <div class="flex flex-col gap-0.5">
+                <button
+                  phx-click="move_step_up"
+                  phx-value-id={step.id}
+                  class="btn btn-ghost btn-xs btn-square"
+                  title="Move up"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 15l7-7 7 7" />
+                  </svg>
+                </button>
+                <button
+                  phx-click="move_step_down"
+                  phx-value-id={step.id}
+                  class="btn btn-ghost btn-xs btn-square"
+                  title="Move down"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+                  </svg>
+                </button>
               </div>
               <button
                 phx-click="delete_step"
@@ -338,7 +390,7 @@ defmodule DodoRouterWeb.ProjectLive.Show do
       </div>
 
       <!-- Routing Modal -->
-      <.modal :if={@live_action == :routing} id="routing-modal" show on_cancel={JS.patch(~p"/projects/#{@project}")}>
+      <.modal :if={@live_action == :routing} id="routing-modal" show on_cancel={JS.patch(~p"/routers/#{@router}")}>
         <h3 class="font-bold text-lg mb-4">Add Routing Step</h3>
         <form phx-submit="add_step" phx-change="update_step_form" class="space-y-4">
           <div class="form-control">
@@ -389,94 +441,10 @@ defmodule DodoRouterWeb.ProjectLive.Show do
             </div>
           </div>
           <div class="modal-action">
-            <button type="button" phx-click={JS.patch(~p"/projects/#{@project}")} class="btn">Cancel</button>
+            <button type="button" phx-click={JS.patch(~p"/routers/#{@router}")} class="btn">Cancel</button>
             <button type="submit" class="btn btn-primary">Add Step</button>
           </div>
         </form>
-      </.modal>
-
-      <!-- Credentials Modal -->
-      <.modal :if={@live_action == :credentials} id="credentials-modal" show on_cancel={JS.patch(~p"/projects/#{@project}")}>
-        <h3 class="font-bold text-lg mb-2">Provider Credentials</h3>
-        <p class="text-sm text-base-content/60 mb-6">API keys are stored securely in Infisical.</p>
-
-        <div class="space-y-6">
-          <div class="flex items-center justify-between">
-            <div>
-              <h4 class="font-medium">z.ai</h4>
-              <p class="text-sm text-base-content/60">Works for both Standard & Coding plans</p>
-            </div>
-            <span :if={assigns[:has_zai_key]} class="badge badge-success gap-1">
-              <.icon name="hero-check" class="h-3 w-3" />
-              Configured
-            </span>
-            <span :if={!assigns[:has_zai_key]} class="badge badge-ghost">Not set</span>
-          </div>
-          <form phx-submit="save_credential" class="flex gap-2 items-center">
-            <input type="hidden" name="provider" value="zai" />
-            <input
-              type="text"
-              name="api_key"
-              placeholder={if assigns[:has_zai_key], do: "Enter new key to replace", else: "Enter API key"}
-              class="input input-bordered flex-1"
-              autocomplete="off"
-              data-1p-ignore="true"
-              data-lpignore="true"
-              required
-            />
-            <button type="submit" class="btn btn-primary">Save</button>
-            <span :if={assigns[:saved_provider] == "zai"} class="text-success font-medium animate-pulse">
-              Saved!
-            </span>
-          </form>
-
-          <div class="divider"></div>
-
-          <div class="flex items-center justify-between">
-            <div>
-              <h4 class="font-medium">Moonshot (Kimi)</h4>
-              <p class="text-sm text-base-content/60">For Kimi K2.5 models</p>
-            </div>
-            <span :if={assigns[:has_moonshot_key]} class="badge badge-success gap-1">
-              <.icon name="hero-check" class="h-3 w-3" />
-              Configured
-            </span>
-            <span :if={!assigns[:has_moonshot_key]} class="badge badge-ghost">Not set</span>
-          </div>
-          <form phx-submit="save_credential" class="flex gap-2 items-center">
-            <input type="hidden" name="provider" value="moonshot" />
-            <input
-              type="text"
-              name="api_key"
-              placeholder={if assigns[:has_moonshot_key], do: "Enter new key to replace", else: "Enter API key"}
-              class="input input-bordered flex-1"
-              autocomplete="off"
-              data-1p-ignore="true"
-              data-lpignore="true"
-              required
-            />
-            <button type="submit" class="btn btn-primary">Save</button>
-            <span :if={assigns[:saved_provider] == "moonshot"} class="text-success font-medium animate-pulse">
-              Saved!
-            </span>
-          </form>
-
-          <div class="divider"></div>
-
-          <div>
-            <h4 class="font-medium mb-2">DodoRouter API Key</h4>
-            <p class="text-sm text-base-content/60 mb-2">
-              Current: <code class="font-mono"><%= @project.api_key_prefix %>...</code>
-            </p>
-            <button phx-click="regenerate_api_key" data-confirm="This will invalidate the current key. Continue?" class="btn btn-warning btn-sm">
-              Regenerate API Key
-            </button>
-          </div>
-        </div>
-
-        <div class="modal-action">
-          <button type="button" phx-click={JS.patch(~p"/projects/#{@project}")} class="btn">Close</button>
-        </div>
       </.modal>
     </div>
     """
@@ -518,21 +486,21 @@ defmodule DodoRouterWeb.ProjectLive.Show do
     DodoRouterWeb.Endpoint.url()
   end
 
-  defp curl_snippet(base_url) do
+  defp curl_snippet(base_url, slug) do
     """
-    curl #{base_url}/v1/chat/completions \\
+    curl #{base_url}/r/#{slug}/v1/chat/completions \\
       -H "Authorization: Bearer YOUR_API_KEY" \\
       -H "Content-Type: application/json" \\
       -d '{"messages": [{"role": "user", "content": "Hello!"}]}'
     """
   end
 
-  defp python_snippet(base_url) do
+  defp python_snippet(base_url, slug) do
     """
     from openai import OpenAI
 
     client = OpenAI(
-        base_url="#{base_url}/v1",
+        base_url="#{base_url}/r/#{slug}/v1",
         api_key="YOUR_API_KEY"
     )
 
@@ -544,12 +512,12 @@ defmodule DodoRouterWeb.ProjectLive.Show do
     """
   end
 
-  defp node_snippet(base_url) do
+  defp node_snippet(base_url, slug) do
     """
     import OpenAI from 'openai';
 
     const client = new OpenAI({
-      baseURL: '#{base_url}/v1',
+      baseURL: '#{base_url}/r/#{slug}/v1',
       apiKey: 'YOUR_API_KEY'
     });
 

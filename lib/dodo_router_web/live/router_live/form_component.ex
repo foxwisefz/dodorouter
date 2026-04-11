@@ -1,7 +1,7 @@
-defmodule DodoRouterWeb.ProjectLive.FormComponent do
+defmodule DodoRouterWeb.RouterLive.FormComponent do
   use DodoRouterWeb, :live_component
 
-  alias DodoRouter.Projects
+  alias DodoRouter.Routers
 
   @impl true
   def render(assigns) do
@@ -13,16 +13,16 @@ defmodule DodoRouterWeb.ProjectLive.FormComponent do
 
       <.simple_form
         for={@form}
-        id="project-form"
+        id="router-form"
         phx-target={@myself}
         phx-change="validate"
         phx-submit="save"
       >
         <.input field={@form[:name]} type="text" label="Name" />
-        <.input field={@form[:slug]} type="text" label="Slug" placeholder="my-project" />
+        <.input field={@form[:slug]} type="text" label="Slug" placeholder="my-router" />
         <p class="text-sm text-base-content/60 -mt-1">Lowercase letters, numbers, and dashes only</p>
         <:actions>
-          <.button phx-disable-with="Saving...">Save Project</.button>
+          <.button phx-disable-with="Saving...">Save Router</.button>
         </:actions>
       </.simple_form>
     </div>
@@ -30,33 +30,33 @@ defmodule DodoRouterWeb.ProjectLive.FormComponent do
   end
 
   @impl true
-  def update(%{project: project} = assigns, socket) do
+  def update(%{router: router} = assigns, socket) do
     {:ok,
      socket
      |> assign(assigns)
      |> assign_new(:form, fn ->
-       to_form(Projects.change_project(project))
+       to_form(Routers.change_router(router))
      end)}
   end
 
   @impl true
-  def handle_event("validate", %{"project" => project_params}, socket) do
-    changeset = Projects.change_project(socket.assigns.project, project_params)
+  def handle_event("validate", %{"router" => router_params}, socket) do
+    changeset = Routers.change_router(socket.assigns.router, router_params)
     {:noreply, assign(socket, form: to_form(changeset, action: :validate))}
   end
 
-  def handle_event("save", %{"project" => project_params}, socket) do
-    save_project(socket, socket.assigns.action, project_params)
+  def handle_event("save", %{"router" => router_params}, socket) do
+    save_router(socket, socket.assigns.action, router_params)
   end
 
-  defp save_project(socket, :edit, project_params) do
-    case Projects.update_project(socket.assigns.project, project_params) do
-      {:ok, project} ->
-        notify_parent({:saved, project})
+  defp save_router(socket, :edit, router_params) do
+    case Routers.update_router(socket.assigns.router, router_params) do
+      {:ok, router} ->
+        notify_parent({:saved, router})
 
         {:noreply,
          socket
-         |> put_flash(:info, "Project updated successfully")
+         |> put_flash(:info, "Router updated successfully")
          |> push_patch(to: socket.assigns.patch)}
 
       {:error, %Ecto.Changeset{} = changeset} ->
@@ -64,14 +64,14 @@ defmodule DodoRouterWeb.ProjectLive.FormComponent do
     end
   end
 
-  defp save_project(socket, :new, project_params) do
-    case Projects.create_project(socket.assigns.current_user, project_params) do
-      {:ok, project, api_key} ->
-        notify_parent({:saved, project, api_key})
+  defp save_router(socket, :new, router_params) do
+    case Routers.create_router(socket.assigns.current_user, router_params) do
+      {:ok, router, api_key} ->
+        notify_parent({:saved, router, api_key})
 
         {:noreply,
          socket
-         |> put_flash(:info, "Project created successfully")
+         |> put_flash(:info, "Router created successfully")
          |> push_patch(to: socket.assigns.patch)}
 
       {:error, %Ecto.Changeset{} = changeset} ->

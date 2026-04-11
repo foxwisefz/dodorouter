@@ -8,7 +8,7 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
   @behaviour DodoRouter.Proxy.Adapter
 
   alias DodoRouter.Proxy.Adapter
-  alias DodoRouter.Projects.RoutingStep
+  alias DodoRouter.Routers.RoutingStep
 
   @base_url "https://api.moonshot.ai/v1"
   @timeout_ms 120_000

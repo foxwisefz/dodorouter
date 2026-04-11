@@ -1,12 +1,12 @@
-defmodule DodoRouterWeb.ProjectLive.Index do
+defmodule DodoRouterWeb.RouterLive.Index do
   use DodoRouterWeb, :live_view
 
-  alias DodoRouter.Projects
-  alias DodoRouter.Projects.Project
+  alias DodoRouter.Routers
+  alias DodoRouter.Routers.Router
 
   @impl true
   def mount(_params, _session, socket) do
-    {:ok, stream(socket, :projects, Projects.list_projects(socket.assigns.current_user))}
+    {:ok, stream(socket, :routers, Routers.list_routers(socket.assigns.current_user))}
   end
 
   @impl true
@@ -16,36 +16,36 @@ defmodule DodoRouterWeb.ProjectLive.Index do
 
   defp apply_action(socket, :new, _params) do
     socket
-    |> assign(:page_title, "New Project")
-    |> assign(:project, %Project{})
+    |> assign(:page_title, "New Router")
+    |> assign(:router, %Router{})
   end
 
   defp apply_action(socket, :index, _params) do
     socket
-    |> assign(:page_title, "Projects")
-    |> assign(:project, nil)
+    |> assign(:page_title, "Routers")
+    |> assign(:router, nil)
   end
 
   @impl true
   def handle_event("delete", %{"id" => id}, socket) do
-    project = Projects.get_project!(socket.assigns.current_user, id)
-    {:ok, _} = Projects.delete_project(project)
+    router = Routers.get_router!(socket.assigns.current_user, id)
+    {:ok, _} = Routers.delete_router(router)
 
-    {:noreply, stream_delete(socket, :projects, project)}
+    {:noreply, stream_delete(socket, :routers, router)}
   end
 
   @impl true
-  def handle_info({DodoRouterWeb.ProjectLive.FormComponent, {:saved, project, api_key}}, socket) do
+  def handle_info({DodoRouterWeb.RouterLive.FormComponent, {:saved, router, api_key}}, socket) do
     socket =
       socket
-      |> stream_insert(:projects, project, at: 0)
+      |> stream_insert(:routers, router, at: 0)
       |> assign(:show_api_key, api_key)
 
     {:noreply, socket}
   end
 
-  def handle_info({DodoRouterWeb.ProjectLive.FormComponent, {:saved, project}}, socket) do
-    {:noreply, stream_insert(socket, :projects, project, at: 0)}
+  def handle_info({DodoRouterWeb.RouterLive.FormComponent, {:saved, router}}, socket) do
+    {:noreply, stream_insert(socket, :routers, router, at: 0)}
   end
 
   @impl true
@@ -55,14 +55,14 @@ defmodule DodoRouterWeb.ProjectLive.Index do
       <!-- Header -->
       <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
         <div>
-          <h1 class="text-2xl font-bold">Projects</h1>
+          <h1 class="text-2xl font-bold">Routers</h1>
           <p class="text-base-content/60">Manage your API keys and routing configurations</p>
         </div>
-        <.link patch={~p"/projects/new"} class="btn btn-primary">
+        <.link patch={~p"/routers/new"} class="btn btn-primary">
           <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
           </svg>
-          New Project
+          New Router
         </.link>
       </div>
 
@@ -81,26 +81,26 @@ defmodule DodoRouterWeb.ProjectLive.Index do
       </div>
 
       <!-- Modal -->
-      <.modal :if={@live_action == :new} id="project-modal" show on_cancel={JS.patch(~p"/projects")}>
+      <.modal :if={@live_action == :new} id="router-modal" show on_cancel={JS.patch(~p"/routers")}>
         <.live_component
-          module={DodoRouterWeb.ProjectLive.FormComponent}
-          id={@project.id || :new}
+          module={DodoRouterWeb.RouterLive.FormComponent}
+          id={@router.id || :new}
           title={@page_title}
           action={@live_action}
-          project={@project}
+          router={@router}
           current_user={@current_user}
-          patch={~p"/projects"}
+          patch={~p"/routers"}
         />
       </.modal>
 
-      <!-- Projects Grid -->
-      <div id="projects" phx-update="stream" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        <div :for={{dom_id, project} <- @streams.projects} id={dom_id} class="card bg-base-100 shadow hover:shadow-lg transition-shadow">
+      <!-- Routers Grid -->
+      <div id="routers" phx-update="stream" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div :for={{dom_id, router} <- @streams.routers} id={dom_id} class="card bg-base-100 shadow hover:shadow-lg transition-shadow">
           <div class="card-body">
             <div class="flex items-start justify-between">
               <div>
-                <h2 class="card-title"><%= project.name %></h2>
-                <p class="text-sm text-base-content/60 font-mono"><%= project.slug %></p>
+                <h2 class="card-title"><%= router.name %></h2>
+                <p class="text-sm text-base-content/60 font-mono"><%= router.slug %></p>
               </div>
               <div class="dropdown dropdown-end">
                 <label tabindex="0" class="btn btn-ghost btn-sm btn-square">
@@ -109,11 +109,10 @@ defmodule DodoRouterWeb.ProjectLive.Index do
                   </svg>
                 </label>
                 <ul tabindex="0" class="dropdown-content z-[1] menu p-2 shadow bg-base-200 rounded-box w-40">
-                  <li><.link navigate={~p"/projects/#{project}"}>View</.link></li>
-                  <li><.link navigate={~p"/projects/#{project}/routing"}>Routing</.link></li>
-                  <li><.link navigate={~p"/projects/#{project}/credentials"}>Credentials</.link></li>
+                  <li><.link navigate={~p"/routers/#{router}"}>View</.link></li>
+                  <li><.link navigate={~p"/routers/#{router}/routing"}>Routing</.link></li>
                   <li class="text-error">
-                    <a phx-click="delete" phx-value-id={project.id} data-confirm="Delete this project?">
+                    <a phx-click="delete" phx-value-id={router.id} data-confirm="Delete this router?">
                       Delete
                     </a>
                   </li>
@@ -123,12 +122,12 @@ defmodule DodoRouterWeb.ProjectLive.Index do
 
             <div class="mt-4 flex items-center gap-2">
               <div class="badge badge-ghost font-mono text-xs">
-                <%= project.api_key_prefix %>...
+                <%= router.api_key_prefix %>...
               </div>
             </div>
 
             <div class="card-actions justify-end mt-4">
-              <.link navigate={~p"/projects/#{project}"} class="btn btn-primary btn-sm">
+              <.link navigate={~p"/routers/#{router}"} class="btn btn-primary btn-sm">
                 Open
               </.link>
             </div>
@@ -137,14 +136,14 @@ defmodule DodoRouterWeb.ProjectLive.Index do
       </div>
 
       <!-- Empty State -->
-      <div :if={Enum.empty?(@streams.projects.inserts)} class="hero min-h-[300px] bg-base-100 rounded-box">
+      <div :if={Enum.empty?(@streams.routers.inserts)} class="hero min-h-[300px] bg-base-100 rounded-box">
         <div class="hero-content text-center">
           <div class="max-w-md">
-            <h1 class="text-2xl font-bold">No projects yet</h1>
+            <h1 class="text-2xl font-bold">No routers yet</h1>
             <p class="py-4 text-base-content/60">
-              Create your first project to get an API key and start routing requests.
+              Create your first router to get an API key and start routing requests.
             </p>
-            <.link patch={~p"/projects/new"} class="btn btn-primary">Create Project</.link>
+            <.link patch={~p"/routers/new"} class="btn btn-primary">Create Router</.link>
           </div>
         </div>
       </div>

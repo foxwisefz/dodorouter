@@ -3,7 +3,7 @@ defmodule DodoRouter.Proxy.Adapter do
   Behaviour for LLM provider adapters.
   """
 
-  alias DodoRouter.Projects.RoutingStep
+  alias DodoRouter.Routers.RoutingStep
 
   @type request :: map()
   @type response :: map()

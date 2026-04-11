@@ -2,19 +2,19 @@ defmodule DodoRouterWeb.Plugs.ApiAuth do
   @moduledoc """
   Authenticates API requests via Bearer token.
 
-  Extracts the API key from the Authorization header and looks up the project.
-  Sets `conn.assigns.current_project` on success.
+  Extracts the API key from the Authorization header and looks up the router.
+  Sets `conn.assigns.current_router` on success.
   """
 
   import Plug.Conn
-  alias DodoRouter.Projects
+  alias DodoRouter.Routers
 
   def init(opts), do: opts
 
   def call(conn, _opts) do
     with {:ok, api_key} <- extract_bearer_token(conn),
-         %{} = project <- Projects.get_project_by_api_key(api_key) do
-      assign(conn, :current_project, project)
+         %{} = router <- get_router(conn, api_key) do
+      assign(conn, :current_router, router)
     else
       _ ->
         conn
@@ -22,6 +22,19 @@ defmodule DodoRouterWeb.Plugs.ApiAuth do
         |> send_resp(401, Jason.encode!(%{error: %{message: "Invalid API key", type: "authentication_error"}}))
         |> halt()
     end
+  end
+
+  # For new /r/:router_slug/v1 endpoints, verify slug matches API key
+  defp get_router(%{path_params: %{"router_slug" => slug}} = _conn, api_key) do
+    case Routers.get_router_by_api_key(api_key) do
+      %{slug: ^slug} = router -> router
+      _ -> nil
+    end
+  end
+
+  # For legacy /v1 endpoints, just look up by API key
+  defp get_router(_conn, api_key) do
+    Routers.get_router_by_api_key(api_key)
   end
 
   defp extract_bearer_token(conn) do

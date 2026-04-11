@@ -3,29 +3,29 @@ defmodule DodoRouter.Proxy do
   The Proxy context - dispatches requests through the routing chain.
   """
 
-  alias DodoRouter.Projects
-  alias DodoRouter.Projects.Project
+  alias DodoRouter.Routers
+  alias DodoRouter.Routers.Router
   alias DodoRouter.Proxy.{Adapter, FallbackChain}
   alias DodoRouter.Logs
 
   @doc """
-  Dispatches a request through the project's routing chain.
+  Dispatches a request through the router's routing chain.
 
   Returns `{:ok, response}` or `{:error, reason}`.
   """
-  def dispatch(%Project{} = project, request, opts \\ []) do
+  def dispatch(%Router{} = router, request, opts \\ []) do
     request_id = Keyword.get(opts, :request_id, Ecto.UUID.generate())
     start_time = System.monotonic_time(:millisecond)
 
-    steps = Projects.list_routing_steps(project)
+    steps = Routers.list_routing_steps(router)
 
     if Enum.empty?(steps) do
       {:error, :no_routing_configured}
     else
-      result = FallbackChain.execute(request, steps, project.id, opts)
+      result = FallbackChain.execute(request, steps, router.id, opts)
 
-      log_request(project, request, result, request_id, start_time)
-      broadcast_event(project, result)
+      log_request(router, request, result, request_id, start_time)
+      broadcast_event(router, result)
 
       # Calculate provider time (sum of all attempt latencies)
       provider_ms = result.attempted_steps |> Enum.map(& &1[:latency_ms]) |> Enum.sum()
@@ -43,11 +43,11 @@ defmodule DodoRouter.Proxy do
   @doc """
   Dispatches a streaming request.
   """
-  def dispatch_streaming(%Project{} = project, request, send_chunk) do
-    dispatch(project, request, stream: true, send_chunk: send_chunk)
+  def dispatch_streaming(%Router{} = router, request, send_chunk) do
+    dispatch(router, request, stream: true, send_chunk: send_chunk)
   end
 
-  defp log_request(project, request, result, request_id, start_time) do
+  defp log_request(router, request, result, request_id, start_time) do
     latency_ms = System.monotonic_time(:millisecond) - start_time
 
     {call_type, tools_invoked} =
@@ -64,7 +64,7 @@ defmodule DodoRouter.Proxy do
     response_body = result.final_response |> clean_response() |> truncate_body() |> Jason.encode!()
 
     log_attrs = %{
-      project_id: project.id,
+      router_id: router.id,
       request_id: request_id,
       status: to_string(result.status),
       http_status: if(result.status == :error, do: 502, else: 200),
@@ -108,7 +108,7 @@ defmodule DodoRouter.Proxy do
     Map.delete(response, "_meta")
   end
 
-  defp broadcast_event(project, result) do
+  defp broadcast_event(router, result) do
     last_step = List.last(result.attempted_steps)
 
     event = %{
@@ -122,7 +122,7 @@ defmodule DodoRouter.Proxy do
 
     Phoenix.PubSub.broadcast(
       DodoRouter.PubSub,
-      "project:#{project.id}:events",
+      "router:#{router.id}:events",
       {:proxy_event, event}
     )
   end

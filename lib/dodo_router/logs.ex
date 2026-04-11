@@ -6,7 +6,7 @@ defmodule DodoRouter.Logs do
   import Ecto.Query
   alias DodoRouter.Repo
   alias DodoRouter.Logs.RequestLog
-  alias DodoRouter.Projects.Project
+  alias DodoRouter.Routers.Router
   alias DodoRouter.Accounts.User
 
   # Logging
@@ -34,27 +34,27 @@ defmodule DodoRouter.Logs do
   defp broadcast_log_created(log) do
     Phoenix.PubSub.broadcast(
       DodoRouter.PubSub,
-      "project:#{log.project_id}:logs",
+      "router:#{log.router_id}:logs",
       {:log_created, log}
     )
   end
 
-  def subscribe_to_logs(project_id) do
-    Phoenix.PubSub.subscribe(DodoRouter.PubSub, "project:#{project_id}:logs")
+  def subscribe_to_logs(router_id) do
+    Phoenix.PubSub.subscribe(DodoRouter.PubSub, "router:#{router_id}:logs")
   end
 
-  def unsubscribe_from_logs(project_id) do
-    Phoenix.PubSub.unsubscribe(DodoRouter.PubSub, "project:#{project_id}:logs")
+  def unsubscribe_from_logs(router_id) do
+    Phoenix.PubSub.unsubscribe(DodoRouter.PubSub, "router:#{router_id}:logs")
   end
 
   # Queries
 
-  def list_logs(%Project{} = project, opts \\ []) do
+  def list_logs(%Router{} = router, opts \\ []) do
     limit = Keyword.get(opts, :limit, 100)
     offset = Keyword.get(opts, :offset, 0)
 
     from(l in RequestLog,
-      where: l.project_id == ^project.id,
+      where: l.router_id == ^router.id,
       order_by: [desc: l.inserted_at],
       limit: ^limit,
       offset: ^offset
@@ -69,8 +69,8 @@ defmodule DodoRouter.Logs do
 
   def get_log!(%User{} = user, id) do
     query = from l in RequestLog,
-      join: p in Project, on: l.project_id == p.id,
-      where: l.id == ^id and p.user_id == ^user.id
+      join: r in Router, on: l.router_id == r.id,
+      where: l.id == ^id and r.user_id == ^user.id
     Repo.one!(query)
   end
 
@@ -78,13 +78,13 @@ defmodule DodoRouter.Logs do
 
   # Analytics
 
-  def stats(%Project{} = project, opts \\ []) do
+  def stats(%Router{} = router, opts \\ []) do
     hours = Keyword.get(opts, :hours, 24)
     since = DateTime.add(DateTime.utc_now(), -hours * 3600, :second)
 
     query =
       from l in RequestLog,
-        where: l.project_id == ^project.id and l.inserted_at >= ^since,
+        where: l.router_id == ^router.id and l.inserted_at >= ^since,
         select: %{
           total_requests: count(l.id),
           successful_requests: count(fragment("CASE WHEN ? = 'success' THEN 1 END", l.status)),
@@ -100,12 +100,12 @@ defmodule DodoRouter.Logs do
     Repo.one(query) || empty_stats()
   end
 
-  def stats_by_provider(%Project{} = project, opts \\ []) do
+  def stats_by_provider(%Router{} = router, opts \\ []) do
     hours = Keyword.get(opts, :hours, 24)
     since = DateTime.add(DateTime.utc_now(), -hours * 3600, :second)
 
     from(l in RequestLog,
-      where: l.project_id == ^project.id and l.inserted_at >= ^since and not is_nil(l.final_provider),
+      where: l.router_id == ^router.id and l.inserted_at >= ^since and not is_nil(l.final_provider),
       group_by: l.final_provider,
       select: %{
         provider: l.final_provider,
@@ -119,12 +119,12 @@ defmodule DodoRouter.Logs do
     |> Repo.all()
   end
 
-  def stats_by_model(%Project{} = project, opts \\ []) do
+  def stats_by_model(%Router{} = router, opts \\ []) do
     hours = Keyword.get(opts, :hours, 24)
     since = DateTime.add(DateTime.utc_now(), -hours * 3600, :second)
 
     from(l in RequestLog,
-      where: l.project_id == ^project.id and l.inserted_at >= ^since and not is_nil(l.final_model),
+      where: l.router_id == ^router.id and l.inserted_at >= ^since and not is_nil(l.final_model),
       group_by: [l.final_provider, l.final_model],
       select: %{
         provider: l.final_provider,
@@ -139,13 +139,13 @@ defmodule DodoRouter.Logs do
     |> Repo.all()
   end
 
-  def latency_percentiles(%Project{} = project, opts \\ []) do
+  def latency_percentiles(%Router{} = router, opts \\ []) do
     hours = Keyword.get(opts, :hours, 24)
     since = DateTime.add(DateTime.utc_now(), -hours * 3600, :second)
 
     query =
       from l in RequestLog,
-        where: l.project_id == ^project.id and l.inserted_at >= ^since and not is_nil(l.latency_ms),
+        where: l.router_id == ^router.id and l.inserted_at >= ^since and not is_nil(l.latency_ms),
         select: %{
           p50: fragment("percentile_cont(0.5) WITHIN GROUP (ORDER BY ?)", l.latency_ms),
           p95: fragment("percentile_cont(0.95) WITHIN GROUP (ORDER BY ?)", l.latency_ms),
@@ -155,12 +155,12 @@ defmodule DodoRouter.Logs do
     Repo.one(query) || %{p50: nil, p95: nil, p99: nil}
   end
 
-  def requests_per_minute(%Project{} = project, opts \\ []) do
+  def requests_per_minute(%Router{} = router, opts \\ []) do
     minutes = Keyword.get(opts, :minutes, 60)
     since = DateTime.add(DateTime.utc_now(), -minutes * 60, :second)
 
     from(l in RequestLog,
-      where: l.project_id == ^project.id and l.inserted_at >= ^since,
+      where: l.router_id == ^router.id and l.inserted_at >= ^since,
       group_by: fragment("date_trunc('minute', ?)", l.inserted_at),
       order_by: fragment("date_trunc('minute', ?)", l.inserted_at),
       select: %{
@@ -171,12 +171,12 @@ defmodule DodoRouter.Logs do
     |> Repo.all()
   end
 
-  def failure_breakdown(%Project{} = project, opts \\ []) do
+  def failure_breakdown(%Router{} = router, opts \\ []) do
     hours = Keyword.get(opts, :hours, 24)
     since = DateTime.add(DateTime.utc_now(), -hours * 3600, :second)
 
     from(l in RequestLog,
-      where: l.project_id == ^project.id and l.inserted_at >= ^since and l.status in ["error", "fallback"],
+      where: l.router_id == ^router.id and l.inserted_at >= ^since and l.status in ["error", "fallback"],
       group_by: [l.final_provider, l.final_model, l.status],
       order_by: [desc: count(l.id)],
       select: %{

@@ -3,18 +3,18 @@ defmodule DodoRouterWeb.LogLive.Index do
 
   require Logger
 
-  alias DodoRouter.{Logs, Projects}
+  alias DodoRouter.{Logs, Routers}
 
   @impl true
   def mount(_params, _session, socket) do
-    projects = Projects.list_projects(socket.assigns.current_user)
+    routers = Routers.list_routers(socket.assigns.current_user)
 
     socket =
       socket
       |> assign(:page_title, "Request Logs")
-      |> assign(:projects, projects)
-      |> assign(:selected_project_id, nil)
-      |> assign(:selected_project, nil)
+      |> assign(:routers, routers)
+      |> assign(:selected_router_id, nil)
+      |> assign(:selected_router, nil)
       |> assign(:filters, %{status: nil, provider: nil, call_type: nil})
       |> stream(:logs, [])
 
@@ -23,8 +23,8 @@ defmodule DodoRouterWeb.LogLive.Index do
 
   @impl true
   def terminate(_reason, socket) do
-    if socket.assigns.selected_project_id do
-      Logs.unsubscribe_from_logs(socket.assigns.selected_project_id)
+    if socket.assigns.selected_router_id do
+      Logs.unsubscribe_from_logs(socket.assigns.selected_router_id)
     end
 
     :ok
@@ -32,32 +32,32 @@ defmodule DodoRouterWeb.LogLive.Index do
 
   @impl true
   def handle_params(params, _url, socket) do
-    project_id = params["project_id"]
-    old_project_id = socket.assigns.selected_project_id
+    router_id = params["router_id"]
+    old_router_id = socket.assigns.selected_router_id
 
-    # Unsubscribe from old project if switching
-    if old_project_id && old_project_id != project_id do
-      Logs.unsubscribe_from_logs(old_project_id)
+    # Unsubscribe from old router if switching
+    if old_router_id && old_router_id != router_id do
+      Logs.unsubscribe_from_logs(old_router_id)
     end
 
     socket =
-      if project_id do
-        project = Projects.get_project!(socket.assigns.current_user, project_id)
-        logs = Logs.list_logs(project, limit: 100)
+      if router_id do
+        router = Routers.get_router!(socket.assigns.current_user, router_id)
+        logs = Logs.list_logs(router, limit: 100)
 
-        # Subscribe to new logs for this project
-        if connected?(socket) && old_project_id != project_id do
-          Logs.subscribe_to_logs(project_id)
+        # Subscribe to new logs for this router
+        if connected?(socket) && old_router_id != router_id do
+          Logs.subscribe_to_logs(router_id)
         end
 
         socket
-        |> assign(:selected_project_id, project_id)
-        |> assign(:selected_project, project)
+        |> assign(:selected_router_id, router_id)
+        |> assign(:selected_router, router)
         |> stream(:logs, logs, reset: true)
       else
         socket
-        |> assign(:selected_project_id, nil)
-        |> assign(:selected_project, nil)
+        |> assign(:selected_router_id, nil)
+        |> assign(:selected_router, nil)
         |> stream(:logs, [], reset: true)
       end
 
@@ -71,15 +71,15 @@ defmodule DodoRouterWeb.LogLive.Index do
   end
 
   @impl true
-  def handle_event("select_project", params, socket) do
-    Logger.debug("select_project params: #{inspect(params)}")
+  def handle_event("select_router", params, socket) do
+    Logger.debug("select_router params: #{inspect(params)}")
 
     case params do
-      %{"project_id" => ""} ->
+      %{"router_id" => ""} ->
         {:noreply, push_patch(socket, to: ~p"/logs")}
 
-      %{"project_id" => project_id} ->
-        {:noreply, push_patch(socket, to: ~p"/logs?project_id=#{project_id}")}
+      %{"router_id" => router_id} ->
+        {:noreply, push_patch(socket, to: ~p"/logs?router_id=#{router_id}")}
 
       _ ->
         {:noreply, socket}
@@ -102,8 +102,8 @@ defmodule DodoRouterWeb.LogLive.Index do
   end
 
   defp reload_logs(socket, filters) do
-    if socket.assigns.selected_project do
-      logs = Logs.list_logs(socket.assigns.selected_project, Map.to_list(filters) ++ [limit: 100])
+    if socket.assigns.selected_router do
+      logs = Logs.list_logs(socket.assigns.selected_router, Map.to_list(filters) ++ [limit: 100])
 
       socket
       |> assign(:filters, filters)
@@ -123,21 +123,21 @@ defmodule DodoRouterWeb.LogLive.Index do
           <h1 class="text-2xl font-bold">Request Logs</h1>
           <p class="text-base-content/60">Browse and filter API request history</p>
         </div>
-        <form phx-change="select_project">
+        <form phx-change="select_router">
           <select
-            name="project_id"
+            name="router_id"
             class="select select-bordered w-full sm:w-auto"
           >
-            <option value="">Select a project...</option>
-            <option :for={p <- @projects} value={p.id} selected={to_string(p.id) == @selected_project_id}>
-              <%= p.name %>
+            <option value="">Select a router...</option>
+            <option :for={r <- @routers} value={r.id} selected={to_string(r.id) == @selected_router_id}>
+              <%= r.name %>
             </option>
           </select>
         </form>
       </div>
 
       <!-- Filters -->
-      <div :if={@selected_project} class="card bg-base-100 shadow mb-6">
+      <div :if={@selected_router} class="card bg-base-100 shadow mb-6">
         <div class="card-body py-4">
           <div class="flex flex-wrap gap-4 items-center">
             <span class="text-sm font-medium">Filters:</span>
@@ -160,7 +160,7 @@ defmodule DodoRouterWeb.LogLive.Index do
       </div>
 
       <!-- Logs Table -->
-      <div :if={@selected_project} class="card bg-base-100 shadow">
+      <div :if={@selected_router} class="card bg-base-100 shadow">
         <div class="card-body p-0">
           <div class="overflow-x-auto">
             <table class="table">
@@ -225,12 +225,12 @@ defmodule DodoRouterWeb.LogLive.Index do
       </div>
 
       <!-- Empty State -->
-      <div :if={!@selected_project} class="hero min-h-[300px] bg-base-100 rounded-box">
+      <div :if={!@selected_router} class="hero min-h-[300px] bg-base-100 rounded-box">
         <div class="hero-content text-center">
           <div class="max-w-md">
-            <h1 class="text-2xl font-bold">Select a Project</h1>
+            <h1 class="text-2xl font-bold">Select a Router</h1>
             <p class="py-4 text-base-content/60">
-              Choose a project from the dropdown above to view its request logs.
+              Choose a router from the dropdown above to view its request logs.
             </p>
           </div>
         </div>

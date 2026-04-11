@@ -1,23 +1,23 @@
-defmodule DodoRouter.Projects.Project do
+defmodule DodoRouter.Routers.Router do
   use Ecto.Schema
   import Ecto.Changeset
 
   @primary_key {:id, :binary_id, autogenerate: true}
   @foreign_key_type :binary_id
-  schema "projects" do
+  schema "routers" do
     field :name, :string
     field :slug, :string
     field :api_key_hash, :string
     field :api_key_prefix, :string
 
     belongs_to :user, DodoRouter.Accounts.User
-    has_many :routing_steps, DodoRouter.Projects.RoutingStep
+    has_many :routing_steps, DodoRouter.Routers.RoutingStep
 
     timestamps()
   end
 
-  def changeset(project, attrs) do
-    project
+  def changeset(router, attrs) do
+    router
     |> cast(attrs, [:name, :slug])
     |> validate_required([:name, :slug])
     |> validate_format(:slug, ~r/^[a-z0-9-]+$/, message: "must be lowercase alphanumeric with dashes")
@@ -26,10 +26,10 @@ defmodule DodoRouter.Projects.Project do
     |> unique_constraint(:api_key_hash)
   end
 
-  def create_changeset(project, attrs) do
+  def create_changeset(router, attrs) do
     {api_key, hash, prefix} = generate_api_key()
 
-    project
+    router
     |> changeset(attrs)
     |> put_change(:api_key_hash, hash)
     |> put_change(:api_key_prefix, prefix)

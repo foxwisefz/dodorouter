@@ -10,7 +10,7 @@ defmodule DodoRouter.Proxy.Adapters.Zai do
   @behaviour DodoRouter.Proxy.Adapter
 
   alias DodoRouter.Proxy.Adapter
-  alias DodoRouter.Projects.RoutingStep
+  alias DodoRouter.Routers.RoutingStep
 
   @standard_base_url "https://api.z.ai/api/paas/v4"
   @coding_base_url "https://api.z.ai/api/coding/paas/v4"

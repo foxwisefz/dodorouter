@@ -8,13 +8,14 @@ defmodule DodoRouter.Proxy.FallbackChain do
 
   alias DodoRouter.Proxy.Adapter
   alias DodoRouter.Proxy.Adapters.{Zai, Moonshot}
-  alias DodoRouter.Projects.RoutingStep
+  alias DodoRouter.Providers
+  alias DodoRouter.Routers.RoutingStep
   alias DodoRouter.Secrets
 
   defstruct [
     :request,
     :steps,
-    :project_id,
+    :router_id,
     :stream,
     :send_chunk,
     attempted_steps: [],
@@ -22,14 +23,14 @@ defmodule DodoRouter.Proxy.FallbackChain do
     status: nil
   ]
 
-  def execute(request, steps, project_id, opts \\ []) do
+  def execute(request, steps, router_id, opts \\ []) do
     stream = Keyword.get(opts, :stream, false)
     send_chunk = Keyword.get(opts, :send_chunk, fn _ -> :ok end)
 
     state = %__MODULE__{
       request: request,
       steps: steps,
-      project_id: project_id,
+      router_id: router_id,
       stream: stream,
       send_chunk: send_chunk
     }
@@ -89,7 +90,7 @@ defmodule DodoRouter.Proxy.FallbackChain do
 
   defp execute_step(%RoutingStep{} = step, state) do
     adapter = adapter_for(step.provider)
-    api_key = get_api_key(step.provider, state.project_id)
+    api_key = get_api_key(step, state.router_id)
 
     if is_nil(api_key) do
       {:error, :auth_error, %{reason: "Missing API key for #{step.provider}"}}
@@ -105,8 +106,18 @@ defmodule DodoRouter.Proxy.FallbackChain do
   defp adapter_for("zai"), do: Zai
   defp adapter_for("moonshot"), do: Moonshot
 
-  defp get_api_key("zai", project_id), do: Secrets.zai_api_key(project_id)
-  defp get_api_key("moonshot", project_id), do: Secrets.moonshot_api_key(project_id)
+  # Get API key - prefer provider_key if assigned, fall back to legacy router secrets
+  defp get_api_key(%RoutingStep{provider_key: %{} = provider_key}, _router_id) do
+    Providers.get_raw_api_key(provider_key)
+  end
+
+  defp get_api_key(%RoutingStep{provider: "zai"}, router_id) do
+    Secrets.zai_api_key(router_id)
+  end
+
+  defp get_api_key(%RoutingStep{provider: "moonshot"}, router_id) do
+    Secrets.moonshot_api_key(router_id)
+  end
 
   defp endpoint_for(%RoutingStep{provider: "zai", plan_type: "coding"}),
     do: "https://api.z.ai/api/coding/paas/v4/chat/completions"

@@ -1,19 +1,19 @@
 defmodule DodoRouterWeb.DashboardLive do
   use DodoRouterWeb, :live_view
 
-  alias DodoRouter.{Projects, Logs}
+  alias DodoRouter.{Routers, Logs}
 
   @refresh_interval_ms 5_000
 
   @impl true
   def mount(_params, _session, socket) do
-    projects = Projects.list_projects(socket.assigns.current_user)
+    routers = Routers.list_routers(socket.assigns.current_user)
 
     socket =
       socket
       |> assign(:page_title, "Dashboard")
-      |> assign(:projects, projects)
-      |> assign(:selected_project, List.first(projects))
+      |> assign(:routers, routers)
+      |> assign(:selected_router, List.first(routers))
       |> assign(:stats, nil)
       |> assign(:stats_by_provider, [])
       |> assign(:latency_percentiles, %{})
@@ -22,7 +22,7 @@ defmodule DodoRouterWeb.DashboardLive do
       |> assign(:live_events, [])
 
     socket =
-      if socket.assigns.selected_project do
+      if socket.assigns.selected_router do
         load_stats(socket)
       else
         socket
@@ -31,10 +31,10 @@ defmodule DodoRouterWeb.DashboardLive do
     if connected?(socket) do
       schedule_refresh()
 
-      if socket.assigns.selected_project do
+      if socket.assigns.selected_router do
         Phoenix.PubSub.subscribe(
           DodoRouter.PubSub,
-          "project:#{socket.assigns.selected_project.id}:events"
+          "router:#{socket.assigns.selected_router.id}:events"
         )
       end
     end
@@ -43,21 +43,21 @@ defmodule DodoRouterWeb.DashboardLive do
   end
 
   @impl true
-  def handle_params(%{"project_id" => project_id}, _url, socket) do
-    project = Projects.get_project!(socket.assigns.current_user, project_id)
+  def handle_params(%{"router_id" => router_id}, _url, socket) do
+    router = Routers.get_router!(socket.assigns.current_user, router_id)
 
-    if socket.assigns.selected_project do
+    if socket.assigns.selected_router do
       Phoenix.PubSub.unsubscribe(
         DodoRouter.PubSub,
-        "project:#{socket.assigns.selected_project.id}:events"
+        "router:#{socket.assigns.selected_router.id}:events"
       )
     end
 
-    Phoenix.PubSub.subscribe(DodoRouter.PubSub, "project:#{project.id}:events")
+    Phoenix.PubSub.subscribe(DodoRouter.PubSub, "router:#{router.id}:events")
 
     socket =
       socket
-      |> assign(:selected_project, project)
+      |> assign(:selected_router, router)
       |> assign(:live_events, [])
       |> load_stats()
 
@@ -69,8 +69,8 @@ defmodule DodoRouterWeb.DashboardLive do
   end
 
   @impl true
-  def handle_event("select_project", %{"project_id" => project_id}, socket) do
-    {:noreply, push_patch(socket, to: ~p"/dashboard?project_id=#{project_id}")}
+  def handle_event("select_router", %{"router_id" => router_id}, socket) do
+    {:noreply, push_patch(socket, to: ~p"/dashboard?router_id=#{router_id}")}
   end
 
   @impl true
@@ -78,7 +78,7 @@ defmodule DodoRouterWeb.DashboardLive do
     schedule_refresh()
 
     socket =
-      if socket.assigns.selected_project do
+      if socket.assigns.selected_router do
         load_stats(socket)
       else
         socket
@@ -97,14 +97,14 @@ defmodule DodoRouterWeb.DashboardLive do
   end
 
   defp load_stats(socket) do
-    project = socket.assigns.selected_project
+    router = socket.assigns.selected_router
 
     socket
-    |> assign(:stats, Logs.stats(project, hours: 24))
-    |> assign(:stats_by_provider, Logs.stats_by_provider(project, hours: 24))
-    |> assign(:latency_percentiles, Logs.latency_percentiles(project, hours: 24))
-    |> assign(:failure_breakdown, Logs.failure_breakdown(project, hours: 24))
-    |> assign(:requests_per_minute, Logs.requests_per_minute(project, minutes: 60))
+    |> assign(:stats, Logs.stats(router, hours: 24))
+    |> assign(:stats_by_provider, Logs.stats_by_provider(router, hours: 24))
+    |> assign(:latency_percentiles, Logs.latency_percentiles(router, hours: 24))
+    |> assign(:failure_breakdown, Logs.failure_breakdown(router, hours: 24))
+    |> assign(:requests_per_minute, Logs.requests_per_minute(router, minutes: 60))
   end
 
   @impl true
@@ -118,17 +118,17 @@ defmodule DodoRouterWeb.DashboardLive do
           <p class="text-base-content/60">Monitor your LLM proxy in real-time</p>
         </div>
         <select
-          phx-change="select_project"
-          name="project_id"
+          phx-change="select_router"
+          name="router_id"
           class="select select-bordered w-full sm:w-auto"
         >
-          <option :for={p <- @projects} value={p.id} selected={@selected_project && p.id == @selected_project.id}>
-            <%= p.name %>
+          <option :for={r <- @routers} value={r.id} selected={@selected_router && r.id == @selected_router.id}>
+            <%= r.name %>
           </option>
         </select>
       </div>
 
-      <%= if @selected_project && @stats do %>
+      <%= if @selected_router && @stats do %>
         <!-- Stats Grid -->
         <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
           <div class="stat bg-base-100 rounded-box shadow">
@@ -319,9 +319,9 @@ defmodule DodoRouterWeb.DashboardLive do
             <div class="max-w-md">
               <h1 class="text-3xl font-bold">Welcome to DodoRouter</h1>
               <p class="py-6 text-base-content/60">
-                Create your first project to start routing LLM requests with automatic fallbacks.
+                Create your first router to start routing LLM requests with automatic fallbacks.
               </p>
-              <a href={~p"/projects/new"} class="btn btn-primary">Create Project</a>
+              <a href={~p"/routers/new"} class="btn btn-primary">Create Router</a>
             </div>
           </div>
         </div>
