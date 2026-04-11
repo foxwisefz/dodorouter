@@ -7,6 +7,9 @@
     <.live_title default="DodoRouter">
       {assigns[:page_title]}
     </.live_title>
+    <link rel="icon" type="image/png" sizes="32x32" href={~p"/favicon-32.png"} />
+    <link rel="icon" type="image/png" sizes="16x16" href={~p"/favicon-16.png"} />
+    <link rel="apple-touch-icon" sizes="180x180" href={~p"/apple-touch-icon.png"} />
     <link phx-track-static rel="stylesheet" href={~p"/assets/css/app.css"} />
     <script defer phx-track-static type="text/javascript" src={~p"/assets/js/app.js"}>
     </script>
@@ -44,9 +47,7 @@
             <!-- Logo -->
             <div class="p-4 border-b border-base-300">
               <a href={~p"/projects"} class="flex items-center gap-2">
-                <div class="w-8 h-8 rounded-lg bg-primary flex items-center justify-center">
-                  <span class="text-primary-content font-bold">D</span>
-                </div>
+                <img src={~p"/images/dodo-logo.png"} alt="DodoRouter" class="w-10 h-10" />
                 <span class="text-xl font-bold">DodoRouter</span>
               </a>
             </div>
