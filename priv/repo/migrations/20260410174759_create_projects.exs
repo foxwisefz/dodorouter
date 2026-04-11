@@ -2,7 +2,8 @@ defmodule DodoRouter.Repo.Migrations.CreateProjects do
   use Ecto.Migration
 
   def change do
-    create table(:projects) do
+    create table(:projects, primary_key: false) do
+      add :id, :uuid, primary_key: true
       add :name, :string, null: false
       add :slug, :string, null: false
       add :api_key_hash, :string, null: false
@@ -14,8 +15,9 @@ defmodule DodoRouter.Repo.Migrations.CreateProjects do
     create unique_index(:projects, [:slug])
     create unique_index(:projects, [:api_key_hash])
 
-    create table(:routing_steps) do
-      add :project_id, references(:projects, on_delete: :delete_all), null: false
+    create table(:routing_steps, primary_key: false) do
+      add :id, :uuid, primary_key: true
+      add :project_id, references(:projects, type: :uuid, on_delete: :delete_all), null: false
       add :position, :integer, null: false
       add :provider, :string, null: false
       add :model, :string, null: false
@@ -30,8 +32,9 @@ defmodule DodoRouter.Repo.Migrations.CreateProjects do
     create index(:routing_steps, [:project_id])
     create unique_index(:routing_steps, [:project_id, :position])
 
-    create table(:request_logs) do
-      add :project_id, references(:projects, on_delete: :delete_all), null: false
+    create table(:request_logs, primary_key: false) do
+      add :id, :uuid, primary_key: true
+      add :project_id, references(:projects, type: :uuid, on_delete: :delete_all), null: false
       add :request_id, :uuid, null: false
       add :status, :string, null: false
       add :http_status, :integer
@@ -69,7 +72,8 @@ defmodule DodoRouter.Repo.Migrations.CreateProjects do
     create index(:request_logs, [:inserted_at])
     create unique_index(:request_logs, [:request_id])
 
-    create table(:model_pricing) do
+    create table(:model_pricing, primary_key: false) do
+      add :id, :uuid, primary_key: true
       add :provider, :string, null: false
       add :model, :string, null: false
       add :input_cost_per_1m_tokens, :numeric, precision: 10, scale: 6
