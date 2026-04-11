@@ -37,7 +37,13 @@
             I agree to the <a href="/terms" target="_blank" class="link link-primary">Terms of Service</a>
           </span>
         </label>
-        <.error :for={msg <- Enum.map(f[:tos_accepted].errors, &translate_error/1)}>{msg}</.error>
+        <%= if f[:tos_accepted].errors != [] do %>
+          <span class="text-error text-sm mt-1">
+            <%= for {msg, _opts} <- f[:tos_accepted].errors do %>
+              <%= msg %>
+            <% end %>
+          </span>
+        <% end %>
       </div>
 
       <.button phx-disable-with="Creating account..." class="btn btn-primary w-full mt-4">
