@@ -157,23 +157,24 @@ defmodule DodoRouter.Secrets do
       {"Content-Type", "application/json"}
     ]
 
-    projects_body = %{
+    # Create folder hierarchy: /dodorouter/projects/{project_id}
+    # Each call is idempotent (400 = already exists)
+    with :ok <- create_folder("dodorouter", "/", headers, config),
+         :ok <- create_folder("projects", "/dodorouter", headers, config),
+         :ok <- create_folder(to_string(project_id), "/dodorouter/projects", headers, config) do
+      :ok
+    end
+  end
+
+  defp create_folder(name, path, headers, config) do
+    body = %{
       "workspaceId" => config.project_id,
       "environment" => config.env,
-      "name" => "projects",
-      "path" => "/"
+      "name" => name,
+      "path" => path
     }
 
-    Req.post("https://app.infisical.com/api/v1/folders", headers: headers, json: projects_body)
-
-    project_body = %{
-      "workspaceId" => config.project_id,
-      "environment" => config.env,
-      "name" => to_string(project_id),
-      "path" => "/projects"
-    }
-
-    case Req.post("https://app.infisical.com/api/v1/folders", headers: headers, json: project_body) do
+    case Req.post("https://app.infisical.com/api/v1/folders", headers: headers, json: body) do
       {:ok, %{status: status}} when status in [200, 201, 400] -> :ok
       {:ok, %{status: status, body: body}} -> {:error, {:folder_create_failed, status, body}}
       {:error, reason} -> {:error, reason}
