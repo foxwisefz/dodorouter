@@ -8,6 +8,7 @@ defmodule DodoRouter.Application do
   @impl true
   def start(_type, _args) do
     children = [
+      DodoRouter.ShutdownListener,
       DodoRouterWeb.Telemetry,
       DodoRouter.Repo,
       {DNSCluster, query: Application.get_env(:dodo_router, :dns_cluster_query) || :ignore},

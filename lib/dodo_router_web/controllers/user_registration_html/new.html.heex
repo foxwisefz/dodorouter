@@ -24,7 +24,29 @@
         phx-mounted={JS.focus()}
       />
 
-      <.button phx-disable-with="Creating account..." class="btn btn-primary w-full">
+      <div class="form-control mt-4">
+        <label class="label cursor-pointer justify-start gap-3">
+          <input
+            type="checkbox"
+            name={f[:tos_accepted].name}
+            value="true"
+            class="checkbox checkbox-primary"
+            required
+          />
+          <span class="label-text">
+            I agree to the <a href="/terms" target="_blank" class="link link-primary">Terms of Service</a>
+          </span>
+        </label>
+        <%= if f[:tos_accepted].errors != [] do %>
+          <span class="text-error text-sm mt-1">
+            <%= for {msg, _opts} <- f[:tos_accepted].errors do %>
+              <%= msg %>
+            <% end %>
+          </span>
+        <% end %>
+      </div>
+
+      <.button phx-disable-with="Creating account..." class="btn btn-primary w-full mt-4">
         Create an account
       </.button>
     </.form>
