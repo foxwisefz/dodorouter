@@ -3,7 +3,7 @@ defmodule DodoRouter.Secrets do
   Secrets management via Infisical.
 
   Uses folder structure:
-    /projects/{project_id}/{provider}_api_key
+    /dodorouter/projects/{project_id}/{provider}_api_key
 
   Project ID is used for organization. Provider credentials are stored as:
     - zai_api_key
@@ -57,7 +57,7 @@ defmodule DodoRouter.Secrets do
   # Private - Paths
 
   defp secret_path(project_id) do
-    "/projects/#{project_id}"
+    "/dodorouter/projects/#{project_id}"
   end
 
   # Private - Infisical API

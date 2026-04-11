@@ -2,6 +2,9 @@ defmodule DodoRouter.Logs.RequestLog do
   use Ecto.Schema
   import Ecto.Changeset
 
+  @primary_key {:id, :binary_id, autogenerate: true}
+  @foreign_key_type :binary_id
+
   @statuses ~w(success fallback error)
   @call_types ~w(completion tool_call tool_enabled_completion)
 
