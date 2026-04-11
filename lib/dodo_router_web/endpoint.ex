@@ -1,5 +1,6 @@
 defmodule DodoRouterWeb.Endpoint do
   use Phoenix.Endpoint, otp_app: :dodo_router
+  require Logger
 
   # The session will be stored in the cookie and signed,
   # this means its contents can be read but not tampered with.
@@ -40,6 +41,7 @@ defmodule DodoRouterWeb.Endpoint do
     cookie_key: "request_logger"
 
   plug Plug.RequestId
+  plug :quiet_health_checks
   plug Plug.Telemetry, event_prefix: [:phoenix, :endpoint]
 
   plug Plug.Parsers,
@@ -51,4 +53,11 @@ defmodule DodoRouterWeb.Endpoint do
   plug Plug.Head
   plug Plug.Session, @session_options
   plug DodoRouterWeb.Router
+
+  defp quiet_health_checks(%{request_path: "/health"} = conn, _opts) do
+    Logger.disable(self())
+    conn
+  end
+
+  defp quiet_health_checks(conn, _opts), do: conn
 end
