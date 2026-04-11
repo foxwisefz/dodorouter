@@ -66,9 +66,27 @@ config :tailwind,
   ]
 
 # Configures Elixir's Logger
-config :logger, :default_formatter,
+config :logger,
+  level: :info,
+  backends: [:console, {LoggerFileBackend, :info_log}, {LoggerFileBackend, :error_log}]
+
+config :logger, :console,
   format: "$time $metadata[$level] $message\n",
   metadata: [:request_id]
+
+config :logger, :info_log,
+  path: "logs/info.log",
+  level: :info,
+  format: "$time $metadata[$level] $message\n",
+  metadata: [:request_id],
+  rotate: %{max_bytes: 10_485_760, keep: 5, compress: true}
+
+config :logger, :error_log,
+  path: "logs/error.log",
+  level: :error,
+  format: "$time $metadata[$level] $message\n",
+  metadata: [:request_id],
+  rotate: %{max_bytes: 10_485_760, keep: 5, compress: true}
 
 # Use Jason for JSON parsing in Phoenix
 config :phoenix, :json_library, Jason

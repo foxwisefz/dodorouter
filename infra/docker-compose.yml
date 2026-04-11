@@ -17,6 +17,8 @@ services:
     ports:
       - "4001:4000"
     env_file: .app.env
+    volumes:
+      - app1_logs:/app/logs
     depends_on:
       db:
         condition: service_healthy
@@ -36,6 +38,8 @@ services:
     ports:
       - "4002:4000"
     env_file: .app.env
+    volumes:
+      - app2_logs:/app/logs
     depends_on:
       db:
         condition: service_healthy
@@ -51,3 +55,5 @@ services:
 
 volumes:
   postgres_data:
+  app1_logs:
+  app2_logs:
