@@ -29,6 +29,12 @@ defmodule DodoRouterWeb.Router do
     post "/chat/completions", ProxyController, :create
   end
 
+  # Health check (no auth, no session)
+  scope "/", DodoRouterWeb do
+    pipe_through :api
+    get "/health", HealthController, :index
+  end
+
   # Public routes
   scope "/", DodoRouterWeb do
     pipe_through :browser
