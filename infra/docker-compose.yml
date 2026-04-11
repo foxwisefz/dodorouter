@@ -6,26 +6,48 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U $POSTGRES_USER -d $POSTGRES_DB"]
+      test: ["CMD", "pg_isready"]
       interval: 5s
       timeout: 5s
       retries: 5
 
-  app:
+  app1:
     image: foxwise/dodorouter:latest
-    # Or build locally:
-    # build:
-    #   context: ..
-    #   dockerfile: Dockerfile
     restart: unless-stopped
     ports:
-      - "4000:4000"
+      - "4001:4000"
     env_file: .app.env
     depends_on:
       db:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    stop_grace_period: 30s
     command: >
       sh -c "/app/bin/migrate && /app/bin/server"
+
+  app2:
+    image: foxwise/dodorouter:latest
+    restart: unless-stopped
+    ports:
+      - "4002:4000"
+    env_file: .app.env
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    stop_grace_period: 30s
+    command: >
+      sh -c "/app/bin/server"
 
 volumes:
   postgres_data:
