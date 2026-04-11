@@ -7,7 +7,9 @@ defmodule DodoRouter.Accounts.User do
     field :password, :string, virtual: true, redact: true
     field :hashed_password, :string, redact: true
     field :confirmed_at, :utc_datetime
+    field :tos_accepted_at, :utc_datetime
     field :authenticated_at, :utc_datetime, virtual: true
+    field :tos_accepted, :boolean, virtual: true
 
     timestamps(type: :utc_datetime)
   end
@@ -103,6 +105,26 @@ defmodule DodoRouter.Accounts.User do
       |> delete_change(:password)
     else
       changeset
+    end
+  end
+
+  @doc """
+  A user changeset for registration that requires TOS acceptance.
+  """
+  def registration_changeset(user, attrs, opts \\ []) do
+    user
+    |> cast(attrs, [:email, :tos_accepted])
+    |> validate_email(opts)
+    |> validate_tos_acceptance()
+  end
+
+  defp validate_tos_acceptance(changeset) do
+    case get_field(changeset, :tos_accepted) do
+      true ->
+        put_change(changeset, :tos_accepted_at, DateTime.utc_now(:second))
+
+      _ ->
+        add_error(changeset, :tos_accepted, "you must accept the Terms of Service")
     end
   end
 

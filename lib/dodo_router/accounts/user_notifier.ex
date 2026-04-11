@@ -6,10 +6,14 @@ defmodule DodoRouter.Accounts.UserNotifier do
 
   # Delivers the email using the application mailer.
   defp deliver(recipient, subject, body) do
+    from_email = Application.get_env(:dodo_router, :email_from, "support@mail.dodorouter.com")
+    reply_to = Application.get_env(:dodo_router, :email_reply_to, "support@dodorouter.com")
+
     email =
       new()
       |> to(recipient)
-      |> from({"DodoRouter", "contact@example.com"})
+      |> from({"DodoRouter", from_email})
+      |> maybe_reply_to(reply_to)
       |> subject(subject)
       |> text_body(body)
 
@@ -17,6 +21,9 @@ defmodule DodoRouter.Accounts.UserNotifier do
       {:ok, email}
     end
   end
+
+  defp maybe_reply_to(email, nil), do: email
+  defp maybe_reply_to(email, reply_to), do: reply_to(email, reply_to)
 
   @doc """
   Deliver instructions to update a user email.

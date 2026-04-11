@@ -40,6 +40,7 @@ defmodule DodoRouterWeb.Router do
     pipe_through :browser
 
     get "/", PageController, :home
+    get "/terms", TermsController, :index
   end
 
   # Dashboard (requires auth)
