@@ -95,7 +95,7 @@ defmodule DodoRouterWeb.ProjectLive.Show do
   end
 
   def handle_event("delete_step", %{"id" => id}, socket) do
-    step = Projects.get_routing_step!(id)
+    step = Projects.get_routing_step!(socket.assigns.project, id)
     {:ok, _} = Projects.delete_routing_step(step)
 
     remaining = Projects.list_routing_steps(socket.assigns.project)

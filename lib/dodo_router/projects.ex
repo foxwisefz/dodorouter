@@ -100,7 +100,9 @@ defmodule DodoRouter.Projects do
     )
   end
 
-  def get_routing_step!(id), do: Repo.get!(RoutingStep, id)
+  def get_routing_step!(project, id) do
+    Repo.get_by!(RoutingStep, id: id, project_id: project.id)
+  end
 
   def create_routing_step(%Project{} = project, attrs) do
     next_position = get_next_position(project)
