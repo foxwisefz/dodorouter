@@ -49,7 +49,8 @@ defmodule DodoRouter.Providers do
   Creates a provider key and stores the API key in Infisical.
   """
   def create_provider_key(%User{id: user_id} = _user, attrs, api_key_value) do
-    changeset = ProviderKey.create_changeset(%ProviderKey{}, attrs, user_id)
+    hint = generate_key_hint(api_key_value)
+    changeset = ProviderKey.create_changeset(%ProviderKey{}, attrs, user_id, hint)
 
     case Repo.insert(changeset) do
       {:ok, provider_key} ->
@@ -107,5 +108,34 @@ defmodule DodoRouter.Providers do
 
   defp delete_api_key(user_id, key_ref) do
     DodoRouter.Secrets.delete_provider_key(user_id, key_ref)
+  end
+
+  # show bits of API key
+  defp generate_key_hint(nil), do: ""
+
+  defp generate_key_hint(key) do
+    len = String.length(key)
+
+    hint =
+      cond do
+        # For keys 1-4: Mask everything
+        len <= 4 ->
+          String.duplicate("•", len)
+
+        # For keys 5-8: Show 2 chars, mask the rest
+        len < 9 ->
+          prefix = String.slice(key, 0, 2)
+          bullets = String.duplicate("•", len - 2)
+          prefix <> bullets
+
+        # For keys 12+: Show 3 at start, 3 at end, mask the middle
+        true ->
+          prefix = String.slice(key, 0, 3)
+          suffix = String.slice(key, -3..-1)
+          bullets = String.duplicate("•", len - 7)
+          "#{prefix}#{bullets}#{suffix}"
+      end
+
+    hint
   end
 end

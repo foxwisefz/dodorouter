@@ -210,20 +210,12 @@ defmodule DodoRouterWeb.RouterLive.Show do
             </div>
           </div>
         </div>
-        <div class="flex gap-2">
-          <.link patch={~p"/routers/#{@router}/routing"} class="btn btn-sm bg-base-200 border-base-300/50 hover:bg-base-300 gap-2">
-            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h7" />
-            </svg>
-            Routing
-          </.link>
-          <.link navigate={~p"/providers"} class="btn btn-sm bg-base-200 border-base-300/50 hover:bg-base-300 gap-2">
-            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
-            </svg>
-            Providers
-          </.link>
-        </div>
+        <.link patch={~p"/routers/#{@router}/routing"} class="btn btn-sm bg-base-200 border-base-300/50 hover:bg-base-300 gap-2">
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h7" />
+          </svg>
+          Routing
+        </.link>
       </div>
 
       <!-- New API Key Alert -->
@@ -318,16 +310,17 @@ defmodule DodoRouterWeb.RouterLive.Show do
                 <span :if={step.thinking_enabled} class="px-1.5 py-0.5 rounded text-xs bg-accent/20 text-accent">thinking</span>
               </div>
               <div class="mt-2">
+                <input type="hidden" name="step_id" value={step.id} />
                 <select
                   phx-change="assign_key"
                   name="key_id"
-                  class={"text-sm py-1.5 px-2 rounded-lg border transition-colors #{if step.provider_key_id, do: "bg-base-200/50 border-base-300/30 text-base-content/70", else: "bg-warning/5 border-warning/30 text-warning"}"}
+                  class={"text-sm py-1.5 px-3 rounded-lg border transition-colors appearance-none bg-no-repeat bg-right pr-8 #{if step.provider_key_id, do: "bg-base-200/50 border-base-300/30 text-base-content/70", else: "bg-warning/5 border-warning/30 text-warning"}"}
+                  style="background-image: url('data:image/svg+xml;charset=UTF-8,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 20 20%22 fill=%22%236b7280%22%3E%3Cpath fill-rule=%22evenodd%22 d=%22M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z%22 clip-rule=%22evenodd%22/%3E%3C/svg%3E');"
                 >
-                  <input type="hidden" name="step_id" value={step.id} />
                   <option value="">-- Select API Key --</option>
-                  <%= for key <- @provider_keys do %>
+                  <%= for key <- matching_keys(@provider_keys, step.provider) do %>
                     <option value={key.id} selected={step.provider_key_id == key.id}>
-                      <%= key.label %> (<%= key.provider_slug %>)
+                      <%= key.label %>
                     </option>
                   <% end %>
                 </select>
@@ -536,5 +529,12 @@ defmodule DodoRouterWeb.RouterLive.Show do
     });
     console.log(response.choices[0].message.content);
     """
+  end
+
+  defp matching_keys(provider_keys, step_provider) do
+    alias DodoRouter.Providers.ProviderKey
+    Enum.filter(provider_keys, fn key ->
+      ProviderKey.adapter_provider(key.provider_slug) == step_provider
+    end)
   end
 end

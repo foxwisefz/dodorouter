@@ -5,9 +5,24 @@ defmodule DodoRouterWeb.ProvidersLive.Index do
   alias DodoRouter.Providers.ProviderKey
 
   @provider_info %{
-    "zai_standard" => %{name: "z.ai (Standard Plan)", endpoint: "https://api.z.ai/api/paas/v4"},
-    "zai_coding" => %{name: "z.ai (Coding Plan)", endpoint: "https://api.z.ai/api/coding/paas/v4"},
-    "moonshot" => %{name: "Moonshot (Kimi)", endpoint: "https://api.moonshot.ai/v1"}
+    "zai_standard" => %{
+      name: "z.ai Standard",
+      short: "GLM models for general use",
+      endpoint: "https://api.z.ai/api/paas/v4",
+      color: "emerald"
+    },
+    "zai_coding" => %{
+      name: "z.ai Coding",
+      short: "Optimized for code generation",
+      endpoint: "https://api.z.ai/api/coding/paas/v4",
+      color: "emerald"
+    },
+    "moonshot" => %{
+      name: "Moonshot",
+      short: "Kimi K2 models",
+      endpoint: "https://api.moonshot.ai/v1",
+      color: "amber"
+    }
   }
 
   @impl true
@@ -20,6 +35,7 @@ defmodule DodoRouterWeb.ProvidersLive.Index do
       |> assign(:provider_keys, provider_keys)
       |> assign(:provider_info, @provider_info)
       |> assign(:adding_to, nil)
+      |> assign(:editing_key, nil)
       |> assign(:form, nil)
 
     {:ok, socket}
@@ -37,6 +53,33 @@ defmodule DodoRouterWeb.ProvidersLive.Index do
     {:noreply, assign(socket, adding_to: nil, form: nil)}
   end
 
+  def handle_event("start_edit", %{"id" => id}, socket) do
+    {:noreply, assign(socket, editing_key: id)}
+  end
+
+  def handle_event("cancel_edit", _params, socket) do
+    {:noreply, assign(socket, editing_key: nil)}
+  end
+
+  def handle_event("save_label", %{"key_id" => id, "label" => label}, socket) do
+    provider_key = Providers.get_provider_key!(socket.assigns.current_user, id)
+
+    case Providers.update_provider_key(provider_key, %{label: label}) do
+      {:ok, _updated} ->
+        provider_keys = Providers.list_provider_keys_grouped(socket.assigns.current_user)
+
+        socket =
+          socket
+          |> assign(:provider_keys, provider_keys)
+          |> assign(:editing_key, nil)
+
+        {:noreply, socket}
+
+      {:error, _} ->
+        {:noreply, put_flash(socket, :error, "Failed to update label")}
+    end
+  end
+
   def handle_event("validate", %{"provider_key" => params}, socket) do
     changeset =
       %ProviderKey{}
@@ -50,17 +93,21 @@ defmodule DodoRouterWeb.ProvidersLive.Index do
     api_key = params["api_key"] || ""
 
     if String.trim(api_key) == "" do
-      changeset =
-        %ProviderKey{}
-        |> ProviderKey.changeset(params)
-        |> Ecto.Changeset.add_error(:api_key, "can't be blank")
-        |> Map.put(:action, :validate)
-
-      {:noreply, assign(socket, form: to_form(changeset))}
+      socket = put_flash(socket, :error, "Please enter an API key")
+      {:noreply, socket}
     else
+      provider_slug = socket.assigns.adding_to
+      existing_keys = Map.get(socket.assigns.provider_keys, provider_slug, [])
+
+      label = case params["label"] do
+        nil -> next_label(existing_keys)
+        "" -> next_label(existing_keys)
+        l -> l
+      end
+
       attrs = %{
-        provider_slug: socket.assigns.adding_to,
-        label: params["label"]
+        provider_slug: provider_slug,
+        label: label
       }
 
       case Providers.create_provider_key(socket.assigns.current_user, attrs, api_key) do
@@ -72,15 +119,24 @@ defmodule DodoRouterWeb.ProvidersLive.Index do
             |> assign(:provider_keys, provider_keys)
             |> assign(:adding_to, nil)
             |> assign(:form, nil)
-            |> put_flash(:info, "API key added successfully")
+            |> put_flash(:info, "API key added")
 
           {:noreply, socket}
 
         {:error, %Ecto.Changeset{} = changeset} ->
-          {:noreply, assign(socket, form: to_form(changeset))}
+          error_msg = case changeset.errors do
+            [{:label, _} | _] -> "A key with that label already exists"
+            _ -> "Failed to save API key"
+          end
+          socket = put_flash(socket, :error, error_msg)
+          {:noreply, socket}
 
-        {:error, {:secret_storage_failed, reason}} ->
-          socket = put_flash(socket, :error, "Failed to store API key: #{inspect(reason)}")
+        {:error, {:secret_storage_failed, _reason}} ->
+          socket = put_flash(socket, :error, "Failed to store API key securely")
+          {:noreply, socket}
+
+        {:error, _other} ->
+          socket = put_flash(socket, :error, "Something went wrong")
           {:noreply, socket}
       end
     end
@@ -103,108 +159,136 @@ defmodule DodoRouterWeb.ProvidersLive.Index do
   @impl true
   def render(assigns) do
     ~H"""
-    <div>
+    <div class="max-w-2xl">
       <!-- Header -->
       <div class="mb-8">
         <h1 class="text-2xl font-bold">Providers</h1>
-        <p class="text-base-content/50 text-sm">Manage API keys for LLM providers</p>
+        <p class="text-base-content/50 text-sm">Connect your LLM provider API keys</p>
       </div>
 
       <!-- Provider Cards -->
-      <div class="space-y-4">
+      <div class="space-y-3">
         <%= for provider_slug <- ProviderKey.provider_slugs() do %>
           <% info = @provider_info[provider_slug] %>
           <% keys = Map.get(@provider_keys, provider_slug, []) %>
+          <% key_count = length(keys) %>
 
-          <div class="provider-card">
+          <div class="bg-base-100 rounded-xl border border-base-300/40 overflow-hidden">
             <!-- Provider Header -->
-            <div class="flex items-start justify-between mb-4">
-              <div>
-                <h2 class="text-lg font-semibold"><%= info.name %></h2>
-                <p class="text-sm text-base-content/50 font-mono"><%= info.endpoint %></p>
+            <div class="p-4 flex items-center justify-between">
+              <div class="flex items-center gap-3">
+                <div class={"w-3 h-3 rounded-full #{provider_color(info.color)}"} title={info.endpoint}></div>
+                <div>
+                  <h2 class="font-semibold"><%= info.name %></h2>
+                  <p class="text-xs text-base-content/50"><%= info.short %></p>
+                </div>
               </div>
-              <div class="stat-icon flex-shrink-0">
-                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01" />
-                </svg>
-              </div>
-            </div>
-
-            <!-- Existing Keys -->
-            <div class="space-y-2">
-              <%= for key <- keys do %>
-                <div class="flex items-center justify-between p-3 bg-base-200/50 rounded-lg border border-base-300/30">
-                  <div class="flex items-center gap-3">
-                    <div class="w-8 h-8 rounded-lg bg-success/10 flex items-center justify-center">
-                      <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-success" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
-                      </svg>
-                    </div>
-                    <span class="font-medium text-base-content/90"><%= key.label %></span>
-                  </div>
+              <div class="flex items-center gap-3">
+                <%= if key_count > 0 do %>
+                  <span class="text-xs text-base-content/50"><%= key_count %> <%= if key_count == 1, do: "key", else: "keys" %></span>
+                <% end %>
+                <%= if @adding_to != provider_slug do %>
                   <button
-                    phx-click="delete"
-                    phx-value-id={key.id}
-                    data-confirm="Remove this API key?"
-                    class="p-2 rounded-lg hover:bg-error/10 text-base-content/50 hover:text-error transition-colors"
+                    phx-click="start_add"
+                    phx-value-provider={provider_slug}
+                    class="btn btn-sm btn-primary"
                   >
-                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                    </svg>
+                    Add Key
                   </button>
-                </div>
-              <% end %>
-
-              <p :if={Enum.empty?(keys)} class="text-base-content/40 text-sm py-2">
-                No API keys configured
-              </p>
+                <% end %>
+              </div>
             </div>
 
-            <!-- Add Key Form -->
-            <%= if @adding_to == provider_slug do %>
-              <.form for={@form} phx-change="validate" phx-submit="save" class="mt-4 p-4 bg-base-200/30 rounded-lg border border-base-300/30">
-                <div class="flex flex-col sm:flex-row gap-3">
-                  <div class="flex-1">
-                    <input
-                      type="text"
-                      name="provider_key[label]"
-                      value={@form[:label].value}
-                      placeholder="Label (e.g., Personal, Team)"
-                      class={"input bg-base-200 border-base-300/50 w-full #{if @form[:label].errors != [], do: "border-error"}"}
-                    />
+            <!-- Keys List -->
+            <%= if key_count > 0 || @adding_to == provider_slug do %>
+              <div class="border-t border-base-300/40 bg-base-200/30">
+                <!-- Existing Keys -->
+                <%= for key <- keys do %>
+                  <div class="flex items-center justify-between px-4 py-3 border-b border-base-300/20 last:border-b-0">
+                    <%= if @editing_key == key.id do %>
+                      <form phx-submit="save_label" class="flex items-center gap-2 flex-1">
+                        <input type="hidden" name="key_id" value={key.id} />
+                        <input
+                          type="text"
+                          name="label"
+                          value={key.label}
+                          class="flex-1 px-2 py-1 bg-base-100 border border-base-300/50 rounded text-sm focus:outline-none focus:border-primary/50"
+                          autofocus
+                        />
+                        <button type="submit" class="text-primary hover:text-primary/80 p-1">
+                          <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+                          </svg>
+                        </button>
+                        <button type="button" phx-click="cancel_edit" class="text-base-content/40 hover:text-base-content p-1">
+                          <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                          </svg>
+                        </button>
+                      </form>
+                    <% else %>
+                      <div class="flex items-center gap-3">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-success" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+                        </svg>
+                        <button
+                          phx-click="start_edit"
+                          phx-value-id={key.id}
+                          class="text-sm hover:text-primary transition-colors"
+                        >
+                          <%= key.label %>
+                        </button>
+                      </div>
+                      <button
+                        phx-click="delete"
+                        phx-value-id={key.id}
+                        data-confirm="Remove this API key?"
+                        class="text-base-content/40 hover:text-error transition-colors p-1"
+                      >
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                      </button>
+                    <% end %>
                   </div>
-                  <div class="flex-1">
-                    <input
-                      type="password"
-                      name="provider_key[api_key]"
-                      placeholder="API Key"
-                      class="input bg-base-200 border-base-300/50 w-full"
-                      autocomplete="off"
-                    />
-                  </div>
-                  <div class="flex gap-2">
-                    <button type="submit" class="btn btn-primary">Save</button>
-                    <button type="button" phx-click="cancel_add" class="btn btn-ghost">Cancel</button>
-                  </div>
-                </div>
-              </.form>
-            <% else %>
-              <button
-                phx-click="start_add"
-                phx-value-provider={provider_slug}
-                class="mt-4 w-full py-2.5 rounded-lg border border-dashed border-base-300/50 text-base-content/50 hover:border-primary/50 hover:text-primary hover:bg-primary/5 transition-colors flex items-center justify-center gap-2 text-sm"
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
-                </svg>
-                Add Key
-              </button>
+                <% end %>
+
+                <!-- Add Key Form -->
+                <%= if @adding_to == provider_slug do %>
+                  <.form for={@form} phx-submit="save" class="px-4 py-3" autocomplete="off" data-1p-ignore data-lpignore="true">
+                    <div class="flex gap-2">
+                      <input
+                        type="text"
+                        name="provider_key[api_key]"
+                        placeholder="Paste your API key here..."
+                        class="flex-1 px-3 py-2 bg-base-100 border border-base-300/50 rounded-lg text-sm font-mono focus:outline-none focus:border-primary/50"
+                        autocomplete="off"
+                        data-1p-ignore
+                        data-lpignore="true"
+                        spellcheck="false"
+                        autofocus
+                      />
+                      <button type="submit" class="btn btn-sm btn-primary">Save</button>
+                      <button type="button" phx-click="cancel_add" class="btn btn-sm btn-ghost">Cancel</button>
+                    </div>
+                  </.form>
+                <% end %>
+              </div>
             <% end %>
           </div>
         <% end %>
       </div>
     </div>
     """
+  end
+
+  defp provider_color("emerald"), do: "bg-emerald-500"
+  defp provider_color("amber"), do: "bg-amber-500"
+  defp provider_color(_), do: "bg-base-content/50"
+
+  defp next_label(existing_keys) do
+    count = length(existing_keys) + 1
+    "Key #{count}"
   end
 
 end

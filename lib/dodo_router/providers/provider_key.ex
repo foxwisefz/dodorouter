@@ -11,6 +11,7 @@ defmodule DodoRouter.Providers.ProviderKey do
     field :provider_slug, :string
     field :label, :string
     field :key_ref, :string
+    field :key_hint, :string
 
     belongs_to :user, DodoRouter.Accounts.User
 
@@ -20,21 +21,42 @@ defmodule DodoRouter.Providers.ProviderKey do
   def changeset(provider_key, attrs) do
     provider_key
     |> cast(attrs, [:provider_slug, :label, :user_id])
-    |> validate_required([:provider_slug, :label, :user_id])
+    |> validate_required([:provider_slug])
     |> validate_inclusion(:provider_slug, @provider_slugs)
-    |> validate_length(:label, min: 1, max: 100)
-    |> unique_constraint([:user_id, :label])
+    |> validate_length(:label, max: 100)
     |> unique_constraint([:user_id, :key_ref])
     |> foreign_key_constraint(:user_id)
   end
 
-  def create_changeset(provider_key, attrs, user_id) do
+  def create_changeset(provider_key, attrs, user_id, key_hint) do
     key_ref = generate_key_ref()
+    provider_slug = attrs[:provider_slug] || attrs["provider_slug"]
+
+    # Generate default label if not provided
+    label =
+      case attrs[:label] || attrs["label"] do
+        nil -> default_label(provider_slug)
+        "" -> default_label(provider_slug)
+        l -> l
+      end
 
     provider_key
-    |> changeset(attrs)
+    |> cast(attrs, [:provider_slug, :label])
+    |> put_change(:key_hint, key_hint)
+    |> put_change(:label, label)
     |> put_change(:user_id, user_id)
     |> put_change(:key_ref, key_ref)
+    |> validate_required([:provider_slug, :user_id])
+    |> validate_inclusion(:provider_slug, @provider_slugs)
+    |> validate_length(:label, max: 100)
+    |> unique_constraint([:user_id, :key_ref])
+    |> unique_constraint([:user_id, :label], name: "provider_keys_user_id_label_index")
+    |> foreign_key_constraint(:user_id)
+  end
+
+  defp default_label(provider_slug) do
+    info = display_info(provider_slug)
+    "#{info.name} Key"
   end
 
   defp generate_key_ref do
