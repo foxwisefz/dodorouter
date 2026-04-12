@@ -1,4 +1,4 @@
-defmodule DodoRouter.Projects.RoutingStep do
+defmodule DodoRouter.Routers.RoutingStep do
   use Ecto.Schema
   import Ecto.Changeset
 
@@ -17,30 +17,32 @@ defmodule DodoRouter.Projects.RoutingStep do
     field :max_tokens, :integer
     field :thinking_enabled, :boolean
 
-    belongs_to :project, DodoRouter.Projects.Project
+    belongs_to :router, DodoRouter.Routers.Router
+    belongs_to :provider_key, DodoRouter.Providers.ProviderKey
 
     timestamps()
   end
 
   def changeset(step, attrs) do
     step
-    |> cast(attrs, [:position, :provider, :model, :plan_type, :temperature, :max_tokens, :thinking_enabled, :project_id])
+    |> cast(attrs, [:position, :provider, :model, :plan_type, :temperature, :max_tokens, :thinking_enabled, :router_id, :provider_key_id])
     |> validate_required([:provider, :model])
     |> validate_inclusion(:provider, @providers)
     |> validate_inclusion(:plan_type, @plan_types)
     |> validate_number(:position, greater_than_or_equal_to: 0)
     |> validate_number(:temperature, greater_than_or_equal_to: 0.0, less_than_or_equal_to: 2.0)
     |> validate_number(:max_tokens, greater_than: 0)
-    |> foreign_key_constraint(:project_id)
-    |> unique_constraint([:project_id, :position])
+    |> foreign_key_constraint(:router_id)
+    |> foreign_key_constraint(:provider_key_id)
+    |> unique_constraint([:router_id, :position])
   end
 
-  def create_changeset(step, attrs, project_id, position) do
+  def create_changeset(step, attrs, router_id, position) do
     step
     |> changeset(attrs)
-    |> put_change(:project_id, project_id)
+    |> put_change(:router_id, router_id)
     |> put_change(:position, position)
-    |> validate_required([:position, :project_id])
+    |> validate_required([:position, :router_id])
   end
 
   def providers, do: @providers

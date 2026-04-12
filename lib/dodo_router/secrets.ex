@@ -50,14 +50,49 @@ defmodule DodoRouter.Secrets do
     list_from_infisical(project_id)
   end
 
-  # Convenience getters for provider API keys
+  # Convenience getters for provider API keys (legacy - for existing routers)
   def zai_api_key(project_id), do: get(project_id, "zai_api_key")
   def moonshot_api_key(project_id), do: get(project_id, "moonshot_api_key")
+
+  # New provider key API (per-user, reusable across routers)
+
+  def get_provider_key(user_id, key_ref) do
+    cache_key = "provider_key/#{user_id}/#{key_ref}"
+
+    case get_cached(cache_key) do
+      {:ok, value} -> value
+      :miss -> fetch_and_cache_provider_key(user_id, key_ref, cache_key)
+    end
+  end
+
+  def put_provider_key(user_id, key_ref, value) do
+    cache_key = "provider_key/#{user_id}/#{key_ref}"
+
+    case put_provider_key_to_infisical(user_id, key_ref, value) do
+      :ok ->
+        put_cache(cache_key, value)
+        :ok
+
+      error ->
+        error
+    end
+  end
+
+  def delete_provider_key(user_id, key_ref) do
+    cache_key = "provider_key/#{user_id}/#{key_ref}"
+    result = delete_provider_key_from_infisical(user_id, key_ref)
+    invalidate_cache(cache_key)
+    result
+  end
 
   # Private - Paths
 
   defp secret_path(project_id) do
     "/dodorouter/projects/#{project_id}"
+  end
+
+  defp provider_key_path(user_id) do
+    "/dodorouter/users/#{user_id}/provider_keys"
   end
 
   # Private - Infisical API
@@ -260,6 +295,161 @@ defmodule DodoRouter.Secrets do
         {:error, reason} ->
           {:error, reason}
       end
+    end
+  end
+
+  # Provider Key Infisical operations
+
+  defp fetch_and_cache_provider_key(user_id, key_ref, cache_key) do
+    with {:ok, config} <- get_infisical_config() do
+      path = provider_key_path(user_id)
+
+      url =
+        "https://app.infisical.com/api/v3/secrets/raw/#{key_ref}?" <>
+          URI.encode_query(%{
+            "workspaceId" => config.project_id,
+            "environment" => config.env,
+            "secretPath" => path
+          })
+
+      headers = [{"Authorization", "Bearer #{config.token}"}]
+
+      case Req.get(url, headers: headers) do
+        {:ok, %{status: 200, body: %{"secret" => %{"secretValue" => value}}}} ->
+          put_cache(cache_key, value)
+          value
+
+        {:ok, %{status: 404}} ->
+          Logger.debug("Provider key not found: #{cache_key}")
+          nil
+
+        {:ok, %{status: status, body: _body}} ->
+          Logger.debug("Infisical fetch failed for #{cache_key}: status=#{status}")
+          nil
+
+        {:error, reason} ->
+          Logger.debug("Infisical fetch failed for #{cache_key}: #{inspect(reason)}")
+          nil
+      end
+    else
+      _ -> nil
+    end
+  end
+
+  defp put_provider_key_to_infisical(user_id, key_ref, value) do
+    with {:ok, config} <- get_infisical_config() do
+      path = provider_key_path(user_id)
+      url = "#{@infisical_api}/#{key_ref}"
+
+      headers = [
+        {"Authorization", "Bearer #{config.token}"},
+        {"Content-Type", "application/json"}
+      ]
+
+      body = %{
+        "projectId" => config.project_id,
+        "environment" => config.env,
+        "secretPath" => path,
+        "secretValue" => value
+      }
+
+      case Req.post(url, headers: headers, json: body) do
+        {:ok, %{status: status}} when status in [200, 201] ->
+          :ok
+
+        {:ok, %{status: 400, body: %{"message" => msg}}} when is_binary(msg) ->
+          if String.contains?(msg, "exist") do
+            update_provider_key_in_infisical(user_id, key_ref, value, config)
+          else
+            {:error, {:create_failed, msg}}
+          end
+
+        {:ok, %{status: 404, body: %{"message" => msg}}} when is_binary(msg) ->
+          if String.contains?(msg, "Folder") do
+            case ensure_user_folder(user_id, config) do
+              :ok -> put_provider_key_to_infisical(user_id, key_ref, value)
+              error -> error
+            end
+          else
+            {:error, {:http_error, 404, msg}}
+          end
+
+        {:ok, %{status: status, body: body}} ->
+          {:error, {:http_error, status, body}}
+
+        {:error, reason} ->
+          {:error, reason}
+      end
+    end
+  end
+
+  defp update_provider_key_in_infisical(user_id, key_ref, value, config) do
+    path = provider_key_path(user_id)
+    url = "#{@infisical_api}/#{key_ref}"
+
+    headers = [
+      {"Authorization", "Bearer #{config.token}"},
+      {"Content-Type", "application/json"}
+    ]
+
+    body = %{
+      "projectId" => config.project_id,
+      "environment" => config.env,
+      "secretPath" => path,
+      "secretValue" => value
+    }
+
+    case Req.patch(url, headers: headers, json: body) do
+      {:ok, %{status: status}} when status in [200, 201] ->
+        :ok
+
+      {:ok, %{status: status, body: body}} ->
+        {:error, {:http_error, status, body}}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp delete_provider_key_from_infisical(user_id, key_ref) do
+    with {:ok, config} <- get_infisical_config() do
+      path = provider_key_path(user_id)
+
+      url =
+        "#{@infisical_api}/#{key_ref}/raw?" <>
+          URI.encode_query(%{
+            "projectId" => config.project_id,
+            "environment" => config.env,
+            "secretPath" => path
+          })
+
+      headers = [{"Authorization", "Bearer #{config.token}"}]
+
+      case Req.delete(url, headers: headers) do
+        {:ok, %{status: status}} when status in [200, 204, 404] ->
+          :ok
+
+        {:ok, %{status: status, body: body}} ->
+          {:error, {:http_error, status, body}}
+
+        {:error, reason} ->
+          {:error, reason}
+      end
+    end
+  end
+
+  defp ensure_user_folder(user_id, config) do
+    headers = [
+      {"Authorization", "Bearer #{config.token}"},
+      {"Content-Type", "application/json"}
+    ]
+
+    # Create folder hierarchy: /dodorouter/users/{user_id}/provider_keys
+    with :ok <- create_folder("dodorouter", "/", headers, config),
+         :ok <- create_folder("users", "/dodorouter", headers, config),
+         :ok <- create_folder(to_string(user_id), "/dodorouter/users", headers, config),
+         :ok <- create_folder("provider_keys", "/dodorouter/users/#{user_id}", headers, config) do
+      :ok
     end
   end
 

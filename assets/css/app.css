@@ -26,26 +26,29 @@
   default: false;
   prefersdark: true;
   color-scheme: "dark";
-  --color-base-100: oklch(30.33% 0.016 252.42);
-  --color-base-200: oklch(25.26% 0.014 253.1);
-  --color-base-300: oklch(20.15% 0.012 254.09);
-  --color-base-content: oklch(97.807% 0.029 256.847);
-  --color-primary: oklch(58% 0.233 277.117);
-  --color-primary-content: oklch(96% 0.018 272.314);
-  --color-secondary: oklch(58% 0.233 277.117);
-  --color-secondary-content: oklch(96% 0.018 272.314);
-  --color-accent: oklch(60% 0.25 292.717);
-  --color-accent-content: oklch(96% 0.016 293.756);
-  --color-neutral: oklch(37% 0.044 257.287);
-  --color-neutral-content: oklch(98% 0.003 247.858);
-  --color-info: oklch(58% 0.158 241.966);
-  --color-info-content: oklch(97% 0.013 236.62);
-  --color-success: oklch(60% 0.118 184.704);
-  --color-success-content: oklch(98% 0.014 180.72);
-  --color-warning: oklch(66% 0.179 58.318);
-  --color-warning-content: oklch(98% 0.022 95.277);
-  --color-error: oklch(58% 0.253 17.585);
-  --color-error-content: oklch(96% 0.015 12.422);
+  --color-base-100: oklch(24% 0.012 250);
+  --color-base-200: oklch(20% 0.010 250);
+  --color-base-300: oklch(16% 0.008 250);
+  --color-base-content: oklch(95% 0.01 250);
+  /* Green primary - matches logo */
+  --color-primary: oklch(65% 0.18 145);
+  --color-primary-content: oklch(98% 0.01 145);
+  /* Teal secondary */
+  --color-secondary: oklch(55% 0.12 175);
+  --color-secondary-content: oklch(98% 0.01 175);
+  /* Orange accent - matches logo beak */
+  --color-accent: oklch(75% 0.18 55);
+  --color-accent-content: oklch(20% 0.02 55);
+  --color-neutral: oklch(35% 0.02 250);
+  --color-neutral-content: oklch(95% 0.01 250);
+  --color-info: oklch(65% 0.15 230);
+  --color-info-content: oklch(98% 0.01 230);
+  --color-success: oklch(65% 0.18 145);
+  --color-success-content: oklch(98% 0.01 145);
+  --color-warning: oklch(75% 0.18 55);
+  --color-warning-content: oklch(20% 0.02 55);
+  --color-error: oklch(60% 0.22 25);
+  --color-error-content: oklch(98% 0.01 25);
   --radius-selector: 0.25rem;
   --radius-field: 0.25rem;
   --radius-box: 0.5rem;
@@ -61,26 +64,29 @@
   default: true;
   prefersdark: false;
   color-scheme: "light";
-  --color-base-100: oklch(98% 0 0);
-  --color-base-200: oklch(96% 0.001 286.375);
-  --color-base-300: oklch(92% 0.004 286.32);
-  --color-base-content: oklch(21% 0.006 285.885);
-  --color-primary: oklch(70% 0.213 47.604);
-  --color-primary-content: oklch(98% 0.016 73.684);
-  --color-secondary: oklch(55% 0.027 264.364);
-  --color-secondary-content: oklch(98% 0.002 247.839);
-  --color-accent: oklch(0% 0 0);
-  --color-accent-content: oklch(100% 0 0);
-  --color-neutral: oklch(44% 0.017 285.786);
-  --color-neutral-content: oklch(98% 0 0);
-  --color-info: oklch(62% 0.214 259.815);
-  --color-info-content: oklch(97% 0.014 254.604);
-  --color-success: oklch(70% 0.14 182.503);
-  --color-success-content: oklch(98% 0.014 180.72);
-  --color-warning: oklch(66% 0.179 58.318);
-  --color-warning-content: oklch(98% 0.022 95.277);
-  --color-error: oklch(58% 0.253 17.585);
-  --color-error-content: oklch(96% 0.015 12.422);
+  --color-base-100: oklch(99% 0.005 250);
+  --color-base-200: oklch(96% 0.008 250);
+  --color-base-300: oklch(92% 0.010 250);
+  --color-base-content: oklch(25% 0.015 250);
+  /* Green primary - matches logo */
+  --color-primary: oklch(55% 0.18 145);
+  --color-primary-content: oklch(98% 0.01 145);
+  /* Teal secondary */
+  --color-secondary: oklch(50% 0.12 175);
+  --color-secondary-content: oklch(98% 0.01 175);
+  /* Orange accent - matches logo beak */
+  --color-accent: oklch(70% 0.18 55);
+  --color-accent-content: oklch(20% 0.02 55);
+  --color-neutral: oklch(40% 0.02 250);
+  --color-neutral-content: oklch(98% 0.01 250);
+  --color-info: oklch(55% 0.15 230);
+  --color-info-content: oklch(98% 0.01 230);
+  --color-success: oklch(55% 0.18 145);
+  --color-success-content: oklch(98% 0.01 145);
+  --color-warning: oklch(70% 0.18 55);
+  --color-warning-content: oklch(20% 0.02 55);
+  --color-error: oklch(55% 0.22 25);
+  --color-error-content: oklch(98% 0.01 25);
   --radius-selector: 0.25rem;
   --radius-field: 0.25rem;
   --radius-box: 0.5rem;
@@ -103,3 +109,122 @@
 [data-phx-session], [data-phx-teleported-src] { display: contents }
 
 /* This file is for your main application CSS */
+
+/* ============================================
+   DodoRouter Design System
+   ============================================ */
+
+/* Card with subtle border - use instead of plain bg-base-100 */
+.card-bordered {
+  @apply bg-base-100 rounded-xl border border-base-300/50;
+}
+
+/* Stat card - consistent metric display */
+.stat-card {
+  @apply bg-base-100 rounded-xl border border-base-300/50 p-5;
+}
+
+.stat-card .stat-label {
+  @apply text-sm text-base-content/60 mb-1;
+}
+
+.stat-card .stat-value {
+  @apply text-2xl font-bold text-base-content;
+}
+
+.stat-card .stat-desc {
+  @apply text-xs text-base-content/50 mt-1;
+}
+
+/* Muted value colors - less rainbow, more cohesive */
+.stat-card .stat-value.text-muted {
+  @apply text-base-content/80;
+}
+
+/* Section headers */
+.section-title {
+  @apply text-lg font-semibold text-base-content mb-1;
+}
+
+.section-desc {
+  @apply text-sm text-base-content/60;
+}
+
+/* Form elements - less jarring selects */
+select.select,
+.select {
+  @apply bg-base-200 border-base-300/50 focus:border-primary/50 focus:outline-none;
+}
+
+/* Input fields */
+input.input,
+.input {
+  @apply bg-base-200 border-base-300/50 focus:border-primary/50 focus:outline-none;
+}
+
+/* Code blocks */
+.code-block {
+  @apply bg-base-300 rounded-lg p-4 font-mono text-sm overflow-x-auto;
+}
+
+/* Routing step cards */
+.step-card {
+  @apply bg-base-200/50 rounded-lg border border-base-300/30 p-4;
+}
+
+/* Provider cards */
+.provider-card {
+  @apply bg-base-100 rounded-xl border border-base-300/50 p-5;
+}
+
+/* Sidebar refinements */
+.sidebar-section {
+  @apply px-3 py-2;
+}
+
+.sidebar-title {
+  @apply text-xs font-semibold text-base-content/50 uppercase tracking-wider px-2 mb-2;
+}
+
+/* Badge refinements */
+.badge-subtle {
+  @apply bg-base-300 text-base-content/70 border-0;
+}
+
+/* Button refinements */
+.btn-subtle {
+  @apply btn btn-ghost bg-base-200/50 hover:bg-base-200 border-base-300/50;
+}
+
+/* Chart container */
+.chart-container {
+  @apply bg-base-100 rounded-xl border border-base-300/50 p-5;
+}
+
+/* Table refinements */
+.table-container {
+  @apply bg-base-100 rounded-xl border border-base-300/50 overflow-hidden;
+}
+
+.table-container .table {
+  @apply w-full;
+}
+
+.table-container .table th {
+  @apply bg-base-200/50 text-base-content/70 font-medium text-xs uppercase tracking-wider;
+}
+
+/* Empty states */
+.empty-state {
+  @apply text-center py-12 text-base-content/50;
+}
+
+/* Live indicator */
+.live-dot {
+  @apply w-2 h-2 rounded-full bg-success animate-pulse;
+}
+
+/* Icon containers for stats */
+.stat-icon {
+  @apply w-10 h-10 rounded-lg bg-base-200 flex items-center justify-center text-base-content/60;
+}

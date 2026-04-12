@@ -4,20 +4,25 @@ defmodule DodoRouterWeb.ProxyController do
   alias DodoRouter.Proxy
 
   def create(conn, params) do
-    project = conn.assigns.current_project
+    router = conn.assigns.current_router
     request_id = Ecto.UUID.generate()
 
     if params["stream"] == true do
-      stream_response(conn, project, params, request_id)
+      stream_response(conn, router, params, request_id)
     else
-      sync_response(conn, project, params, request_id)
+      sync_response(conn, router, params, request_id)
     end
   end
 
-  defp sync_response(conn, project, params, request_id) do
+  # Legacy endpoint for backwards compatibility
+  def create_legacy(conn, params) do
+    create(conn, params)
+  end
+
+  defp sync_response(conn, router, params, request_id) do
     start_time = System.monotonic_time(:millisecond)
 
-    case Proxy.dispatch(project, params, request_id: request_id) do
+    case Proxy.dispatch(router, params, request_id: request_id) do
       {:ok, response, timing} ->
         total_ms = System.monotonic_time(:millisecond) - start_time
         provider_ms = timing[:provider_ms] || 0
@@ -30,16 +35,10 @@ defmodule DodoRouterWeb.ProxyController do
         |> put_resp_header("x-timing-overhead-ms", to_string(overhead_ms))
         |> json(response)
 
-      {:ok, response} ->
-        # Fallback for old format
-        conn
-        |> put_resp_header("x-request-id", request_id)
-        |> json(response)
-
       {:error, :no_routing_configured} ->
         conn
         |> put_status(500)
-        |> json(%{error: %{message: "No routing configured for this project", type: "configuration_error"}})
+        |> json(%{error: %{message: "No routing configured for this router", type: "configuration_error"}})
 
       {:error, :all_providers_failed, attempts} ->
         total_ms = System.monotonic_time(:millisecond) - start_time
@@ -62,7 +61,7 @@ defmodule DodoRouterWeb.ProxyController do
     end
   end
 
-  defp stream_response(conn, project, params, request_id) do
+  defp stream_response(conn, router, params, request_id) do
     conn =
       conn
       |> put_resp_content_type("text/event-stream")
@@ -75,8 +74,8 @@ defmodule DodoRouterWeb.ProxyController do
       :ok
     end
 
-    case Proxy.dispatch_streaming(project, params, send_chunk) do
-      {:ok, _response} ->
+    case Proxy.dispatch_streaming(router, params, send_chunk) do
+      {:ok, _response, _timing} ->
         conn
 
       {:error, :no_routing_configured} ->

@@ -3,18 +3,18 @@ defmodule DodoRouterWeb.LogLive.Index do
 
   require Logger
 
-  alias DodoRouter.{Logs, Projects}
+  alias DodoRouter.{Logs, Routers}
 
   @impl true
   def mount(_params, _session, socket) do
-    projects = Projects.list_projects(socket.assigns.current_user)
+    routers = Routers.list_routers(socket.assigns.current_user)
 
     socket =
       socket
       |> assign(:page_title, "Request Logs")
-      |> assign(:projects, projects)
-      |> assign(:selected_project_id, nil)
-      |> assign(:selected_project, nil)
+      |> assign(:routers, routers)
+      |> assign(:selected_router_id, nil)
+      |> assign(:selected_router, nil)
       |> assign(:filters, %{status: nil, provider: nil, call_type: nil})
       |> stream(:logs, [])
 
@@ -23,8 +23,8 @@ defmodule DodoRouterWeb.LogLive.Index do
 
   @impl true
   def terminate(_reason, socket) do
-    if socket.assigns.selected_project_id do
-      Logs.unsubscribe_from_logs(socket.assigns.selected_project_id)
+    if socket.assigns.selected_router_id do
+      Logs.unsubscribe_from_logs(socket.assigns.selected_router_id)
     end
 
     :ok
@@ -32,32 +32,32 @@ defmodule DodoRouterWeb.LogLive.Index do
 
   @impl true
   def handle_params(params, _url, socket) do
-    project_id = params["project_id"]
-    old_project_id = socket.assigns.selected_project_id
+    router_id = params["router_id"]
+    old_router_id = socket.assigns.selected_router_id
 
-    # Unsubscribe from old project if switching
-    if old_project_id && old_project_id != project_id do
-      Logs.unsubscribe_from_logs(old_project_id)
+    # Unsubscribe from old router if switching
+    if old_router_id && old_router_id != router_id do
+      Logs.unsubscribe_from_logs(old_router_id)
     end
 
     socket =
-      if project_id do
-        project = Projects.get_project!(socket.assigns.current_user, project_id)
-        logs = Logs.list_logs(project, limit: 100)
+      if router_id do
+        router = Routers.get_router!(socket.assigns.current_user, router_id)
+        logs = Logs.list_logs(router, limit: 100)
 
-        # Subscribe to new logs for this project
-        if connected?(socket) && old_project_id != project_id do
-          Logs.subscribe_to_logs(project_id)
+        # Subscribe to new logs for this router
+        if connected?(socket) && old_router_id != router_id do
+          Logs.subscribe_to_logs(router_id)
         end
 
         socket
-        |> assign(:selected_project_id, project_id)
-        |> assign(:selected_project, project)
+        |> assign(:selected_router_id, router_id)
+        |> assign(:selected_router, router)
         |> stream(:logs, logs, reset: true)
       else
         socket
-        |> assign(:selected_project_id, nil)
-        |> assign(:selected_project, nil)
+        |> assign(:selected_router_id, nil)
+        |> assign(:selected_router, nil)
         |> stream(:logs, [], reset: true)
       end
 
@@ -71,15 +71,15 @@ defmodule DodoRouterWeb.LogLive.Index do
   end
 
   @impl true
-  def handle_event("select_project", params, socket) do
-    Logger.debug("select_project params: #{inspect(params)}")
+  def handle_event("select_router", params, socket) do
+    Logger.debug("select_router params: #{inspect(params)}")
 
     case params do
-      %{"project_id" => ""} ->
+      %{"router_id" => ""} ->
         {:noreply, push_patch(socket, to: ~p"/logs")}
 
-      %{"project_id" => project_id} ->
-        {:noreply, push_patch(socket, to: ~p"/logs?project_id=#{project_id}")}
+      %{"router_id" => router_id} ->
+        {:noreply, push_patch(socket, to: ~p"/logs?router_id=#{router_id}")}
 
       _ ->
         {:noreply, socket}
@@ -102,8 +102,8 @@ defmodule DodoRouterWeb.LogLive.Index do
   end
 
   defp reload_logs(socket, filters) do
-    if socket.assigns.selected_project do
-      logs = Logs.list_logs(socket.assigns.selected_project, Map.to_list(filters) ++ [limit: 100])
+    if socket.assigns.selected_router do
+      logs = Logs.list_logs(socket.assigns.selected_router, Map.to_list(filters) ++ [limit: 100])
 
       socket
       |> assign(:filters, filters)
@@ -118,121 +118,119 @@ defmodule DodoRouterWeb.LogLive.Index do
     ~H"""
     <div>
       <!-- Header -->
-      <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
+      <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-8">
         <div>
           <h1 class="text-2xl font-bold">Request Logs</h1>
-          <p class="text-base-content/60">Browse and filter API request history</p>
+          <p class="text-base-content/50 text-sm">Browse and filter API request history</p>
         </div>
-        <form phx-change="select_project">
+        <form phx-change="select_router">
           <select
-            name="project_id"
-            class="select select-bordered w-full sm:w-auto"
+            name="router_id"
+            class="py-2 px-3 bg-base-200 border border-base-300/50 rounded-lg text-sm w-full sm:w-48"
           >
-            <option value="">Select a project...</option>
-            <option :for={p <- @projects} value={p.id} selected={to_string(p.id) == @selected_project_id}>
-              <%= p.name %>
+            <option value="">Select a router...</option>
+            <option :for={r <- @routers} value={r.id} selected={to_string(r.id) == @selected_router_id}>
+              <%= r.name %>
             </option>
           </select>
         </form>
       </div>
 
       <!-- Filters -->
-      <div :if={@selected_project} class="card bg-base-100 shadow mb-6">
-        <div class="card-body py-4">
-          <div class="flex flex-wrap gap-4 items-center">
-            <span class="text-sm font-medium">Filters:</span>
+      <div :if={@selected_router} class="card-bordered p-4 mb-6">
+        <div class="flex flex-wrap gap-3 items-center">
+          <span class="text-sm font-medium text-base-content/60">Filters:</span>
 
-            <select phx-change="filter" name="status" class="select select-bordered select-sm">
-              <option value="">All Status</option>
-              <option value="success" selected={@filters.status == "success"}>Success</option>
-              <option value="fallback" selected={@filters.status == "fallback"}>Fallback</option>
-              <option value="error" selected={@filters.status == "error"}>Error</option>
-            </select>
+          <select phx-change="filter" name="status" class="py-1.5 px-2 bg-base-200 border border-base-300/50 rounded-lg text-sm">
+            <option value="">All Status</option>
+            <option value="success" selected={@filters.status == "success"}>Success</option>
+            <option value="fallback" selected={@filters.status == "fallback"}>Fallback</option>
+            <option value="error" selected={@filters.status == "error"}>Error</option>
+          </select>
 
-            <select phx-change="filter" name="call_type" class="select select-bordered select-sm">
-              <option value="">All Types</option>
-              <option value="completion" selected={@filters.call_type == "completion"}>Completion</option>
-              <option value="tool_call" selected={@filters.call_type == "tool_call"}>Tool Call</option>
-              <option value="tool_enabled_completion" selected={@filters.call_type == "tool_enabled_completion"}>Tool Enabled</option>
-            </select>
-          </div>
+          <select phx-change="filter" name="call_type" class="py-1.5 px-2 bg-base-200 border border-base-300/50 rounded-lg text-sm">
+            <option value="">All Types</option>
+            <option value="completion" selected={@filters.call_type == "completion"}>Completion</option>
+            <option value="tool_call" selected={@filters.call_type == "tool_call"}>Tool Call</option>
+            <option value="tool_enabled_completion" selected={@filters.call_type == "tool_enabled_completion"}>Tool Enabled</option>
+          </select>
         </div>
       </div>
 
       <!-- Logs Table -->
-      <div :if={@selected_project} class="card bg-base-100 shadow">
-        <div class="card-body p-0">
-          <div class="overflow-x-auto">
-            <table class="table">
-              <thead>
-                <tr>
-                  <th>Time</th>
-                  <th>Status</th>
-                  <th>Provider/Model</th>
-                  <th>Type</th>
-                  <th>Tokens</th>
-                  <th>Latency</th>
-                  <th>Attempts</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody id="logs" phx-update="stream">
-                <tr :for={{dom_id, log} <- @streams.logs} id={dom_id} class="hover">
-                  <td class="font-mono text-xs"><%= format_time(log.inserted_at) %></td>
-                  <td><.status_badge status={log.status} /></td>
-                  <td>
-                    <%= if length(log.attempted_steps) > 1 do %>
-                      <div class="flex items-center gap-1">
-                        <%= for {step, idx} <- Enum.with_index(log.attempted_steps) do %>
-                          <span class={[
-                            "text-xs px-1.5 py-0.5 rounded",
-                            step["status"] == "success" && "bg-success/20 text-success",
-                            step["status"] != "success" && "bg-error/20 text-error line-through"
-                          ]}>
-                            <%= step["provider"] %>
-                          </span>
-                          <%= if idx < length(log.attempted_steps) - 1 do %>
-                            <span class="text-base-content/40">→</span>
-                          <% end %>
-                        <% end %>
-                      </div>
-                      <div class="text-xs text-base-content/60 mt-0.5"><%= log.final_model %></div>
-                    <% else %>
-                      <span class="font-medium"><%= log.final_provider %></span>
-                      <span class="text-base-content/60">/ <%= log.final_model %></span>
+      <div :if={@selected_router} class="table-container">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>Time</th>
+              <th>Status</th>
+              <th>Provider/Model</th>
+              <th>Type</th>
+              <th>Tokens</th>
+              <th>Latency</th>
+              <th>Attempts</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="logs" phx-update="stream">
+            <tr :for={{dom_id, log} <- @streams.logs} id={dom_id} class="hover:bg-base-200/30">
+              <td class="font-mono text-xs text-base-content/70"><%= format_time(log.inserted_at) %></td>
+              <td><.status_badge status={log.status} /></td>
+              <td>
+                <%= if length(log.attempted_steps) > 1 do %>
+                  <div class="flex items-center gap-1">
+                    <%= for {step, idx} <- Enum.with_index(log.attempted_steps) do %>
+                      <span class={[
+                        "text-xs px-1.5 py-0.5 rounded",
+                        step["status"] == "success" && "bg-success/20 text-success",
+                        step["status"] != "success" && "bg-error/20 text-error line-through"
+                      ]}>
+                        <%= step["provider"] %>
+                      </span>
+                      <%= if idx < length(log.attempted_steps) - 1 do %>
+                        <span class="text-base-content/30">→</span>
+                      <% end %>
                     <% end %>
-                  </td>
-                  <td><.call_type_badge type={log.call_type} /></td>
-                  <td class="font-mono text-sm"><%= log.total_tokens || "-" %></td>
-                  <td class="font-mono text-sm"><%= if log.latency_ms, do: "#{log.latency_ms}ms", else: "-" %></td>
-                  <td class="text-center">
-                    <%= if length(log.attempted_steps) > 1 do %>
-                      <span class="badge badge-warning badge-sm"><%= length(log.attempted_steps) %></span>
-                    <% else %>
-                      <span class="text-base-content/50">1</span>
-                    <% end %>
-                  </td>
-                  <td>
-                    <.link navigate={~p"/logs/#{log}"} class="btn btn-ghost btn-xs">
-                      View
-                    </.link>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
+                  </div>
+                  <div class="text-xs text-base-content/50 mt-0.5"><%= log.final_model %></div>
+                <% else %>
+                  <span class="text-base-content/80"><%= log.final_provider %></span>
+                  <span class="text-base-content/40"> / </span>
+                  <span class="text-base-content/60"><%= log.final_model %></span>
+                <% end %>
+              </td>
+              <td><.call_type_badge type={log.call_type} /></td>
+              <td class="font-mono text-sm text-base-content/70"><%= log.total_tokens || "-" %></td>
+              <td class="font-mono text-sm text-base-content/70"><%= if log.latency_ms, do: "#{log.latency_ms}ms", else: "-" %></td>
+              <td class="text-center">
+                <%= if length(log.attempted_steps) > 1 do %>
+                  <span class="px-1.5 py-0.5 bg-warning/20 text-warning rounded text-xs"><%= length(log.attempted_steps) %></span>
+                <% else %>
+                  <span class="text-base-content/40">1</span>
+                <% end %>
+              </td>
+              <td>
+                <.link navigate={~p"/logs/#{log}"} class="text-sm text-primary hover:underline">
+                  View
+                </.link>
+              </td>
+            </tr>
+          </tbody>
+        </table>
       </div>
 
       <!-- Empty State -->
-      <div :if={!@selected_project} class="hero min-h-[300px] bg-base-100 rounded-box">
-        <div class="hero-content text-center">
-          <div class="max-w-md">
-            <h1 class="text-2xl font-bold">Select a Project</h1>
-            <p class="py-4 text-base-content/60">
-              Choose a project from the dropdown above to view its request logs.
-            </p>
+      <div :if={!@selected_router} class="card-bordered p-12 text-center">
+        <div class="max-w-md mx-auto">
+          <div class="stat-icon w-16 h-16 mx-auto mb-6">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+            </svg>
           </div>
+          <h2 class="text-xl font-semibold mb-2">Select a Router</h2>
+          <p class="text-base-content/50">
+            Choose a router from the dropdown above to view its request logs.
+          </p>
         </div>
       </div>
     </div>
@@ -242,31 +240,31 @@ defmodule DodoRouterWeb.LogLive.Index do
   defp status_badge(assigns) do
     class =
       case assigns.status do
-        "success" -> "badge-success"
-        "fallback" -> "badge-warning"
-        "error" -> "badge-error"
-        _ -> "badge-ghost"
+        "success" -> "bg-success/20 text-success"
+        "fallback" -> "bg-warning/20 text-warning"
+        "error" -> "bg-error/20 text-error"
+        _ -> "bg-base-300 text-base-content/60"
       end
 
     assigns = assign(assigns, :class, class)
 
     ~H"""
-    <span class={"badge badge-sm #{@class}"}><%= @status %></span>
+    <span class={"px-2 py-0.5 rounded text-xs font-medium #{@class}"}><%= @status %></span>
     """
   end
 
   defp call_type_badge(assigns) do
     {label, class} =
       case assigns.type do
-        "tool_call" -> {"Tool", "badge-secondary"}
-        "tool_enabled_completion" -> {"Tool+", "badge-primary"}
-        _ -> {"Chat", "badge-ghost"}
+        "tool_call" -> {"Tool", "bg-secondary/20 text-secondary"}
+        "tool_enabled_completion" -> {"Tool+", "bg-primary/20 text-primary"}
+        _ -> {"Chat", "bg-base-300 text-base-content/60"}
       end
 
     assigns = assign(assigns, label: label, class: class)
 
     ~H"""
-    <span class={"badge badge-sm #{@class}"}><%= @label %></span>
+    <span class={"px-2 py-0.5 rounded text-xs font-medium #{@class}"}><%= @label %></span>
     """
   end
 

@@ -38,7 +38,7 @@ defmodule DodoRouter.Logs.RequestLog do
     # Cost
     field :estimated_cost_usd, :decimal
 
-    belongs_to :project, DodoRouter.Projects.Project
+    belongs_to :router, DodoRouter.Routers.Router
 
     field :inserted_at, :utc_datetime_usec
   end
@@ -46,7 +46,7 @@ defmodule DodoRouter.Logs.RequestLog do
   def changeset(log, attrs) do
     log
     |> cast(attrs, [
-      :project_id,
+      :router_id,
       :request_id,
       :status,
       :http_status,
@@ -65,10 +65,10 @@ defmodule DodoRouter.Logs.RequestLog do
       :estimated_cost_usd,
       :inserted_at
     ])
-    |> validate_required([:project_id, :request_id, :status, :inserted_at])
+    |> validate_required([:router_id, :request_id, :status, :inserted_at])
     |> validate_inclusion(:status, @statuses)
     |> validate_inclusion(:call_type, @call_types ++ [nil])
-    |> foreign_key_constraint(:project_id)
+    |> foreign_key_constraint(:router_id)
     |> unique_constraint(:request_id)
   end
 

@@ -22,11 +22,18 @@ defmodule DodoRouterWeb.Router do
     plug DodoRouterWeb.Plugs.ApiAuth
   end
 
-  # LLM Proxy API - OpenAI-compatible endpoint
-  scope "/v1", DodoRouterWeb do
+  # LLM Proxy API - Router-specific endpoint
+  scope "/r/:router_slug/v1", DodoRouterWeb do
     pipe_through :proxy_api
 
     post "/chat/completions", ProxyController, :create
+  end
+
+  # Legacy endpoint (backwards compatibility)
+  scope "/v1", DodoRouterWeb do
+    pipe_through :proxy_api
+
+    post "/chat/completions", ProxyController, :create_legacy
   end
 
   # Health check (no auth, no session)
@@ -47,13 +54,18 @@ defmodule DodoRouterWeb.Router do
   scope "/", DodoRouterWeb do
     pipe_through [:browser, :require_authenticated_user]
 
-    live_session :authenticated, on_mount: {DodoRouterWeb.UserAuth, :ensure_authenticated} do
-      live "/projects", ProjectLive.Index, :index
-      live "/projects/new", ProjectLive.Index, :new
-      live "/projects/:id", ProjectLive.Show, :show
-      live "/projects/:id/edit", ProjectLive.Show, :edit
-      live "/projects/:id/routing", ProjectLive.Show, :routing
-      live "/projects/:id/credentials", ProjectLive.Show, :credentials
+    live_session :authenticated,
+      on_mount: [
+        {DodoRouterWeb.UserAuth, :ensure_authenticated},
+        {DodoRouterWeb.NavHooks, :load_routers}
+      ] do
+      live "/routers", RouterLive.Index, :index
+      live "/routers/new", RouterLive.Index, :new
+      live "/routers/:id", RouterLive.Show, :show
+      live "/routers/:id/edit", RouterLive.Show, :edit
+      live "/routers/:id/routing", RouterLive.Show, :routing
+
+      live "/providers", ProvidersLive.Index, :index
 
       live "/logs", LogLive.Index, :index
       live "/logs/:id", LogLive.Show, :show
