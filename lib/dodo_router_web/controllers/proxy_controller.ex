@@ -14,6 +14,19 @@ defmodule DodoRouterWeb.ProxyController do
     end
   end
 
+  def models(conn, _params) do
+    router = conn.assigns.current_router
+
+    model = %{
+      id: router.slug,
+      object: "model",
+      created: DateTime.to_unix(router.inserted_at),
+      owned_by: "dodo"
+    }
+
+    json(conn, %{object: "list", data: [model]})
+  end
+
   # Legacy endpoint for backwards compatibility
   def create_legacy(conn, params) do
     create(conn, params)
