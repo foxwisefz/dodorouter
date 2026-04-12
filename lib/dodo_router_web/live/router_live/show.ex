@@ -144,7 +144,7 @@ defmodule DodoRouterWeb.RouterLive.Show do
     |> List.replace_at(j, Enum.at(list, i))
   end
 
-  def handle_event("assign_key", %{"step_id" => step_id, "key_id" => key_id}, socket) do
+  def handle_event("assign_key", %{"key_id" => key_id, "step_id" => step_id}, socket) do
     step = Routers.get_routing_step!(socket.assigns.router, step_id)
     provider_key_id = if key_id == "", do: nil, else: key_id
 
@@ -199,64 +199,103 @@ defmodule DodoRouterWeb.RouterLive.Show do
       <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-8">
         <div>
           <div class="flex items-center gap-3">
-            <.link navigate={~p"/routers"} class="p-2 rounded-lg hover:bg-base-200 transition-colors text-base-content/60 hover:text-base-content">
-              <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" />
+            <.link
+              navigate={~p"/routers"}
+              class="p-2 rounded-lg hover:bg-base-200 transition-colors text-base-content/60 hover:text-base-content"
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                class="h-5 w-5"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+              >
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M15 19l-7-7 7-7"
+                />
               </svg>
             </.link>
             <div>
-              <h1 class="text-2xl font-bold"><%= @router.name %></h1>
-              <p class="text-base-content/50 font-mono text-sm"><%= @router.slug %></p>
+              <h1 class="text-2xl font-bold">{@router.name}</h1>
+              <p class="text-base-content/50 font-mono text-sm">{@router.slug}</p>
             </div>
           </div>
         </div>
-        <.link patch={~p"/routers/#{@router}/routing"} class="btn btn-sm bg-base-200 border-base-300/50 hover:bg-base-300 gap-2">
-          <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h7" />
+        <.link
+          patch={~p"/routers/#{@router}/routing"}
+          class="btn btn-sm bg-base-200 border-base-300/50 hover:bg-base-300 gap-2"
+        >
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            class="h-4 w-4"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+          >
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              d="M4 6h16M4 12h16M4 18h7"
+            />
           </svg>
           Routing
         </.link>
       </div>
-
-      <!-- New API Key Alert -->
+      
+    <!-- New API Key Alert -->
       <div :if={assigns[:new_api_key]} class="card-bordered p-4 mb-6 border-warning/50 bg-warning/5">
         <div class="flex gap-3">
           <div class="stat-icon bg-warning/10 text-warning flex-shrink-0">
-            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              class="h-5 w-5"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+            >
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+              />
             </svg>
           </div>
           <div class="flex-1">
             <h3 class="font-semibold text-warning">New API key generated!</h3>
             <p class="text-sm text-base-content/60">Save it now - this won't be shown again.</p>
             <code class="block mt-2 p-3 bg-base-300 rounded-lg font-mono text-sm break-all select-all">
-              <%= @new_api_key %>
+              {@new_api_key}
             </code>
           </div>
         </div>
       </div>
-
-      <!-- Stats -->
+      
+    <!-- Stats -->
       <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
         <div class="stat-card">
           <div class="stat-label">Requests (24h)</div>
-          <div class="stat-value"><%= @stats.total_requests %></div>
+          <div class="stat-value">{@stats.total_requests}</div>
         </div>
         <div class="stat-card">
           <div class="stat-label">Success Rate</div>
-          <div class={["stat-value", success_color(@stats)]}><%= success_rate(@stats) %></div>
+          <div class={["stat-value", success_color(@stats)]}>{success_rate(@stats)}</div>
         </div>
         <div class="stat-card">
           <div class="stat-label">Tokens Used</div>
-          <div class="stat-value"><%= format_number(@stats.total_tokens) %></div>
+          <div class="stat-value">{format_number(@stats.total_tokens)}</div>
         </div>
         <div class="stat-card">
           <div class="stat-label">Avg Latency</div>
-          <div class="stat-value"><%= format_latency(@stats.avg_latency_ms) %></div>
+          <div class="stat-value">{format_latency(@stats.avg_latency_ms)}</div>
         </div>
       </div>
-
-      <!-- Quick Start Card -->
+      
+    <!-- Quick Start Card -->
       <div class="card-bordered p-5 mb-6">
         <div class="flex items-center justify-between mb-4">
           <h2 class="section-title mb-0">Quick Start</h2>
@@ -265,17 +304,23 @@ defmodule DodoRouterWeb.RouterLive.Show do
               phx-click="set_snippet_tab"
               phx-value-tab="curl"
               class={"px-3 py-1 rounded text-sm transition-colors #{if @snippet_tab == "curl", do: "bg-base-100 text-base-content", else: "text-base-content/60 hover:text-base-content"}"}
-            >cURL</button>
+            >
+              cURL
+            </button>
             <button
               phx-click="set_snippet_tab"
               phx-value-tab="python"
               class={"px-3 py-1 rounded text-sm transition-colors #{if @snippet_tab == "python", do: "bg-base-100 text-base-content", else: "text-base-content/60 hover:text-base-content"}"}
-            >Python</button>
+            >
+              Python
+            </button>
             <button
               phx-click="set_snippet_tab"
               phx-value-tab="node"
               class={"px-3 py-1 rounded text-sm transition-colors #{if @snippet_tab == "node", do: "bg-base-100 text-base-content", else: "text-base-content/60 hover:text-base-content"}"}
-            >Node.js</button>
+            >
+              Node.js
+            </button>
           </div>
         </div>
 
@@ -284,11 +329,13 @@ defmodule DodoRouterWeb.RouterLive.Show do
         </div>
 
         <p class="text-sm text-base-content/50 mt-3">
-          Replace <code class="text-primary font-medium">YOUR_API_KEY</code> with your router API key: <code class="font-mono text-base-content/70"><%= @router.api_key_prefix %>...</code>
+          Replace <code class="text-primary font-medium">YOUR_API_KEY</code>
+          with your router API key:
+          <code class="font-mono text-base-content/70">{@router.api_key_prefix}...</code>
         </p>
       </div>
-
-      <!-- Routing Chain -->
+      
+    <!-- Routing Chain -->
       <div class="card-bordered p-5 mb-6">
         <div class="flex items-center justify-between mb-4">
           <h2 class="section-title mb-0">Routing Chain</h2>
@@ -297,33 +344,48 @@ defmodule DodoRouterWeb.RouterLive.Show do
           </.link>
         </div>
         <div id="routing-steps" phx-update="stream" class="space-y-3">
-          <div :for={{dom_id, step} <- @streams.routing_steps} id={dom_id} class="step-card flex items-center gap-4">
+          <div
+            :for={{dom_id, step} <- @streams.routing_steps}
+            id={dom_id}
+            class="step-card flex items-center gap-4"
+          >
             <div class="w-8 h-8 rounded-lg bg-primary/20 text-primary flex items-center justify-center font-bold text-sm flex-shrink-0">
-              <%= step.position + 1 %>
+              {step.position + 1}
             </div>
             <div class="flex-1 min-w-0">
               <div class="flex items-center gap-2 flex-wrap">
-                <span class="font-medium text-base-content/90"><%= step.provider %></span>
+                <span class="font-medium text-base-content/90">{step.provider}</span>
                 <span class="text-base-content/40">/</span>
-                <span class="font-mono text-sm text-base-content/70"><%= step.model %></span>
-                <span :if={step.plan_type == "coding"} class="px-1.5 py-0.5 rounded text-xs bg-secondary/20 text-secondary">coding</span>
-                <span :if={step.thinking_enabled} class="px-1.5 py-0.5 rounded text-xs bg-accent/20 text-accent">thinking</span>
+                <span class="font-mono text-sm text-base-content/70">{step.model}</span>
+                <span
+                  :if={step.plan_type == "coding"}
+                  class="px-1.5 py-0.5 rounded text-xs bg-secondary/20 text-secondary"
+                >
+                  coding
+                </span>
+                <span
+                  :if={step.thinking_enabled}
+                  class="px-1.5 py-0.5 rounded text-xs bg-accent/20 text-accent"
+                >
+                  thinking
+                </span>
               </div>
               <div class="mt-2">
-                <input type="hidden" name="step_id" value={step.id} />
-                <select
-                  phx-change="assign_key"
-                  name="key_id"
-                  class={"text-sm py-1.5 px-3 rounded-lg border transition-colors appearance-none bg-no-repeat bg-right pr-8 #{if step.provider_key_id, do: "bg-base-200/50 border-base-300/30 text-base-content/70", else: "bg-warning/5 border-warning/30 text-warning"}"}
-                  style="background-image: url('data:image/svg+xml;charset=UTF-8,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 20 20%22 fill=%22%236b7280%22%3E%3Cpath fill-rule=%22evenodd%22 d=%22M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z%22 clip-rule=%22evenodd%22/%3E%3C/svg%3E');"
-                >
-                  <option value="">-- Select API Key --</option>
-                  <%= for key <- matching_keys(@provider_keys, step.provider) do %>
-                    <option value={key.id} selected={step.provider_key_id == key.id}>
-                      <%= key.label %>
-                    </option>
-                  <% end %>
-                </select>
+                <.form for={%{}} phx-change="assign_key">
+                  <input type="hidden" name="step_id" value={step.id} />
+                  <select
+                    name="key_id"
+                    class={"text-sm py-1.5 px-3 rounded-lg border transition-colors appearance-none bg-no-repeat bg-right pr-8 #{if step.provider_key_id, do: "bg-base-200/50 border-base-300/30 text-base-content/70", else: "bg-warning/5 border-warning/30 text-warning"}"}
+                    style="background-image: url('data:image/svg+xml;charset=UTF-8,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 20 20%22 fill=%22%236b7280%22%3E%3Cpath fill-rule=%22evenodd%22 d=%22M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z%22 clip-rule=%22evenodd%22/%3E%3C/svg%3E');"
+                  >
+                    <option value="">-- Select API Key --</option>
+                    <%= for key <- matching_keys(@provider_keys, step.provider) do %>
+                      <option value={key.id} selected={step.provider_key_id == key.id}>
+                        {key.label}
+                      </option>
+                    <% end %>
+                  </select>
+                </.form>
               </div>
             </div>
             <div class="flex flex-col gap-1">
@@ -333,8 +395,19 @@ defmodule DodoRouterWeb.RouterLive.Show do
                 class="p-1 rounded hover:bg-base-300 text-base-content/40 hover:text-base-content transition-colors"
                 title="Move up"
               >
-                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 15l7-7 7 7" />
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  class="h-4 w-4"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                >
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M5 15l7-7 7 7"
+                  />
                 </svg>
               </button>
               <button
@@ -343,8 +416,19 @@ defmodule DodoRouterWeb.RouterLive.Show do
                 class="p-1 rounded hover:bg-base-300 text-base-content/40 hover:text-base-content transition-colors"
                 title="Move down"
               >
-                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  class="h-4 w-4"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                >
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M19 9l-7 7-7-7"
+                  />
                 </svg>
               </button>
             </div>
@@ -354,8 +438,19 @@ defmodule DodoRouterWeb.RouterLive.Show do
               class="p-2 rounded-lg hover:bg-error/10 text-base-content/40 hover:text-error transition-colors"
               data-confirm="Remove this step?"
             >
-              <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                class="h-4 w-4"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+              >
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                />
               </svg>
             </button>
           </div>
@@ -364,37 +459,55 @@ defmodule DodoRouterWeb.RouterLive.Show do
           No routing steps configured. Add one to start proxying requests.
         </p>
       </div>
-
-      <!-- Live Events -->
+      
+    <!-- Live Events -->
       <div :if={length(@recent_events) > 0} class="card-bordered p-5">
         <div class="flex items-center gap-3 mb-4">
           <h2 class="section-title mb-0">Recent Events</h2>
           <span class="flex items-center gap-1.5 px-2 py-0.5 bg-success/10 rounded text-xs font-medium text-success">
-            <span class="live-dot"></span>
-            Live
+            <span class="live-dot"></span> Live
           </span>
         </div>
         <div class="space-y-2">
-          <div :for={event <- @recent_events} class={"flex items-center justify-between p-3 rounded-lg text-sm #{event_class(event)}"}>
+          <div
+            :for={event <- @recent_events}
+            class={"flex items-center justify-between p-3 rounded-lg text-sm #{event_class(event)}"}
+          >
             <div class="flex items-center gap-3">
               <span class={"w-2 h-2 rounded-full #{event_dot_class(event)}"}></span>
-              <span class="font-mono text-base-content/80"><%= event.provider %>/<%= event.model %></span>
-              <span :if={event.had_fallback} class="px-1.5 py-0.5 bg-warning/20 text-warning rounded text-xs">fallback</span>
+              <span class="font-mono text-base-content/80">{event.provider}/{event.model}</span>
+              <span
+                :if={event.had_fallback}
+                class="px-1.5 py-0.5 bg-warning/20 text-warning rounded text-xs"
+              >
+                fallback
+              </span>
             </div>
-            <span class="text-base-content/50 font-mono"><%= event.latency_ms %>ms</span>
+            <span class="text-base-content/50 font-mono">{event.latency_ms}ms</span>
           </div>
         </div>
       </div>
-
-      <!-- Routing Modal -->
-      <.modal :if={@live_action == :routing} id="routing-modal" show on_cancel={JS.patch(~p"/routers/#{@router}")}>
+      
+    <!-- Routing Modal -->
+      <.modal
+        :if={@live_action == :routing}
+        id="routing-modal"
+        show
+        on_cancel={JS.patch(~p"/routers/#{@router}")}
+      >
         <h3 class="text-lg font-semibold mb-6">Add Routing Step</h3>
         <form phx-submit="add_step" phx-change="update_step_form" class="space-y-5">
           <div>
             <label class="block text-sm font-medium text-base-content/70 mb-2">Provider</label>
-            <select name="step[provider]" class="w-full py-2.5 px-3 bg-base-200 border border-base-300/50 rounded-lg" required>
+            <select
+              name="step[provider]"
+              class="w-full py-2.5 px-3 bg-base-200 border border-base-300/50 rounded-lg"
+              required
+            >
               <option value="zai" selected={@step_provider == "zai"}>z.ai (GLM models)</option>
-              <option value="moonshot" selected={@step_provider == "moonshot"}>Moonshot (Kimi K2.5)</option>
+              <option value="moonshot" selected={@step_provider == "moonshot"}>
+                Moonshot (Kimi K2.5)
+              </option>
             </select>
           </div>
           <div>
@@ -402,43 +515,71 @@ defmodule DodoRouterWeb.RouterLive.Show do
             <input
               type="text"
               name="step[model]"
-              placeholder={if @step_provider == "zai", do: "e.g. glm-4-plus, glm-5.1", else: "e.g. kimi-k2.5"}
+              placeholder={
+                if @step_provider == "zai", do: "e.g. glm-4-plus, glm-5.1", else: "e.g. kimi-k2.5"
+              }
               class="w-full py-2.5 px-3 bg-base-200 border border-base-300/50 rounded-lg"
               required
             />
           </div>
-
-          <!-- z.ai specific options -->
+          
+    <!-- z.ai specific options -->
           <div :if={@step_provider == "zai"}>
             <label class="block text-sm font-medium text-base-content/70 mb-2">Plan Type</label>
-            <select name="step[plan_type]" class="w-full py-2.5 px-3 bg-base-200 border border-base-300/50 rounded-lg">
+            <select
+              name="step[plan_type]"
+              class="w-full py-2.5 px-3 bg-base-200 border border-base-300/50 rounded-lg"
+            >
               <option value="standard">Standard (/api/paas/v4)</option>
               <option value="coding">Coding Plan (/api/coding/paas/v4)</option>
             </select>
             <p class="text-xs text-base-content/50 mt-1.5">Select based on your z.ai subscription</p>
           </div>
-
-          <!-- Moonshot specific options -->
+          
+    <!-- Moonshot specific options -->
           <div :if={@step_provider == "moonshot"}>
             <label class="flex items-center gap-3 cursor-pointer">
-              <input type="checkbox" name="step[thinking_enabled]" value="true" class="w-4 h-4 rounded border-base-300 text-primary focus:ring-primary/50" />
+              <input
+                type="checkbox"
+                name="step[thinking_enabled]"
+                value="true"
+                class="w-4 h-4 rounded border-base-300 text-primary focus:ring-primary/50"
+              />
               <span class="text-sm">Enable Thinking Mode</span>
             </label>
-            <p class="text-xs text-base-content/50 mt-1.5 ml-7">Uses extended reasoning for complex tasks</p>
+            <p class="text-xs text-base-content/50 mt-1.5 ml-7">
+              Uses extended reasoning for complex tasks
+            </p>
           </div>
 
           <div class="grid grid-cols-2 gap-4">
             <div>
               <label class="block text-sm font-medium text-base-content/70 mb-2">Temperature</label>
-              <input type="number" name="step[temperature]" step="0.1" min="0" max="2" placeholder="Optional" class="w-full py-2.5 px-3 bg-base-200 border border-base-300/50 rounded-lg" />
+              <input
+                type="number"
+                name="step[temperature]"
+                step="0.1"
+                min="0"
+                max="2"
+                placeholder="Optional"
+                class="w-full py-2.5 px-3 bg-base-200 border border-base-300/50 rounded-lg"
+              />
             </div>
             <div>
               <label class="block text-sm font-medium text-base-content/70 mb-2">Max Tokens</label>
-              <input type="number" name="step[max_tokens]" min="1" placeholder="Optional" class="w-full py-2.5 px-3 bg-base-200 border border-base-300/50 rounded-lg" />
+              <input
+                type="number"
+                name="step[max_tokens]"
+                min="1"
+                placeholder="Optional"
+                class="w-full py-2.5 px-3 bg-base-200 border border-base-300/50 rounded-lg"
+              />
             </div>
           </div>
           <div class="flex justify-end gap-3 pt-4 border-t border-base-300/50">
-            <button type="button" phx-click={JS.patch(~p"/routers/#{@router}")} class="btn btn-ghost">Cancel</button>
+            <button type="button" phx-click={JS.patch(~p"/routers/#{@router}")} class="btn btn-ghost">
+              Cancel
+            </button>
             <button type="submit" class="btn btn-primary">Add Step</button>
           </div>
         </form>
@@ -448,13 +589,16 @@ defmodule DodoRouterWeb.RouterLive.Show do
   end
 
   defp success_rate(%{total_requests: 0}), do: "-"
+
   defp success_rate(%{total_requests: total, successful_requests: success}) do
     "#{round(success / total * 100)}%"
   end
 
   defp success_color(%{total_requests: 0}), do: ""
+
   defp success_color(%{total_requests: total, successful_requests: success}) do
     rate = success / total * 100
+
     cond do
       rate >= 95 -> ""
       rate >= 80 -> "text-warning"
@@ -533,6 +677,7 @@ defmodule DodoRouterWeb.RouterLive.Show do
 
   defp matching_keys(provider_keys, step_provider) do
     alias DodoRouter.Providers.ProviderKey
+
     Enum.filter(provider_keys, fn key ->
       ProviderKey.adapter_provider(key.provider_slug) == step_provider
     end)
