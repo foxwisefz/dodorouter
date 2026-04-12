@@ -3,8 +3,6 @@ defmodule DodoRouter.Proxy.Adapter do
   Behaviour for LLM provider adapters.
   """
 
-  require Logger
-
   alias DodoRouter.Routers.RoutingStep
 
   @type request :: map()
@@ -61,6 +59,7 @@ defmodule DodoRouter.Proxy.Adapter do
   def should_fallback?(:timeout), do: true
   def should_fallback?(:model_unavailable), do: true
   def should_fallback?(:auth_error), do: true
+  def should_fallback?(:unknown), do: true
   def should_fallback?(_), do: false
 
   @doc """
@@ -129,15 +128,6 @@ defmodule DodoRouter.Proxy.Adapter do
       |> Map.take(@allowed_request_fields)
       |> normalize_max_completion_tokens()
       |> sanitize_messages()
-
-    Logger.info("""
-    [Adapter.sanitize_request] Keys being sent to provider: #{inspect(Map.keys(sanitized))}
-    Has max_completion_tokens: #{Map.has_key?(sanitized, "max_completion_tokens")}
-    Has max_tokens: #{Map.has_key?(sanitized, "max_tokens")}
-    Has router_slug: #{Map.has_key?(sanitized, "router_slug")}
-    Has parallel_tool_calls: #{Map.has_key?(sanitized, "parallel_tool_calls")}
-    Message count: #{length(sanitized["messages"] || [])}
-    """)
 
     sanitized
   end

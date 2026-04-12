@@ -32,7 +32,10 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
         {:ok, response_body}
 
       {:ok, %{status: status, body: response_body}} ->
-        Logger.error("[Moonshot] Non-200 response: status=#{status} body=#{inspect(response_body)}")
+        Logger.error(
+          "[Moonshot] Non-200 response: status=#{status} body=#{inspect(response_body)}"
+        )
+
         reason = Adapter.categorize_error(status, response_body)
         {:error, reason, %{status: status, body: response_body, latency_ms: latency(start_time)}}
 
@@ -122,8 +125,12 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
         # Body was consumed by into_fun, use accumulated raw_body instead
         response_body =
           case raw_body do
-            nil -> %{"error" => "no body captured"}
-            "" -> %{"error" => "empty body"}
+            nil ->
+              %{"error" => "no body captured"}
+
+            "" ->
+              %{"error" => "empty body"}
+
             b ->
               case Jason.decode(b) do
                 {:ok, decoded} -> decoded
@@ -131,7 +138,10 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
               end
           end
 
-        Logger.error("[Moonshot] Stream error #{status}: #{inspect(response_body)} raw_body_len=#{byte_size(raw_body || "")}")
+        Logger.error(
+          "[Moonshot] Stream error #{status}: #{inspect(response_body)} raw_body_len=#{byte_size(raw_body || "")}"
+        )
+
         reason = Adapter.categorize_error(status, response_body)
         {:error, reason, %{status: status, body: response_body, latency_ms: latency(start_time)}}
 
@@ -157,20 +167,11 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
       |> maybe_default("presence_penalty", nil)
       |> maybe_default("stop", nil)
       |> maybe_put_thinking(step)
+      |> maybe_transform_kimi_reasoning(step)
 
-    Logger.info("[Moonshot] Sending request model=#{body["model"]} max_tokens=#{inspect(body["max_tokens"])} msg_count=#{length(body["messages"] || [])} has_tools=#{is_list(body["tools"])}")
-
-    # Log first 2 messages for debugging
-    Enum.take(body["messages"] || [], 2)
-    |> Enum.with_index()
-    |> Enum.each(fn {msg, i} ->
-      role = msg["role"]
-      content_preview = case msg["content"] do
-        c when is_binary(c) -> String.slice(c, 0, 100)
-        c -> inspect(c) |> String.slice(0, 100)
-      end
-      Logger.info("[Moonshot] msg[#{i}] role=#{role} content_type=#{is_binary(msg["content"])} keys=#{inspect(Map.keys(msg))} preview=#{content_preview}")
-    end)
+    Logger.info(
+      "[Moonshot] Sending request model=#{body["model"]} msg_count=#{length(body["messages"] || [])}"
+    )
 
     body
   end
@@ -189,6 +190,60 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
   end
 
   defp maybe_put_thinking(body, _step), do: body
+
+  # kimi-k2 models require reasoning_content on assistant messages when thinking is enabled.
+  # Converts reasoning_details (OpenRouter-style) → reasoning_content (kimi-k2 flat format).
+  # Also ensures assistant tool-call messages have at least an empty reasoning_content.
+  # Note: thinking may be enabled by default for kimi-k2.5 even if thinking_enabled is nil in DB.
+  defp maybe_transform_kimi_reasoning(body, %RoutingStep{model: model})
+       when is_binary(model) do
+    if String.starts_with?(model, "kimi") do
+      messages =
+        Enum.map(body["messages"] || [], fn msg ->
+          case msg["role"] do
+            "assistant" ->
+              msg
+              |> convert_reasoning_details()
+              |> ensure_reasoning_content_for_tool_calls()
+
+            _ ->
+              msg
+          end
+        end)
+
+      Map.put(body, "messages", messages)
+    else
+      body
+    end
+  end
+
+  defp maybe_transform_kimi_reasoning(body, _step), do: body
+
+  # Convert reasoning_details array → reasoning_content flat string
+  defp convert_reasoning_details(%{"reasoning_details" => details} = msg) when is_list(details) do
+    reasoning_content =
+      details
+      |> Enum.filter(fn
+        %{"type" => "reasoning.text"} -> true
+        _ -> false
+      end)
+      |> Enum.map(fn %{"text" => text} -> text end)
+      |> Enum.join("")
+
+    msg
+    |> Map.put("reasoning_content", reasoning_content)
+    |> Map.delete("reasoning_details")
+  end
+
+  defp convert_reasoning_details(msg), do: msg
+
+  # When thinking is enabled, kimi-k2 requires reasoning_content on every
+  # assistant message that has tool_calls. Add empty string if missing.
+  defp ensure_reasoning_content_for_tool_calls(%{"tool_calls" => _calls} = msg) do
+    Map.put_new(msg, "reasoning_content", "")
+  end
+
+  defp ensure_reasoning_content_for_tool_calls(msg), do: msg
 
   defp parse_sse_chunk(data) do
     data
