@@ -18,7 +18,6 @@ defmodule DodoRouterWeb.Router do
   end
 
   pipeline :proxy_api do
-    plug :accepts, ["json"]
     plug DodoRouterWeb.Plugs.ApiAuth
   end
 
