@@ -20,7 +20,7 @@ defmodule DodoRouterWeb.ProxyController do
     model = %{
       id: router.slug,
       object: "model",
-      created: DateTime.to_unix(router.inserted_at),
+      created: router.inserted_at |> DateTime.from_naive!("Etc/UTC") |> DateTime.to_unix(),
       owned_by: "dodo"
     }
 
