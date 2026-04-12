@@ -5,7 +5,7 @@ defmodule DodoRouter.Proxy do
 
   alias DodoRouter.Routers
   alias DodoRouter.Routers.Router
-  alias DodoRouter.Proxy.{Adapter, FallbackChain}
+  alias DodoRouter.Proxy.{Adapter, FallbackChain, InflightTracker}
   alias DodoRouter.Logs
 
   @doc """
@@ -16,26 +16,40 @@ defmodule DodoRouter.Proxy do
   def dispatch(%Router{} = router, request, opts \\ []) do
     request_id = Keyword.get(opts, :request_id, Ecto.UUID.generate())
     start_time = System.monotonic_time(:millisecond)
+    streaming = Keyword.get(opts, :stream, false)
 
     steps = Routers.list_routing_steps(router)
 
     if Enum.empty?(steps) do
       {:error, :no_routing_configured}
     else
-      result = FallbackChain.execute(request, steps, router.id, opts)
+      # Track in-flight request
+      first_step = List.first(steps)
 
-      log_request(router, request, result, request_id, start_time)
-      broadcast_event(router, result)
+      InflightTracker.register(request_id, router.id, %{
+        model: first_step.model,
+        provider: first_step.provider,
+        streaming: streaming
+      })
 
-      # Calculate provider time (sum of all attempt latencies)
-      provider_ms = result.attempted_steps |> Enum.map(& &1[:latency_ms]) |> Enum.sum()
+      try do
+        result = FallbackChain.execute(request, steps, router.id, opts)
 
-      case result.status do
-        status when status in [:success, :fallback] ->
-          {:ok, result.final_response, %{provider_ms: provider_ms}}
+        log_request(router, request, result, request_id, start_time)
+        broadcast_event(router, result)
 
-        :error ->
-          {:error, :all_providers_failed, result.attempted_steps}
+        # Calculate provider time (sum of all attempt latencies)
+        provider_ms = result.attempted_steps |> Enum.map(& &1[:latency_ms]) |> Enum.sum()
+
+        case result.status do
+          status when status in [:success, :fallback] ->
+            {:ok, result.final_response, %{provider_ms: provider_ms}}
+
+          :error ->
+            {:error, :all_providers_failed, result.attempted_steps}
+        end
+      after
+        InflightTracker.unregister(request_id)
       end
     end
   end

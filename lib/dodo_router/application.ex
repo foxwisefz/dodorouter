@@ -13,8 +13,7 @@ defmodule DodoRouter.Application do
       DodoRouter.Repo,
       {DNSCluster, query: Application.get_env(:dodo_router, :dns_cluster_query) || :ignore},
       {Phoenix.PubSub, name: DodoRouter.PubSub},
-      # Start a worker by calling: DodoRouter.Worker.start_link(arg)
-      # {DodoRouter.Worker, arg},
+      DodoRouter.Proxy.InflightTracker,
       # Start to serve requests, typically the last entry
       DodoRouterWeb.Endpoint
     ]
