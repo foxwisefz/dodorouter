@@ -5,7 +5,7 @@ defmodule DodoRouter.Proxy do
 
   alias DodoRouter.Routers
   alias DodoRouter.Routers.Router
-  alias DodoRouter.Proxy.{Adapter, FallbackChain, InflightTracker}
+  alias DodoRouter.Proxy.{Adapter, FallbackChain}
   alias DodoRouter.Logs
 
   @doc """
@@ -23,33 +23,24 @@ defmodule DodoRouter.Proxy do
     if Enum.empty?(steps) do
       {:error, :no_routing_configured}
     else
-      # Track in-flight request
+      # Broadcast request started (shows as pending in logs UI)
       first_step = List.first(steps)
+      broadcast_request_started(router, request_id, first_step, streaming)
 
-      InflightTracker.register(request_id, router.id, %{
-        model: first_step.model,
-        provider: first_step.provider,
-        streaming: streaming
-      })
+      result = FallbackChain.execute(request, steps, router.id, opts)
 
-      try do
-        result = FallbackChain.execute(request, steps, router.id, opts)
+      log_request(router, request, result, request_id, start_time)
+      broadcast_event(router, result)
 
-        log_request(router, request, result, request_id, start_time)
-        broadcast_event(router, result)
+      # Calculate provider time (sum of all attempt latencies)
+      provider_ms = result.attempted_steps |> Enum.map(& &1[:latency_ms]) |> Enum.sum()
 
-        # Calculate provider time (sum of all attempt latencies)
-        provider_ms = result.attempted_steps |> Enum.map(& &1[:latency_ms]) |> Enum.sum()
+      case result.status do
+        status when status in [:success, :fallback] ->
+          {:ok, result.final_response, %{provider_ms: provider_ms}}
 
-        case result.status do
-          status when status in [:success, :fallback] ->
-            {:ok, result.final_response, %{provider_ms: provider_ms}}
-
-          :error ->
-            {:error, :all_providers_failed, result.attempted_steps}
-        end
-      after
-        InflightTracker.unregister(request_id)
+        :error ->
+          {:error, :all_providers_failed, result.attempted_steps}
       end
     end
   end
@@ -130,6 +121,24 @@ defmodule DodoRouter.Proxy do
   defp clean_response(response) do
     # Remove internal metadata
     Map.delete(response, "_meta")
+  end
+
+  defp broadcast_request_started(router, request_id, first_step, streaming) do
+    pending_log = %{
+      id: nil,
+      request_id: request_id,
+      status: "pending",
+      final_provider: first_step.provider,
+      final_model: first_step.model,
+      streaming: streaming,
+      inserted_at: DateTime.utc_now()
+    }
+
+    Phoenix.PubSub.broadcast(
+      DodoRouter.PubSub,
+      "router:#{router.id}:logs",
+      {:log_pending, pending_log}
+    )
   end
 
   defp broadcast_event(router, result) do

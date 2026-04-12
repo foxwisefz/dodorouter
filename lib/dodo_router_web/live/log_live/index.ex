@@ -65,9 +65,20 @@ defmodule DodoRouterWeb.LogLive.Index do
   end
 
   @impl true
+  def handle_info({:log_pending, pending}, socket) do
+    # Insert pending log at top, use request_id as stream key
+    pending = Map.put(pending, :id, "pending-#{pending.request_id}")
+    {:noreply, stream_insert(socket, :logs, pending, at: 0)}
+  end
+
   def handle_info({:log_created, log}, socket) do
-    # Insert new log at the top of the stream
-    {:noreply, stream_insert(socket, :logs, log, at: 0)}
+    # Remove pending entry, insert real log
+    socket =
+      socket
+      |> stream_delete_by_dom_id(:logs, "logs-pending-#{log.request_id}")
+      |> stream_insert(:logs, log, at: 0)
+
+    {:noreply, socket}
   end
 
   @impl true
@@ -192,11 +203,15 @@ defmodule DodoRouterWeb.LogLive.Index do
             </tr>
           </thead>
           <tbody id="logs" phx-update="stream">
-            <tr :for={{dom_id, log} <- @streams.logs} id={dom_id} class="hover:bg-base-200/30">
+            <tr
+              :for={{dom_id, log} <- @streams.logs}
+              id={dom_id}
+              class={["hover:bg-base-200/30", log.status == "pending" && "animate-pulse"]}
+            >
               <td class="font-mono text-xs text-base-content/70">{format_time(log.inserted_at)}</td>
               <td><.status_badge status={log.status} /></td>
               <td>
-                <%= if length(log.attempted_steps) > 1 do %>
+                <%= if is_list(log[:attempted_steps]) and length(log.attempted_steps) > 1 do %>
                   <div class="flex items-center gap-1">
                     <%= for {step, idx} <- Enum.with_index(log.attempted_steps) do %>
                       <span class={[
@@ -218,24 +233,26 @@ defmodule DodoRouterWeb.LogLive.Index do
                   <span class="text-base-content/60">{log.final_model}</span>
                 <% end %>
               </td>
-              <td><.call_type_badge type={log.call_type} /></td>
-              <td class="font-mono text-sm text-base-content/70">{log.total_tokens || "-"}</td>
+              <td><.call_type_badge type={log[:call_type]} /></td>
+              <td class="font-mono text-sm text-base-content/70">{log[:total_tokens] || "-"}</td>
               <td class="font-mono text-sm text-base-content/70">
-                {if log.latency_ms, do: "#{log.latency_ms}ms", else: "-"}
+                {if log[:latency_ms], do: "#{log.latency_ms}ms", else: "-"}
               </td>
               <td class="text-center">
-                <%= if length(log.attempted_steps) > 1 do %>
+                <%= if is_list(log[:attempted_steps]) and length(log.attempted_steps) > 1 do %>
                   <span class="px-1.5 py-0.5 bg-warning/20 text-warning rounded text-xs">
                     {length(log.attempted_steps)}
                   </span>
                 <% else %>
-                  <span class="text-base-content/40">1</span>
+                  <span class="text-base-content/40">{if log.status == "pending", do: "-", else: "1"}</span>
                 <% end %>
               </td>
               <td>
-                <.link navigate={~p"/logs/#{log}"} class="text-sm text-primary hover:underline">
-                  View
-                </.link>
+                <%= if log.status != "pending" do %>
+                  <.link navigate={~p"/logs/#{log}"} class="text-sm text-primary hover:underline">
+                    View
+                  </.link>
+                <% end %>
               </td>
             </tr>
           </tbody>
@@ -277,6 +294,7 @@ defmodule DodoRouterWeb.LogLive.Index do
         "success" -> "bg-success/20 text-success"
         "fallback" -> "bg-warning/20 text-warning"
         "error" -> "bg-error/20 text-error"
+        "pending" -> "bg-info/20 text-info"
         _ -> "bg-base-300 text-base-content/60"
       end
 

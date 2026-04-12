@@ -2,7 +2,6 @@ defmodule DodoRouterWeb.DashboardLive do
   use DodoRouterWeb, :live_view
 
   alias DodoRouter.{Routers, Logs}
-  alias DodoRouter.Proxy.InflightTracker
 
   @refresh_interval_ms 5_000
 
@@ -21,7 +20,6 @@ defmodule DodoRouterWeb.DashboardLive do
       |> assign(:failure_breakdown, [])
       |> assign(:requests_per_minute, [])
       |> assign(:live_events, [])
-      |> assign(:inflight_requests, [])
 
     socket =
       if socket.assigns.selected_router do
@@ -38,8 +36,6 @@ defmodule DodoRouterWeb.DashboardLive do
           DodoRouter.PubSub,
           "router:#{socket.assigns.selected_router.id}:events"
         )
-
-        InflightTracker.subscribe(socket.assigns.selected_router.id)
       end
     end
 
@@ -55,12 +51,9 @@ defmodule DodoRouterWeb.DashboardLive do
         DodoRouter.PubSub,
         "router:#{socket.assigns.selected_router.id}:events"
       )
-
-      InflightTracker.unsubscribe(socket.assigns.selected_router.id)
     end
 
     Phoenix.PubSub.subscribe(DodoRouter.PubSub, "router:#{router.id}:events")
-    InflightTracker.subscribe(router.id)
 
     socket =
       socket
@@ -99,15 +92,6 @@ defmodule DodoRouterWeb.DashboardLive do
     {:noreply, assign(socket, :live_events, live_events)}
   end
 
-  def handle_info({:inflight_changed, router_id}, socket) do
-    if socket.assigns.selected_router && socket.assigns.selected_router.id == router_id do
-      inflight = InflightTracker.list(router_id)
-      {:noreply, assign(socket, :inflight_requests, inflight)}
-    else
-      {:noreply, socket}
-    end
-  end
-
   defp schedule_refresh do
     Process.send_after(self(), :refresh, @refresh_interval_ms)
   end
@@ -121,7 +105,6 @@ defmodule DodoRouterWeb.DashboardLive do
     |> assign(:latency_percentiles, Logs.latency_percentiles(router, hours: 24))
     |> assign(:failure_breakdown, Logs.failure_breakdown(router, hours: 24))
     |> assign(:requests_per_minute, Logs.requests_per_minute(router, minutes: 60))
-    |> assign(:inflight_requests, InflightTracker.list(router.id))
   end
 
   @impl true
@@ -338,43 +321,6 @@ defmodule DodoRouterWeb.DashboardLive do
             </table>
           </div>
           
-    <!-- In-Flight Requests -->
-          <div :if={length(@inflight_requests) > 0} class="chart-container mb-4 lg:col-span-2">
-            <div class="flex items-center gap-3 mb-4">
-              <h2 class="section-title mb-0">In-Flight</h2>
-              <span class="flex items-center gap-1.5 px-2 py-0.5 bg-info/10 rounded text-xs font-medium text-info">
-                <span class="live-dot bg-info"></span>
-                {length(@inflight_requests)} active
-              </span>
-            </div>
-            <div class="space-y-2">
-              <%= for req <- @inflight_requests do %>
-                <div class="flex items-center justify-between p-3 rounded-lg text-sm bg-info/5 border border-info/20">
-                  <div class="flex items-center gap-3">
-                    <span class="relative flex h-2 w-2">
-                      <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-info opacity-75">
-                      </span>
-                      <span class="relative inline-flex rounded-full h-2 w-2 bg-info"></span>
-                    </span>
-                    <span class="font-mono text-base-content/80">
-                      {req.provider}/{req.model}
-                    </span>
-                    <span
-                      :if={req.streaming}
-                      class="px-1.5 py-0.5 bg-primary/20 text-primary rounded text-xs"
-                    >
-                      streaming
-                    </span>
-                  </div>
-                  <div class="flex items-center gap-4 text-base-content/50 text-sm">
-                    <span class="font-mono">{format_elapsed(req.elapsed_ms)}</span>
-                    <span class="text-xs">{format_event_time(req.started_at)}</span>
-                  </div>
-                </div>
-              <% end %>
-            </div>
-          </div>
-
     <!-- Live Events -->
           <div class="chart-container">
             <div class="flex items-center gap-3 mb-4">
@@ -477,8 +423,6 @@ defmodule DodoRouterWeb.DashboardLive do
 
   defp format_event_time(dt), do: Calendar.strftime(dt, "%H:%M:%S")
 
-  defp format_elapsed(ms) when ms < 1000, do: "#{ms}ms"
-  defp format_elapsed(ms), do: "#{Float.round(ms / 1000, 1)}s"
 
   defp event_class(%{status: :success}), do: "bg-success/10"
   defp event_class(%{status: :fallback}), do: "bg-warning/10"
