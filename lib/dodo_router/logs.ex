@@ -67,10 +67,34 @@ defmodule DodoRouter.Logs do
     |> Repo.all()
   end
 
+  def list_logs_for_user(%User{} = user, opts \\ []) do
+    limit = Keyword.get(opts, :limit, 100)
+    offset = Keyword.get(opts, :offset, 0)
+
+    from(l in RequestLog,
+      join: r in Router,
+      on: l.router_id == r.id,
+      where: r.user_id == ^user.id,
+      order_by: [desc: l.inserted_at],
+      limit: ^limit,
+      offset: ^offset,
+      preload: [router: r]
+    )
+    |> maybe_filter_status(opts[:status])
+    |> maybe_filter_provider(opts[:provider])
+    |> maybe_filter_model(opts[:model])
+    |> maybe_filter_call_type(opts[:call_type])
+    |> maybe_filter_date_range(opts[:from], opts[:to])
+    |> Repo.all()
+  end
+
   def get_log!(%User{} = user, id) do
-    query = from l in RequestLog,
-      join: r in Router, on: l.router_id == r.id,
-      where: l.id == ^id and r.user_id == ^user.id
+    query =
+      from l in RequestLog,
+        join: r in Router,
+        on: l.router_id == r.id,
+        where: l.id == ^id and r.user_id == ^user.id
+
     Repo.one!(query)
   end
 
@@ -104,13 +128,16 @@ defmodule DodoRouter.Logs do
     hours = Keyword.get(opts, :hours, 24)
     since = DateTime.add(DateTime.utc_now(), -hours * 3600, :second)
 
+    # Count success + fallback as successful for the final provider (it handled the request)
     from(l in RequestLog,
-      where: l.router_id == ^router.id and l.inserted_at >= ^since and not is_nil(l.final_provider),
+      where:
+        l.router_id == ^router.id and l.inserted_at >= ^since and not is_nil(l.final_provider),
       group_by: l.final_provider,
       select: %{
         provider: l.final_provider,
         total_requests: count(l.id),
-        successful_requests: count(fragment("CASE WHEN ? = 'success' THEN 1 END", l.status)),
+        successful_requests:
+          count(fragment("CASE WHEN ? IN ('success', 'fallback') THEN 1 END", l.status)),
         error_requests: count(fragment("CASE WHEN ? = 'error' THEN 1 END", l.status)),
         total_tokens: sum(l.total_tokens),
         avg_latency_ms: avg(l.latency_ms)
@@ -123,20 +150,35 @@ defmodule DodoRouter.Logs do
     hours = Keyword.get(opts, :hours, 24)
     since = DateTime.add(DateTime.utc_now(), -hours * 3600, :second)
 
-    from(l in RequestLog,
-      where: l.router_id == ^router.id and l.inserted_at >= ^since and not is_nil(l.final_model),
-      group_by: [l.final_provider, l.final_model],
-      select: %{
-        provider: l.final_provider,
-        model: l.final_model,
-        total_requests: count(l.id),
-        successful_requests: count(fragment("CASE WHEN ? = 'success' THEN 1 END", l.status)),
-        error_requests: count(fragment("CASE WHEN ? = 'error' THEN 1 END", l.status)),
-        total_tokens: sum(l.total_tokens),
-        avg_latency_ms: avg(l.latency_ms)
+    # Get all logs and aggregate from attempted_steps to capture all attempts
+    logs =
+      from(l in RequestLog,
+        where: l.router_id == ^router.id and l.inserted_at >= ^since,
+        select: l.attempted_steps
+      )
+      |> Repo.all()
+
+    # Aggregate stats from all attempted steps
+    logs
+    |> List.flatten()
+    |> Enum.group_by(fn step -> {step["provider"], step["model"]} end)
+    |> Enum.map(fn {{provider, model}, steps} ->
+      successful = Enum.count(steps, &(&1["status"] == "success"))
+      total = length(steps)
+      latencies = steps |> Enum.map(& &1["latency_ms"]) |> Enum.reject(&is_nil/1)
+
+      avg_latency =
+        if length(latencies) > 0, do: Enum.sum(latencies) / length(latencies), else: nil
+
+      %{
+        provider: provider,
+        model: model,
+        total_requests: total,
+        successful_requests: successful,
+        error_requests: total - successful,
+        avg_latency_ms: avg_latency
       }
-    )
-    |> Repo.all()
+    end)
   end
 
   def latency_percentiles(%Router{} = router, opts \\ []) do
@@ -176,7 +218,9 @@ defmodule DodoRouter.Logs do
     since = DateTime.add(DateTime.utc_now(), -hours * 3600, :second)
 
     from(l in RequestLog,
-      where: l.router_id == ^router.id and l.inserted_at >= ^since and l.status in ["error", "fallback"],
+      where:
+        l.router_id == ^router.id and l.inserted_at >= ^since and
+          l.status in ["error", "fallback"],
       group_by: [l.final_provider, l.final_model, l.status],
       order_by: [desc: count(l.id)],
       select: %{
@@ -195,7 +239,9 @@ defmodule DodoRouter.Logs do
   defp maybe_filter_status(query, status), do: where(query, [l], l.status == ^status)
 
   defp maybe_filter_provider(query, nil), do: query
-  defp maybe_filter_provider(query, provider), do: where(query, [l], l.final_provider == ^provider)
+
+  defp maybe_filter_provider(query, provider),
+    do: where(query, [l], l.final_provider == ^provider)
 
   defp maybe_filter_model(query, nil), do: query
   defp maybe_filter_model(query, model), do: where(query, [l], l.final_model == ^model)

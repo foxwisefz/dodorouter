@@ -20,7 +20,9 @@ defmodule DodoRouter.Routers.Router do
     router
     |> cast(attrs, [:name, :slug])
     |> validate_required([:name, :slug])
-    |> validate_format(:slug, ~r/^[a-z0-9-]+$/, message: "must be lowercase alphanumeric with dashes")
+    |> validate_format(:slug, ~r/^[a-z0-9-]+$/,
+      message: "must be lowercase alphanumeric with dashes"
+    )
     |> validate_length(:slug, min: 3, max: 50)
     |> unique_constraint(:slug)
     |> unique_constraint(:api_key_hash)

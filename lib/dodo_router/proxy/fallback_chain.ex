@@ -20,7 +20,8 @@ defmodule DodoRouter.Proxy.FallbackChain do
     :send_chunk,
     attempted_steps: [],
     final_response: nil,
-    status: nil
+    status: nil,
+    partial_content: ""
   ]
 
   def execute(request, steps, router_id, opts \\ []) do
@@ -59,10 +60,14 @@ defmodule DodoRouter.Proxy.FallbackChain do
 
         status = if length(state.attempted_steps) > 0, do: :fallback, else: :success
 
-        %{state |
-          final_response: response,
-          attempted_steps: state.attempted_steps ++ [attempt],
-          status: status
+        # Prepend any partial content from previous failed attempts
+        response = prepend_partial_content(response, state.partial_content)
+
+        %{
+          state
+          | final_response: response,
+            attempted_steps: state.attempted_steps ++ [attempt],
+            status: status
         }
 
       {:error, reason, details} ->
@@ -81,6 +86,9 @@ defmodule DodoRouter.Proxy.FallbackChain do
         state = %{state | attempted_steps: state.attempted_steps ++ [attempt]}
 
         if Adapter.should_fallback?(reason) and length(rest) > 0 do
+          state = accumulate_partial_content(state, details)
+          # Reconstruct request with partial assistant message so next provider continues
+          state = reconstruct_request(state)
           run_chain(%{state | steps: rest})
         else
           %{state | status: :error}
@@ -121,12 +129,15 @@ defmodule DodoRouter.Proxy.FallbackChain do
 
   defp endpoint_for(%RoutingStep{provider: "zai", plan_type: "coding"}),
     do: "https://api.z.ai/api/coding/paas/v4/chat/completions"
+
   defp endpoint_for(%RoutingStep{provider: "zai"}),
     do: "https://api.z.ai/api/paas/v4/chat/completions"
+
   defp endpoint_for(%RoutingStep{provider: "moonshot"}),
     do: "https://api.moonshot.cn/v1/chat/completions"
 
   defp truncate_error(nil), do: nil
+
   defp truncate_error(body) when is_map(body) do
     case Jason.encode(body) do
       {:ok, json} when byte_size(json) > 500 -> String.slice(json, 0, 500) <> "..."
@@ -134,7 +145,50 @@ defmodule DodoRouter.Proxy.FallbackChain do
       _ -> inspect(body) |> String.slice(0, 500)
     end
   end
+
   defp truncate_error(body), do: inspect(body) |> String.slice(0, 500)
+
+  # Accumulate partial content from a failed streaming attempt
+  defp accumulate_partial_content(state, %{partial_content: content})
+       when is_binary(content) and content != "" do
+    %{state | partial_content: state.partial_content <> content}
+  end
+
+  defp accumulate_partial_content(state, _details), do: state
+
+  # Reconstruct the request messages to include the partial assistant response
+  # so the next provider continues from where the previous one left off
+  defp reconstruct_request(%{partial_content: ""} = state), do: state
+
+  defp reconstruct_request(state) do
+    request = state.request
+    messages = Map.get(request, "messages", [])
+
+    # Append the partial content as an assistant message
+    assistant_msg = %{"role" => "assistant", "content" => state.partial_content}
+    updated_messages = messages ++ [assistant_msg]
+
+    %{state | request: Map.put(request, "messages", updated_messages)}
+  end
+
+  # Prepend partial content from previous attempts to the final response
+  defp prepend_partial_content(response, ""), do: response
+
+  defp prepend_partial_content(response, partial) do
+    case response do
+      %{"choices" => [choice | rest_choices]} ->
+        updated_choice =
+          update_in(choice, ["message", "content"], fn
+            nil -> partial
+            existing -> partial <> existing
+          end)
+
+        %{response | "choices" => [updated_choice | rest_choices]}
+
+      _ ->
+        response
+    end
+  end
 
   defp latency(start_time), do: System.monotonic_time(:millisecond) - start_time
 end

@@ -16,12 +16,17 @@ defmodule DodoRouter.Proxy do
   def dispatch(%Router{} = router, request, opts \\ []) do
     request_id = Keyword.get(opts, :request_id, Ecto.UUID.generate())
     start_time = System.monotonic_time(:millisecond)
+    streaming = Keyword.get(opts, :stream, false)
 
     steps = Routers.list_routing_steps(router)
 
     if Enum.empty?(steps) do
       {:error, :no_routing_configured}
     else
+      # Broadcast request started (shows as pending in logs UI)
+      first_step = List.first(steps)
+      broadcast_request_started(router, request_id, first_step, streaming)
+
       result = FallbackChain.execute(request, steps, router.id, opts)
 
       log_request(router, request, result, request_id, start_time)
@@ -61,7 +66,9 @@ defmodule DodoRouter.Proxy do
 
     # Encode request/response for storage (truncate large payloads)
     request_body = request |> truncate_body() |> Jason.encode!()
-    response_body = result.final_response |> clean_response() |> truncate_body() |> Jason.encode!()
+
+    response_body =
+      result.final_response |> clean_response() |> truncate_body() |> Jason.encode!()
 
     log_attrs = %{
       router_id: router.id,
@@ -86,26 +93,52 @@ defmodule DodoRouter.Proxy do
   end
 
   defp truncate_body(nil), do: nil
+
   defp truncate_body(body) when is_map(body) do
     # Truncate message content if too long
     case get_in(body, ["messages"]) do
       messages when is_list(messages) ->
-        truncated_messages = Enum.map(messages, fn msg ->
-          case msg["content"] do
-            content when is_binary(content) and byte_size(content) > 1000 ->
-              Map.put(msg, "content", String.slice(content, 0, 1000) <> "... [truncated]")
-            _ -> msg
-          end
-        end)
+        truncated_messages =
+          Enum.map(messages, fn msg ->
+            case msg["content"] do
+              content when is_binary(content) and byte_size(content) > 1000 ->
+                Map.put(msg, "content", String.slice(content, 0, 1000) <> "... [truncated]")
+
+              _ ->
+                msg
+            end
+          end)
+
         Map.put(body, "messages", truncated_messages)
-      _ -> body
+
+      _ ->
+        body
     end
   end
 
   defp clean_response(nil), do: nil
+
   defp clean_response(response) do
     # Remove internal metadata
     Map.delete(response, "_meta")
+  end
+
+  defp broadcast_request_started(router, request_id, first_step, streaming) do
+    pending_log = %{
+      id: nil,
+      request_id: request_id,
+      status: "pending",
+      final_provider: first_step.provider,
+      final_model: first_step.model,
+      streaming: streaming,
+      inserted_at: DateTime.utc_now()
+    }
+
+    Phoenix.PubSub.broadcast(
+      DodoRouter.PubSub,
+      "router:#{router.id}:logs",
+      {:log_pending, pending_log}
+    )
   end
 
   defp broadcast_event(router, result) do

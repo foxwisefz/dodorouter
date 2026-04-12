@@ -38,7 +38,9 @@ defmodule DodoRouterWeb.ProxyController do
       {:error, :no_routing_configured} ->
         conn
         |> put_status(500)
-        |> json(%{error: %{message: "No routing configured for this router", type: "configuration_error"}})
+        |> json(%{
+          error: %{message: "No routing configured for this router", type: "configuration_error"}
+        })
 
       {:error, :all_providers_failed, attempts} ->
         total_ms = System.monotonic_time(:millisecond) - start_time
@@ -79,13 +81,17 @@ defmodule DodoRouterWeb.ProxyController do
         conn
 
       {:error, :no_routing_configured} ->
-        error_event = "data: " <> Jason.encode!(%{error: %{message: "No routing configured"}}) <> "\n\n"
+        error_event =
+          "data: " <> Jason.encode!(%{error: %{message: "No routing configured"}}) <> "\n\n"
+
         chunk(conn, error_event)
         chunk(conn, "data: [DONE]\n\n")
         conn
 
       {:error, :all_providers_failed, _attempts} ->
-        error_event = "data: " <> Jason.encode!(%{error: %{message: "All providers failed"}}) <> "\n\n"
+        error_event =
+          "data: " <> Jason.encode!(%{error: %{message: "All providers failed"}}) <> "\n\n"
+
         chunk(conn, error_event)
         chunk(conn, "data: [DONE]\n\n")
         conn

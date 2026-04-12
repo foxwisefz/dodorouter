@@ -56,11 +56,23 @@ defmodule DodoRouter.Proxy.Adapters.Zai do
 
     start_time = System.monotonic_time(:millisecond)
 
+    # Track partial content in process dict so it survives error paths
+    # (Req's into_fun error path loses the resp.private accumulator)
+    Process.delete(:__zai_stream_acc__)
+
     into_fun = fn {:data, data}, {req, resp} ->
       resp =
         if resp.private[:stream_acc] == nil do
           ttfb = System.monotonic_time(:millisecond) - start_time
-          initial_acc = %{content: "", usage: nil, finish_reason: nil, first_chunk_time: ttfb}
+
+          initial_acc = %{
+            content: "",
+            tool_calls: %{},
+            usage: nil,
+            finish_reason: nil,
+            first_chunk_time: ttfb
+          }
+
           Req.Response.put_private(resp, :stream_acc, initial_acc)
         else
           resp
@@ -72,6 +84,7 @@ defmodule DodoRouter.Proxy.Adapters.Zai do
         {:chunk, chunk_data} ->
           send_chunk.(data)
           acc = accumulate_chunk(acc, chunk_data)
+          Process.put(:__zai_stream_acc__, acc)
           {:cont, {req, Req.Response.put_private(resp, :stream_acc, acc)}}
 
         :done ->
@@ -83,16 +96,22 @@ defmodule DodoRouter.Proxy.Adapters.Zai do
       end
     end
 
-    case Req.post(url,
-           headers: headers,
-           json: body,
-           receive_timeout: @timeout_ms,
-           into: into_fun
-         ) do
+    result =
+      Req.post(url,
+        headers: headers,
+        json: body,
+        receive_timeout: @timeout_ms,
+        into: into_fun
+      )
+
+    partial_acc = Process.get(:__zai_stream_acc__)
+    Process.delete(:__zai_stream_acc__)
+
+    case result do
       {:ok, %Req.Response{status: 200} = resp} ->
         acc =
           resp.private[:stream_acc] ||
-            %{content: "", usage: nil, finish_reason: nil, first_chunk_time: nil}
+            %{content: "", tool_calls: %{}, usage: nil, finish_reason: nil, first_chunk_time: nil}
 
         {:ok, build_final_response(acc, start_time)}
 
@@ -101,10 +120,10 @@ defmodule DodoRouter.Proxy.Adapters.Zai do
         {:error, reason, %{status: status, body: response_body, latency_ms: latency(start_time)}}
 
       {:error, %Req.TransportError{reason: :timeout}} ->
-        {:error, :timeout, %{latency_ms: latency(start_time)}}
+        {:error, :timeout, build_stream_error_details(partial_acc, start_time)}
 
       {:error, reason} ->
-        {:error, :unknown, %{reason: reason, latency_ms: latency(start_time)}}
+        {:error, :unknown, build_stream_error_details(partial_acc, start_time, %{reason: reason})}
     end
   end
 
@@ -126,6 +145,7 @@ defmodule DodoRouter.Proxy.Adapters.Zai do
 
   # Only set default if client didn't provide a value
   defp maybe_default(map, _key, nil), do: map
+
   defp maybe_default(map, key, default) do
     if Map.has_key?(map, key), do: map, else: Map.put(map, key, default)
   end
@@ -135,14 +155,19 @@ defmodule DodoRouter.Proxy.Adapters.Zai do
     |> String.split("\n")
     |> Enum.reduce(:skip, fn line, acc ->
       cond do
-        String.starts_with?(line, "data: [DONE]") -> :done
+        String.starts_with?(line, "data: [DONE]") ->
+          :done
+
         String.starts_with?(line, "data: ") ->
           json = String.trim_leading(line, "data: ")
+
           case Jason.decode(json) do
             {:ok, parsed} -> {:chunk, parsed}
             _ -> acc
           end
-        true -> acc
+
+        true ->
+          acc
       end
     end)
   end
@@ -154,20 +179,66 @@ defmodule DodoRouter.Proxy.Adapters.Zai do
         c -> acc.content <> c
       end
 
+    tool_calls = accumulate_tool_calls(acc.tool_calls, chunk_data)
     usage = chunk_data["usage"] || acc.usage
 
     finish_reason =
       get_in(chunk_data, ["choices", Access.at(0), "finish_reason"]) || acc.finish_reason
 
-    %{acc | content: content, usage: usage, finish_reason: finish_reason}
+    %{acc | content: content, tool_calls: tool_calls, usage: usage, finish_reason: finish_reason}
+  end
+
+  defp accumulate_tool_calls(existing, chunk_data) do
+    case get_in(chunk_data, ["choices", Access.at(0), "delta", "tool_calls"]) do
+      nil ->
+        existing
+
+      calls when is_list(calls) ->
+        Enum.reduce(calls, existing, fn call, acc ->
+          index = call["index"] || 0
+
+          case Map.get(acc, index) do
+            nil ->
+              # First chunk for this tool call - initialize it
+              Map.put(acc, index, %{
+                "id" => call["id"],
+                "type" => call["type"] || "function",
+                "function" => %{
+                  "name" => get_in(call, ["function", "name"]) || "",
+                  "arguments" => get_in(call, ["function", "arguments"]) || ""
+                }
+              })
+
+            existing_call ->
+              # Subsequent chunk - append arguments
+              new_args =
+                existing_call["function"]["arguments"] <>
+                  (get_in(call, ["function", "arguments"]) || "")
+
+              new_name =
+                case get_in(call, ["function", "name"]) do
+                  nil -> existing_call["function"]["name"]
+                  name -> name
+                end
+
+              put_in(
+                acc,
+                [index, "function"],
+                %{"name" => new_name, "arguments" => new_args}
+              )
+          end
+        end)
+    end
   end
 
   defp build_final_response(acc, start_time) do
+    message = build_final_message(acc)
+
     %{
       "choices" => [
         %{
           "index" => 0,
-          "message" => %{"role" => "assistant", "content" => acc.content},
+          "message" => message,
           "finish_reason" => acc.finish_reason
         }
       ],
@@ -177,6 +248,39 @@ defmodule DodoRouter.Proxy.Adapters.Zai do
         "ttfb_ms" => acc.first_chunk_time
       }
     }
+  end
+
+  defp build_final_message(acc) do
+    base = %{"role" => "assistant", "content" => acc.content}
+
+    if map_size(acc.tool_calls) > 0 do
+      # Convert tool_calls map (keyed by index) to sorted list
+      tool_calls_list =
+        acc.tool_calls
+        |> Enum.sort_by(fn {index, _} -> index end)
+        |> Enum.map(fn {_index, call} -> call end)
+
+      Map.put(base, "tool_calls", tool_calls_list)
+    else
+      base
+    end
+  end
+
+  defp build_stream_error_details(partial_acc, start_time, extra \\ %{})
+
+  defp build_stream_error_details(nil, start_time, extra) do
+    Map.merge(%{latency_ms: latency(start_time)}, extra)
+  end
+
+  defp build_stream_error_details(partial_acc, start_time, extra) do
+    Map.merge(
+      %{
+        latency_ms: latency(start_time),
+        partial_content: partial_acc.content,
+        chunks_sent: partial_acc.content != ""
+      },
+      extra
+    )
   end
 
   defp latency(start_time), do: System.monotonic_time(:millisecond) - start_time

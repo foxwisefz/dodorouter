@@ -157,6 +157,8 @@ defmodule DodoRouter.Routers do
   # Preloading
 
   def with_routing_steps(%Router{} = router) do
-    Repo.preload(router, routing_steps: from(s in RoutingStep, order_by: [asc: s.position], preload: [:provider_key]))
+    Repo.preload(router,
+      routing_steps: from(s in RoutingStep, order_by: [asc: s.position], preload: [:provider_key])
+    )
   end
 end

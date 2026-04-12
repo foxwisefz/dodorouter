@@ -14,9 +14,11 @@ defmodule DodoRouterWeb.RouterLive.Show do
 
     if connected?(socket) do
       Phoenix.PubSub.subscribe(DodoRouter.PubSub, "router:#{router.id}:events")
+      Logs.subscribe_to_logs(router.id)
     end
 
     provider_keys = Providers.list_provider_keys(socket.assigns.current_user)
+    recent_logs = Logs.list_logs(router, limit: 10)
 
     socket =
       socket
@@ -25,9 +27,11 @@ defmodule DodoRouterWeb.RouterLive.Show do
       |> assign(:recent_events, [])
       |> assign(:stats_timer, nil)
       |> assign(:has_routing_steps, length(router.routing_steps) > 0)
+      |> assign(:has_logs, length(recent_logs) > 0)
       |> assign(:snippet_tab, "curl")
       |> assign(:provider_keys, provider_keys)
       |> stream(:routing_steps, router.routing_steps)
+      |> stream(:recent_logs, recent_logs)
 
     {:ok, socket}
   end
@@ -189,6 +193,26 @@ defmodule DodoRouterWeb.RouterLive.Show do
   def handle_info(:refresh_stats, socket) do
     stats = Logs.stats(socket.assigns.router)
     {:noreply, assign(socket, :stats, stats)}
+  end
+
+  def handle_info({:log_pending, pending}, socket) do
+    # Use request_id as stream key so completed log replaces it in place
+    pending = Map.put(pending, :id, pending.request_id)
+
+    {:noreply,
+     socket
+     |> assign(:has_logs, true)
+     |> stream_insert(:recent_logs, pending, at: 0, limit: 10)}
+  end
+
+  def handle_info({:log_created, log}, socket) do
+    # Use request_id as key to replace pending entry in place
+    log = Map.put(log, :id, log.request_id)
+
+    {:noreply,
+     socket
+     |> assign(:has_logs, true)
+     |> stream_insert(:recent_logs, log)}
   end
 
   @impl true
@@ -459,7 +483,52 @@ defmodule DodoRouterWeb.RouterLive.Show do
           No routing steps configured. Add one to start proxying requests.
         </p>
       </div>
-      
+
+      <!-- Recent Logs -->
+      <div class="card-bordered p-5 mb-6">
+        <div class="flex items-center justify-between mb-4">
+          <h2 class="section-title mb-0">Recent Logs</h2>
+          <.link navigate={~p"/logs?router_id=#{@router.id}"} class="text-sm text-primary hover:underline">
+            View all logs
+          </.link>
+        </div>
+        <div id="recent-logs" phx-update="stream" class="space-y-2">
+          <.link
+            :for={{dom_id, log} <- @streams.recent_logs}
+            id={dom_id}
+            navigate={if log.status != "pending", do: ~p"/logs/#{log}", else: nil}
+            class={[
+              "flex items-center justify-between p-3 rounded-lg text-sm transition-colors",
+              log.status == "pending" && "bg-info/10 animate-pulse",
+              log.status == "success" && "bg-success/10 hover:bg-success/20",
+              log.status == "fallback" && "bg-warning/10 hover:bg-warning/20",
+              log.status == "error" && "bg-error/10 hover:bg-error/20"
+            ]}
+          >
+            <div class="flex items-center gap-3">
+              <span class={[
+                "w-2 h-2 rounded-full",
+                log.status == "pending" && "bg-info",
+                log.status == "success" && "bg-success",
+                log.status == "fallback" && "bg-warning",
+                log.status == "error" && "bg-error"
+              ]}></span>
+              <span class="font-mono text-base-content/80">{log.final_provider}/{log.final_model}</span>
+              <span class={"px-1.5 py-0.5 rounded text-xs font-medium #{status_badge_class(log.status)}"}>
+                {log.status}
+              </span>
+            </div>
+            <div class="flex items-center gap-4 text-base-content/50 text-sm">
+              <span :if={Map.get(log, :latency_ms)} class="font-mono">{log.latency_ms}ms</span>
+              <span class="font-mono text-xs">{format_time(log.inserted_at)}</span>
+            </div>
+          </.link>
+        </div>
+        <p :if={!@has_logs} class="empty-state py-8">
+          No requests yet. Use the Quick Start snippet above to make your first request.
+        </p>
+      </div>
+
     <!-- Live Events -->
       <div :if={length(@recent_events) > 0} class="card-bordered p-5">
         <div class="flex items-center gap-3 mb-4">
@@ -622,6 +691,14 @@ defmodule DodoRouterWeb.RouterLive.Show do
   defp event_dot_class(%{status: :success}), do: "bg-success"
   defp event_dot_class(%{status: :fallback}), do: "bg-warning"
   defp event_dot_class(_), do: "bg-error"
+
+  defp status_badge_class("success"), do: "bg-success/20 text-success"
+  defp status_badge_class("fallback"), do: "bg-warning/20 text-warning"
+  defp status_badge_class("error"), do: "bg-error/20 text-error"
+  defp status_badge_class("pending"), do: "bg-info/20 text-info"
+  defp status_badge_class(_), do: "bg-base-300 text-base-content/60"
+
+  defp format_time(dt), do: Calendar.strftime(dt, "%H:%M:%S")
 
   defp base_url do
     DodoRouterWeb.Endpoint.url()
