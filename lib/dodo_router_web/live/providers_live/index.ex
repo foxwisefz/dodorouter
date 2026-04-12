@@ -105,98 +105,101 @@ defmodule DodoRouterWeb.ProvidersLive.Index do
     ~H"""
     <div>
       <!-- Header -->
-      <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
-        <div>
-          <h1 class="text-2xl font-bold">Providers</h1>
-          <p class="text-base-content/60">Manage API keys for LLM providers</p>
-        </div>
+      <div class="mb-8">
+        <h1 class="text-2xl font-bold">Providers</h1>
+        <p class="text-base-content/50 text-sm">Manage API keys for LLM providers</p>
       </div>
 
       <!-- Provider Cards -->
-      <div class="space-y-6">
+      <div class="space-y-4">
         <%= for provider_slug <- ProviderKey.provider_slugs() do %>
           <% info = @provider_info[provider_slug] %>
           <% keys = Map.get(@provider_keys, provider_slug, []) %>
 
-          <div class="card bg-base-100 shadow">
-            <div class="card-body">
-              <!-- Provider Header -->
-              <div class="flex items-center justify-between">
-                <div>
-                  <h2 class="card-title"><%= info.name %></h2>
-                  <p class="text-sm text-base-content/60 font-mono"><%= info.endpoint %></p>
-                </div>
+          <div class="provider-card">
+            <!-- Provider Header -->
+            <div class="flex items-start justify-between mb-4">
+              <div>
+                <h2 class="text-lg font-semibold"><%= info.name %></h2>
+                <p class="text-sm text-base-content/50 font-mono"><%= info.endpoint %></p>
               </div>
+              <div class="stat-icon flex-shrink-0">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01" />
+                </svg>
+              </div>
+            </div>
 
-              <!-- Existing Keys -->
-              <div class="mt-4 space-y-2">
-                <%= for key <- keys do %>
-                  <div class="flex items-center justify-between p-3 bg-base-200 rounded-lg">
-                    <div class="flex items-center gap-3">
-                      <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-success" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <!-- Existing Keys -->
+            <div class="space-y-2">
+              <%= for key <- keys do %>
+                <div class="flex items-center justify-between p-3 bg-base-200/50 rounded-lg border border-base-300/30">
+                  <div class="flex items-center gap-3">
+                    <div class="w-8 h-8 rounded-lg bg-success/10 flex items-center justify-center">
+                      <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-success" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
                       </svg>
-                      <span class="font-medium"><%= key.label %></span>
                     </div>
-                    <button
-                      phx-click="delete"
-                      phx-value-id={key.id}
-                      data-confirm="Remove this API key?"
-                      class="btn btn-ghost btn-sm btn-square text-error"
-                    >
-                      <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                      </svg>
-                    </button>
+                    <span class="font-medium text-base-content/90"><%= key.label %></span>
                   </div>
-                <% end %>
-
-                <p :if={Enum.empty?(keys)} class="text-base-content/50 text-sm py-2">
-                  No API keys configured
-                </p>
-              </div>
-
-              <!-- Add Key Form -->
-              <%= if @adding_to == provider_slug do %>
-                <.form for={@form} phx-change="validate" phx-submit="save" class="mt-4 p-4 bg-base-200 rounded-lg">
-                  <div class="flex flex-col sm:flex-row gap-3">
-                    <div class="flex-1">
-                      <input
-                        type="text"
-                        name="provider_key[label]"
-                        value={@form[:label].value}
-                        placeholder="Label (e.g., Personal, Team)"
-                        class={"input input-bordered w-full #{if @form[:label].errors != [], do: "input-error"}"}
-                      />
-                    </div>
-                    <div class="flex-1">
-                      <input
-                        type="password"
-                        name="provider_key[api_key]"
-                        placeholder="API Key"
-                        class="input input-bordered w-full"
-                        autocomplete="off"
-                      />
-                    </div>
-                    <div class="flex gap-2">
-                      <button type="submit" class="btn btn-primary">Save</button>
-                      <button type="button" phx-click="cancel_add" class="btn btn-ghost">Cancel</button>
-                    </div>
-                  </div>
-                </.form>
-              <% else %>
-                <button
-                  phx-click="start_add"
-                  phx-value-provider={provider_slug}
-                  class="btn btn-outline btn-sm mt-4"
-                >
-                  <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
-                  </svg>
-                  Add Key
-                </button>
+                  <button
+                    phx-click="delete"
+                    phx-value-id={key.id}
+                    data-confirm="Remove this API key?"
+                    class="p-2 rounded-lg hover:bg-error/10 text-base-content/50 hover:text-error transition-colors"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                    </svg>
+                  </button>
+                </div>
               <% end %>
+
+              <p :if={Enum.empty?(keys)} class="text-base-content/40 text-sm py-2">
+                No API keys configured
+              </p>
             </div>
+
+            <!-- Add Key Form -->
+            <%= if @adding_to == provider_slug do %>
+              <.form for={@form} phx-change="validate" phx-submit="save" class="mt-4 p-4 bg-base-200/30 rounded-lg border border-base-300/30">
+                <div class="flex flex-col sm:flex-row gap-3">
+                  <div class="flex-1">
+                    <input
+                      type="text"
+                      name="provider_key[label]"
+                      value={@form[:label].value}
+                      placeholder="Label (e.g., Personal, Team)"
+                      class={"input bg-base-200 border-base-300/50 w-full #{if @form[:label].errors != [], do: "border-error"}"}
+                    />
+                  </div>
+                  <div class="flex-1">
+                    <input
+                      type="password"
+                      name="provider_key[api_key]"
+                      placeholder="API Key"
+                      class="input bg-base-200 border-base-300/50 w-full"
+                      autocomplete="off"
+                    />
+                  </div>
+                  <div class="flex gap-2">
+                    <button type="submit" class="btn btn-primary">Save</button>
+                    <button type="button" phx-click="cancel_add" class="btn btn-ghost">Cancel</button>
+                  </div>
+                </div>
+              </.form>
+            <% else %>
+              <button
+                phx-click="start_add"
+                phx-value-provider={provider_slug}
+                class="mt-4 w-full py-2.5 rounded-lg border border-dashed border-base-300/50 text-base-content/50 hover:border-primary/50 hover:text-primary hover:bg-primary/5 transition-colors flex items-center justify-center gap-2 text-sm"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+                </svg>
+                Add Key
+              </button>
+            <% end %>
           </div>
         <% end %>
       </div>

@@ -43,119 +43,97 @@
         <!-- Sidebar -->
         <div class="drawer-side z-40">
           <label for="sidebar-drawer" class="drawer-overlay"></label>
-          <aside class="bg-base-100 h-screen w-64 border-r border-base-300 flex flex-col">
+          <aside class="bg-base-100 h-screen w-64 border-r border-base-300/50 flex flex-col">
             <!-- Fixed: Logo -->
-            <div class="flex-shrink-0 p-4 border-b border-base-300">
-              <a href={~p"/routers"} class="flex items-center gap-2">
-                <img src={~p"/images/dodo-logo.png"} alt="DodoRouter" class="w-10 h-10" />
-                <span class="text-xl font-bold">DodoRouter</span>
+            <div class="flex-shrink-0 p-4 border-b border-base-300/50">
+              <a href={~p"/routers"} class="flex items-center gap-3">
+                <img src={~p"/images/dodo-logo.png"} alt="DodoRouter" class="w-9 h-9" />
+                <span class="text-lg font-bold">DodoRouter</span>
               </a>
             </div>
 
             <!-- Fixed: Dashboard -->
-            <div class="flex-shrink-0 px-2 pt-2">
-              <ul class="menu menu-sm">
-                <li>
-                  <a href={~p"/dashboard"} class="gap-3">
-                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
-                    </svg>
-                    Dashboard
-                  </a>
-                </li>
-              </ul>
+            <div class="flex-shrink-0 p-3">
+              <a href={~p"/dashboard"} class="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-base-200 transition-colors text-base-content/80 hover:text-base-content">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
+                </svg>
+                <span class="text-sm font-medium">Dashboard</span>
+              </a>
             </div>
 
             <!-- Scrollable: Logs + Routers -->
-            <div class="flex-1 overflow-y-auto px-2 py-2">
-              <!-- Logs (collapsible) -->
-              <div class="collapse collapse-arrow bg-base-200 rounded-lg mb-2">
-                <input type="checkbox" />
-                <div class="collapse-title font-medium flex items-center gap-2 py-2 min-h-0">
+            <div class="flex-1 overflow-y-auto px-3 pb-3">
+              <!-- Logs -->
+              <div class="mb-4">
+                <a href={~p"/logs"} class="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-base-200 transition-colors text-base-content/80 hover:text-base-content">
                   <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                   </svg>
-                  Logs
-                </div>
-                <div class="collapse-content px-0">
-                  <ul class="menu menu-sm">
-                    <li><a href={~p"/logs"}>All Logs</a></li>
-                  </ul>
-                </div>
+                  <span class="text-sm font-medium">Logs</span>
+                </a>
               </div>
 
               <!-- Routers -->
-              <div class="mb-2">
-                <div class="flex items-center justify-between px-2 py-1">
-                  <span class="text-xs font-semibold text-base-content/60 uppercase tracking-wider">Routers</span>
-                  <a href={~p"/routers/new"} class="btn btn-ghost btn-xs btn-square" title="New Router">
+              <div>
+                <div class="flex items-center justify-between px-3 mb-2">
+                  <span class="text-xs font-semibold text-base-content/40 uppercase tracking-wider">Routers</span>
+                  <a href={~p"/routers/new"} class="p-1 rounded hover:bg-base-200 text-base-content/40 hover:text-base-content transition-colors" title="New Router">
                     <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                       <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
                     </svg>
                   </a>
                 </div>
-                <ul class="menu menu-sm">
+                <div class="space-y-0.5">
                   <%= if assigns[:nav_routers] && length(@nav_routers) > 0 do %>
                     <%= for router <- @nav_routers do %>
-                      <li>
-                        <a href={~p"/routers/#{router}"} class="gap-2">
-                          <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 opacity-60" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
-                          </svg>
-                          <span class="truncate"><%= router.name %></span>
-                        </a>
-                      </li>
+                      <a href={~p"/routers/#{router}"} class="flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-base-200 transition-colors text-base-content/70 hover:text-base-content text-sm">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-base-content/40" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2" />
+                        </svg>
+                        <span class="truncate"><%= router.name %></span>
+                      </a>
                     <% end %>
                   <% else %>
-                    <li class="text-base-content/50 text-sm px-2 py-1">No routers yet</li>
+                    <p class="text-base-content/40 text-xs px-3 py-2">No routers yet</p>
                   <% end %>
-                  <li>
-                    <a href={~p"/routers"} class="text-primary">
-                      View All
-                    </a>
-                  </li>
-                </ul>
+                  <a href={~p"/routers"} class="flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-base-200 transition-colors text-primary/80 hover:text-primary text-sm">
+                    View All
+                  </a>
+                </div>
               </div>
             </div>
 
             <!-- Fixed: Account -->
-            <div class="flex-shrink-0 border-t border-base-300 px-2 py-2">
-              <ul class="menu menu-sm">
-                <li>
-                  <a href={~p"/providers"} class="gap-3">
-                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
-                    </svg>
-                    Providers
-                  </a>
-                </li>
-                <li>
-                  <a href={~p"/users/settings"} class="gap-3">
-                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                    </svg>
-                    Settings
-                  </a>
-                </li>
-                <li>
-                  <.link href={~p"/users/log-out"} method="delete" class="gap-3">
-                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
-                    </svg>
-                    Log out
-                  </.link>
-                </li>
-              </ul>
+            <div class="flex-shrink-0 border-t border-base-300/50 p-3">
+              <div class="space-y-0.5">
+                <a href={~p"/providers"} class="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-base-200 transition-colors text-base-content/70 hover:text-base-content text-sm">
+                  <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
+                  </svg>
+                  Providers
+                </a>
+                <a href={~p"/users/settings"} class="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-base-200 transition-colors text-base-content/70 hover:text-base-content text-sm">
+                  <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                  </svg>
+                  Settings
+                </a>
+                <.link href={~p"/users/log-out"} method="delete" class="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-base-200 transition-colors text-base-content/70 hover:text-base-content text-sm">
+                  <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+                  </svg>
+                  Log out
+                </.link>
+              </div>
               <!-- User info -->
-              <div class="flex items-center gap-3 px-2 pt-2 mt-2 border-t border-base-300">
-                <div class="avatar placeholder">
-                  <div class="bg-neutral text-neutral-content rounded-full w-8">
-                    <span class="text-xs"><%= String.first(@current_scope.user.email) |> String.upcase() %></span>
-                  </div>
+              <div class="flex items-center gap-3 px-3 pt-3 mt-3 border-t border-base-300/30">
+                <div class="w-8 h-8 rounded-full bg-primary/20 text-primary flex items-center justify-center text-xs font-bold">
+                  <%= String.first(@current_scope.user.email) |> String.upcase() %>
                 </div>
                 <div class="flex-1 min-w-0">
-                  <p class="text-xs font-medium truncate"><%= @current_scope.user.email %></p>
+                  <p class="text-xs text-base-content/60 truncate"><%= @current_scope.user.email %></p>
                 </div>
               </div>
             </div>
