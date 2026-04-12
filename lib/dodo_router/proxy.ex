@@ -75,7 +75,7 @@ defmodule DodoRouter.Proxy do
       request_id: request_id,
       status: to_string(result.status),
       http_status: if(result.status == :error, do: 502, else: 200),
-      attempted_steps: result.attempted_steps,
+      attempted_steps: stringify_keys(result.attempted_steps),
       final_provider: last_step[:provider],
       final_model: last_step[:model],
       call_type: call_type,
@@ -123,15 +123,27 @@ defmodule DodoRouter.Proxy do
     Map.delete(response, "_meta")
   end
 
+  # Convert atom keys to string keys for JSON storage
+  defp stringify_keys(list) when is_list(list) do
+    Enum.map(list, &stringify_map_keys/1)
+  end
+
+  defp stringify_map_keys(map) when is_map(map) do
+    Map.new(map, fn {k, v} -> {to_string(k), v} end)
+  end
+
   defp broadcast_request_started(router, request_id, first_step, streaming) do
     pending_log = %{
       id: nil,
       request_id: request_id,
+      router: router,
       status: "pending",
       final_provider: first_step.provider,
       final_model: first_step.model,
       streaming: streaming,
-      inserted_at: DateTime.utc_now()
+      inserted_at: DateTime.utc_now(),
+      # Fields needed for display - use string keys to match template expectations
+      attempted_steps: [%{"provider" => first_step.provider, "model" => first_step.model}]
     }
 
     Phoenix.PubSub.broadcast(
