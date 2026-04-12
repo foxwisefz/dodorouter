@@ -35,13 +35,14 @@
             required
           />
           <span class="label-text">
-            I agree to the <a href="/terms" target="_blank" class="link link-primary">Terms of Service</a>
+            I agree to the
+            <a href="/terms" target="_blank" class="link link-primary">Terms of Service</a>
           </span>
         </label>
         <%= if f[:tos_accepted].errors != [] do %>
           <span class="text-error text-sm mt-1">
             <%= for {msg, _opts} <- f[:tos_accepted].errors do %>
-              <%= msg %>
+              {msg}
             <% end %>
           </span>
         <% end %>

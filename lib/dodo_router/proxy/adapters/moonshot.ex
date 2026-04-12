@@ -57,6 +57,9 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
 
     start_time = System.monotonic_time(:millisecond)
 
+    # Track partial content in process dict so it survives error paths
+    Process.delete(:__moonshot_stream_acc__)
+
     into_fun = fn {:data, data}, {req, resp} ->
       resp =
         if resp.private[:stream_acc] == nil do
@@ -73,6 +76,7 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
         {:chunk, chunk_data} ->
           send_chunk.(data)
           acc = accumulate_chunk(acc, chunk_data)
+          Process.put(:__moonshot_stream_acc__, acc)
           {:cont, {req, Req.Response.put_private(resp, :stream_acc, acc)}}
 
         :done ->
@@ -84,12 +88,18 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
       end
     end
 
-    case Req.post(url,
-           headers: headers,
-           json: body,
-           receive_timeout: @timeout_ms,
-           into: into_fun
-         ) do
+    result =
+      Req.post(url,
+        headers: headers,
+        json: body,
+        receive_timeout: @timeout_ms,
+        into: into_fun
+      )
+
+    partial_acc = Process.get(:__moonshot_stream_acc__)
+    Process.delete(:__moonshot_stream_acc__)
+
+    case result do
       {:ok, %Req.Response{status: 200} = resp} ->
         acc =
           resp.private[:stream_acc] ||
@@ -102,10 +112,10 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
         {:error, reason, %{status: status, body: response_body, latency_ms: latency(start_time)}}
 
       {:error, %Req.TransportError{reason: :timeout}} ->
-        {:error, :timeout, %{latency_ms: latency(start_time)}}
+        {:error, :timeout, build_stream_error_details(partial_acc, start_time)}
 
       {:error, reason} ->
-        {:error, :unknown, %{reason: reason, latency_ms: latency(start_time)}}
+        {:error, :unknown, build_stream_error_details(partial_acc, start_time, %{reason: reason})}
     end
   end
 
@@ -125,6 +135,7 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
 
   # Only set default if client didn't provide a value
   defp maybe_default(map, _key, nil), do: map
+
   defp maybe_default(map, key, default) do
     if Map.has_key?(map, key), do: map, else: Map.put(map, key, default)
   end
@@ -142,14 +153,19 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
     |> String.split("\n")
     |> Enum.reduce(:skip, fn line, acc ->
       cond do
-        String.starts_with?(line, "data: [DONE]") -> :done
+        String.starts_with?(line, "data: [DONE]") ->
+          :done
+
         String.starts_with?(line, "data: ") ->
           json = String.trim_leading(line, "data: ")
+
           case Jason.decode(json) do
             {:ok, parsed} -> {:chunk, parsed}
             _ -> acc
           end
-        true -> acc
+
+        true ->
+          acc
       end
     end)
   end
@@ -184,6 +200,23 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
         "ttfb_ms" => acc.first_chunk_time
       }
     }
+  end
+
+  defp build_stream_error_details(partial_acc, start_time, extra \\ %{})
+
+  defp build_stream_error_details(nil, start_time, extra) do
+    Map.merge(%{latency_ms: latency(start_time)}, extra)
+  end
+
+  defp build_stream_error_details(partial_acc, start_time, extra) do
+    Map.merge(
+      %{
+        latency_ms: latency(start_time),
+        partial_content: partial_acc.content,
+        chunks_sent: partial_acc.content != ""
+      },
+      extra
+    )
   end
 
   defp latency(start_time), do: System.monotonic_time(:millisecond) - start_time

@@ -61,7 +61,9 @@ defmodule DodoRouter.Proxy do
 
     # Encode request/response for storage (truncate large payloads)
     request_body = request |> truncate_body() |> Jason.encode!()
-    response_body = result.final_response |> clean_response() |> truncate_body() |> Jason.encode!()
+
+    response_body =
+      result.final_response |> clean_response() |> truncate_body() |> Jason.encode!()
 
     log_attrs = %{
       router_id: router.id,
@@ -86,23 +88,31 @@ defmodule DodoRouter.Proxy do
   end
 
   defp truncate_body(nil), do: nil
+
   defp truncate_body(body) when is_map(body) do
     # Truncate message content if too long
     case get_in(body, ["messages"]) do
       messages when is_list(messages) ->
-        truncated_messages = Enum.map(messages, fn msg ->
-          case msg["content"] do
-            content when is_binary(content) and byte_size(content) > 1000 ->
-              Map.put(msg, "content", String.slice(content, 0, 1000) <> "... [truncated]")
-            _ -> msg
-          end
-        end)
+        truncated_messages =
+          Enum.map(messages, fn msg ->
+            case msg["content"] do
+              content when is_binary(content) and byte_size(content) > 1000 ->
+                Map.put(msg, "content", String.slice(content, 0, 1000) <> "... [truncated]")
+
+              _ ->
+                msg
+            end
+          end)
+
         Map.put(body, "messages", truncated_messages)
-      _ -> body
+
+      _ ->
+        body
     end
   end
 
   defp clean_response(nil), do: nil
+
   defp clean_response(response) do
     # Remove internal metadata
     Map.delete(response, "_meta")

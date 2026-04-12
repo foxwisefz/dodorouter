@@ -7,12 +7,25 @@ defmodule DodoRouter.Proxy.Adapter do
 
   @type request :: map()
   @type response :: map()
-  @type error_reason :: :rate_limited | :server_error | :timeout | :model_unavailable | :bad_request | :auth_error | :content_policy | :unknown
+  @type error_reason ::
+          :rate_limited
+          | :server_error
+          | :timeout
+          | :model_unavailable
+          | :bad_request
+          | :auth_error
+          | :content_policy
+          | :unknown
 
   @callback call(request(), RoutingStep.t(), api_key :: String.t()) ::
               {:ok, response()} | {:error, error_reason(), details :: map()}
 
-  @callback stream(request(), RoutingStep.t(), api_key :: String.t(), send_chunk :: (binary() -> :ok)) ::
+  @callback stream(
+              request(),
+              RoutingStep.t(),
+              api_key :: String.t(),
+              send_chunk :: (binary() -> :ok)
+            ) ::
               {:ok, response()} | {:error, error_reason(), details :: map()}
 
   @doc """

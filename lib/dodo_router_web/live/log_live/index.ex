@@ -129,35 +129,54 @@ defmodule DodoRouterWeb.LogLive.Index do
             class="py-2 px-3 bg-base-200 border border-base-300/50 rounded-lg text-sm w-full sm:w-48"
           >
             <option value="">Select a router...</option>
-            <option :for={r <- @routers} value={r.id} selected={to_string(r.id) == @selected_router_id}>
-              <%= r.name %>
+            <option
+              :for={r <- @routers}
+              value={r.id}
+              selected={to_string(r.id) == @selected_router_id}
+            >
+              {r.name}
             </option>
           </select>
         </form>
       </div>
-
-      <!-- Filters -->
+      
+    <!-- Filters -->
       <div :if={@selected_router} class="card-bordered p-4 mb-6">
         <div class="flex flex-wrap gap-3 items-center">
           <span class="text-sm font-medium text-base-content/60">Filters:</span>
 
-          <select phx-change="filter" name="status" class="py-1.5 px-2 bg-base-200 border border-base-300/50 rounded-lg text-sm">
+          <select
+            phx-change="filter"
+            name="status"
+            class="py-1.5 px-2 bg-base-200 border border-base-300/50 rounded-lg text-sm"
+          >
             <option value="">All Status</option>
             <option value="success" selected={@filters.status == "success"}>Success</option>
             <option value="fallback" selected={@filters.status == "fallback"}>Fallback</option>
             <option value="error" selected={@filters.status == "error"}>Error</option>
           </select>
 
-          <select phx-change="filter" name="call_type" class="py-1.5 px-2 bg-base-200 border border-base-300/50 rounded-lg text-sm">
+          <select
+            phx-change="filter"
+            name="call_type"
+            class="py-1.5 px-2 bg-base-200 border border-base-300/50 rounded-lg text-sm"
+          >
             <option value="">All Types</option>
-            <option value="completion" selected={@filters.call_type == "completion"}>Completion</option>
+            <option value="completion" selected={@filters.call_type == "completion"}>
+              Completion
+            </option>
             <option value="tool_call" selected={@filters.call_type == "tool_call"}>Tool Call</option>
-            <option value="tool_enabled_completion" selected={@filters.call_type == "tool_enabled_completion"}>Tool Enabled</option>
+            <option
+              value="tool_enabled_completion"
+              selected={@filters.call_type == "tool_enabled_completion"}
+            >
+              Tool Enabled
+            </option>
           </select>
         </div>
       </div>
-
-      <!-- Logs Table -->
+      
+    <!-- Logs Table -->
       <div :if={@selected_router} class="table-container">
         <table class="table">
           <thead>
@@ -174,7 +193,7 @@ defmodule DodoRouterWeb.LogLive.Index do
           </thead>
           <tbody id="logs" phx-update="stream">
             <tr :for={{dom_id, log} <- @streams.logs} id={dom_id} class="hover:bg-base-200/30">
-              <td class="font-mono text-xs text-base-content/70"><%= format_time(log.inserted_at) %></td>
+              <td class="font-mono text-xs text-base-content/70">{format_time(log.inserted_at)}</td>
               <td><.status_badge status={log.status} /></td>
               <td>
                 <%= if length(log.attempted_steps) > 1 do %>
@@ -185,26 +204,30 @@ defmodule DodoRouterWeb.LogLive.Index do
                         step["status"] == "success" && "bg-success/20 text-success",
                         step["status"] != "success" && "bg-error/20 text-error line-through"
                       ]}>
-                        <%= step["provider"] %>
+                        {step["provider"]}
                       </span>
                       <%= if idx < length(log.attempted_steps) - 1 do %>
                         <span class="text-base-content/30">→</span>
                       <% end %>
                     <% end %>
                   </div>
-                  <div class="text-xs text-base-content/50 mt-0.5"><%= log.final_model %></div>
+                  <div class="text-xs text-base-content/50 mt-0.5">{log.final_model}</div>
                 <% else %>
-                  <span class="text-base-content/80"><%= log.final_provider %></span>
+                  <span class="text-base-content/80">{log.final_provider}</span>
                   <span class="text-base-content/40"> / </span>
-                  <span class="text-base-content/60"><%= log.final_model %></span>
+                  <span class="text-base-content/60">{log.final_model}</span>
                 <% end %>
               </td>
               <td><.call_type_badge type={log.call_type} /></td>
-              <td class="font-mono text-sm text-base-content/70"><%= log.total_tokens || "-" %></td>
-              <td class="font-mono text-sm text-base-content/70"><%= if log.latency_ms, do: "#{log.latency_ms}ms", else: "-" %></td>
+              <td class="font-mono text-sm text-base-content/70">{log.total_tokens || "-"}</td>
+              <td class="font-mono text-sm text-base-content/70">
+                {if log.latency_ms, do: "#{log.latency_ms}ms", else: "-"}
+              </td>
               <td class="text-center">
                 <%= if length(log.attempted_steps) > 1 do %>
-                  <span class="px-1.5 py-0.5 bg-warning/20 text-warning rounded text-xs"><%= length(log.attempted_steps) %></span>
+                  <span class="px-1.5 py-0.5 bg-warning/20 text-warning rounded text-xs">
+                    {length(log.attempted_steps)}
+                  </span>
                 <% else %>
                   <span class="text-base-content/40">1</span>
                 <% end %>
@@ -218,13 +241,24 @@ defmodule DodoRouterWeb.LogLive.Index do
           </tbody>
         </table>
       </div>
-
-      <!-- Empty State -->
+      
+    <!-- Empty State -->
       <div :if={!@selected_router} class="card-bordered p-12 text-center">
         <div class="max-w-md mx-auto">
           <div class="stat-icon w-16 h-16 mx-auto mb-6">
-            <svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              class="h-8 w-8"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+            >
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="1.5"
+                d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+              />
             </svg>
           </div>
           <h2 class="text-xl font-semibold mb-2">Select a Router</h2>
@@ -249,7 +283,7 @@ defmodule DodoRouterWeb.LogLive.Index do
     assigns = assign(assigns, :class, class)
 
     ~H"""
-    <span class={"px-2 py-0.5 rounded text-xs font-medium #{@class}"}><%= @status %></span>
+    <span class={"px-2 py-0.5 rounded text-xs font-medium #{@class}"}>{@status}</span>
     """
   end
 
@@ -264,7 +298,7 @@ defmodule DodoRouterWeb.LogLive.Index do
     assigns = assign(assigns, label: label, class: class)
 
     ~H"""
-    <span class={"px-2 py-0.5 rounded text-xs font-medium #{@class}"}><%= @label %></span>
+    <span class={"px-2 py-0.5 rounded text-xs font-medium #{@class}"}>{@label}</span>
     """
   end
 

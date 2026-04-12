@@ -122,8 +122,12 @@ defmodule DodoRouterWeb.DashboardLive do
           name="router_id"
           class="select bg-base-200 border-base-300/50 w-full sm:w-48"
         >
-          <option :for={r <- @routers} value={r.id} selected={@selected_router && r.id == @selected_router.id}>
-            <%= r.name %>
+          <option
+            :for={r <- @routers}
+            value={r.id}
+            selected={@selected_router && r.id == @selected_router.id}
+          >
+            {r.name}
           </option>
         </select>
       </div>
@@ -133,80 +137,113 @@ defmodule DodoRouterWeb.DashboardLive do
         <div class="grid grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
           <div class="stat-card">
             <div class="stat-label">Requests (24h)</div>
-            <div class="stat-value"><%= @stats.total_requests %></div>
+            <div class="stat-value">{@stats.total_requests}</div>
             <div class="stat-desc">Total API calls</div>
           </div>
 
           <div class="stat-card">
             <div class="stat-label">Success Rate</div>
-            <div class={"stat-value #{success_color(@stats)}"}><%= success_rate(@stats) %></div>
-            <div class="stat-desc"><%= @stats.successful_requests %> successful</div>
+            <div class={"stat-value #{success_color(@stats)}"}>{success_rate(@stats)}</div>
+            <div class="stat-desc">{@stats.successful_requests} successful</div>
           </div>
 
           <div class="stat-card">
             <div class="stat-label">Fallback Rate</div>
-            <div class="stat-value"><%= fallback_rate(@stats) %></div>
-            <div class="stat-desc"><%= @stats.fallback_requests %> fallbacks</div>
+            <div class="stat-value">{fallback_rate(@stats)}</div>
+            <div class="stat-desc">{@stats.fallback_requests} fallbacks</div>
           </div>
 
           <div class="stat-card">
             <div class="stat-label">Tokens Used</div>
-            <div class="stat-value"><%= format_number(@stats.total_tokens) %></div>
+            <div class="stat-value">{format_number(@stats.total_tokens)}</div>
             <div class="stat-desc">
-              <%= format_number(@stats.prompt_tokens) %> in / <%= format_number(@stats.completion_tokens) %> out
+              {format_number(@stats.prompt_tokens)} in / {format_number(@stats.completion_tokens)} out
             </div>
           </div>
 
           <div class="stat-card">
             <div class="stat-label">Est. Cost</div>
-            <div class="stat-value"><%= format_cost(@stats.total_cost_usd) %></div>
+            <div class="stat-value">{format_cost(@stats.total_cost_usd)}</div>
             <div class="stat-desc">Last 24 hours</div>
           </div>
         </div>
-
-        <!-- Latency Stats -->
+        
+    <!-- Latency Stats -->
         <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
           <div class="stat-card flex items-center gap-4">
             <div class="stat-icon">
-              <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                class="h-5 w-5"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+              >
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
+                />
               </svg>
             </div>
             <div>
               <div class="stat-label">p50 Latency</div>
-              <div class="stat-value"><%= format_latency(@latency_percentiles.p50) %></div>
+              <div class="stat-value">{format_latency(@latency_percentiles.p50)}</div>
               <div class="stat-desc">Median response time</div>
             </div>
           </div>
 
           <div class="stat-card flex items-center gap-4">
             <div class="stat-icon">
-              <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                class="h-5 w-5"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+              >
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
+                />
               </svg>
             </div>
             <div>
               <div class="stat-label">p95 Latency</div>
-              <div class="stat-value"><%= format_latency(@latency_percentiles.p95) %></div>
+              <div class="stat-value">{format_latency(@latency_percentiles.p95)}</div>
               <div class="stat-desc">95th percentile</div>
             </div>
           </div>
 
           <div class="stat-card flex items-center gap-4">
             <div class="stat-icon">
-              <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                class="h-5 w-5"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+              >
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
+                />
               </svg>
             </div>
             <div>
               <div class="stat-label">p99 Latency</div>
-              <div class="stat-value"><%= format_latency(@latency_percentiles.p99) %></div>
+              <div class="stat-value">{format_latency(@latency_percentiles.p99)}</div>
               <div class="stat-desc">99th percentile</div>
             </div>
           </div>
         </div>
-
-        <!-- Charts Row -->
+        
+    <!-- Charts Row -->
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
           <!-- Requests per Minute -->
           <div class="chart-container">
@@ -223,30 +260,35 @@ defmodule DodoRouterWeb.DashboardLive do
               <% end %>
             </div>
           </div>
-
-          <!-- Provider Breakdown -->
+          
+    <!-- Provider Breakdown -->
           <div class="chart-container">
             <h2 class="section-title">By Provider</h2>
             <p class="section-desc mb-4">Request distribution (24h)</p>
             <div class="space-y-3">
               <%= for stat <- @stats_by_provider do %>
                 <div class="flex items-center gap-4">
-                  <span class="w-24 text-sm text-base-content/80"><%= stat.provider %></span>
+                  <span class="w-24 text-sm text-base-content/80">{stat.provider}</span>
                   <div class="flex-1 h-2 bg-base-200 rounded-full overflow-hidden">
                     <div
                       class="h-full bg-primary/70 rounded-full"
                       style={"width: #{if @stats.total_requests > 0, do: round(stat.total_requests / @stats.total_requests * 100), else: 0}%"}
-                    ></div>
+                    >
+                    </div>
                   </div>
-                  <span class="w-12 text-right text-sm font-mono text-base-content/70"><%= stat.total_requests %></span>
+                  <span class="w-12 text-right text-sm font-mono text-base-content/70">
+                    {stat.total_requests}
+                  </span>
                 </div>
               <% end %>
-              <p :if={Enum.empty?(@stats_by_provider)} class="empty-state text-sm py-4">No data yet</p>
+              <p :if={Enum.empty?(@stats_by_provider)} class="empty-state text-sm py-4">
+                No data yet
+              </p>
             </div>
           </div>
         </div>
-
-        <!-- Failures & Live Events -->
+        
+    <!-- Failures & Live Events -->
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
           <!-- Failures -->
           <div :if={length(@failure_breakdown) > 0} class="table-container">
@@ -265,27 +307,26 @@ defmodule DodoRouterWeb.DashboardLive do
               <tbody>
                 <%= for f <- @failure_breakdown do %>
                   <tr class="hover:bg-base-200/30">
-                    <td class="text-base-content/80"><%= f.provider %></td>
-                    <td class="font-mono text-xs text-base-content/70"><%= f.model %></td>
+                    <td class="text-base-content/80">{f.provider}</td>
+                    <td class="font-mono text-xs text-base-content/70">{f.model}</td>
                     <td>
                       <span class={"px-2 py-0.5 rounded text-xs font-medium #{if f.status == "error", do: "bg-error/20 text-error", else: "bg-warning/20 text-warning"}"}>
-                        <%= f.status %>
+                        {f.status}
                       </span>
                     </td>
-                    <td class="font-mono text-right text-base-content/70"><%= f.count %></td>
+                    <td class="font-mono text-right text-base-content/70">{f.count}</td>
                   </tr>
                 <% end %>
               </tbody>
             </table>
           </div>
-
-          <!-- Live Events -->
+          
+    <!-- Live Events -->
           <div class="chart-container">
             <div class="flex items-center gap-3 mb-4">
               <h2 class="section-title mb-0">Live Events</h2>
               <span class="flex items-center gap-1.5 px-2 py-0.5 bg-success/10 rounded text-xs font-medium text-success">
-                <span class="live-dot"></span>
-                Live
+                <span class="live-dot"></span> Live
               </span>
             </div>
             <div class="space-y-2 max-h-64 overflow-y-auto">
@@ -293,12 +334,17 @@ defmodule DodoRouterWeb.DashboardLive do
                 <div class={"flex items-center justify-between p-3 rounded-lg text-sm #{event_class(event)}"}>
                   <div class="flex items-center gap-3">
                     <span class={"w-2 h-2 rounded-full #{event_dot_class(event)}"}></span>
-                    <span class="font-mono text-base-content/80"><%= event.provider %>/<%= event.model %></span>
-                    <span :if={event.had_fallback} class="px-1.5 py-0.5 bg-warning/20 text-warning rounded text-xs">fallback</span>
+                    <span class="font-mono text-base-content/80">{event.provider}/{event.model}</span>
+                    <span
+                      :if={event.had_fallback}
+                      class="px-1.5 py-0.5 bg-warning/20 text-warning rounded text-xs"
+                    >
+                      fallback
+                    </span>
                   </div>
                   <div class="flex items-center gap-4 text-base-content/50 text-sm">
-                    <span class="font-mono"><%= event.latency_ms %>ms</span>
-                    <span><%= format_event_time(event.timestamp) %></span>
+                    <span class="font-mono">{event.latency_ms}ms</span>
+                    <span>{format_event_time(event.timestamp)}</span>
                   </div>
                 </div>
               <% end %>
@@ -313,8 +359,19 @@ defmodule DodoRouterWeb.DashboardLive do
         <div class="card-bordered p-12 text-center">
           <div class="max-w-md mx-auto">
             <div class="stat-icon w-16 h-16 mx-auto mb-6">
-              <svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M13 10V3L4 14h7v7l9-11h-7z" />
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                class="h-8 w-8"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+              >
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="1.5"
+                  d="M13 10V3L4 14h7v7l9-11h-7z"
+                />
               </svg>
             </div>
             <h2 class="text-xl font-semibold mb-2">Welcome to DodoRouter</h2>
@@ -330,13 +387,16 @@ defmodule DodoRouterWeb.DashboardLive do
   end
 
   defp success_rate(%{total_requests: 0}), do: "-"
+
   defp success_rate(%{total_requests: total, successful_requests: success}) do
     "#{round(success / total * 100)}%"
   end
 
   defp success_color(%{total_requests: 0}), do: ""
+
   defp success_color(%{total_requests: total, successful_requests: success}) do
     rate = success / total * 100
+
     cond do
       rate >= 95 -> ""
       rate >= 80 -> "text-warning"
@@ -345,6 +405,7 @@ defmodule DodoRouterWeb.DashboardLive do
   end
 
   defp fallback_rate(%{total_requests: 0}), do: "-"
+
   defp fallback_rate(%{total_requests: total, fallback_requests: fallback}) do
     "#{round(fallback / total * 100)}%"
   end
@@ -378,6 +439,7 @@ defmodule DodoRouterWeb.DashboardLive do
 
   defp bucket_height(_bucket, []), do: 0
   defp bucket_height(%{count: 0}, _all), do: 2
+
   defp bucket_height(%{count: count}, all) do
     max_count = Enum.map(all, & &1.count) |> Enum.max(fn -> 1 end)
     max(2, round(count / max_count * 100))

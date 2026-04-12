@@ -19,7 +19,10 @@ defmodule DodoRouterWeb.Plugs.ApiAuth do
       _ ->
         conn
         |> put_resp_content_type("application/json")
-        |> send_resp(401, Jason.encode!(%{error: %{message: "Invalid API key", type: "authentication_error"}}))
+        |> send_resp(
+          401,
+          Jason.encode!(%{error: %{message: "Invalid API key", type: "authentication_error"}})
+        )
         |> halt()
     end
   end

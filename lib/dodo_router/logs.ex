@@ -68,9 +68,12 @@ defmodule DodoRouter.Logs do
   end
 
   def get_log!(%User{} = user, id) do
-    query = from l in RequestLog,
-      join: r in Router, on: l.router_id == r.id,
-      where: l.id == ^id and r.user_id == ^user.id
+    query =
+      from l in RequestLog,
+        join: r in Router,
+        on: l.router_id == r.id,
+        where: l.id == ^id and r.user_id == ^user.id
+
     Repo.one!(query)
   end
 
@@ -105,7 +108,8 @@ defmodule DodoRouter.Logs do
     since = DateTime.add(DateTime.utc_now(), -hours * 3600, :second)
 
     from(l in RequestLog,
-      where: l.router_id == ^router.id and l.inserted_at >= ^since and not is_nil(l.final_provider),
+      where:
+        l.router_id == ^router.id and l.inserted_at >= ^since and not is_nil(l.final_provider),
       group_by: l.final_provider,
       select: %{
         provider: l.final_provider,
@@ -176,7 +180,9 @@ defmodule DodoRouter.Logs do
     since = DateTime.add(DateTime.utc_now(), -hours * 3600, :second)
 
     from(l in RequestLog,
-      where: l.router_id == ^router.id and l.inserted_at >= ^since and l.status in ["error", "fallback"],
+      where:
+        l.router_id == ^router.id and l.inserted_at >= ^since and
+          l.status in ["error", "fallback"],
       group_by: [l.final_provider, l.final_model, l.status],
       order_by: [desc: count(l.id)],
       select: %{
@@ -195,7 +201,9 @@ defmodule DodoRouter.Logs do
   defp maybe_filter_status(query, status), do: where(query, [l], l.status == ^status)
 
   defp maybe_filter_provider(query, nil), do: query
-  defp maybe_filter_provider(query, provider), do: where(query, [l], l.final_provider == ^provider)
+
+  defp maybe_filter_provider(query, provider),
+    do: where(query, [l], l.final_provider == ^provider)
 
   defp maybe_filter_model(query, nil), do: query
   defp maybe_filter_model(query, model), do: where(query, [l], l.final_model == ^model)

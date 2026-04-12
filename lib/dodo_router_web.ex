@@ -17,7 +17,9 @@ defmodule DodoRouterWeb do
   those modules here.
   """
 
-  def static_paths, do: ~w(assets fonts images favicon.ico favicon-16.png favicon-32.png apple-touch-icon.png robots.txt)
+  def static_paths,
+    do:
+      ~w(assets fonts images favicon.ico favicon-16.png favicon-32.png apple-touch-icon.png robots.txt)
 
   def router do
     quote do
