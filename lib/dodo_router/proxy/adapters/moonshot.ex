@@ -7,6 +7,8 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
 
   @behaviour DodoRouter.Proxy.Adapter
 
+  require Logger
+
   alias DodoRouter.Proxy.Adapter
   alias DodoRouter.Routers.RoutingStep
 
@@ -30,6 +32,7 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
         {:ok, response_body}
 
       {:ok, %{status: status, body: response_body}} ->
+        Logger.error("[Moonshot] Non-200 response: status=#{status} body=#{inspect(response_body)}")
         reason = Adapter.categorize_error(status, response_body)
         {:error, reason, %{status: status, body: response_body, latency_ms: latency(start_time)}}
 
@@ -59,8 +62,13 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
 
     # Track partial content in process dict so it survives error paths
     Process.delete(:__moonshot_stream_acc__)
+    Process.delete(:__moonshot_raw_body__)
 
     into_fun = fn {:data, data}, {req, resp} ->
+      # Accumulate raw body for error diagnostics
+      accumulated = (Process.get(:__moonshot_raw_body__) || "") <> data
+      Process.put(:__moonshot_raw_body__, accumulated)
+
       resp =
         if resp.private[:stream_acc] == nil do
           ttfb = System.monotonic_time(:millisecond) - start_time
@@ -84,6 +92,7 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
           {:halt, {req, resp}}
 
         :skip ->
+          # Could be an error response body that doesn't parse as SSE
           {:cont, {req, resp}}
       end
     end
@@ -97,7 +106,9 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
       )
 
     partial_acc = Process.get(:__moonshot_stream_acc__)
+    raw_body = Process.get(:__moonshot_raw_body__)
     Process.delete(:__moonshot_stream_acc__)
+    Process.delete(:__moonshot_raw_body__)
 
     case result do
       {:ok, %Req.Response{status: 200} = resp} ->
@@ -107,7 +118,20 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
 
         {:ok, build_final_response(acc, start_time)}
 
-      {:ok, %Req.Response{status: status, body: response_body}} ->
+      {:ok, %Req.Response{status: status}} ->
+        # Body was consumed by into_fun, use accumulated raw_body instead
+        response_body =
+          case raw_body do
+            nil -> %{"error" => "no body captured"}
+            "" -> %{"error" => "empty body"}
+            b ->
+              case Jason.decode(b) do
+                {:ok, decoded} -> decoded
+                _ -> %{"raw" => String.slice(b, 0, 500)}
+              end
+          end
+
+        Logger.error("[Moonshot] Stream error #{status}: #{inspect(response_body)} raw_body_len=#{byte_size(raw_body || "")}")
         reason = Adapter.categorize_error(status, response_body)
         {:error, reason, %{status: status, body: response_body, latency_ms: latency(start_time)}}
 
@@ -122,16 +146,33 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
   defp build_request_body(request, %RoutingStep{} = step) do
     # Model always comes from routing step
     # Client values take precedence, step defaults are fallbacks
-    request
-    |> Adapter.sanitize_request()
-    |> Map.put("model", step.model)
-    |> maybe_default("temperature", step.temperature)
-    |> maybe_default("max_tokens", step.max_tokens)
-    |> maybe_default("top_p", nil)
-    |> maybe_default("frequency_penalty", nil)
-    |> maybe_default("presence_penalty", nil)
-    |> maybe_default("stop", nil)
-    |> maybe_put_thinking(step)
+    body =
+      request
+      |> Adapter.sanitize_request()
+      |> Map.put("model", step.model)
+      |> maybe_default("temperature", step.temperature)
+      |> maybe_default("max_tokens", step.max_tokens)
+      |> maybe_default("top_p", nil)
+      |> maybe_default("frequency_penalty", nil)
+      |> maybe_default("presence_penalty", nil)
+      |> maybe_default("stop", nil)
+      |> maybe_put_thinking(step)
+
+    Logger.info("[Moonshot] Sending request model=#{body["model"]} max_tokens=#{inspect(body["max_tokens"])} msg_count=#{length(body["messages"] || [])} has_tools=#{is_list(body["tools"])}")
+
+    # Log first 2 messages for debugging
+    Enum.take(body["messages"] || [], 2)
+    |> Enum.with_index()
+    |> Enum.each(fn {msg, i} ->
+      role = msg["role"]
+      content_preview = case msg["content"] do
+        c when is_binary(c) -> String.slice(c, 0, 100)
+        c -> inspect(c) |> String.slice(0, 100)
+      end
+      Logger.info("[Moonshot] msg[#{i}] role=#{role} content_type=#{is_binary(msg["content"])} keys=#{inspect(Map.keys(msg))} preview=#{content_preview}")
+    end)
+
+    body
   end
 
   # Only set default if client didn't provide a value

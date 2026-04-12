@@ -3,6 +3,8 @@ defmodule DodoRouter.Proxy.Adapter do
   Behaviour for LLM provider adapters.
   """
 
+  require Logger
+
   alias DodoRouter.Routers.RoutingStep
 
   @type request :: map()
@@ -122,10 +124,22 @@ defmodule DodoRouter.Proxy.Adapter do
   recognized fields are forwarded, preventing 400 Bad Request errors.
   """
   def sanitize_request(request) when is_map(request) do
-    request
-    |> Map.take(@allowed_request_fields)
-    |> normalize_max_completion_tokens()
-    |> sanitize_messages()
+    sanitized =
+      request
+      |> Map.take(@allowed_request_fields)
+      |> normalize_max_completion_tokens()
+      |> sanitize_messages()
+
+    Logger.info("""
+    [Adapter.sanitize_request] Keys being sent to provider: #{inspect(Map.keys(sanitized))}
+    Has max_completion_tokens: #{Map.has_key?(sanitized, "max_completion_tokens")}
+    Has max_tokens: #{Map.has_key?(sanitized, "max_tokens")}
+    Has router_slug: #{Map.has_key?(sanitized, "router_slug")}
+    Has parallel_tool_calls: #{Map.has_key?(sanitized, "parallel_tool_calls")}
+    Message count: #{length(sanitized["messages"] || [])}
+    """)
+
+    sanitized
   end
 
   def sanitize_request(request), do: request
@@ -148,15 +162,42 @@ defmodule DodoRouter.Proxy.Adapter do
     end
   end
 
-  # Remove non-standard keys from individual message objects (e.g. reasoning_details)
+  # Remove non-standard keys from individual message objects.
+  # Also normalize tool message content from array format to string.
+  # Some clients send content as [{"type": "text", "text": "..."}] but many
+  # providers only accept a plain string for tool messages.
+  #
+  # Note: reasoning_details is kept here so provider-specific adapters can
+  # convert it (e.g. Moonshot kimi-k2 needs it as reasoning_content).
   defp sanitize_messages(%{"messages" => messages} = request) when is_list(messages) do
     sanitized =
       Enum.map(messages, fn msg ->
-        Map.take(msg, ~w(role content name tool_calls tool_call_id tool_calls function_call))
+        msg
+        |> Map.take(~w(role content name tool_calls tool_call_id function_call reasoning_details))
+        |> normalize_message_content()
       end)
 
     Map.put(request, "messages", sanitized)
   end
 
   defp sanitize_messages(request), do: request
+
+  # Normalize content from array format to string.
+  # OpenAI-style: [{"type": "text", "text": "..."}] -> "..."
+  # Only normalize for tool messages and when content is a list.
+  defp normalize_message_content(%{"content" => content, "role" => role} = msg)
+       when is_list(content) and role in ["tool", "user"] do
+    normalized =
+      content
+      |> Enum.map(fn
+        %{"type" => "text", "text" => text} -> text
+        %{"text" => text} -> text
+        other -> Jason.encode!(other)
+      end)
+      |> Enum.join("\n")
+
+    Map.put(msg, "content", normalized)
+  end
+
+  defp normalize_message_content(msg), do: msg
 end
