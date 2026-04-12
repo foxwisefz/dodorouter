@@ -99,11 +99,12 @@ defmodule DodoRouterWeb.ProvidersLive.Index do
       provider_slug = socket.assigns.adding_to
       existing_keys = Map.get(socket.assigns.provider_keys, provider_slug, [])
 
-      label = case params["label"] do
-        nil -> next_label(existing_keys)
-        "" -> next_label(existing_keys)
-        l -> l
-      end
+      label =
+        case params["label"] do
+          nil -> next_label(existing_keys)
+          "" -> next_label(existing_keys)
+          l -> l
+        end
 
       attrs = %{
         provider_slug: provider_slug,
@@ -124,10 +125,12 @@ defmodule DodoRouterWeb.ProvidersLive.Index do
           {:noreply, socket}
 
         {:error, %Ecto.Changeset{} = changeset} ->
-          error_msg = case changeset.errors do
-            [{:label, _} | _] -> "A key with that label already exists"
-            _ -> "Failed to save API key"
-          end
+          error_msg =
+            case changeset.errors do
+              [{:label, _} | _] -> "A key with that label already exists"
+              _ -> "Failed to save API key"
+            end
+
           socket = put_flash(socket, :error, error_msg)
           {:noreply, socket}
 
@@ -165,8 +168,8 @@ defmodule DodoRouterWeb.ProvidersLive.Index do
         <h1 class="text-2xl font-bold">Providers</h1>
         <p class="text-base-content/50 text-sm">Connect your LLM provider API keys</p>
       </div>
-
-      <!-- Provider Cards -->
+      
+    <!-- Provider Cards -->
       <div class="space-y-3">
         <%= for provider_slug <- ProviderKey.provider_slugs() do %>
           <% info = @provider_info[provider_slug] %>
@@ -177,15 +180,21 @@ defmodule DodoRouterWeb.ProvidersLive.Index do
             <!-- Provider Header -->
             <div class="p-4 flex items-center justify-between">
               <div class="flex items-center gap-3">
-                <div class={"w-3 h-3 rounded-full #{provider_color(info.color)}"} title={info.endpoint}></div>
+                <div
+                  class={"w-3 h-3 rounded-full #{provider_color(info.color)}"}
+                  title={info.endpoint}
+                >
+                </div>
                 <div>
-                  <h2 class="font-semibold"><%= info.name %></h2>
-                  <p class="text-xs text-base-content/50"><%= info.short %></p>
+                  <h2 class="font-semibold">{info.name}</h2>
+                  <p class="text-xs text-base-content/50">{info.short}</p>
                 </div>
               </div>
               <div class="flex items-center gap-3">
                 <%= if key_count > 0 do %>
-                  <span class="text-xs text-base-content/50"><%= key_count %> <%= if key_count == 1, do: "key", else: "keys" %></span>
+                  <span class="text-xs text-base-content/50">
+                    {key_count} {if key_count == 1, do: "key", else: "keys"}
+                  </span>
                 <% end %>
                 <%= if @adding_to != provider_slug do %>
                   <button
@@ -198,8 +207,8 @@ defmodule DodoRouterWeb.ProvidersLive.Index do
                 <% end %>
               </div>
             </div>
-
-            <!-- Keys List -->
+            
+    <!-- Keys List -->
             <%= if key_count > 0 || @adding_to == provider_slug do %>
               <div class="border-t border-base-300/40 bg-base-200/30">
                 <!-- Existing Keys -->
@@ -216,27 +225,64 @@ defmodule DodoRouterWeb.ProvidersLive.Index do
                           autofocus
                         />
                         <button type="submit" class="text-primary hover:text-primary/80 p-1">
-                          <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+                          <svg
+                            xmlns="http://www.w3.org/2000/svg"
+                            class="h-4 w-4"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                            stroke="currentColor"
+                          >
+                            <path
+                              stroke-linecap="round"
+                              stroke-linejoin="round"
+                              stroke-width="2"
+                              d="M5 13l4 4L19 7"
+                            />
                           </svg>
                         </button>
-                        <button type="button" phx-click="cancel_edit" class="text-base-content/40 hover:text-base-content p-1">
-                          <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                        <button
+                          type="button"
+                          phx-click="cancel_edit"
+                          class="text-base-content/40 hover:text-base-content p-1"
+                        >
+                          <svg
+                            xmlns="http://www.w3.org/2000/svg"
+                            class="h-4 w-4"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                            stroke="currentColor"
+                          >
+                            <path
+                              stroke-linecap="round"
+                              stroke-linejoin="round"
+                              stroke-width="2"
+                              d="M6 18L18 6M6 6l12 12"
+                            />
                           </svg>
                         </button>
                       </form>
                     <% else %>
                       <div class="flex items-center gap-3">
-                        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-success" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+                        <svg
+                          xmlns="http://www.w3.org/2000/svg"
+                          class="h-4 w-4 text-success"
+                          fill="none"
+                          viewBox="0 0 24 24"
+                          stroke="currentColor"
+                        >
+                          <path
+                            stroke-linecap="round"
+                            stroke-linejoin="round"
+                            stroke-width="2"
+                            d="M5 13l4 4L19 7"
+                          />
                         </svg>
                         <button
                           phx-click="start_edit"
                           phx-value-id={key.id}
                           class="text-sm hover:text-primary transition-colors"
                         >
-                          <%= key.label %>
+                          {key.label}
                         </button>
                       </div>
                       <button
@@ -245,17 +291,35 @@ defmodule DodoRouterWeb.ProvidersLive.Index do
                         data-confirm="Remove this API key?"
                         class="text-base-content/40 hover:text-error transition-colors p-1"
                       >
-                        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                        <svg
+                          xmlns="http://www.w3.org/2000/svg"
+                          class="h-4 w-4"
+                          fill="none"
+                          viewBox="0 0 24 24"
+                          stroke="currentColor"
+                        >
+                          <path
+                            stroke-linecap="round"
+                            stroke-linejoin="round"
+                            stroke-width="2"
+                            d="M6 18L18 6M6 6l12 12"
+                          />
                         </svg>
                       </button>
                     <% end %>
                   </div>
                 <% end %>
-
-                <!-- Add Key Form -->
+                
+    <!-- Add Key Form -->
                 <%= if @adding_to == provider_slug do %>
-                  <.form for={@form} phx-submit="save" class="px-4 py-3" autocomplete="off" data-1p-ignore data-lpignore="true">
+                  <.form
+                    for={@form}
+                    phx-submit="save"
+                    class="px-4 py-3"
+                    autocomplete="off"
+                    data-1p-ignore
+                    data-lpignore="true"
+                  >
                     <div class="flex gap-2">
                       <input
                         type="text"
@@ -269,7 +333,9 @@ defmodule DodoRouterWeb.ProvidersLive.Index do
                         autofocus
                       />
                       <button type="submit" class="btn btn-sm btn-primary">Save</button>
-                      <button type="button" phx-click="cancel_add" class="btn btn-sm btn-ghost">Cancel</button>
+                      <button type="button" phx-click="cancel_add" class="btn btn-sm btn-ghost">
+                        Cancel
+                      </button>
                     </div>
                   </.form>
                 <% end %>
@@ -290,5 +356,4 @@ defmodule DodoRouterWeb.ProvidersLive.Index do
     count = length(existing_keys) + 1
     "Key #{count}"
   end
-
 end
