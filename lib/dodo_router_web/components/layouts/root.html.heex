@@ -21,7 +21,7 @@
 
         <div class="drawer-content flex flex-col">
           <!-- Navbar -->
-          <div class="navbar bg-base-100 border-b border-base-300 lg:hidden">
+          <div class="navbar bg-base-100 border-b border-base-300/50 lg:hidden">
             <div class="flex-none">
               <label for="sidebar-drawer" class="btn btn-square btn-ghost drawer-button">
                 <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" class="inline-block w-5 h-5 stroke-current">
@@ -30,7 +30,7 @@
               </label>
             </div>
             <div class="flex-1">
-              <span class="text-xl font-bold">DodoRouter</span>
+              <img src={~p"/images/dodo-logo-horizontal.png"} alt="DodoRouter" class="h-7" />
             </div>
           </div>
 
@@ -46,9 +46,8 @@
           <aside class="bg-base-100 h-screen w-64 border-r border-base-300/50 flex flex-col">
             <!-- Fixed: Logo -->
             <div class="flex-shrink-0 p-4 border-b border-base-300/50">
-              <a href={~p"/routers"} class="flex items-center gap-3">
-                <img src={~p"/images/dodo-logo.png"} alt="DodoRouter" class="w-9 h-9" />
-                <span class="text-lg font-bold">DodoRouter</span>
+              <a href={~p"/routers"} class="block">
+                <img src={~p"/images/dodo-logo-horizontal.png"} alt="DodoRouter" class="h-8" />
               </a>
             </div>
 
@@ -143,15 +142,15 @@
     <% else %>
       <!-- Non-authenticated layout -->
       <div class="min-h-screen flex flex-col">
-        <div class="navbar bg-base-100 border-b border-base-300">
+        <div class="navbar bg-base-100 border-b border-base-300/50 px-4">
           <div class="flex-1">
-            <a href={~p"/"} class="btn btn-ghost text-xl">DodoRouter</a>
+            <a href={~p"/"}>
+              <img src={~p"/images/dodo-logo-horizontal.png"} alt="DodoRouter" class="h-8" />
+            </a>
           </div>
-          <div class="flex-none">
-            <ul class="menu menu-horizontal px-1">
-              <li><a href={~p"/users/register"}>Register</a></li>
-              <li><a href={~p"/users/log-in"}>Log in</a></li>
-            </ul>
+          <div class="flex-none flex items-center gap-2">
+            <a href={~p"/users/register"} class="btn btn-ghost btn-sm">Register</a>
+            <a href={~p"/users/log-in"} class="btn btn-primary btn-sm">Log in</a>
           </div>
         </div>
         <div class="flex-1 p-6">
