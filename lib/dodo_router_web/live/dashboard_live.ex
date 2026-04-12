@@ -214,7 +214,7 @@ defmodule DodoRouterWeb.DashboardLive do
             </div>
           </div>
         </div>
-
+        
     <!-- Model Leaderboard -->
         <div :if={length(@stats_by_model) > 0} class="card-bordered p-5 mb-6">
           <h2 class="section-title">Model Leaderboard</h2>
@@ -261,7 +261,7 @@ defmodule DodoRouterWeb.DashboardLive do
             <% end %>
           </div>
         </div>
-
+        
     <!-- Charts Row -->
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
           <!-- Requests per Minute -->

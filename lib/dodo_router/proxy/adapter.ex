@@ -59,6 +59,7 @@ defmodule DodoRouter.Proxy.Adapter do
   def should_fallback?(:timeout), do: true
   def should_fallback?(:model_unavailable), do: true
   def should_fallback?(:auth_error), do: true
+  def should_fallback?(:unknown), do: true
   def should_fallback?(_), do: false
 
   @doc """
@@ -103,4 +104,90 @@ defmodule DodoRouter.Proxy.Adapter do
       true -> {"completion", []}
     end
   end
+
+  # Standard OpenAI-compatible fields that upstream providers accept.
+  # Everything else (router_slug, parallel_tool_calls, etc.) is stripped.
+  @allowed_request_fields ~w(
+    model messages temperature top_p max_tokens max_completion_tokens
+    stream stream_options stop frequency_penalty presence_penalty
+    tools tool_choice response_format seed n logprobs top_logprobs
+    user reasoning_effort thinking
+  )
+
+  @doc """
+  Strips non-standard fields from the incoming request body before
+  forwarding to an upstream provider.
+
+  Clients may send extra fields (e.g. `router_slug`, `parallel_tool_calls`)
+  that are not part of the provider's API. This whitelist ensures only
+  recognized fields are forwarded, preventing 400 Bad Request errors.
+  """
+  def sanitize_request(request) when is_map(request) do
+    sanitized =
+      request
+      |> Map.take(@allowed_request_fields)
+      |> normalize_max_completion_tokens()
+      |> sanitize_messages()
+
+    sanitized
+  end
+
+  def sanitize_request(request), do: request
+
+  # OpenAI introduced max_completion_tokens as a replacement for max_tokens.
+  # Some providers only accept max_tokens, so normalize if only the newer key is present.
+  defp normalize_max_completion_tokens(request) do
+    cond do
+      Map.has_key?(request, "max_tokens") ->
+        # max_tokens already set — drop max_completion_tokens to avoid sending both
+        Map.delete(request, "max_completion_tokens")
+
+      Map.has_key?(request, "max_completion_tokens") ->
+        request
+        |> Map.put("max_tokens", request["max_completion_tokens"])
+        |> Map.delete("max_completion_tokens")
+
+      true ->
+        request
+    end
+  end
+
+  # Remove non-standard keys from individual message objects.
+  # Also normalize tool message content from array format to string.
+  # Some clients send content as [{"type": "text", "text": "..."}] but many
+  # providers only accept a plain string for tool messages.
+  #
+  # Note: reasoning_details is kept here so provider-specific adapters can
+  # convert it (e.g. Moonshot kimi-k2 needs it as reasoning_content).
+  defp sanitize_messages(%{"messages" => messages} = request) when is_list(messages) do
+    sanitized =
+      Enum.map(messages, fn msg ->
+        msg
+        |> Map.take(~w(role content name tool_calls tool_call_id function_call reasoning_details))
+        |> normalize_message_content()
+      end)
+
+    Map.put(request, "messages", sanitized)
+  end
+
+  defp sanitize_messages(request), do: request
+
+  # Normalize content from array format to string.
+  # OpenAI-style: [{"type": "text", "text": "..."}] -> "..."
+  # Only normalize for tool messages and when content is a list.
+  defp normalize_message_content(%{"content" => content, "role" => role} = msg)
+       when is_list(content) and role in ["tool", "user"] do
+    normalized =
+      content
+      |> Enum.map(fn
+        %{"type" => "text", "text" => text} -> text
+        %{"text" => text} -> text
+        other -> Jason.encode!(other)
+      end)
+      |> Enum.join("\n")
+
+    Map.put(msg, "content", normalized)
+  end
+
+  defp normalize_message_content(msg), do: msg
 end

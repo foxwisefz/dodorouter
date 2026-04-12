@@ -7,6 +7,8 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
 
   @behaviour DodoRouter.Proxy.Adapter
 
+  require Logger
+
   alias DodoRouter.Proxy.Adapter
   alias DodoRouter.Routers.RoutingStep
 
@@ -30,6 +32,10 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
         {:ok, response_body}
 
       {:ok, %{status: status, body: response_body}} ->
+        Logger.error(
+          "[Moonshot] Non-200 response: status=#{status} body=#{inspect(response_body)}"
+        )
+
         reason = Adapter.categorize_error(status, response_body)
         {:error, reason, %{status: status, body: response_body, latency_ms: latency(start_time)}}
 
@@ -59,12 +65,25 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
 
     # Track partial content in process dict so it survives error paths
     Process.delete(:__moonshot_stream_acc__)
+    Process.delete(:__moonshot_raw_body__)
 
     into_fun = fn {:data, data}, {req, resp} ->
+      # Accumulate raw body for error diagnostics
+      accumulated = (Process.get(:__moonshot_raw_body__) || "") <> data
+      Process.put(:__moonshot_raw_body__, accumulated)
+
       resp =
         if resp.private[:stream_acc] == nil do
           ttfb = System.monotonic_time(:millisecond) - start_time
-          initial_acc = %{content: "", usage: nil, finish_reason: nil, first_chunk_time: ttfb}
+
+          initial_acc = %{
+            content: "",
+            tool_calls: %{},
+            usage: nil,
+            finish_reason: nil,
+            first_chunk_time: ttfb
+          }
+
           Req.Response.put_private(resp, :stream_acc, initial_acc)
         else
           resp
@@ -73,11 +92,17 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
       acc = resp.private.stream_acc
 
       case parse_sse_chunk(data) do
-        {:chunk, chunk_data} ->
+        {:chunks, chunks} ->
           send_chunk.(data)
-          acc = accumulate_chunk(acc, chunk_data)
+          acc = Enum.reduce(chunks, acc, &accumulate_chunk(&2, &1))
           Process.put(:__moonshot_stream_acc__, acc)
           {:cont, {req, Req.Response.put_private(resp, :stream_acc, acc)}}
+
+        {:chunks_then_done, chunks} ->
+          send_chunk.(data)
+          acc = Enum.reduce(chunks, acc, &accumulate_chunk(&2, &1))
+          Process.put(:__moonshot_stream_acc__, acc)
+          {:halt, {req, Req.Response.put_private(resp, :stream_acc, acc)}}
 
         :done ->
           send_chunk.("data: [DONE]\n\n")
@@ -97,17 +122,39 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
       )
 
     partial_acc = Process.get(:__moonshot_stream_acc__)
+    raw_body = Process.get(:__moonshot_raw_body__)
     Process.delete(:__moonshot_stream_acc__)
+    Process.delete(:__moonshot_raw_body__)
 
     case result do
       {:ok, %Req.Response{status: 200} = resp} ->
         acc =
           resp.private[:stream_acc] ||
-            %{content: "", usage: nil, finish_reason: nil, first_chunk_time: nil}
+            %{content: "", tool_calls: %{}, usage: nil, finish_reason: nil, first_chunk_time: nil}
 
         {:ok, build_final_response(acc, start_time)}
 
-      {:ok, %Req.Response{status: status, body: response_body}} ->
+      {:ok, %Req.Response{status: status}} ->
+        # Body was consumed by into_fun, use accumulated raw_body instead
+        response_body =
+          case raw_body do
+            nil ->
+              %{"error" => "no body captured"}
+
+            "" ->
+              %{"error" => "empty body"}
+
+            b ->
+              case Jason.decode(b) do
+                {:ok, decoded} -> decoded
+                _ -> %{"raw" => String.slice(b, 0, 500)}
+              end
+          end
+
+        Logger.error(
+          "[Moonshot] Stream error #{status}: #{inspect(response_body)} raw_body_len=#{byte_size(raw_body || "")}"
+        )
+
         reason = Adapter.categorize_error(status, response_body)
         {:error, reason, %{status: status, body: response_body, latency_ms: latency(start_time)}}
 
@@ -122,15 +169,24 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
   defp build_request_body(request, %RoutingStep{} = step) do
     # Model always comes from routing step
     # Client values take precedence, step defaults are fallbacks
-    request
-    |> Map.put("model", step.model)
-    |> maybe_default("temperature", step.temperature)
-    |> maybe_default("max_tokens", step.max_tokens)
-    |> maybe_default("top_p", nil)
-    |> maybe_default("frequency_penalty", nil)
-    |> maybe_default("presence_penalty", nil)
-    |> maybe_default("stop", nil)
-    |> maybe_put_thinking(step)
+    body =
+      request
+      |> Adapter.sanitize_request()
+      |> Map.put("model", step.model)
+      |> maybe_default("temperature", step.temperature)
+      |> maybe_default("max_tokens", step.max_tokens)
+      |> maybe_default("top_p", nil)
+      |> maybe_default("frequency_penalty", nil)
+      |> maybe_default("presence_penalty", nil)
+      |> maybe_default("stop", nil)
+      |> maybe_put_thinking(step)
+      |> maybe_transform_kimi_reasoning(step)
+
+    Logger.info(
+      "[Moonshot] Sending request model=#{body["model"]} msg_count=#{length(body["messages"] || [])}"
+    )
+
+    body
   end
 
   # Only set default if client didn't provide a value
@@ -148,26 +204,84 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
 
   defp maybe_put_thinking(body, _step), do: body
 
-  defp parse_sse_chunk(data) do
-    data
-    |> String.split("\n")
-    |> Enum.reduce(:skip, fn line, acc ->
-      cond do
-        String.starts_with?(line, "data: [DONE]") ->
-          :done
+  # kimi-k2 models require reasoning_content on assistant messages when thinking is enabled.
+  # Converts reasoning_details (OpenRouter-style) → reasoning_content (kimi-k2 flat format).
+  # Also ensures assistant tool-call messages have at least an empty reasoning_content.
+  # Note: thinking may be enabled by default for kimi-k2.5 even if thinking_enabled is nil in DB.
+  defp maybe_transform_kimi_reasoning(body, %RoutingStep{model: model})
+       when is_binary(model) do
+    if String.starts_with?(model, "kimi") do
+      messages =
+        Enum.map(body["messages"] || [], fn msg ->
+          case msg["role"] do
+            "assistant" ->
+              msg
+              |> convert_reasoning_details()
+              |> ensure_reasoning_content_for_tool_calls()
 
-        String.starts_with?(line, "data: ") ->
-          json = String.trim_leading(line, "data: ")
-
-          case Jason.decode(json) do
-            {:ok, parsed} -> {:chunk, parsed}
-            _ -> acc
+            _ ->
+              msg
           end
+        end)
 
-        true ->
-          acc
-      end
-    end)
+      Map.put(body, "messages", messages)
+    else
+      body
+    end
+  end
+
+  defp maybe_transform_kimi_reasoning(body, _step), do: body
+
+  # Convert reasoning_details array → reasoning_content flat string
+  defp convert_reasoning_details(%{"reasoning_details" => details} = msg) when is_list(details) do
+    reasoning_content =
+      details
+      |> Enum.filter(fn
+        %{"type" => "reasoning.text"} -> true
+        _ -> false
+      end)
+      |> Enum.map(fn %{"text" => text} -> text end)
+      |> Enum.join("")
+
+    msg
+    |> Map.put("reasoning_content", reasoning_content)
+    |> Map.delete("reasoning_details")
+  end
+
+  defp convert_reasoning_details(msg), do: msg
+
+  # When thinking is enabled, kimi-k2 requires reasoning_content on every
+  # assistant message that has tool_calls. Add empty string if missing.
+  defp ensure_reasoning_content_for_tool_calls(%{"tool_calls" => _calls} = msg) do
+    Map.put_new(msg, "reasoning_content", "")
+  end
+
+  defp ensure_reasoning_content_for_tool_calls(msg), do: msg
+
+  # Parse SSE data - may contain multiple events batched together
+  defp parse_sse_chunk(data) do
+    lines = String.split(data, "\n")
+    has_done = Enum.any?(lines, &String.starts_with?(&1, "data: [DONE]"))
+
+    chunks =
+      lines
+      |> Enum.filter(&String.starts_with?(&1, "data: "))
+      |> Enum.reject(&String.starts_with?(&1, "data: [DONE]"))
+      |> Enum.flat_map(fn line ->
+        json = String.trim_leading(line, "data: ")
+
+        case Jason.decode(json) do
+          {:ok, parsed} -> [parsed]
+          _ -> []
+        end
+      end)
+
+    cond do
+      has_done and chunks == [] -> :done
+      has_done -> {:chunks_then_done, chunks}
+      chunks == [] -> :skip
+      true -> {:chunks, chunks}
+    end
   end
 
   defp accumulate_chunk(acc, chunk_data) do
@@ -177,20 +291,67 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
         c -> acc.content <> c
       end
 
+    tool_calls = accumulate_tool_calls(acc.tool_calls, chunk_data)
     usage = chunk_data["usage"] || acc.usage
 
     finish_reason =
       get_in(chunk_data, ["choices", Access.at(0), "finish_reason"]) || acc.finish_reason
 
-    %{acc | content: content, usage: usage, finish_reason: finish_reason}
+    %{acc | content: content, tool_calls: tool_calls, usage: usage, finish_reason: finish_reason}
+  end
+
+  defp accumulate_tool_calls(existing, chunk_data) do
+    case get_in(chunk_data, ["choices", Access.at(0), "delta", "tool_calls"]) do
+      nil ->
+        existing
+
+      calls when is_list(calls) ->
+
+        Enum.reduce(calls, existing, fn call, acc ->
+          index = call["index"] || 0
+
+          case Map.get(acc, index) do
+            nil ->
+              # First chunk for this tool call - initialize it
+              Map.put(acc, index, %{
+                "id" => call["id"],
+                "type" => call["type"] || "function",
+                "function" => %{
+                  "name" => get_in(call, ["function", "name"]) || "",
+                  "arguments" => get_in(call, ["function", "arguments"]) || ""
+                }
+              })
+
+            existing_call ->
+              # Subsequent chunk - append arguments
+              new_args =
+                existing_call["function"]["arguments"] <>
+                  (get_in(call, ["function", "arguments"]) || "")
+
+              new_name =
+                case get_in(call, ["function", "name"]) do
+                  nil -> existing_call["function"]["name"]
+                  name -> name
+                end
+
+              put_in(
+                acc,
+                [index, "function"],
+                %{"name" => new_name, "arguments" => new_args}
+              )
+          end
+        end)
+    end
   end
 
   defp build_final_response(acc, start_time) do
+    message = build_final_message(acc)
+
     %{
       "choices" => [
         %{
           "index" => 0,
-          "message" => %{"role" => "assistant", "content" => acc.content},
+          "message" => message,
           "finish_reason" => acc.finish_reason
         }
       ],
@@ -200,6 +361,22 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
         "ttfb_ms" => acc.first_chunk_time
       }
     }
+  end
+
+  defp build_final_message(acc) do
+    base = %{"role" => "assistant", "content" => acc.content}
+
+    if map_size(acc.tool_calls) > 0 do
+      # Convert tool_calls map (keyed by index) to sorted list
+      tool_calls_list =
+        acc.tool_calls
+        |> Enum.sort_by(fn {index, _} -> index end)
+        |> Enum.map(fn {_index, call} -> call end)
+
+      Map.put(base, "tool_calls", tool_calls_list)
+    else
+      base
+    end
   end
 
   defp build_stream_error_details(partial_acc, start_time, extra \\ %{})

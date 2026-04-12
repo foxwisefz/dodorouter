@@ -91,6 +91,15 @@ defmodule DodoRouter.Proxy.FallbackChain do
           state = reconstruct_request(state)
           run_chain(%{state | steps: rest})
         else
+          unless Adapter.should_fallback?(reason) do
+            require Logger
+
+            Logger.warning(
+              "Fallback skipped for #{step.provider}/#{step.model}: " <>
+                "error #{inspect(reason)} is not fallback-eligible (remaining steps: #{length(rest)})"
+            )
+          end
+
           %{state | status: :error}
         end
     end

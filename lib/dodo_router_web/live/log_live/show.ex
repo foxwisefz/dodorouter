@@ -5,7 +5,12 @@ defmodule DodoRouterWeb.LogLive.Show do
 
   @impl true
   def mount(%{"id" => id}, _session, socket) do
-    log = Logs.get_log!(socket.assigns.current_user, id)
+    # Try by primary key first, then by request_id (for live stream links)
+    log =
+      case Logs.get_log(socket.assigns.current_user, id) do
+        nil -> Logs.get_log_by_request_id!(socket.assigns.current_user, id)
+        log -> log
+      end
 
     socket =
       socket

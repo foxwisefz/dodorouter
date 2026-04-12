@@ -126,7 +126,6 @@ defmodule DodoRouterWeb.LogLive.Index do
     end
   end
 
-
   @impl true
   def render(assigns) do
     ~H"""
@@ -153,7 +152,7 @@ defmodule DodoRouterWeb.LogLive.Index do
           </select>
         </form>
       </div>
-
+      
     <!-- Logs Table -->
       <div class="table-container">
         <table class="table">
@@ -183,7 +182,7 @@ defmodule DodoRouterWeb.LogLive.Index do
               <td class="font-mono text-xs text-base-content/70">{format_time(log.inserted_at)}</td>
               <td :if={!@selected_router} class="text-sm">
                 <.link
-                  :if={Map.get(log, :router)}
+                  :if={is_struct(Map.get(log, :router), DodoRouter.Routers.Router)}
                   navigate={~p"/routers/#{log.router}"}
                   class="text-primary hover:underline"
                 >
@@ -215,7 +214,9 @@ defmodule DodoRouterWeb.LogLive.Index do
                 <% end %>
               </td>
               <td><.call_type_badge type={Map.get(log, :call_type)} /></td>
-              <td class="font-mono text-sm text-base-content/70">{Map.get(log, :total_tokens) || "-"}</td>
+              <td class="font-mono text-sm text-base-content/70">
+                {Map.get(log, :total_tokens) || "-"}
+              </td>
               <td class="font-mono text-sm text-base-content/70">
                 {if Map.get(log, :latency_ms), do: "#{log.latency_ms}ms", else: "-"}
               </td>
@@ -225,7 +226,9 @@ defmodule DodoRouterWeb.LogLive.Index do
                     {length(log.attempted_steps)}
                   </span>
                 <% else %>
-                  <span class="text-base-content/40">{if log.status == "pending", do: "-", else: "1"}</span>
+                  <span class="text-base-content/40">
+                    {if log.status == "pending", do: "-", else: "1"}
+                  </span>
                 <% end %>
               </td>
             </tr>

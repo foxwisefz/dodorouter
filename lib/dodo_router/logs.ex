@@ -32,6 +32,9 @@ defmodule DodoRouter.Logs do
   end
 
   defp broadcast_log_created(log) do
+    # Preload router for display in live view
+    log = Repo.preload(log, :router)
+
     Phoenix.PubSub.broadcast(
       DodoRouter.PubSub,
       "router:#{log.router_id}:logs",
@@ -57,7 +60,8 @@ defmodule DodoRouter.Logs do
       where: l.router_id == ^router.id,
       order_by: [desc: l.inserted_at],
       limit: ^limit,
-      offset: ^offset
+      offset: ^offset,
+      preload: [:router]
     )
     |> maybe_filter_status(opts[:status])
     |> maybe_filter_provider(opts[:provider])
@@ -94,6 +98,26 @@ defmodule DodoRouter.Logs do
         join: r in Router,
         on: l.router_id == r.id,
         where: l.id == ^id and r.user_id == ^user.id
+
+    Repo.one!(query)
+  end
+
+  def get_log(%User{} = user, id) do
+    query =
+      from l in RequestLog,
+        join: r in Router,
+        on: l.router_id == r.id,
+        where: l.id == ^id and r.user_id == ^user.id
+
+    Repo.one(query)
+  end
+
+  def get_log_by_request_id!(user, request_id) do
+    query =
+      from l in RequestLog,
+        join: r in Router,
+        on: l.router_id == r.id,
+        where: l.request_id == ^request_id and r.user_id == ^user.id
 
     Repo.one!(query)
   end
