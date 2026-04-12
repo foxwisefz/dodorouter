@@ -26,6 +26,7 @@ defmodule DodoRouterWeb.Router do
   scope "/r/:router_slug/v1", DodoRouterWeb do
     pipe_through :proxy_api
 
+    get "/models", ProxyController, :models
     post "/chat/completions", ProxyController, :create
   end
 
