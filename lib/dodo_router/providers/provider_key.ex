@@ -50,7 +50,9 @@ defmodule DodoRouter.Providers.ProviderKey do
     |> validate_inclusion(:provider_slug, @provider_slugs)
     |> validate_length(:label, max: 100)
     |> unique_constraint([:user_id, :key_ref])
-    |> unique_constraint([:user_id, :label], name: "provider_keys_user_id_label_index")
+    |> unique_constraint([:user_id, :provider_slug, :label],
+      name: :provider_keys_user_id_provider_label_index
+    )
     |> foreign_key_constraint(:user_id)
   end
 
