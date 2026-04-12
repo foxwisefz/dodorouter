@@ -483,12 +483,15 @@ defmodule DodoRouterWeb.RouterLive.Show do
           No routing steps configured. Add one to start proxying requests.
         </p>
       </div>
-
-      <!-- Recent Logs -->
+      
+    <!-- Recent Logs -->
       <div class="card-bordered p-5 mb-6">
         <div class="flex items-center justify-between mb-4">
           <h2 class="section-title mb-0">Recent Logs</h2>
-          <.link navigate={~p"/logs?router_id=#{@router.id}"} class="text-sm text-primary hover:underline">
+          <.link
+            navigate={~p"/logs?router_id=#{@router.id}"}
+            class="text-sm text-primary hover:underline"
+          >
             View all logs
           </.link>
         </div>
@@ -512,8 +515,11 @@ defmodule DodoRouterWeb.RouterLive.Show do
                 log.status == "success" && "bg-success",
                 log.status == "fallback" && "bg-warning",
                 log.status == "error" && "bg-error"
-              ]}></span>
-              <span class="font-mono text-base-content/80">{log.final_provider}/{log.final_model}</span>
+              ]}>
+              </span>
+              <span class="font-mono text-base-content/80">
+                {log.final_provider}/{log.final_model}
+              </span>
               <span class={"px-1.5 py-0.5 rounded text-xs font-medium #{status_badge_class(log.status)}"}>
                 {log.status}
               </span>
@@ -528,7 +534,7 @@ defmodule DodoRouterWeb.RouterLive.Show do
           No requests yet. Use the Quick Start snippet above to make your first request.
         </p>
       </div>
-
+      
     <!-- Live Events -->
       <div :if={length(@recent_events) > 0} class="card-bordered p-5">
         <div class="flex items-center gap-3 mb-4">

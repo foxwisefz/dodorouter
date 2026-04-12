@@ -123,6 +123,7 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
     # Model always comes from routing step
     # Client values take precedence, step defaults are fallbacks
     request
+    |> Adapter.sanitize_request()
     |> Map.put("model", step.model)
     |> maybe_default("temperature", step.temperature)
     |> maybe_default("max_tokens", step.max_tokens)
