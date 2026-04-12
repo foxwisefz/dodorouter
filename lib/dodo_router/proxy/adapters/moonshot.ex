@@ -92,18 +92,23 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
       acc = resp.private.stream_acc
 
       case parse_sse_chunk(data) do
-        {:chunk, chunk_data} ->
+        {:chunks, chunks} ->
           send_chunk.(data)
-          acc = accumulate_chunk(acc, chunk_data)
+          acc = Enum.reduce(chunks, acc, &accumulate_chunk(&2, &1))
           Process.put(:__moonshot_stream_acc__, acc)
           {:cont, {req, Req.Response.put_private(resp, :stream_acc, acc)}}
+
+        {:chunks_then_done, chunks} ->
+          send_chunk.(data)
+          acc = Enum.reduce(chunks, acc, &accumulate_chunk(&2, &1))
+          Process.put(:__moonshot_stream_acc__, acc)
+          {:halt, {req, Req.Response.put_private(resp, :stream_acc, acc)}}
 
         :done ->
           send_chunk.("data: [DONE]\n\n")
           {:halt, {req, resp}}
 
         :skip ->
-          # Could be an error response body that doesn't parse as SSE
           {:cont, {req, resp}}
       end
     end
@@ -253,26 +258,30 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
 
   defp ensure_reasoning_content_for_tool_calls(msg), do: msg
 
+  # Parse SSE data - may contain multiple events batched together
   defp parse_sse_chunk(data) do
-    data
-    |> String.split("\n")
-    |> Enum.reduce(:skip, fn line, acc ->
-      cond do
-        String.starts_with?(line, "data: [DONE]") ->
-          :done
+    lines = String.split(data, "\n")
+    has_done = Enum.any?(lines, &String.starts_with?(&1, "data: [DONE]"))
 
-        String.starts_with?(line, "data: ") ->
-          json = String.trim_leading(line, "data: ")
+    chunks =
+      lines
+      |> Enum.filter(&String.starts_with?(&1, "data: "))
+      |> Enum.reject(&String.starts_with?(&1, "data: [DONE]"))
+      |> Enum.flat_map(fn line ->
+        json = String.trim_leading(line, "data: ")
 
-          case Jason.decode(json) do
-            {:ok, parsed} -> {:chunk, parsed}
-            _ -> acc
-          end
+        case Jason.decode(json) do
+          {:ok, parsed} -> [parsed]
+          _ -> []
+        end
+      end)
 
-        true ->
-          acc
-      end
-    end)
+    cond do
+      has_done and chunks == [] -> :done
+      has_done -> {:chunks_then_done, chunks}
+      chunks == [] -> :skip
+      true -> {:chunks, chunks}
+    end
   end
 
   defp accumulate_chunk(acc, chunk_data) do
@@ -285,13 +294,8 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
     tool_calls = accumulate_tool_calls(acc.tool_calls, chunk_data)
     usage = chunk_data["usage"] || acc.usage
 
-    new_finish_reason = get_in(chunk_data, ["choices", Access.at(0), "finish_reason"])
-
-    if new_finish_reason do
-      Logger.debug("[Moonshot] finish_reason received: #{inspect(new_finish_reason)}")
-    end
-
-    finish_reason = new_finish_reason || acc.finish_reason
+    finish_reason =
+      get_in(chunk_data, ["choices", Access.at(0), "finish_reason"]) || acc.finish_reason
 
     %{acc | content: content, tool_calls: tool_calls, usage: usage, finish_reason: finish_reason}
   end
@@ -302,7 +306,7 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
         existing
 
       calls when is_list(calls) ->
-        Logger.debug("[Moonshot] tool_calls chunk: #{inspect(calls)}")
+
         Enum.reduce(calls, existing, fn call, acc ->
           index = call["index"] || 0
 
