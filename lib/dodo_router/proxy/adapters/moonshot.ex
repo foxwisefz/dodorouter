@@ -56,22 +56,31 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
     ]
 
     start_time = System.monotonic_time(:millisecond)
-    initial_acc = %{content: "", usage: nil, finish_reason: nil, first_chunk_time: nil}
 
-    into_fun = fn {:data, data}, acc ->
-      acc = maybe_record_ttfb(acc, start_time)
+    into_fun = fn {:data, data}, {req, resp} ->
+      resp =
+        if resp.private[:stream_acc] == nil do
+          ttfb = System.monotonic_time(:millisecond) - start_time
+          initial_acc = %{content: "", usage: nil, finish_reason: nil, first_chunk_time: ttfb}
+          Req.Response.put_private(resp, :stream_acc, initial_acc)
+        else
+          resp
+        end
+
+      acc = resp.private.stream_acc
 
       case parse_sse_chunk(data) do
         {:chunk, chunk_data} ->
           send_chunk.(data)
-          {:cont, accumulate_chunk(acc, chunk_data)}
+          acc = accumulate_chunk(acc, chunk_data)
+          {:cont, {req, Req.Response.put_private(resp, :stream_acc, acc)}}
 
         :done ->
           send_chunk.("data: [DONE]\n\n")
-          {:halt, acc}
+          {:halt, {req, resp}}
 
         :skip ->
-          {:cont, acc}
+          {:cont, {req, resp}}
       end
     end
 
@@ -79,12 +88,16 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
            headers: headers,
            json: body,
            receive_timeout: @timeout_ms,
-           into: {into_fun, initial_acc}
+           into: into_fun
          ) do
-      {:ok, %{status: 200}, final_acc} ->
-        {:ok, build_final_response(final_acc, start_time)}
+      {:ok, %Req.Response{status: 200} = resp} ->
+        acc =
+          resp.private[:stream_acc] ||
+            %{content: "", usage: nil, finish_reason: nil, first_chunk_time: nil}
 
-      {:ok, %{status: status, body: response_body}} ->
+        {:ok, build_final_response(acc, start_time)}
+
+      {:ok, %Req.Response{status: status, body: response_body}} ->
         reason = Adapter.categorize_error(status, response_body)
         {:error, reason, %{status: status, body: response_body, latency_ms: latency(start_time)}}
 
@@ -140,12 +153,6 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
       end
     end)
   end
-
-  defp maybe_record_ttfb(%{first_chunk_time: nil} = acc, start_time) do
-    %{acc | first_chunk_time: System.monotonic_time(:millisecond) - start_time}
-  end
-
-  defp maybe_record_ttfb(acc, _start_time), do: acc
 
   defp accumulate_chunk(acc, chunk_data) do
     content =
