@@ -182,7 +182,7 @@ defmodule DodoRouterWeb.LogLive.Index do
               <td class="font-mono text-xs text-base-content/70">{format_time(log.inserted_at)}</td>
               <td :if={!@selected_router} class="text-sm">
                 <.link
-                  :if={Map.get(log, :router)}
+                  :if={is_struct(Map.get(log, :router), DodoRouter.Routers.Router)}
                   navigate={~p"/routers/#{log.router}"}
                   class="text-primary hover:underline"
                 >

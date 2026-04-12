@@ -57,7 +57,8 @@ defmodule DodoRouter.Logs do
       where: l.router_id == ^router.id,
       order_by: [desc: l.inserted_at],
       limit: ^limit,
-      offset: ^offset
+      offset: ^offset,
+      preload: [:router]
     )
     |> maybe_filter_status(opts[:status])
     |> maybe_filter_provider(opts[:provider])
