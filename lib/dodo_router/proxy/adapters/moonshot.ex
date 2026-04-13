@@ -196,28 +196,31 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
     if Map.has_key?(map, key), do: map, else: Map.put(map, key, default)
   end
 
-  defp maybe_put_thinking(body, %RoutingStep{model: "kimi-k2.5", thinking_enabled: enabled})
-       when is_boolean(enabled) do
-    thinking_type = if enabled, do: "enabled", else: "disabled"
-    Map.put(body, "thinking", %{"type" => thinking_type})
+  # kimi-k2.5 has thinking enabled by default - only disable if explicitly false
+  defp maybe_put_thinking(body, %RoutingStep{model: "kimi-k2.5", thinking_enabled: false}) do
+    Map.put(body, "thinking", %{"type" => "disabled"})
+  end
+
+  defp maybe_put_thinking(body, %RoutingStep{model: "kimi-k2.5"}) do
+    Map.put(body, "thinking", %{"type" => "enabled"})
   end
 
   defp maybe_put_thinking(body, _step), do: body
 
   # kimi-k2 models require reasoning_content on assistant messages when thinking is enabled.
   # Converts reasoning_details (OpenRouter-style) → reasoning_content (kimi-k2 flat format).
-  # Also ensures assistant tool-call messages have at least an empty reasoning_content.
-  # Note: thinking may be enabled by default for kimi-k2.5 even if thinking_enabled is nil in DB.
-  defp maybe_transform_kimi_reasoning(body, %RoutingStep{model: model})
+  # Only adds reasoning_content if thinking is NOT explicitly disabled.
+  defp maybe_transform_kimi_reasoning(body, %RoutingStep{model: model, thinking_enabled: thinking})
        when is_binary(model) do
-    if String.starts_with?(model, "kimi") do
+    # Only transform if kimi model AND thinking is not explicitly disabled
+    if String.starts_with?(model, "kimi") and thinking != false do
       messages =
         Enum.map(body["messages"] || [], fn msg ->
           case msg["role"] do
             "assistant" ->
               msg
               |> convert_reasoning_details()
-              |> ensure_reasoning_content_for_tool_calls()
+              |> ensure_reasoning_content()
 
             _ ->
               msg
@@ -250,13 +253,11 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
 
   defp convert_reasoning_details(msg), do: msg
 
-  # When thinking is enabled, kimi-k2 requires reasoning_content on every
-  # assistant message that has tool_calls. Add empty string if missing.
-  defp ensure_reasoning_content_for_tool_calls(%{"tool_calls" => _calls} = msg) do
+  # kimi-k2.5 has thinking enabled by default, so ALL assistant messages
+  # need reasoning_content, not just ones with tool_calls.
+  defp ensure_reasoning_content(msg) do
     Map.put_new(msg, "reasoning_content", "")
   end
-
-  defp ensure_reasoning_content_for_tool_calls(msg), do: msg
 
   # Parse SSE data - may contain multiple events batched together
   defp parse_sse_chunk(data) do
