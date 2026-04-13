@@ -81,11 +81,17 @@ defmodule DodoRouter.Proxy.Adapters.Zai do
       acc = resp.private.stream_acc
 
       case parse_sse_chunk(data) do
-        {:chunk, chunk_data} ->
+        {:chunks, chunks} ->
           send_chunk.(data)
-          acc = accumulate_chunk(acc, chunk_data)
+          acc = Enum.reduce(chunks, acc, &accumulate_chunk(&2, &1))
           Process.put(:__zai_stream_acc__, acc)
           {:cont, {req, Req.Response.put_private(resp, :stream_acc, acc)}}
+
+        {:chunks_then_done, chunks} ->
+          send_chunk.(data)
+          acc = Enum.reduce(chunks, acc, &accumulate_chunk(&2, &1))
+          Process.put(:__zai_stream_acc__, acc)
+          {:halt, {req, Req.Response.put_private(resp, :stream_acc, acc)}}
 
         :done ->
           send_chunk.("data: [DONE]\n\n")
@@ -151,26 +157,30 @@ defmodule DodoRouter.Proxy.Adapters.Zai do
     if Map.has_key?(map, key), do: map, else: Map.put(map, key, default)
   end
 
+  # Parse SSE data - may contain multiple events batched together
   defp parse_sse_chunk(data) do
-    data
-    |> String.split("\n")
-    |> Enum.reduce(:skip, fn line, acc ->
-      cond do
-        String.starts_with?(line, "data: [DONE]") ->
-          :done
+    lines = String.split(data, "\n")
+    has_done = Enum.any?(lines, &String.starts_with?(&1, "data: [DONE]"))
 
-        String.starts_with?(line, "data: ") ->
-          json = String.trim_leading(line, "data: ")
+    chunks =
+      lines
+      |> Enum.filter(&String.starts_with?(&1, "data: "))
+      |> Enum.reject(&String.starts_with?(&1, "data: [DONE]"))
+      |> Enum.flat_map(fn line ->
+        json = String.trim_leading(line, "data: ")
 
-          case Jason.decode(json) do
-            {:ok, parsed} -> {:chunk, parsed}
-            _ -> acc
-          end
+        case Jason.decode(json) do
+          {:ok, parsed} -> [parsed]
+          _ -> []
+        end
+      end)
 
-        true ->
-          acc
-      end
-    end)
+    cond do
+      has_done and chunks == [] -> :done
+      has_done -> {:chunks_then_done, chunks}
+      chunks == [] -> :skip
+      true -> {:chunks, chunks}
+    end
   end
 
   defp accumulate_chunk(acc, chunk_data) do
