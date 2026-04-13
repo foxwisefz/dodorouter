@@ -166,21 +166,27 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
     end
   end
 
-  defp build_request_body(request, %RoutingStep{} = step) do
+  @doc false
+  def build_request_body(request, %RoutingStep{} = step) do
     # Model always comes from routing step
     # Client values take precedence, step defaults are fallbacks
     body =
       request
+      |> IO.inspect(label: "L175")
       |> Adapter.sanitize_request()
+      |> IO.inspect(label: "L177")
       |> Map.put("model", step.model)
       |> maybe_default("temperature", step.temperature)
       |> maybe_default("max_tokens", step.max_tokens)
       |> maybe_default("top_p", nil)
+      |> IO.inspect(label: "L181")
       |> maybe_default("frequency_penalty", nil)
       |> maybe_default("presence_penalty", nil)
       |> maybe_default("stop", nil)
       |> maybe_put_thinking(step)
+      |> IO.inspect(label: "L184")
       |> maybe_transform_kimi_reasoning(step)
+      |> IO.inspect(label: "L189")
 
     Logger.info(
       "[Moonshot] Sending request model=#{body["model"]} msg_count=#{length(body["messages"] || [])}"
@@ -260,7 +266,8 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
   end
 
   # Parse SSE data - may contain multiple events batched together
-  defp parse_sse_chunk(data) do
+  @doc false
+  def parse_sse_chunk(data) do
     lines = String.split(data, "\n")
     has_done = Enum.any?(lines, &String.starts_with?(&1, "data: [DONE]"))
 
@@ -301,13 +308,13 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
     %{acc | content: content, tool_calls: tool_calls, usage: usage, finish_reason: finish_reason}
   end
 
-  defp accumulate_tool_calls(existing, chunk_data) do
+  @doc false
+  def accumulate_tool_calls(existing, chunk_data) do
     case get_in(chunk_data, ["choices", Access.at(0), "delta", "tool_calls"]) do
       nil ->
         existing
 
       calls when is_list(calls) ->
-
         Enum.reduce(calls, existing, fn call, acc ->
           index = call["index"] || 0
 
