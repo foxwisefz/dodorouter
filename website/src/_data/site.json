@@ -1,0 +1,5 @@
+{
+  "name": "Dodo Router",
+  "description": "OpenAI-compatible LLM proxy with automatic fallback across providers",
+  "url": "https://dodorouter.com"
+}
