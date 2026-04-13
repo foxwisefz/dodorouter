@@ -163,7 +163,9 @@ defmodule DodoRouter.Proxy.Adapter do
     sanitized =
       Enum.map(messages, fn msg ->
         msg
-        |> Map.take(~w(role content name tool_calls tool_call_id function_call reasoning_details))
+        |> Map.take(
+          ~w(role content name tool_calls tool_call_id function_call reasoning_details reasoning_content)
+        )
         |> normalize_message_content()
       end)
 

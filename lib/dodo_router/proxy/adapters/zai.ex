@@ -133,10 +133,12 @@ defmodule DodoRouter.Proxy.Adapters.Zai do
     end
   end
 
-  defp base_url(%RoutingStep{plan_type: "coding"}), do: @coding_base_url
-  defp base_url(_), do: @standard_base_url
+  @doc false
+  def base_url(%RoutingStep{plan_type: "coding"}), do: @coding_base_url
+  def base_url(_), do: @standard_base_url
 
-  defp build_request_body(request, %RoutingStep{} = step) do
+  @doc false
+  def build_request_body(request, %RoutingStep{} = step) do
     # Model always comes from routing step
     # Client values take precedence, step defaults are fallbacks
     request
@@ -158,7 +160,8 @@ defmodule DodoRouter.Proxy.Adapters.Zai do
   end
 
   # Parse SSE data - may contain multiple events batched together
-  defp parse_sse_chunk(data) do
+  @doc false
+  def parse_sse_chunk(data) do
     lines = String.split(data, "\n")
     has_done = Enum.any?(lines, &String.starts_with?(&1, "data: [DONE]"))
 
@@ -199,7 +202,8 @@ defmodule DodoRouter.Proxy.Adapters.Zai do
     %{acc | content: content, tool_calls: tool_calls, usage: usage, finish_reason: finish_reason}
   end
 
-  defp accumulate_tool_calls(existing, chunk_data) do
+  @doc false
+  def accumulate_tool_calls(existing, chunk_data) do
     case get_in(chunk_data, ["choices", Access.at(0), "delta", "tool_calls"]) do
       nil ->
         existing
