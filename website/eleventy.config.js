@@ -7,7 +7,7 @@ export default function (eleventyConfig) {
 
   // Add a date filter for Nunjucks
   eleventyConfig.addFilter("date", function (value, format) {
-    const date = value instanceof Date ? value : new Date(value);
+    const date = value === "now" ? new Date() : (value instanceof Date ? value : new Date(value));
     return date.getFullYear().toString();
   });
 
