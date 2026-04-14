@@ -2,49 +2,59 @@
 @source "../src";
 
 @theme {
-  /* Primary: A refined blue-purple inspired by Resend's palette */
-  --color-primary-50: oklch(97% 0.02 270);
-  --color-primary-100: oklch(94% 0.04 270);
-  --color-primary-200: oklch(89% 0.08 270);
-  --color-primary-300: oklch(82% 0.12 270);
-  --color-primary-400: oklch(72% 0.16 270);
-  --color-primary-500: oklch(62% 0.19 270);
-  --color-primary-600: oklch(55% 0.20 270);
-  --color-primary-700: oklch(48% 0.18 270);
-  --color-primary-800: oklch(40% 0.14 270);
-  --color-primary-900: oklch(32% 0.10 270);
-  --color-primary-950: oklch(22% 0.06 270);
+  /* Cream/Beige primary - from the dodo's body */
+  --color-cream-50: #fefdfb;
+  --color-cream-100: #fdf8f0;
+  --color-cream-200: #faf0de;
+  --color-cream-300: #f5e4c4;
+  --color-cream-400: #edd4a3;
+  --color-cream-500: #e3c085;
 
-  /* Accent: Warm amber for highlights */
-  --color-accent-50: oklch(98% 0.02 75);
-  --color-accent-100: oklch(95% 0.05 75);
-  --color-accent-200: oklch(90% 0.10 75);
-  --color-accent-300: oklch(82% 0.14 75);
-  --color-accent-400: oklch(75% 0.17 75);
-  --color-accent-500: oklch(68% 0.18 75);
-  --color-accent-600: oklch(60% 0.17 75);
-  --color-accent-700: oklch(52% 0.14 75);
-  --color-accent-800: oklch(44% 0.10 75);
-  --color-accent-900: oklch(36% 0.06 75);
+  /* Muted Orange/Amber - from the beak and feet */
+  --color-amber-50: #fff9eb;
+  --color-amber-100: #ffefc6;
+  --color-amber-200: #ffdf88;
+  --color-amber-300: #ffc94a;
+  --color-amber-400: #ffb020;
+  --color-amber-500: #f59407;
+  --color-amber-600: #d97002;
+  --color-amber-700: #b44d06;
+  --color-amber-800: #923a0c;
+  --color-amber-900: #78300d;
 
-  /* Surface colors for dark theme */
-  --color-surface-50: oklch(98% 0.005 270);
-  --color-surface-100: oklch(96% 0.005 270);
-  --color-surface-200: oklch(92% 0.005 270);
-  --color-surface-300: oklch(87% 0.005 270);
-  --color-surface-700: oklch(30% 0.01 270);
-  --color-surface-800: oklch(22% 0.01 270);
-  --color-surface-850: oklch(18% 0.01 270);
-  --color-surface-900: oklch(14% 0.01 270);
-  --color-surface-950: oklch(10% 0.01 270);
+  /* Dark outline color - from the logo's thick strokes */
+  --color-ink-50: #f5f5f6;
+  --color-ink-100: #e5e5e7;
+  --color-ink-200: #ceced2;
+  --color-ink-300: #b0b0b7;
+  --color-ink-400: #888890;
+  --color-ink-500: #6d6d76;
+  --color-ink-600: #5c5c64;
+  --color-ink-700: #4e4e55;
+  --color-ink-800: #444449;
+  --color-ink-900: #2a2a2e;
+  --color-ink-950: #1a1a1d;
 
-  /* Success/Warning/Error for status indicators */
-  --color-success-400: oklch(75% 0.18 155);
-  --color-success-500: oklch(65% 0.20 155);
-  --color-warning-400: oklch(80% 0.16 85);
-  --color-warning-500: oklch(72% 0.18 85);
-  --color-error-400: oklch(72% 0.20 25);
-  --color-error-500: oklch(62% 0.22 25);
+  /* Traffic Light Trio - status colors */
+  --color-go-400: #4ade80;
+  --color-go-500: #22c55e;
+  --color-go-600: #16a34a;
+  --color-slow-400: #facc15;
+  --color-slow-500: #eab308;
+  --color-slow-600: #ca8a04;
+  --color-stop-400: #f87171;
+  --color-stop-500: #ef4444;
+  --color-stop-600: #dc2626;
+
+  /* Pastel accents - from tail feathers */
+  --color-sky-300: #7dd3fc;
+  --color-sky-400: #38bdf8;
+  --color-sky-500: #0ea5e9;
+  --color-rose-300: #fda4af;
+  --color-rose-400: #fb7185;
+  --color-rose-500: #f43f5e;
+
+  --font-display: "Nunito", ui-sans-serif, system-ui, sans-serif;
 }
 
 /* Smooth scrolling */
@@ -52,52 +62,82 @@ html {
   scroll-behavior: smooth;
 }
 
-/* Subtle glow animation for hero */
-@keyframes pulse-glow {
-  0%, 100% { opacity: 0.4; }
-  50% { opacity: 0.7; }
+/* Bouncy spring animation */
+@keyframes bounce-in {
+  0% { transform: translateY(20px); opacity: 0; }
+  60% { transform: translateY(-4px); opacity: 1; }
+  80% { transform: translateY(2px); }
+  100% { transform: translateY(0); }
 }
 
-.animate-pulse-glow {
-  animation: pulse-glow 4s ease-in-out infinite;
+.animate-bounce-in {
+  animation: bounce-in 0.6s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
 }
 
-/* Gradient text - brighter for visibility */
+/* Gentle float animation for hero elements */
+@keyframes gentle-float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-8px); }
+}
+
+.animate-float {
+  animation: gentle-float 3s ease-in-out infinite;
+}
+
+/* Gradient text - warm amber gradient */
 .text-gradient {
-  background: linear-gradient(135deg, #a5b4fc, #818cf8, #6366f1);
+  background: linear-gradient(135deg, var(--color-amber-400), var(--color-amber-600));
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
 }
 
-/* Code block styling */
+/* Code block styling - sticker-style with thick border */
 .code-block {
-  background: #0a0a0f;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.6);
+  background: var(--color-ink-950);
+  border: 2.5px solid var(--color-ink-900);
+  border-radius: 20px;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.12);
 }
 
-/* Card hover effect */
+/* Sticker card - the core card style */
 .card-hover {
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: all 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
+  border: 2px solid var(--color-ink-200);
 }
 .card-hover:hover {
+  transform: translateY(-6px) scale(1.01);
+  border-color: var(--color-amber-300);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.1), 0 0 0 2px var(--color-amber-100);
+}
+
+/* Sticker card dark variant (for dashboard mockups) */
+.card-dark {
+  border: 2px solid var(--color-ink-800);
+  transition: all 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.card-dark:hover {
   transform: translateY(-4px);
-  border-color: rgba(255, 255, 255, 0.15);
-  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08), 0 12px 40px rgba(0, 0, 0, 0.5);
-  background-color: rgba(255, 255, 255, 0.04);
+  border-color: var(--color-amber-500);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.3);
 }
 
-/* Grid background pattern */
-.grid-bg {
-  background-image:
-    linear-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
-  background-size: 60px 60px;
-}
-
-/* Dot grid background */
-.dot-grid-bg {
-  background-image: radial-gradient(rgba(255, 255, 255, 0.07) 1px, transparent 1px);
+/* Subtle dot pattern for backgrounds */
+.dot-pattern {
+  background-image: radial-gradient(var(--color-amber-200) 1px, transparent 1px);
   background-size: 24px 24px;
+}
+
+/* Status pill styles */
+.status-go {
+  background: color-mix(in oklab, var(--color-go-500) 15%, transparent);
+  color: var(--color-go-600);
+}
+.status-slow {
+  background: color-mix(in oklab, var(--color-slow-500) 15%, transparent);
+  color: var(--color-slow-600);
+}
+.status-stop {
+  background: color-mix(in oklab, var(--color-stop-500) 15%, transparent);
+  color: var(--color-stop-600);
 }
