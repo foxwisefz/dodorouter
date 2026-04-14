@@ -1,26 +1,103 @@
 @import "tailwindcss";
+@source "../src";
 
 @theme {
-  --color-primary-50: oklch(97% 0.02 145);
-  --color-primary-100: oklch(93% 0.05 145);
-  --color-primary-200: oklch(87% 0.10 145);
-  --color-primary-300: oklch(78% 0.13 145);
-  --color-primary-400: oklch(68% 0.16 145);
-  --color-primary-500: oklch(60% 0.17 145);
-  --color-primary-600: oklch(55% 0.18 145);
-  --color-primary-700: oklch(48% 0.17 145);
-  --color-primary-800: oklch(40% 0.14 145);
-  --color-primary-900: oklch(32% 0.11 145);
-  --color-primary-950: oklch(22% 0.08 145);
+  /* Primary: A refined blue-purple inspired by Resend's palette */
+  --color-primary-50: oklch(97% 0.02 270);
+  --color-primary-100: oklch(94% 0.04 270);
+  --color-primary-200: oklch(89% 0.08 270);
+  --color-primary-300: oklch(82% 0.12 270);
+  --color-primary-400: oklch(72% 0.16 270);
+  --color-primary-500: oklch(62% 0.19 270);
+  --color-primary-600: oklch(55% 0.20 270);
+  --color-primary-700: oklch(48% 0.18 270);
+  --color-primary-800: oklch(40% 0.14 270);
+  --color-primary-900: oklch(32% 0.10 270);
+  --color-primary-950: oklch(22% 0.06 270);
 
-  --color-accent-50: oklch(97% 0.02 55);
-  --color-accent-100: oklch(93% 0.05 55);
-  --color-accent-200: oklch(87% 0.10 55);
-  --color-accent-300: oklch(78% 0.13 55);
-  --color-accent-400: oklch(70% 0.16 55);
-  --color-accent-500: oklch(65% 0.18 55);
-  --color-accent-600: oklch(58% 0.18 55);
-  --color-accent-700: oklch(50% 0.16 55);
-  --color-accent-800: oklch(42% 0.12 55);
-  --color-accent-900: oklch(35% 0.08 55);
+  /* Accent: Warm amber for highlights */
+  --color-accent-50: oklch(98% 0.02 75);
+  --color-accent-100: oklch(95% 0.05 75);
+  --color-accent-200: oklch(90% 0.10 75);
+  --color-accent-300: oklch(82% 0.14 75);
+  --color-accent-400: oklch(75% 0.17 75);
+  --color-accent-500: oklch(68% 0.18 75);
+  --color-accent-600: oklch(60% 0.17 75);
+  --color-accent-700: oklch(52% 0.14 75);
+  --color-accent-800: oklch(44% 0.10 75);
+  --color-accent-900: oklch(36% 0.06 75);
+
+  /* Surface colors for dark theme */
+  --color-surface-50: oklch(98% 0.005 270);
+  --color-surface-100: oklch(96% 0.005 270);
+  --color-surface-200: oklch(92% 0.005 270);
+  --color-surface-300: oklch(87% 0.005 270);
+  --color-surface-700: oklch(30% 0.01 270);
+  --color-surface-800: oklch(22% 0.01 270);
+  --color-surface-850: oklch(18% 0.01 270);
+  --color-surface-900: oklch(14% 0.01 270);
+  --color-surface-950: oklch(10% 0.01 270);
+
+  /* Success/Warning/Error for status indicators */
+  --color-success-400: oklch(75% 0.18 155);
+  --color-success-500: oklch(65% 0.20 155);
+  --color-warning-400: oklch(80% 0.16 85);
+  --color-warning-500: oklch(72% 0.18 85);
+  --color-error-400: oklch(72% 0.20 25);
+  --color-error-500: oklch(62% 0.22 25);
+}
+
+/* Smooth scrolling */
+html {
+  scroll-behavior: smooth;
+}
+
+/* Subtle glow animation for hero */
+@keyframes pulse-glow {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 0.7; }
+}
+
+.animate-pulse-glow {
+  animation: pulse-glow 4s ease-in-out infinite;
+}
+
+/* Gradient text - brighter for visibility */
+.text-gradient {
+  background: linear-gradient(135deg, #a5b4fc, #818cf8, #6366f1);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* Code block styling */
+.code-block {
+  background: #0a0a0f;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.6);
+}
+
+/* Card hover effect */
+.card-hover {
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.card-hover:hover {
+  transform: translateY(-4px);
+  border-color: rgba(255, 255, 255, 0.15);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08), 0 12px 40px rgba(0, 0, 0, 0.5);
+  background-color: rgba(255, 255, 255, 0.04);
+}
+
+/* Grid background pattern */
+.grid-bg {
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+  background-size: 60px 60px;
+}
+
+/* Dot grid background */
+.dot-grid-bg {
+  background-image: radial-gradient(rgba(255, 255, 255, 0.07) 1px, transparent 1px);
+  background-size: 24px 24px;
 }
