@@ -237,8 +237,14 @@ defmodule DodoRouterWeb.RouterLive.Show do
   def render(assigns) do
     ~H"""
     <div id="router-show-page" class="relative overflow-hidden" phx-hook="PulseRing">
+      <!-- Gradient mesh background -->
+      <div id="gradient-mesh" class="gradient-mesh">
+        <div class="gradient-mesh-blob"></div>
+      </div>
       <!-- Pulse ring origin (top-center, clipped by parent) -->
       <div id="pulse-ring-container" class="pulse-ring-container"></div>
+      <!-- Content sits above the mesh -->
+      <div class="relative z-10">
       <!-- Header -->
       <div id="router-header" class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-8">
         <div>
@@ -770,6 +776,7 @@ defmodule DodoRouterWeb.RouterLive.Show do
           </div>
         </form>
       </.modal>
+      </div><!-- close content z-10 wrapper -->
     </div>
     """
   end
