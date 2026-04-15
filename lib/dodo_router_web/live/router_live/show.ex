@@ -244,7 +244,7 @@ defmodule DodoRouterWeb.RouterLive.Show do
       <!-- Pulse ring origin (top-center, clipped by parent) -->
       <div id="pulse-ring-container" class="pulse-ring-container"></div>
       <!-- Content sits above the mesh -->
-      <div class="relative z-10">
+      <div class="relative z-10" id="glass-parallax-root" phx-hook="GlassParallax">
       <!-- Header -->
       <div id="router-header" class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-8">
         <div>
@@ -375,26 +375,26 @@ defmodule DodoRouterWeb.RouterLive.Show do
       
     <!-- Stats -->
       <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-        <div class="stat-card">
+        <div class="stat-card" data-glass-card>
           <div class="stat-label">Requests (24h)</div>
           <div class="stat-value">{@stats.total_requests}</div>
         </div>
-        <div class="stat-card">
+        <div class="stat-card" data-glass-card>
           <div class="stat-label">Success Rate</div>
           <div class={["stat-value", success_color(@stats)]}>{success_rate(@stats)}</div>
         </div>
-        <div class="stat-card">
+        <div class="stat-card" data-glass-card>
           <div class="stat-label">Tokens Used</div>
           <div class="stat-value">{format_number(@stats.total_tokens)}</div>
         </div>
-        <div class="stat-card">
+        <div class="stat-card" data-glass-card>
           <div class="stat-label">Avg Latency</div>
           <div class="stat-value">{format_latency(@stats.avg_latency_ms)}</div>
         </div>
       </div>
       
     <!-- Quick Start Card -->
-      <div class="card-bordered p-5 mb-6">
+      <div class="card-bordered p-5 mb-6" data-glass-card>
         <div class="flex items-center justify-between mb-4">
           <h2 class="section-title mb-0">Quick Start</h2>
           <div class="flex bg-base-200 rounded-lg p-1 gap-1">
@@ -586,7 +586,7 @@ defmodule DodoRouterWeb.RouterLive.Show do
       </div>
       
     <!-- Recent Logs -->
-      <div class="card-bordered p-5 mb-6">
+      <div class="card-bordered p-5 mb-6" data-glass-card id="recent-logs-card">
         <div class="flex items-center justify-between mb-4">
           <h2 class="section-title mb-0">Recent Logs</h2>
           <.link
@@ -642,7 +642,7 @@ defmodule DodoRouterWeb.RouterLive.Show do
       </div>
       
     <!-- Live Events -->
-      <div :if={length(@recent_events) > 0} class="card-bordered p-5">
+      <div :if={length(@recent_events) > 0} class="card-bordered p-5" data-glass-card>
         <div class="flex items-center gap-3 mb-4">
           <h2 class="section-title mb-0">Recent Events</h2>
           <span class="flex items-center gap-1.5 px-2 py-0.5 bg-success/10 rounded text-xs font-medium text-success">
