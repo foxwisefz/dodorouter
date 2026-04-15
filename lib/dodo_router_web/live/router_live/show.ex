@@ -236,11 +236,11 @@ defmodule DodoRouterWeb.RouterLive.Show do
   @impl true
   def render(assigns) do
     ~H"""
-    <div>
+    <div id="router-show-page" class="relative overflow-hidden" phx-hook="PulseRing">
+      <!-- Pulse ring origin (top-center, clipped by parent) -->
+      <div id="pulse-ring-container" class="pulse-ring-container"></div>
       <!-- Header -->
-      <div id="router-header" class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-8 relative" phx-hook="PulseRing">
-        <!-- Pulse ring container for heartbeat animation -->
-        <div id="pulse-ring-container" class="pulse-ring-container"></div>
+      <div id="router-header" class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-8">
         <div>
           <div class="flex items-center gap-3">
             <.link

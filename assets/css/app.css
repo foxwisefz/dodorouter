@@ -522,69 +522,55 @@ input.input,
    Live Request Pulse Ring (Heartbeat)
    ============================================ */
 
-/* The container that holds the pulse rings */
+/* The container that holds the pulse rings - positioned at top center */
 .pulse-ring-container {
   position: absolute;
-  top: 50%;
-  right: 0;
-  width: 40px;
-  height: 40px;
-  transform: translateY(-50%);
+  top: 0;
+  left: 50%;
+  width: 0;
+  height: 0;
   pointer-events: none;
   overflow: visible;
+  z-index: 10;
 }
 
-/* Each individual ring */
+/* Each individual ring - wide ellipse origin at top edge */
 .pulse-ring {
   position: absolute;
-  top: 50%;
-  left: 50%;
-  width: 12px;
-  height: 12px;
+  top: 0;
+  left: 0;
+  width: 60px;
+  height: 30px;
   border-radius: 50%;
   transform: translate(-50%, -50%) scale(0);
   opacity: 0;
-  border: 2px solid oklch(65% 0.18 145);
-  box-shadow: 0 0 8px oklch(65% 0.18 145 / 0.3);
-  animation: pulse-ring-expand 2s ease-out forwards;
+  border: 1px solid oklch(65% 0.18 145 / 0.6);
+  box-shadow: 0 0 6px oklch(65% 0.18 145 / 0.2), inset 0 0 6px oklch(65% 0.18 145 / 0.1);
+  animation: pulse-ring-expand 2.5s ease-out forwards;
 }
 
 .pulse-ring.result-success {
-  border-color: oklch(65% 0.18 145);
-  box-shadow: 0 0 12px oklch(65% 0.18 145 / 0.4);
-  animation: pulse-ring-expand-final 1.2s ease-out forwards;
+  border-color: oklch(65% 0.18 145 / 0.8);
+  box-shadow: 0 0 10px oklch(65% 0.18 145 / 0.3), inset 0 0 10px oklch(65% 0.18 145 / 0.15);
+  animation: pulse-ring-expand-final 1.5s ease-out forwards;
 }
 
 .pulse-ring.result-fallback {
-  border-color: oklch(75% 0.18 55);
-  box-shadow: 0 0 12px oklch(75% 0.18 55 / 0.4);
-  animation: pulse-ring-expand-final 1.2s ease-out forwards;
+  border-color: oklch(75% 0.18 55 / 0.8);
+  box-shadow: 0 0 10px oklch(75% 0.18 55 / 0.3), inset 0 0 10px oklch(75% 0.18 55 / 0.15);
+  animation: pulse-ring-expand-final 1.5s ease-out forwards;
 }
 
 .pulse-ring.result-error {
-  border-color: oklch(60% 0.22 25);
-  box-shadow: 0 0 12px oklch(60% 0.22 25 / 0.4);
-  animation: pulse-ring-expand-final 1.2s ease-out forwards;
+  border-color: oklch(60% 0.22 25 / 0.8);
+  box-shadow: 0 0 10px oklch(60% 0.22 25 / 0.3), inset 0 0 10px oklch(60% 0.22 25 / 0.15);
+  animation: pulse-ring-expand-final 1.5s ease-out forwards;
 }
 
 @keyframes pulse-ring-expand {
   0% {
     transform: translate(-50%, -50%) scale(0);
-    opacity: 0.7;
-  }
-  100% {
-    transform: translate(-50%, -50%) scale(6);
-    opacity: 0;
-  }
-}
-
-@keyframes pulse-ring-expand-final {
-  0% {
-    transform: translate(-50%, -50%) scale(0);
-    opacity: 0.9;
-  }
-  50% {
-    opacity: 0.5;
+    opacity: 0.6;
   }
   100% {
     transform: translate(-50%, -50%) scale(10);
@@ -592,25 +578,39 @@ input.input,
   }
 }
 
+@keyframes pulse-ring-expand-final {
+  0% {
+    transform: translate(-50%, -50%) scale(0);
+    opacity: 0.8;
+  }
+  50% {
+    opacity: 0.4;
+  }
+  100% {
+    transform: translate(-50%, -50%) scale(16);
+    opacity: 0;
+  }
+}
+
 /* Light theme */
 [data-theme="light"] .pulse-ring {
-  border-color: oklch(55% 0.18 145);
-  box-shadow: 0 0 6px oklch(55% 0.18 145 / 0.2);
+  border-color: oklch(55% 0.18 145 / 0.5);
+  box-shadow: 0 0 4px oklch(55% 0.18 145 / 0.15), inset 0 0 4px oklch(55% 0.18 145 / 0.08);
 }
 
 [data-theme="light"] .pulse-ring.result-success {
-  border-color: oklch(55% 0.18 145);
-  box-shadow: 0 0 10px oklch(55% 0.18 145 / 0.3);
+  border-color: oklch(55% 0.18 145 / 0.7);
+  box-shadow: 0 0 8px oklch(55% 0.18 145 / 0.25), inset 0 0 8px oklch(55% 0.18 145 / 0.12);
 }
 
 [data-theme="light"] .pulse-ring.result-fallback {
-  border-color: oklch(70% 0.18 55);
-  box-shadow: 0 0 10px oklch(70% 0.18 55 / 0.3);
+  border-color: oklch(70% 0.18 55 / 0.7);
+  box-shadow: 0 0 8px oklch(70% 0.18 55 / 0.25), inset 0 0 8px oklch(70% 0.18 55 / 0.12);
 }
 
 [data-theme="light"] .pulse-ring.result-error {
-  border-color: oklch(55% 0.22 25);
-  box-shadow: 0 0 10px oklch(55% 0.22 25 / 0.3);
+  border-color: oklch(55% 0.22 25 / 0.7);
+  box-shadow: 0 0 8px oklch(55% 0.22 25 / 0.25), inset 0 0 8px oklch(55% 0.22 25 / 0.12);
 }
 
 /* ============================================
