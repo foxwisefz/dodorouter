@@ -44,10 +44,13 @@ defmodule DodoRouter.Proxy.FallbackChain do
   end
 
   defp run_chain(%{steps: []} = state) do
+    broadcast_step_completed(state.router_id, nil, :error, nil)
     %{state | status: :error}
   end
 
   defp run_chain(%{steps: [step | rest]} = state) do
+    step_index = length(state.attempted_steps)
+    broadcast_step_started(state.router_id, step, step_index)
     start_time = System.monotonic_time(:millisecond)
     endpoint = endpoint_for(step)
 
@@ -68,13 +71,16 @@ defmodule DodoRouter.Proxy.FallbackChain do
         # Prepend any partial content from previous failed attempts
         response = prepend_partial_content(response, state.partial_content)
 
-        %{
+        final_state = %{
           state
           | final_response: response,
             response_headers: meta[:headers],
             attempted_steps: state.attempted_steps ++ [attempt],
             status: status
         }
+
+        broadcast_step_completed(state.router_id, step, status, latency(start_time))
+        final_state
 
       {:error, reason, details} ->
         # Track midstream fallback info (partial content already sent to client)
@@ -100,6 +106,7 @@ defmodule DodoRouter.Proxy.FallbackChain do
         state = %{state | attempted_steps: state.attempted_steps ++ [attempt]}
 
         if Adapter.should_fallback?(reason) and length(rest) > 0 do
+          broadcast_step_completed(state.router_id, step, :fallback, latency(start_time))
           state = accumulate_partial_content(state, details)
           # Reconstruct request with partial assistant message so next provider continues
           state = reconstruct_request(state)
@@ -114,9 +121,41 @@ defmodule DodoRouter.Proxy.FallbackChain do
             )
           end
 
+          broadcast_step_completed(state.router_id, step, :error, latency(start_time))
           %{state | status: :error}
         end
     end
+  end
+
+  defp broadcast_step_started(router_id, step, step_index) do
+    Phoenix.PubSub.broadcast(
+      DodoRouter.PubSub,
+      "router:#{router_id}:events",
+      {:step_started,
+       %{
+         step_id: step.id,
+         provider: step.provider,
+         model: step.model,
+         step_index: step_index,
+         timestamp: DateTime.utc_now()
+       }}
+    )
+  end
+
+  defp broadcast_step_completed(router_id, step, status, latency_ms) do
+    Phoenix.PubSub.broadcast(
+      DodoRouter.PubSub,
+      "router:#{router_id}:events",
+      {:step_completed,
+       %{
+         step_id: if(step, do: step.id),
+         provider: if(step, do: step.provider),
+         model: if(step, do: step.model),
+         status: status,
+         latency_ms: latency_ms,
+         timestamp: DateTime.utc_now()
+       }}
+    )
   end
 
   defp execute_step(%RoutingStep{} = step, state) do

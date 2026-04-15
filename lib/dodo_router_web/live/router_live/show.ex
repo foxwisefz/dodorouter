@@ -26,6 +26,7 @@ defmodule DodoRouterWeb.RouterLive.Show do
       |> assign(:stats, Logs.stats(router))
       |> assign(:recent_events, [])
       |> assign(:stats_timer, nil)
+      |> assign(:active_request, false)
       |> assign(:has_routing_steps, length(router.routing_steps) > 0)
       |> assign(:has_logs, length(recent_logs) > 0)
       |> assign(:snippet_tab, "curl")
@@ -171,6 +172,27 @@ defmodule DodoRouterWeb.RouterLive.Show do
   end
 
   @impl true
+  def handle_info({:step_started, step_info}, socket) do
+    {:noreply,
+     socket
+     |> assign(:active_request, true)
+     |> push_event("step_started", %{
+       step_id: step_info.step_id,
+       step_index: step_info.step_index,
+       provider: step_info.provider,
+       model: step_info.model
+     })}
+  end
+
+  def handle_info({:step_completed, step_info}, socket) do
+    {:noreply,
+     push_event(socket, "step_completed", %{
+       step_id: step_info.step_id,
+       status: to_string(step_info.status),
+       latency_ms: step_info.latency_ms
+     })}
+  end
+
   def handle_info({:proxy_event, event}, socket) do
     recent_events = [event | Enum.take(socket.assigns.recent_events, 9)]
 
@@ -181,7 +203,9 @@ defmodule DodoRouterWeb.RouterLive.Show do
     {:noreply,
      socket
      |> assign(:recent_events, recent_events)
-     |> assign(:stats_timer, timer)}
+     |> assign(:stats_timer, timer)
+     |> assign(:active_request, false)
+     |> push_event("request_completed", %{status: to_string(event.status)})}
   end
 
   def handle_info(:refresh_stats, socket) do
@@ -402,123 +426,150 @@ defmodule DodoRouterWeb.RouterLive.Show do
       </div>
       
     <!-- Routing Chain -->
-      <div class="card-bordered p-5 mb-6">
+      <div class="card-bordered p-5 mb-6" id="routing-chain-container" phx-hook="RequestFlowAnimation">
         <div class="flex items-center justify-between mb-4">
-          <h2 class="section-title mb-0">Routing Chain</h2>
+          <div class="flex items-center gap-3">
+            <h2 class="section-title mb-0">Routing Chain</h2>
+            <div
+              :if={@active_request}
+              class="flex items-center gap-2 px-2.5 py-1 bg-primary/10 rounded-full text-xs font-medium text-primary"
+            >
+              <span class="request-flow-pulse w-2 h-2 rounded-full bg-primary"></span> Processing...
+            </div>
+          </div>
           <.link patch={~p"/routers/#{@router}/routing"} class="btn btn-primary btn-sm">
             Add Step
           </.link>
         </div>
-        <div id="routing-steps" phx-update="stream" class="space-y-3">
+        <div id="routing-steps" phx-update="stream" class="relative">
           <div
             :for={{dom_id, step} <- @streams.routing_steps}
             id={dom_id}
-            class="step-card flex items-center gap-4"
+            data-step-id={step.id}
+            data-step-index={step.position}
+            class="step-card-wrapper"
           >
-            <div class="w-8 h-8 rounded-lg bg-primary/20 text-primary flex items-center justify-center font-bold text-sm flex-shrink-0">
-              {step.position + 1}
-            </div>
-            <div class="flex-1 min-w-0">
-              <div class="flex items-center gap-2 flex-wrap">
-                <span class="font-medium text-base-content/90">{step.provider}</span>
-                <span class="text-base-content/40">/</span>
-                <span class="font-mono text-sm text-base-content/70">{step.model}</span>
-                <span
-                  :if={step.plan_type == "coding"}
-                  class="px-1.5 py-0.5 rounded text-xs bg-secondary/20 text-secondary"
-                >
-                  coding
-                </span>
-                <span
-                  :if={step.thinking_enabled}
-                  class="px-1.5 py-0.5 rounded text-xs bg-accent/20 text-accent"
-                >
-                  thinking
-                </span>
-              </div>
-              <div class="mt-2">
-                <.form for={%{}} phx-change="assign_key">
-                  <input type="hidden" name="step_id" value={step.id} />
-                  <select
-                    name="key_id"
-                    class={"text-sm py-1.5 px-3 rounded-lg border transition-colors appearance-none bg-no-repeat bg-right pr-8 #{if step.provider_key_id, do: "bg-base-200/50 border-base-300/30 text-base-content/70", else: "bg-warning/5 border-warning/30 text-warning"}"}
-                    style="background-image: url('data:image/svg+xml;charset=UTF-8,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 20 20%22 fill=%22%236b7280%22%3E%3Cpath fill-rule=%22evenodd%22 d=%22M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z%22 clip-rule=%22evenodd%22/%3E%3C/svg%3E');"
-                  >
-                    <option value="">-- Select API Key --</option>
-                    <%= for key <- matching_keys(@provider_keys, step.provider) do %>
-                      <option value={key.id} selected={step.provider_key_id == key.id}>
-                        {key.label}
-                      </option>
-                    <% end %>
-                  </select>
-                </.form>
-              </div>
-            </div>
-            <div class="flex flex-col gap-1">
-              <button
-                phx-click="move_step_up"
-                phx-value-id={step.id}
-                class="p-1 rounded hover:bg-base-300 text-base-content/40 hover:text-base-content transition-colors"
-                title="Move up"
-              >
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  class="h-4 w-4"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                >
-                  <path
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    stroke-width="2"
-                    d="M5 15l7-7 7 7"
-                  />
-                </svg>
-              </button>
-              <button
-                phx-click="move_step_down"
-                phx-value-id={step.id}
-                class="p-1 rounded hover:bg-base-300 text-base-content/40 hover:text-base-content transition-colors"
-                title="Move down"
-              >
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  class="h-4 w-4"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                >
-                  <path
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    stroke-width="2"
-                    d="M19 9l-7 7-7-7"
-                  />
-                </svg>
-              </button>
-            </div>
-            <button
-              phx-click="delete_step"
-              phx-value-id={step.id}
-              class="p-2 rounded-lg hover:bg-error/10 text-base-content/40 hover:text-error transition-colors"
-              data-confirm="Remove this step?"
+            <!-- Connecting line between steps -->
+            <div
+              :if={step.position > 0}
+              class="step-connector"
+              data-connector-index={step.position}
             >
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                class="h-4 w-4"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
+              <div class="step-connector-line"></div>
+              <div class="step-connector-pulse"></div>
+            </div>
+            <!-- The step card itself -->
+            <div class="step-card flex items-center gap-4 relative overflow-hidden">
+              <!-- Animated border glow overlay -->
+              <div class="step-glow-overlay"></div>
+              <!-- Step number with status ring -->
+              <div class="step-number-ring" data-step-number={step.position + 1}>
+                <div class="w-8 h-8 rounded-lg bg-primary/20 text-primary flex items-center justify-center font-bold text-sm flex-shrink-0 relative z-10">
+                  {step.position + 1}
+                </div>
+              </div>
+              <div class="flex-1 min-w-0">
+                <div class="flex items-center gap-2 flex-wrap">
+                  <span class="font-medium text-base-content/90">{step.provider}</span>
+                  <span class="text-base-content/40">/</span>
+                  <span class="font-mono text-sm text-base-content/70">{step.model}</span>
+                  <span
+                    :if={step.plan_type == "coding"}
+                    class="px-1.5 py-0.5 rounded text-xs bg-secondary/20 text-secondary"
+                  >
+                    coding
+                  </span>
+                  <span
+                    :if={step.thinking_enabled}
+                    class="px-1.5 py-0.5 rounded text-xs bg-accent/20 text-accent"
+                  >
+                    thinking
+                  </span>
+                </div>
+                <div class="mt-2">
+                  <.form for={%{}} phx-change="assign_key">
+                    <input type="hidden" name="step_id" value={step.id} />
+                    <select
+                      name="key_id"
+                      class={"text-sm py-1.5 px-3 rounded-lg border transition-colors appearance-none bg-no-repeat bg-right pr-8 #{if step.provider_key_id, do: "bg-base-200/50 border-base-300/30 text-base-content/70", else: "bg-warning/5 border-warning/30 text-warning"}"}
+                      style="background-image: url('data:image/svg+xml;charset=UTF-8,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 20 20%22 fill=%22%236b7280%22%3E%3Cpath fill-rule=%22evenodd%22 d=%22M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z%22 clip-rule=%22evenodd%22/%3E%3C/svg%3E');"
+                    >
+                      <option value="">-- Select API Key --</option>
+                      <%= for key <- matching_keys(@provider_keys, step.provider) do %>
+                        <option value={key.id} selected={step.provider_key_id == key.id}>
+                          {key.label}
+                        </option>
+                      <% end %>
+                    </select>
+                  </.form>
+                </div>
+              </div>
+              <div class="flex flex-col gap-1">
+                <button
+                  phx-click="move_step_up"
+                  phx-value-id={step.id}
+                  class="p-1 rounded hover:bg-base-300 text-base-content/40 hover:text-base-content transition-colors"
+                  title="Move up"
+                >
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    class="h-4 w-4"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                  >
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="2"
+                      d="M5 15l7-7 7 7"
+                    />
+                  </svg>
+                </button>
+                <button
+                  phx-click="move_step_down"
+                  phx-value-id={step.id}
+                  class="p-1 rounded hover:bg-base-300 text-base-content/40 hover:text-base-content transition-colors"
+                  title="Move down"
+                >
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    class="h-4 w-4"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                  >
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="2"
+                      d="M19 9l-7 7-7-7"
+                    />
+                  </svg>
+                </button>
+              </div>
+              <button
+                phx-click="delete_step"
+                phx-value-id={step.id}
+                class="p-2 rounded-lg hover:bg-error/10 text-base-content/40 hover:text-error transition-colors"
+                data-confirm="Remove this step?"
               >
-                <path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  stroke-width="2"
-                  d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-                />
-              </svg>
-            </button>
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  class="h-4 w-4"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                >
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                  />
+                </svg>
+              </button>
+            </div>
           </div>
         </div>
         <p :if={!@has_routing_steps} class="empty-state py-8">
