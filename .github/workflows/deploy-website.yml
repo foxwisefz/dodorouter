@@ -1,0 +1,51 @@
+name: Deploy Website
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'website/**'
+  workflow_dispatch:
+
+# Prevent concurrent deployments
+concurrency:
+  group: deploy-website
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: website/package-lock.json
+
+      - name: Install dependencies
+        working-directory: website
+        run: npm ci
+
+      - name: Build site
+        working-directory: website
+        run: npm run build
+
+      - name: Setup Tailscale
+        uses: tailscale/github-action@v2
+        with:
+          authkey: ${{ secrets.TAILSCALE_AUTHKEY }}
+
+      - name: Deploy with rsync
+        run: |
+          rsync -avz --delete \
+            -e "ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10" \
+            website/_site/ \
+            ${{ secrets.WEBSITE_DEPLOY_USER }}@${{ secrets.WEBSITE_DEPLOY_HOST }}:${{ secrets.WEBSITE_DEPLOY_PATH }}/
