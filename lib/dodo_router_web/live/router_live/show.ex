@@ -464,7 +464,7 @@ defmodule DodoRouterWeb.RouterLive.Show do
               <div class="step-glow-overlay"></div>
               <!-- Step number with status ring -->
               <div class="step-number-ring" data-step-number={step.position + 1}>
-                <div class="w-8 h-8 rounded-lg bg-primary/20 text-primary flex items-center justify-center font-bold text-sm flex-shrink-0 relative z-10">
+                <div class="w-8 h-8 rounded-full bg-primary/20 text-primary flex items-center justify-center font-bold text-sm flex-shrink-0 relative z-10">
                   {step.position + 1}
                 </div>
               </div>

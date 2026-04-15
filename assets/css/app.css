@@ -315,7 +315,7 @@ input.input,
   position: absolute;
   width: 36px;
   height: 36px;
-  border-radius: 10px;
+  border-radius: 50%;
   border: 2px solid transparent;
   transition: all 0.3s ease;
 }
