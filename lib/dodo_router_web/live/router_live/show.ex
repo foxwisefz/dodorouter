@@ -588,7 +588,7 @@ defmodule DodoRouterWeb.RouterLive.Show do
             View all logs
           </.link>
         </div>
-        <div id="recent-logs" phx-update="stream" class="space-y-2">
+        <div id="recent-logs" phx-update="stream" phx-hook="LogEntryAnimations" class="space-y-2">
           <.link
             :for={{dom_id, log} <- @streams.recent_logs}
             id={dom_id}
