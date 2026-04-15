@@ -238,7 +238,9 @@ defmodule DodoRouterWeb.RouterLive.Show do
     ~H"""
     <div>
       <!-- Header -->
-      <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-8">
+      <div id="router-header" class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-8 relative" phx-hook="PulseRing">
+        <!-- Pulse ring container for heartbeat animation -->
+        <div id="pulse-ring-container" class="pulse-ring-container"></div>
         <div>
           <div class="flex items-center gap-3">
             <.link

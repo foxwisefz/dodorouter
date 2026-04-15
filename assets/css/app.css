@@ -519,6 +519,101 @@ input.input,
 }
 
 /* ============================================
+   Live Request Pulse Ring (Heartbeat)
+   ============================================ */
+
+/* The container that holds the pulse rings */
+.pulse-ring-container {
+  position: absolute;
+  top: 50%;
+  right: 0;
+  width: 40px;
+  height: 40px;
+  transform: translateY(-50%);
+  pointer-events: none;
+  overflow: visible;
+}
+
+/* Each individual ring */
+.pulse-ring {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  transform: translate(-50%, -50%) scale(0);
+  opacity: 0;
+  border: 2px solid oklch(65% 0.18 145);
+  box-shadow: 0 0 8px oklch(65% 0.18 145 / 0.3);
+  animation: pulse-ring-expand 2s ease-out forwards;
+}
+
+.pulse-ring.result-success {
+  border-color: oklch(65% 0.18 145);
+  box-shadow: 0 0 12px oklch(65% 0.18 145 / 0.4);
+  animation: pulse-ring-expand-final 1.2s ease-out forwards;
+}
+
+.pulse-ring.result-fallback {
+  border-color: oklch(75% 0.18 55);
+  box-shadow: 0 0 12px oklch(75% 0.18 55 / 0.4);
+  animation: pulse-ring-expand-final 1.2s ease-out forwards;
+}
+
+.pulse-ring.result-error {
+  border-color: oklch(60% 0.22 25);
+  box-shadow: 0 0 12px oklch(60% 0.22 25 / 0.4);
+  animation: pulse-ring-expand-final 1.2s ease-out forwards;
+}
+
+@keyframes pulse-ring-expand {
+  0% {
+    transform: translate(-50%, -50%) scale(0);
+    opacity: 0.7;
+  }
+  100% {
+    transform: translate(-50%, -50%) scale(6);
+    opacity: 0;
+  }
+}
+
+@keyframes pulse-ring-expand-final {
+  0% {
+    transform: translate(-50%, -50%) scale(0);
+    opacity: 0.9;
+  }
+  50% {
+    opacity: 0.5;
+  }
+  100% {
+    transform: translate(-50%, -50%) scale(10);
+    opacity: 0;
+  }
+}
+
+/* Light theme */
+[data-theme="light"] .pulse-ring {
+  border-color: oklch(55% 0.18 145);
+  box-shadow: 0 0 6px oklch(55% 0.18 145 / 0.2);
+}
+
+[data-theme="light"] .pulse-ring.result-success {
+  border-color: oklch(55% 0.18 145);
+  box-shadow: 0 0 10px oklch(55% 0.18 145 / 0.3);
+}
+
+[data-theme="light"] .pulse-ring.result-fallback {
+  border-color: oklch(70% 0.18 55);
+  box-shadow: 0 0 10px oklch(70% 0.18 55 / 0.3);
+}
+
+[data-theme="light"] .pulse-ring.result-error {
+  border-color: oklch(55% 0.22 25);
+  box-shadow: 0 0 10px oklch(55% 0.22 25 / 0.3);
+}
+
+/* ============================================
    Log Entry Animations
    ============================================ */
 
