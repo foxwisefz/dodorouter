@@ -120,42 +120,6 @@
   background: oklch(24% 0.012 250 / 0.5);
   backdrop-filter: blur(16px) saturate(1.2);
   -webkit-backdrop-filter: blur(16px) saturate(1.2);
-  position: relative;
-  overflow: hidden;
-  transition: transform 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94), box-shadow 0.3s ease;
-}
-
-/* Light refraction shimmer overlay */
-.card-bordered::before {
-  content: "";
-  position: absolute;
-  top: 0;
-  left: -100%;
-  width: 50%;
-  height: 100%;
-  background: linear-gradient(
-    90deg,
-    transparent 0%,
-    oklch(100% 0 0 / 0.03) 40%,
-    oklch(100% 0 0 / 0.06) 50%,
-    oklch(100% 0 0 / 0.03) 60%,
-    transparent 100%
-  );
-  pointer-events: none;
-  z-index: 1;
-  transition: left 0.6s ease;
-}
-
-.card-bordered:hover::before {
-  left: 150%;
-}
-
-/* Glass border glow on hover */
-.card-bordered:hover {
-  border-color: oklch(75% 0.1 250 / 0.2);
-  box-shadow:
-    0 8px 32px oklch(0% 0 0 / 0.2),
-    inset 0 1px 0 oklch(100% 0 0 / 0.05);
 }
 
 /* Stat card - frosted glass metric display */
@@ -164,41 +128,6 @@
   background: oklch(24% 0.012 250 / 0.5);
   backdrop-filter: blur(16px) saturate(1.2);
   -webkit-backdrop-filter: blur(16px) saturate(1.2);
-  position: relative;
-  overflow: hidden;
-  transition: transform 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94), box-shadow 0.3s ease;
-}
-
-/* Light refraction shimmer overlay */
-.stat-card::before {
-  content: "";
-  position: absolute;
-  top: 0;
-  left: -100%;
-  width: 50%;
-  height: 100%;
-  background: linear-gradient(
-    90deg,
-    transparent 0%,
-    oklch(100% 0 0 / 0.03) 40%,
-    oklch(100% 0 0 / 0.06) 50%,
-    oklch(100% 0 0 / 0.03) 60%,
-    transparent 100%
-  );
-  pointer-events: none;
-  z-index: 1;
-  transition: left 0.6s ease;
-}
-
-.stat-card:hover::before {
-  left: 150%;
-}
-
-.stat-card:hover {
-  border-color: oklch(75% 0.1 250 / 0.2);
-  box-shadow:
-    0 8px 32px oklch(0% 0 0 / 0.2),
-    inset 0 1px 0 oklch(100% 0 0 / 0.05);
 }
 
 .stat-card .stat-label {
@@ -599,124 +528,6 @@ input.input,
    Live Request Pulse Ring (Heartbeat)
    ============================================ */
 
-/* Gradient mesh background - slow shifting color blobs */
-.gradient-mesh {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  z-index: 0;
-  overflow: hidden;
-  opacity: 0.4;
-  transition: opacity 0.6s ease;
-}
-
-.gradient-mesh::before,
-.gradient-mesh::after {
-  content: "";
-  position: absolute;
-  border-radius: 50%;
-  filter: blur(80px);
-  animation: mesh-drift 20s ease-in-out infinite alternate;
-}
-
-.gradient-mesh::before {
-  width: 50%;
-  height: 50%;
-  top: -10%;
-  left: -5%;
-  background: radial-gradient(
-    circle,
-    oklch(65% 0.12 145 / 0.3) 0%,
-    oklch(55% 0.10 175 / 0.15) 40%,
-    transparent 70%
-  );
-}
-
-.gradient-mesh::after {
-  width: 45%;
-  height: 45%;
-  bottom: -10%;
-  right: -5%;
-  background: radial-gradient(
-    circle,
-    oklch(75% 0.10 55 / 0.2) 0%,
-    oklch(60% 0.08 230 / 0.1) 40%,
-    transparent 70%
-  );
-  animation-delay: -10s;
-  animation-direction: alternate-reverse;
-}
-
-/* Third blob via an inner element */
-.gradient-mesh-blob {
-  position: absolute;
-  width: 40%;
-  height: 40%;
-  top: 30%;
-  left: 40%;
-  border-radius: 50%;
-  filter: blur(90px);
-  background: radial-gradient(
-    circle,
-    oklch(60% 0.08 230 / 0.15) 0%,
-    oklch(65% 0.06 145 / 0.08) 40%,
-    transparent 70%
-  );
-  animation: mesh-drift 25s ease-in-out infinite alternate-reverse;
-  animation-delay: -5s;
-}
-
-@keyframes mesh-drift {
-  0% {
-    transform: translate(0, 0) scale(1);
-  }
-  33% {
-    transform: translate(10%, 5%) scale(1.1);
-  }
-  66% {
-    transform: translate(-5%, 10%) scale(0.95);
-  }
-  100% {
-    transform: translate(5%, -5%) scale(1.05);
-  }
-}
-
-/* Intensified state during active requests */
-.gradient-mesh.intensify {
-  opacity: 0.7;
-  transition: opacity 0.3s ease;
-}
-
-.gradient-mesh.intensify::before {
-  animation-duration: 8s;
-}
-
-.gradient-mesh.intensify::after {
-  animation-duration: 8s;
-}
-
-.gradient-mesh.intensify .gradient-mesh-blob {
-  animation-duration: 10s;
-}
-
-/* Light theme - softer mesh */
-[data-theme="light"] .gradient-mesh {
-  opacity: 0.25;
-}
-
-[data-theme="light"] .gradient-mesh.intensify {
-  opacity: 0.45;
-}
-
-[data-theme="light"] .gradient-mesh::before,
-[data-theme="light"] .gradient-mesh::after {
-  filter: blur(100px);
-}
-
-[data-theme="light"] .gradient-mesh-blob {
-  filter: blur(110px);
-}
-
 /* The container that holds the pulse rings - positioned at top center */
 .pulse-ring-container {
   position: absolute;
@@ -921,67 +732,12 @@ input.input,
    Glassmorphism Cards - 3D Tilt Parallax
    ============================================ */
 
-/* Applied via JS when mouse enters a glass card */
-.glass-tilting {
-  transform-style: preserve-3d;
-  will-change: transform;
-}
-
-/* Specular highlight that follows mouse position */
-.glass-specular {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  pointer-events: none;
-  z-index: 2;
-  opacity: 0;
-  transition: opacity 0.3s ease;
-  background: radial-gradient(
-    circle at var(--specular-x, 50%) var(--specular-y, 50%),
-    oklch(100% 0 0 / 0.08) 0%,
-    oklch(100% 0 0 / 0.02) 30%,
-    transparent 60%
-  );
-}
-
-.glass-tilting .glass-specular {
-  opacity: 1;
-}
-
 /* Light theme glass cards */
 [data-theme="light"] .card-bordered,
-[data-theme="light"] .stat-card {
+[data-theme="light"] .stat-card,
+[data-theme="light"] .chart-container,
+[data-theme="light"] .table-container,
+[data-theme="light"] .provider-card {
   background: oklch(98% 0.005 250 / 0.6);
   border-color: oklch(50% 0.01 250 / 0.15);
-}
-
-[data-theme="light"] .card-bordered:hover,
-[data-theme="light"] .stat-card:hover {
-  border-color: oklch(60% 0.05 250 / 0.25);
-  box-shadow:
-    0 8px 32px oklch(0% 0 0 / 0.08),
-    inset 0 1px 0 oklch(100% 0 0 / 0.3);
-}
-
-[data-theme="light"] .card-bordered::before,
-[data-theme="light"] .stat-card::before {
-  background: linear-gradient(
-    90deg,
-    transparent 0%,
-    oklch(100% 0 0 / 0.15) 40%,
-    oklch(100% 0 0 / 0.25) 50%,
-    oklch(100% 0 0 / 0.15) 60%,
-    transparent 100%
-  );
-}
-
-[data-theme="light"] .glass-specular {
-  background: radial-gradient(
-    circle at var(--specular-x, 50%) var(--specular-y, 50%),
-    oklch(100% 0 0 / 0.15) 0%,
-    oklch(100% 0 0 / 0.05) 30%,
-    transparent 60%
-  );
 }
