@@ -1,0 +1,21 @@
+{
+  "name": "dodo-router-website",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Marketing website for Dodo Router",
+  "scripts": {
+    "build": "npm run build:css && npx @11ty/eleventy",
+    "build:css": "npx @tailwindcss/cli -i src/css/app.css -o _site/assets/css/app.css --minify",
+    "dev": "concurrently \"npm run dev:css\" \"npm run dev:eleventy\"",
+    "dev:css": "npx @tailwindcss/cli -i src/css/app.css -o _site/assets/css/app.css --watch",
+    "dev:eleventy": "npx @11ty/eleventy --serve --quiet",
+    "clean": "rm -rf _site"
+  },
+  "devDependencies": {
+    "@11ty/eleventy": "^3.0.0",
+    "@tailwindcss/cli": "^4.1.0",
+    "tailwindcss": "^4.1.0",
+    "concurrently": "^9.1.0"
+  }
+}
