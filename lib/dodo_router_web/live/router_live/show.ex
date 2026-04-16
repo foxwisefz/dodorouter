@@ -471,9 +471,9 @@ defmodule DodoRouterWeb.RouterLive.Show do
               <h2 class="section-title mb-0">Routing Chain</h2>
               <div
                 :if={@active_request}
-                class="flex items-center gap-2 px-2.5 py-1 bg-primary/10 rounded-full text-xs font-medium text-primary"
+                class="flex items-center gap-2 px-2.5 py-1 bg-green-500/25 rounded-full text-xs font-medium text-green-400"
               >
-                <span class="request-flow-pulse w-2 h-2 rounded-full bg-primary"></span> Processing...
+                <span class="request-flow-pulse w-2 h-2 rounded-full bg-green-400"></span> Processing...
               </div>
             </div>
             <.link patch={~p"/routers/#{@router}/routing"} class="btn btn-primary btn-sm">
