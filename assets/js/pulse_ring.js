@@ -1,9 +1,8 @@
 /**
- * PulseRing Hook (now a notification bar indicator)
+ * PulseRing Hook (notification bar indicator)
  *
  * Shows a horizontal notification bar that drops down from the top of the page
- * when requests are in-flight. Displays "Processing X request(s)" with a
- * pulsing dot. Supports concurrent requests with a live counter.
+ * when requests are in-flight.
  */
 
 export const PulseRing = {
@@ -11,47 +10,53 @@ export const PulseRing = {
     this.bar = null
     this.countEl = null
     this.activeCount = 0
+    this.removeTimer = null
 
-    this.handleEvent("step_started", () => this.onRequestStart())
-    this.handleEvent("request_completed", ({status}) => this.onRequestComplete(status))
+    this.handleEvent("step_started", (_payload) => {
+      this.activeCount++
+      this.showBar()
+      this.updateCount()
+    })
+
+    this.handleEvent("step_completed", (_payload) => {
+      if (this.activeCount > 0) {
+        this.activeCount--
+      }
+      if (this.activeCount === 0) {
+        this.updateCountTo("Completing...")
+      } else {
+        this.updateCount()
+      }
+    })
+
+    this.handleEvent("request_completed", ({status}) => {
+      if (this.activeCount <= 0 && this.bar) {
+        this.startRemoval(status)
+      }
+    })
   },
 
   destroyed() {
+    if (this.removeTimer) clearTimeout(this.removeTimer)
     this.removeBar()
   },
 
-  onRequestStart() {
-    this.activeCount++
-
-    if (!this.bar) {
-      this.createBar()
+  showBar() {
+    if (this.bar) {
+      if (!document.contains(this.bar)) {
+        this.bar = null
+        this.countEl = null
+      } else {
+        if (this.removeTimer) {
+          clearTimeout(this.removeTimer)
+          this.removeTimer = null
+        }
+        this.bar.className = "request-peek-bar active"
+        return
+      }
     }
 
-    this.updateCount()
-  },
-
-  onRequestComplete(status) {
-    if (this.activeCount > 0) {
-      this.activeCount--
-    }
-
-    if (this.activeCount === 0 && this.bar) {
-      // No more active requests — flash result and remove
-      this.bar.classList.remove("active")
-      this.bar.classList.add(`result-${status}`)
-
-      this.bar.addEventListener("animationend", () => {
-        this.removeBar()
-      }, { once: true })
-
-      // Safety cleanup
-      setTimeout(() => this.removeBar(), 1200)
-    } else if (this.bar) {
-      this.updateCount()
-    }
-  },
-
-  createBar() {
+    // Create fresh bar
     this.bar = document.createElement("div")
     this.bar.className = "request-peek-bar active"
 
@@ -67,6 +72,21 @@ export const PulseRing = {
     this.el.prepend(this.bar)
   },
 
+  startRemoval(status) {
+    if (this.removeTimer) {
+      clearTimeout(this.removeTimer)
+    }
+
+    this.bar.classList.remove("active")
+    void this.bar.offsetHeight
+    this.bar.classList.add(`result-${status}`)
+
+    this.removeTimer = setTimeout(() => {
+      this.removeBar()
+      this.removeTimer = null
+    }, 1000)
+  },
+
   updateCount() {
     if (!this.countEl) return
 
@@ -75,6 +95,10 @@ export const PulseRing = {
     } else {
       this.countEl.textContent = `Processing ${this.activeCount} requests`
     }
+  },
+
+  updateCountTo(text) {
+    if (this.countEl) this.countEl.textContent = text
   },
 
   removeBar() {
