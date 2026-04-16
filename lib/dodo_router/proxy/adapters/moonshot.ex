@@ -173,6 +173,7 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
     body =
       request
       |> Adapter.sanitize_request()
+      |> Adapter.flatten_content_to_string()
       |> Map.put("model", step.model)
       |> maybe_default("temperature", step.temperature)
       |> maybe_default("max_tokens", step.max_tokens)
@@ -180,6 +181,8 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
       |> maybe_default("frequency_penalty", nil)
       |> maybe_default("presence_penalty", nil)
       |> maybe_default("stop", nil)
+      |> clamp_temperature()
+      |> handle_tool_choice_required()
       |> maybe_put_thinking(step)
       |> maybe_transform_kimi_reasoning(step)
 
@@ -197,10 +200,53 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
     if Map.has_key?(map, key), do: map, else: Map.put(map, key, default)
   end
 
+  # Moonshot temperature range is [0, 1], OpenAI is [0, 2]
+  # Also: if temp < 0.3 and n > 1, Moonshot raises an exception
+  defp clamp_temperature(body) do
+    case body["temperature"] do
+      nil ->
+        body
+
+      temp when is_number(temp) ->
+        n = body["n"] || 1
+        clamped = temp |> max(0.0) |> min(1.0)
+
+        # Bump to 0.3 if n > 1 and temp < 0.3
+        clamped = if clamped < 0.3 and n > 1, do: 0.3, else: clamped
+
+        Map.put(body, "temperature", clamped)
+
+      _ ->
+        body
+    end
+  end
+
+  # Moonshot doesn't support tool_choice="required"
+  # Workaround: add a user message asking to select a tool
+  defp handle_tool_choice_required(%{"tool_choice" => "required"} = body) do
+    messages = body["messages"] || []
+
+    messages =
+      messages ++
+        [
+          %{
+            "role" => "user",
+            "content" => "Please select a tool to handle the current issue."
+          }
+        ]
+
+    body
+    |> Map.put("messages", messages)
+    |> Map.delete("tool_choice")
+  end
+
+  defp handle_tool_choice_required(body), do: body
+
   defguardp is_kimi_thinking_model(model)
             when is_binary(model) and
                    (binary_part(model, 0, 7) == "kimi-k2" or model == "kimi-for-coding")
 
+  # kimi thinking models have thinking enabled by default - only disable if explicitly false
   defp maybe_put_thinking(body, %RoutingStep{model: model, thinking_enabled: false})
        when is_kimi_thinking_model(model) do
     Map.put(body, "thinking", %{"type" => "disabled"})

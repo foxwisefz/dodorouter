@@ -3,6 +3,11 @@ defmodule DodoRouter.Proxy.Adapters.DeepSeek do
   Adapter for DeepSeek API.
 
   Supports DeepSeek V3 (chat) and DeepSeek R1 (reasoner) models.
+
+  Transformations applied:
+  - Flatten content arrays to strings (doesn't support list format)
+  - Normalize thinking param (only accepts {"type": "enabled"})
+  - Map reasoning_effort to thinking enabled
   """
 
   use DodoRouter.Proxy.Adapter.Registry,
@@ -16,6 +21,7 @@ defmodule DodoRouter.Proxy.Adapters.DeepSeek do
     color: "cyan",
     short_description: "DeepSeek V3, R1 models"
 
+  alias DodoRouter.Proxy.Adapter
   alias DodoRouter.Proxy.Adapters.OpenAICompatible
   alias DodoRouter.Routers.RoutingStep
 
@@ -23,11 +29,40 @@ defmodule DodoRouter.Proxy.Adapters.DeepSeek do
 
   @impl true
   def call(request, %RoutingStep{} = step, api_key) do
-    OpenAICompatible.call(request, step, api_key, @base_url, provider: "deepseek")
+    request
+    |> transform_request()
+    |> OpenAICompatible.call(step, api_key, @base_url, provider: "deepseek")
   end
 
   @impl true
   def stream(request, %RoutingStep{} = step, api_key, send_chunk) do
-    OpenAICompatible.stream(request, step, api_key, send_chunk, @base_url, provider: "deepseek")
+    request
+    |> transform_request()
+    |> OpenAICompatible.stream(step, api_key, send_chunk, @base_url, provider: "deepseek")
+  end
+
+  defp transform_request(request) do
+    request
+    |> Adapter.flatten_content_to_string()
+    |> normalize_thinking_param()
+  end
+
+  # DeepSeek only accepts {"type": "enabled"} for thinking, no budget_tokens
+  defp normalize_thinking_param(request) do
+    thinking = request["thinking"]
+    reasoning_effort = request["reasoning_effort"]
+
+    request = Map.delete(request, "reasoning_effort")
+
+    cond do
+      is_map(thinking) and thinking["type"] == "enabled" ->
+        Map.put(request, "thinking", %{"type" => "enabled"})
+
+      reasoning_effort not in [nil, "none"] ->
+        Map.put(request, "thinking", %{"type" => "enabled"})
+
+      true ->
+        Map.delete(request, "thinking")
+    end
   end
 end

@@ -2,7 +2,11 @@ defmodule DodoRouter.Proxy.Adapters.Cohere do
   @moduledoc """
   Adapter for Cohere API.
 
-  Supports Command R and Command R+ models via OpenAI-compatible endpoint.
+  Supports Command R and Command R+ models via Cohere's v2 chat endpoint.
+
+  Transformations applied:
+  - Maps OpenAI params to Cohere params (top_p → p, n → num_generations, stop → stop_sequences)
+  - Transforms response back to OpenAI format
   """
 
   use DodoRouter.Proxy.Adapter.Registry,
@@ -16,18 +20,230 @@ defmodule DodoRouter.Proxy.Adapters.Cohere do
     color: "coral",
     short_description: "Command R, R+ models"
 
-  alias DodoRouter.Proxy.Adapters.OpenAICompatible
+  require Logger
+
+  alias DodoRouter.Proxy.Adapter
   alias DodoRouter.Routers.RoutingStep
 
   @base_url "https://api.cohere.com/v2"
+  @timeout_ms 120_000
 
   @impl true
   def call(request, %RoutingStep{} = step, api_key) do
-    OpenAICompatible.call(request, step, api_key, @base_url, provider: "cohere")
+    url = @base_url <> "/chat"
+    body = build_cohere_request(request, step)
+
+    headers = [
+      {"Authorization", "Bearer #{api_key}"},
+      {"Content-Type", "application/json"}
+    ]
+
+    start_time = System.monotonic_time(:millisecond)
+
+    case Req.post(url, headers: headers, json: body, receive_timeout: @timeout_ms) do
+      {:ok, %{status: 200, body: response_body}} ->
+        {:ok, convert_to_openai_format(response_body)}
+
+      {:ok, %{status: status, body: response_body}} ->
+        Logger.error("[Cohere] Non-200 response: status=#{status} body=#{inspect(response_body)}")
+        reason = Adapter.categorize_error(status, response_body)
+        {:error, reason, %{status: status, body: response_body, latency_ms: latency(start_time)}}
+
+      {:error, %Req.TransportError{reason: :timeout}} ->
+        {:error, :timeout, %{latency_ms: latency(start_time)}}
+
+      {:error, reason} ->
+        {:error, :unknown, %{reason: reason, latency_ms: latency(start_time)}}
+    end
   end
 
   @impl true
   def stream(request, %RoutingStep{} = step, api_key, send_chunk) do
-    OpenAICompatible.stream(request, step, api_key, send_chunk, @base_url, provider: "cohere")
+    url = @base_url <> "/chat"
+    body = build_cohere_request(request, step) |> Map.put("stream", true)
+
+    headers = [
+      {"Authorization", "Bearer #{api_key}"},
+      {"Content-Type", "application/json"}
+    ]
+
+    start_time = System.monotonic_time(:millisecond)
+
+    into_fun = fn {:data, data}, {req, resp} ->
+      resp =
+        if resp.private[:stream_acc] == nil do
+          ttfb = System.monotonic_time(:millisecond) - start_time
+          initial_acc = %{content: "", usage: nil, first_chunk_time: ttfb}
+          Req.Response.put_private(resp, :stream_acc, initial_acc)
+        else
+          resp
+        end
+
+      acc = resp.private.stream_acc
+
+      case parse_cohere_sse(data) do
+        {:events, events} ->
+          {new_acc, openai_chunks} = process_cohere_events(acc, events)
+          Enum.each(openai_chunks, &send_chunk.(&1))
+          {:cont, {req, Req.Response.put_private(resp, :stream_acc, new_acc)}}
+
+        :done ->
+          send_chunk.("data: [DONE]\n\n")
+          {:halt, {req, resp}}
+
+        :skip ->
+          {:cont, {req, resp}}
+      end
+    end
+
+    result = Req.post(url, headers: headers, json: body, receive_timeout: @timeout_ms, into: into_fun)
+
+    case result do
+      {:ok, %Req.Response{status: 200} = resp} ->
+        acc = resp.private[:stream_acc] || %{content: "", usage: nil, first_chunk_time: nil}
+        {:ok, build_final_response(acc)}
+
+      {:ok, %Req.Response{status: status, body: response_body}} ->
+        reason = Adapter.categorize_error(status, response_body)
+        {:error, reason, %{status: status, body: response_body, latency_ms: latency(start_time)}}
+
+      {:error, %Req.TransportError{reason: :timeout}} ->
+        {:error, :timeout, %{latency_ms: latency(start_time)}}
+
+      {:error, reason} ->
+        {:error, :unknown, %{reason: reason, latency_ms: latency(start_time)}}
+    end
   end
+
+  defp build_cohere_request(request, step) do
+    base =
+      request
+      |> Adapter.sanitize_request()
+      |> Map.put("model", step.model)
+
+    # Map OpenAI params to Cohere params
+    base
+    |> map_param("top_p", "p")
+    |> map_param("n", "num_generations")
+    |> map_param("stop", "stop_sequences")
+  end
+
+  defp map_param(body, from_key, to_key) do
+    case Map.pop(body, from_key) do
+      {nil, body} -> body
+      {value, body} -> Map.put(body, to_key, value)
+    end
+  end
+
+  defp convert_to_openai_format(cohere_response) do
+    message = cohere_response["message"] || %{}
+    content_parts = message["content"] || []
+
+    content =
+      content_parts
+      |> Enum.map(fn part -> part["text"] || "" end)
+      |> Enum.join("")
+
+    tool_calls =
+      (message["tool_calls"] || [])
+      |> Enum.with_index()
+      |> Enum.map(fn {tc, idx} ->
+        Map.put(tc, "index", idx)
+      end)
+
+    openai_message = %{"role" => "assistant", "content" => content}
+
+    openai_message =
+      if tool_calls != [], do: Map.put(openai_message, "tool_calls", tool_calls), else: openai_message
+
+    usage =
+      case cohere_response["usage"]["tokens"] do
+        %{"input_tokens" => input, "output_tokens" => output} ->
+          %{
+            "prompt_tokens" => input,
+            "completion_tokens" => output,
+            "total_tokens" => (input || 0) + (output || 0)
+          }
+
+        _ ->
+          nil
+      end
+
+    response = %{
+      "choices" => [%{"index" => 0, "message" => openai_message, "finish_reason" => "stop"}]
+    }
+
+    if usage, do: Map.put(response, "usage", usage), else: response
+  end
+
+  defp parse_cohere_sse(data) do
+    lines = data |> String.split("\n") |> Enum.map(&String.trim/1) |> Enum.reject(&(&1 == ""))
+
+    events =
+      lines
+      |> Enum.filter(&String.starts_with?(&1, "data: "))
+      |> Enum.map(fn "data: " <> json ->
+        case Jason.decode(json) do
+          {:ok, parsed} -> parsed
+          _ -> nil
+        end
+      end)
+      |> Enum.reject(&is_nil/1)
+
+    cond do
+      Enum.any?(events, &(&1["type"] == "message-end")) -> :done
+      events == [] -> :skip
+      true -> {:events, events}
+    end
+  end
+
+  defp process_cohere_events(acc, events) do
+    Enum.reduce(events, {acc, []}, fn event, {acc, chunks} ->
+      case event["type"] do
+        "content-delta" ->
+          text = get_in(event, ["delta", "message", "content", "text"]) || ""
+          new_acc = %{acc | content: acc.content <> text}
+
+          if text != "" do
+            chunk = "data: #{Jason.encode!(%{"choices" => [%{"index" => 0, "delta" => %{"content" => text}}]})}\n\n"
+            {new_acc, chunks ++ [chunk]}
+          else
+            {new_acc, chunks}
+          end
+
+        "message-end" ->
+          usage = get_in(event, ["delta", "usage", "tokens"])
+
+          new_acc =
+            if usage do
+              %{
+                acc
+                | usage: %{
+                    "prompt_tokens" => usage["input_tokens"],
+                    "completion_tokens" => usage["output_tokens"],
+                    "total_tokens" => (usage["input_tokens"] || 0) + (usage["output_tokens"] || 0)
+                  }
+              }
+            else
+              acc
+            end
+
+          {new_acc, chunks}
+
+        _ ->
+          {acc, chunks}
+      end
+    end)
+  end
+
+  defp build_final_response(acc) do
+    response = %{
+      "choices" => [%{"index" => 0, "message" => %{"role" => "assistant", "content" => acc.content}, "finish_reason" => "stop"}],
+      "_meta" => %{"ttfb_ms" => acc.first_chunk_time}
+    }
+
+    if acc.usage, do: Map.put(response, "usage", acc.usage), else: response
+  end
+
+  defp latency(start_time), do: System.monotonic_time(:millisecond) - start_time
 end
