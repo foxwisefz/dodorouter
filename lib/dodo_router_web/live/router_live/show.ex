@@ -237,8 +237,6 @@ defmodule DodoRouterWeb.RouterLive.Show do
   def render(assigns) do
     ~H"""
     <div id="router-show-page" class="relative overflow-hidden" phx-hook="PulseRing">
-      <!-- Pulse ring origin (top-center, clipped by parent) -->
-      <div id="pulse-ring-container" class="pulse-ring-container"></div>
       <!-- Content -->
       <div class="relative z-10">
       <!-- Header -->
