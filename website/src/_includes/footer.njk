@@ -1,29 +1,19 @@
-<footer class="border-t-2 border-ink-200 bg-cream-100">
-  <div class="mx-auto max-w-6xl px-6 py-16">
-    <div class="grid gap-12 md:grid-cols-3">
-      <div>
-        <a href="/" class="flex items-center gap-2">
-          <img src="/assets/images/dodo-logo-horizontal.png" alt="DodoRouter" class="h-6" />
-        </a>
-        <p class="mt-4 text-sm leading-relaxed font-semibold text-ink-500">OpenAI-compatible LLM proxy with automatic fallback across providers.</p>
+<footer class="border-t border-border bg-background">
+  <div class="mx-auto max-w-6xl px-6 md:px-12 lg:px-20 py-12">
+    <div class="flex flex-col items-center justify-between gap-6 md:flex-row">
+      <div class="flex items-center gap-3">
+        <img src="/assets/images/dodo-logo-horizontal.png" alt="DodoRouter" class="h-6" />
+        <span class="text-sm text-muted-foreground">OpenAI-compatible LLM proxy with automatic fallback.</span>
       </div>
-      <div>
-        <h4 class="text-sm font-extrabold text-ink-950">Product</h4>
-        <ul class="mt-4 space-y-3">
-          <li><a href="/#features" class="text-sm font-semibold text-ink-500 transition-colors hover:text-ink-950">Features</a></li>
-          <li><a href="/#providers" class="text-sm font-semibold text-ink-500 transition-colors hover:text-ink-950">Providers</a></li>
-          <li><a href="/#pricing" class="text-sm font-semibold text-ink-500 transition-colors hover:text-ink-950">Pricing</a></li>
-        </ul>
-      </div>
-      <div>
-        <h4 class="text-sm font-extrabold text-ink-950">Legal</h4>
-        <ul class="mt-4 space-y-3">
-          <li><a href="https://api.dodorouter.com/terms" class="text-sm font-semibold text-ink-500 transition-colors hover:text-ink-950">Terms of Service</a></li>
-        </ul>
+      <div class="flex items-center gap-6">
+        <a href="/#features" class="text-sm text-muted-foreground transition-colors hover:text-foreground">Features</a>
+        <a href="/#providers" class="text-sm text-muted-foreground transition-colors hover:text-foreground">Providers</a>
+        <a href="/#pricing" class="text-sm text-muted-foreground transition-colors hover:text-foreground">Pricing</a>
+        <a href="https://api.dodorouter.com/terms" class="text-sm text-muted-foreground transition-colors hover:text-foreground">Terms</a>
       </div>
     </div>
-    <div class="mt-12 border-t-2 border-ink-200 pt-8 text-center">
-      <p class="text-sm font-bold text-ink-400">&copy; {{ "now" | date }} Foxwise AI. All rights reserved.</p>
+    <div class="mt-8 border-t border-border pt-6 text-center">
+      <p class="text-xs text-muted-foreground">&copy; {{ "now" | date }} Foxwise AI. All rights reserved.</p>
     </div>
   </div>
 </footer>
