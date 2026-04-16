@@ -174,13 +174,19 @@ defmodule DodoRouterWeb.RouterLive.Show do
 
   @impl true
   def handle_info({:step_started, step_info}, socket) do
-    active_requests = socket.assigns.active_requests + 1
+    socket =
+      if step_info.step_index == 0 do
+        active_requests = socket.assigns.active_requests + 1
+
+        socket
+        |> assign(:active_requests, active_requests)
+        |> assign(:active_request, true)
+      else
+        socket
+      end
 
     {:noreply,
-     socket
-     |> assign(:active_requests, active_requests)
-     |> assign(:active_request, true)
-     |> push_event("step_started", %{
+     push_event(socket, "step_started", %{
        step_id: step_info.step_id,
        step_index: step_info.step_index,
        provider: step_info.provider,
@@ -189,13 +195,8 @@ defmodule DodoRouterWeb.RouterLive.Show do
   end
 
   def handle_info({:step_completed, step_info}, socket) do
-    active_requests = max(0, socket.assigns.active_requests - 1)
-
     {:noreply,
-     socket
-     |> assign(:active_requests, active_requests)
-     |> assign(:active_request, active_requests > 0)
-     |> push_event("step_completed", %{
+     push_event(socket, "step_completed", %{
        step_id: step_info.step_id,
        status: to_string(step_info.status),
        latency_ms: step_info.latency_ms
@@ -208,10 +209,14 @@ defmodule DodoRouterWeb.RouterLive.Show do
     if socket.assigns[:stats_timer], do: Process.cancel_timer(socket.assigns[:stats_timer])
     timer = Process.send_after(self(), :refresh_stats, 500)
 
+    active_requests = max(0, socket.assigns.active_requests - 1)
+
     {:noreply,
      socket
      |> assign(:recent_events, recent_events)
      |> assign(:stats_timer, timer)
+     |> assign(:active_requests, active_requests)
+     |> assign(:active_request, active_requests > 0)
      |> push_event("request_completed", %{status: to_string(event.status)})}
   end
 
