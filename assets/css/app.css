@@ -114,20 +114,16 @@
    DodoRouter Design System
    ============================================ */
 
-/* Card with frosted glass effect */
+/* Card - minimal, for content sections that need containment */
 .card-bordered {
-  @apply rounded-xl border border-white/10;
-  background: oklch(24% 0.012 250 / 0.5);
-  backdrop-filter: blur(16px) saturate(1.2);
-  -webkit-backdrop-filter: blur(16px) saturate(1.2);
+  @apply rounded-xl p-5;
+  background: oklch(22% 0.010 250 / 0.35);
 }
 
-/* Stat card - frosted glass metric display */
+/* Stat card - clean, minimal metric display */
 .stat-card {
-  @apply rounded-xl border border-white/10 p-5;
-  background: oklch(24% 0.012 250 / 0.5);
-  backdrop-filter: blur(16px) saturate(1.2);
-  -webkit-backdrop-filter: blur(16px) saturate(1.2);
+  @apply rounded-xl p-4;
+  background: oklch(22% 0.010 250 / 0.25);
 }
 
 .stat-card .stat-label {
@@ -147,9 +143,9 @@
   @apply text-base-content/80;
 }
 
-/* Section headers */
+/* Section headers - lighter weight */
 .section-title {
-  @apply text-lg font-semibold text-base-content mb-1;
+  @apply text-base font-semibold text-base-content/80 mb-1;
 }
 
 .section-desc {
@@ -173,14 +169,16 @@ input.input,
   @apply bg-base-300 rounded-lg p-4 font-mono text-sm overflow-x-auto;
 }
 
-/* Routing step cards */
+/* Routing step cards - minimal */
 .step-card {
-  @apply bg-base-200/50 rounded-lg border border-base-300/30 p-4;
+  @apply rounded-lg p-3;
+  background: oklch(20% 0.008 250 / 0.3);
 }
 
 /* Provider cards */
 .provider-card {
-  @apply bg-base-100 rounded-xl border border-base-300/50 p-5;
+  @apply rounded-xl p-5;
+  background: oklch(22% 0.010 250 / 0.35);
 }
 
 /* Sidebar refinements */
@@ -204,12 +202,14 @@ input.input,
 
 /* Chart container */
 .chart-container {
-  @apply bg-base-100 rounded-xl border border-base-300/50 p-5;
+  @apply rounded-xl p-5;
+  background: oklch(22% 0.010 250 / 0.35);
 }
 
 /* Table refinements */
 .table-container {
-  @apply bg-base-100 rounded-xl border border-base-300/50 overflow-hidden;
+  @apply rounded-xl overflow-hidden;
+  background: oklch(22% 0.010 250 / 0.35);
 }
 
 .table-container .table {
@@ -738,6 +738,5 @@ input.input,
 [data-theme="light"] .chart-container,
 [data-theme="light"] .table-container,
 [data-theme="light"] .provider-card {
-  background: oklch(98% 0.005 250 / 0.6);
-  border-color: oklch(50% 0.01 250 / 0.15);
+  background: oklch(97% 0.003 250 / 0.7);
 }

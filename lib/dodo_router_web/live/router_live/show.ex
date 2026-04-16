@@ -370,7 +370,7 @@ defmodule DodoRouterWeb.RouterLive.Show do
       </div>
       
     <!-- Stats -->
-      <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+      <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-8">
         <div class="stat-card">
           <div class="stat-label">Requests (24h)</div>
           <div class="stat-value">{@stats.total_requests}</div>
@@ -389,9 +389,9 @@ defmodule DodoRouterWeb.RouterLive.Show do
         </div>
       </div>
       
-    <!-- Quick Start Card -->
-      <div class="card-bordered p-5 mb-6">
-        <div class="flex items-center justify-between mb-4">
+    <!-- Quick Start -->
+      <div class="card-bordered mb-8">
+        <div class="flex items-center justify-between mb-3">
           <h2 class="section-title mb-0">Quick Start</h2>
           <div class="flex bg-base-200 rounded-lg p-1 gap-1">
             <button
@@ -430,8 +430,8 @@ defmodule DodoRouterWeb.RouterLive.Show do
       </div>
       
     <!-- Routing Chain -->
-      <div class="card-bordered p-5 mb-6" id="routing-chain-container" phx-hook="RequestFlowAnimation">
-        <div class="flex items-center justify-between mb-4">
+      <div class="card-bordered mb-8" id="routing-chain-container" phx-hook="RequestFlowAnimation">
+        <div class="flex items-center justify-between mb-3">
           <div class="flex items-center gap-3">
             <h2 class="section-title mb-0">Routing Chain</h2>
             <div
@@ -582,8 +582,8 @@ defmodule DodoRouterWeb.RouterLive.Show do
       </div>
       
     <!-- Recent Logs -->
-      <div class="card-bordered p-5 mb-6" id="recent-logs-card">
-        <div class="flex items-center justify-between mb-4">
+      <div class="card-bordered mb-8" id="recent-logs-card">
+        <div class="flex items-center justify-between mb-3">
           <h2 class="section-title mb-0">Recent Logs</h2>
           <.link
             navigate={~p"/logs?router_id=#{@router.id}"}
@@ -638,8 +638,8 @@ defmodule DodoRouterWeb.RouterLive.Show do
       </div>
       
     <!-- Live Events -->
-      <div :if={length(@recent_events) > 0} class="card-bordered p-5">
-        <div class="flex items-center gap-3 mb-4">
+      <div :if={length(@recent_events) > 0} class="card-bordered">
+        <div class="flex items-center gap-3 mb-3">
           <h2 class="section-title mb-0">Recent Events</h2>
           <span class="flex items-center gap-1.5 px-2 py-0.5 bg-success/10 rounded text-xs font-medium text-success">
             <span class="live-dot"></span> Live

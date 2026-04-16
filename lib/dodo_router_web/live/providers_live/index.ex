@@ -182,7 +182,7 @@ defmodule DodoRouterWeb.ProvidersLive.Index do
           <% keys = Map.get(@provider_keys, provider_slug, []) %>
           <% key_count = length(keys) %>
 
-          <div class="bg-base-100 rounded-xl border border-base-300/40 overflow-hidden">
+          <div class="card-bordered overflow-hidden">
             <!-- Provider Header -->
             <div class="p-4 flex items-center justify-between">
               <div class="flex items-center gap-3">
