@@ -7,7 +7,17 @@ defmodule DodoRouter.Proxy.Adapters.Zai do
   - Coding plan: https://api.z.ai/api/coding/paas/v4
   """
 
-  @behaviour DodoRouter.Proxy.Adapter
+  use DodoRouter.Proxy.Adapter.Registry,
+    slug: "zai",
+    display_name: "z.ai",
+    key_slugs: ["zai_standard", "zai_coding"],
+    endpoints: %{
+      "zai_standard" => "https://api.z.ai/api/paas/v4",
+      "zai_coding" => "https://api.z.ai/api/coding/paas/v4"
+    },
+    models: ~w(glm-5.1 glm-5 glm-5-turbo glm-4.7 glm-4.6 glm-4.5),
+    color: "emerald",
+    short_description: "GLM models for general use"
 
   alias DodoRouter.Proxy.Adapter
   alias DodoRouter.Routers.RoutingStep

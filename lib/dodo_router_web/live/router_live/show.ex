@@ -7,6 +7,7 @@ defmodule DodoRouterWeb.RouterLive.Show do
   alias DodoRouter.Routers.RoutingStep
   alias DodoRouter.Logs
   alias DodoRouter.Providers
+  alias DodoRouter.Proxy.Adapter.Registry
 
   @impl true
   def mount(%{"id" => id}, _session, socket) do
@@ -218,7 +219,10 @@ defmodule DodoRouterWeb.RouterLive.Show do
      |> assign(:stats_timer, timer)
      |> assign(:active_requests, active_requests)
      |> assign(:active_request, active_requests > 0)
-     |> push_event("request_completed", %{request_id: event.request_id, status: to_string(event.status)})}
+     |> push_event("request_completed", %{
+       request_id: event.request_id,
+       status: to_string(event.status)
+     })}
   end
 
   def handle_info(:refresh_stats, socket) do
@@ -473,7 +477,8 @@ defmodule DodoRouterWeb.RouterLive.Show do
                 :if={@active_request}
                 class="flex items-center gap-2 px-2.5 py-1 bg-green-500/25 rounded-full text-xs font-medium text-green-400"
               >
-                <span class="request-flow-pulse w-2 h-2 rounded-full bg-green-400"></span> Processing...
+                <span class="request-flow-pulse w-2 h-2 rounded-full bg-green-400"></span>
+                Processing...
               </div>
             </div>
             <.link patch={~p"/routers/#{@router}/routing"} class="btn btn-primary btn-sm">
@@ -716,10 +721,11 @@ defmodule DodoRouterWeb.RouterLive.Show do
                 class="w-full py-2.5 px-3 bg-base-200 border border-base-300/50 rounded-lg"
                 required
               >
-                <option value="zai" selected={@step_provider == "zai"}>z.ai (GLM models)</option>
-                <option value="moonshot" selected={@step_provider == "moonshot"}>
-                  Moonshot (Kimi K2.5)
-                </option>
+                <%= for {slug, config} <- Enum.sort_by(Registry.all_adapters(), fn {s, _} -> s end) do %>
+                  <option value={slug} selected={@step_provider == slug}>
+                    {config.display_name}
+                  </option>
+                <% end %>
               </select>
             </div>
             <div>
@@ -728,14 +734,16 @@ defmodule DodoRouterWeb.RouterLive.Show do
                 type="text"
                 name="step[model]"
                 placeholder={
-                  if @step_provider == "zai", do: "e.g. glm-4-plus, glm-5.1", else: "e.g. kimi-k2.5"
+                  case Registry.available_models(@step_provider) do
+                    [] -> "e.g. gpt-4"
+                    [first | _] -> "e.g. #{first}"
+                  end
                 }
                 class="w-full py-2.5 px-3 bg-base-200 border border-base-300/50 rounded-lg"
                 required
               />
             </div>
-            
-    <!-- z.ai specific options -->
+            <%!-- z.ai specific options --%>
             <div :if={@step_provider == "zai"}>
               <label class="block text-sm font-medium text-base-content/70 mb-2">Plan Type</label>
               <select
@@ -749,8 +757,7 @@ defmodule DodoRouterWeb.RouterLive.Show do
                 Select based on your z.ai subscription
               </p>
             </div>
-            
-    <!-- Moonshot specific options -->
+            <%!-- Moonshot specific options --%>
             <div :if={@step_provider == "moonshot"}>
               <label class="block text-sm font-medium text-base-content/70 mb-2">Endpoint</label>
               <select
@@ -915,10 +922,8 @@ defmodule DodoRouterWeb.RouterLive.Show do
   end
 
   defp matching_keys(provider_keys, step_provider) do
-    alias DodoRouter.Providers.ProviderKey
-
     Enum.filter(provider_keys, fn key ->
-      ProviderKey.adapter_provider(key.provider_slug) == step_provider
+      Registry.adapter_provider(key.provider_slug) == step_provider
     end)
   end
 

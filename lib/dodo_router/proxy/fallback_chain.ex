@@ -7,7 +7,7 @@ defmodule DodoRouter.Proxy.FallbackChain do
   """
 
   alias DodoRouter.Proxy.Adapter
-  alias DodoRouter.Proxy.Adapters.{Zai, Moonshot}
+  alias DodoRouter.Proxy.Adapter.Registry
   alias DodoRouter.Providers
   alias DodoRouter.Routers.RoutingStep
   alias DodoRouter.Secrets
@@ -177,8 +177,9 @@ defmodule DodoRouter.Proxy.FallbackChain do
     end
   end
 
-  defp adapter_for("zai"), do: Zai
-  defp adapter_for("moonshot"), do: Moonshot
+  defp adapter_for(provider) do
+    Registry.adapter_for(provider)
+  end
 
   # Get API key - prefer provider_key if assigned, fall back to legacy router secrets
   defp get_api_key(%RoutingStep{provider_key: %{} = provider_key}, _router_id) do
@@ -193,17 +194,20 @@ defmodule DodoRouter.Proxy.FallbackChain do
     Secrets.moonshot_api_key(router_id)
   end
 
-  defp endpoint_for(%RoutingStep{provider: "zai", plan_type: "coding"}),
-    do: "https://api.z.ai/api/coding/paas/v4/chat/completions"
+  defp endpoint_for(%RoutingStep{provider: provider} = step) do
+    base =
+      case Registry.all_adapters()[provider] do
+        %{endpoints: endpoints} ->
+          # Find the endpoint matching the plan_type, or fall back to first
+          key_slug = Registry.to_key_slug(provider, step.plan_type || "standard")
+          Map.get(endpoints, key_slug) || endpoints |> Map.values() |> List.first()
 
-  defp endpoint_for(%RoutingStep{provider: "zai"}),
-    do: "https://api.z.ai/api/paas/v4/chat/completions"
+        nil ->
+          nil
+      end
 
-  defp endpoint_for(%RoutingStep{provider: "moonshot", plan_type: "coding"}),
-    do: "https://api.kimi.com/coding/v1/chat/completions"
-
-  defp endpoint_for(%RoutingStep{provider: "moonshot"}),
-    do: "https://api.moonshot.ai/v1/chat/completions"
+    if base, do: base <> "/chat/completions", else: nil
+  end
 
   defp truncate_error(nil), do: nil
 

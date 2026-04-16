@@ -2,10 +2,11 @@ defmodule DodoRouter.Routers.RoutingStep do
   use Ecto.Schema
   import Ecto.Changeset
 
+  alias DodoRouter.Proxy.Adapter.Registry
+
   @primary_key {:id, :binary_id, autogenerate: true}
   @foreign_key_type :binary_id
 
-  @providers ~w(zai moonshot)
   @plan_types ~w(standard coding)
 
   schema "routing_steps" do
@@ -37,7 +38,7 @@ defmodule DodoRouter.Routers.RoutingStep do
       :provider_key_id
     ])
     |> validate_required([:provider, :model])
-    |> validate_inclusion(:provider, @providers)
+    |> validate_inclusion(:provider, Registry.providers())
     |> validate_inclusion(:plan_type, @plan_types)
     |> validate_number(:position, greater_than_or_equal_to: 0)
     |> validate_number(:temperature, greater_than_or_equal_to: 0.0, less_than_or_equal_to: 2.0)
@@ -55,14 +56,8 @@ defmodule DodoRouter.Routers.RoutingStep do
     |> validate_required([:position, :router_id])
   end
 
-  def providers, do: @providers
+  def providers, do: Registry.providers()
   def plan_types, do: @plan_types
 
-  def available_models("zai"), do: ~w(glm-5.1 glm-5 glm-5-turbo glm-4.7 glm-4.6 glm-4.5)
-
-  def available_models("moonshot"),
-    do:
-      ~w(kimi-k2.5 kimi-k2 kimi-k2.6 kimi-for-coding moonshot-v1-8k moonshot-v1-32k moonshot-v1-128k)
-
-  def available_models(_), do: []
+  def available_models(provider), do: Registry.available_models(provider)
 end

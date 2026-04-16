@@ -5,7 +5,16 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
   Supports kimi-k2.5 with thinking mode, kimi-k2 series, and moonshot-v1 series.
   """
 
-  @behaviour DodoRouter.Proxy.Adapter
+  use DodoRouter.Proxy.Adapter.Registry,
+    slug: "moonshot",
+    display_name: "Moonshot (Kimi)",
+    key_slugs: ["moonshot"],
+    endpoints: %{
+      "moonshot" => "https://api.moonshot.ai/v1"
+    },
+    models: ~w(kimi-k2.5 kimi-k2 moonshot-v1-8k moonshot-v1-32k moonshot-v1-128k),
+    color: "amber",
+    short_description: "Kimi K2 models"
 
   require Logger
 
