@@ -187,6 +187,7 @@ defmodule DodoRouterWeb.RouterLive.Show do
 
     {:noreply,
      push_event(socket, "step_started", %{
+       request_id: step_info.request_id,
        step_id: step_info.step_id,
        step_index: step_info.step_index,
        provider: step_info.provider,
@@ -217,7 +218,7 @@ defmodule DodoRouterWeb.RouterLive.Show do
      |> assign(:stats_timer, timer)
      |> assign(:active_requests, active_requests)
      |> assign(:active_request, active_requests > 0)
-     |> push_event("request_completed", %{status: to_string(event.status)})}
+     |> push_event("request_completed", %{request_id: event.request_id, status: to_string(event.status)})}
   end
 
   def handle_info(:refresh_stats, socket) do

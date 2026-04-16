@@ -36,7 +36,7 @@ defmodule DodoRouter.Proxy do
           request,
           steps,
           router.id,
-          Keyword.put(opts, :client_headers, client_headers)
+          opts |> Keyword.put(:client_headers, client_headers) |> Keyword.put(:request_id, request_id)
         )
 
       log_request(
@@ -50,7 +50,7 @@ defmodule DodoRouter.Proxy do
         client_headers
       )
 
-      broadcast_event(router, result)
+      broadcast_event(router, result, request_id)
 
       # Calculate provider time (sum of all attempt latencies)
       provider_ms = result.attempted_steps |> Enum.map(& &1[:latency_ms]) |> Enum.sum()
@@ -228,10 +228,11 @@ defmodule DodoRouter.Proxy do
     )
   end
 
-  defp broadcast_event(router, result) do
+  defp broadcast_event(router, result, request_id) do
     last_step = List.last(result.attempted_steps)
 
     event = %{
+      request_id: request_id,
       status: result.status,
       provider: last_step[:provider],
       model: last_step[:model],

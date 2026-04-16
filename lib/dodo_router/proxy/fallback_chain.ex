@@ -16,6 +16,7 @@ defmodule DodoRouter.Proxy.FallbackChain do
     :request,
     :steps,
     :router_id,
+    :request_id,
     :stream,
     :send_chunk,
     :client_headers,
@@ -30,11 +31,13 @@ defmodule DodoRouter.Proxy.FallbackChain do
     stream = Keyword.get(opts, :stream, false)
     send_chunk = Keyword.get(opts, :send_chunk, fn _ -> :ok end)
     client_headers = Keyword.get(opts, :client_headers, [])
+    request_id = Keyword.get(opts, :request_id)
 
     state = %__MODULE__{
       request: request,
       steps: steps,
       router_id: router_id,
+      request_id: request_id,
       stream: stream,
       send_chunk: send_chunk,
       client_headers: client_headers
@@ -50,7 +53,7 @@ defmodule DodoRouter.Proxy.FallbackChain do
 
   defp run_chain(%{steps: [step | rest]} = state) do
     step_index = length(state.attempted_steps)
-    broadcast_step_started(state.router_id, step, step_index)
+    broadcast_step_started(state.router_id, state.request_id, step, step_index)
     start_time = System.monotonic_time(:millisecond)
     endpoint = endpoint_for(step)
 
@@ -127,12 +130,13 @@ defmodule DodoRouter.Proxy.FallbackChain do
     end
   end
 
-  defp broadcast_step_started(router_id, step, step_index) do
+  defp broadcast_step_started(router_id, request_id, step, step_index) do
     Phoenix.PubSub.broadcast(
       DodoRouter.PubSub,
       "router:#{router_id}:events",
       {:step_started,
        %{
+         request_id: request_id,
          step_id: step.id,
          provider: step.provider,
          model: step.model,

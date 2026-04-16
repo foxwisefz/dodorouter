@@ -9,25 +9,29 @@ export const PulseRing = {
   mounted() {
     this.bar = null
     this.countEl = null
-    this.activeCount = 0
+    this.activeRequests = []
     this.removeTimer = null
 
     this.handleEvent("step_started", (payload) => {
-      if (payload.step_index == 0) {
-        this.activeCount++
+      console.log("L16 step_started");
+      if (payload.step_index == 0 && payload.request_id) {
+        this.activeRequests.push(payload.request_id)
         this.showBar()
         this.updateCount()
       }
     })
 
-    this.handleEvent("request_completed", ({status}) => {
-      if (this.activeCount > 0) {
-        this.activeCount--
+    this.handleEvent("request_completed", ({request_id, status}) => {
+      console.log("L25 request_completed");
+      if (request_id) {
+        this.activeRequests.pop()
       }
 
-      if (this.activeCount === 0 && this.bar) {
+      if (this.activeRequests.length === 0 && this.bar) {
+        console.log("L31 removing bar")
         this.startRemoval(status)
       } else {
+        console.log("L34 updating count")
         this.updateCount()
       }
     })
@@ -87,10 +91,11 @@ export const PulseRing = {
   updateCount() {
     if (!this.countEl) return
 
-    if (this.activeCount === 1) {
+    const count = this.activeRequests.length
+    if (count === 1) {
       this.countEl.textContent = "Processing 1 request"
     } else {
-      this.countEl.textContent = `Processing ${this.activeCount} requests`
+      this.countEl.textContent = `Processing ${count} requests`
     }
   },
 
