@@ -30,6 +30,11 @@ defmodule DodoRouter.Logs.RequestLog do
     # Timing
     field :latency_ms, :integer
     field :ttfb_ms, :integer
+    field :upload_ms, :integer
+    field :provider_processing_ms, :integer
+
+    # Payload
+    field :payload_size_bytes, :integer
 
     # Request/response
     field :request_body, :string
@@ -72,6 +77,9 @@ defmodule DodoRouter.Logs.RequestLog do
       :total_tokens,
       :latency_ms,
       :ttfb_ms,
+      :upload_ms,
+      :provider_processing_ms,
+      :payload_size_bytes,
       :request_body,
       :response_body,
       :request_headers,

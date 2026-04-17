@@ -20,6 +20,7 @@ defmodule DodoRouter.Proxy.Adapters.Zai do
     short_description: "GLM models for general use"
 
   alias DodoRouter.Proxy.Adapter
+  alias DodoRouter.Proxy.FinchTelemetry
   alias DodoRouter.Routers.RoutingStep
 
   @standard_base_url "https://api.z.ai/api/paas/v4"
@@ -66,7 +67,8 @@ defmodule DodoRouter.Proxy.Adapters.Zai do
         {"Content-Type", "application/json"}
       ])
 
-    start_time = System.monotonic_time(:millisecond)
+    payload_size_bytes = body |> Jason.encode!() |> byte_size()
+    start_time = FinchTelemetry.mark_request_start()
 
     # Track partial content in process dict so it survives error paths
     # (Req's into_fun error path loses the resp.private accumulator)
@@ -131,7 +133,15 @@ defmodule DodoRouter.Proxy.Adapters.Zai do
           resp.private[:stream_acc] ||
             %{content: "", tool_calls: %{}, usage: nil, finish_reason: nil, first_chunk_time: nil}
 
-        {:ok, build_final_response(acc, start_time), %{headers: resp_headers}}
+        upload_ms = calculate_upload_ms(start_time)
+
+        timing_meta = %{
+          payload_size_bytes: payload_size_bytes,
+          upload_ms: upload_ms,
+          provider_processing_ms: nil
+        }
+
+        {:ok, build_final_response(acc, timing_meta), %{headers: resp_headers}}
 
       {:ok, %Req.Response{status: status, body: response_body}} ->
         reason = Adapter.categorize_error(status, response_body)
@@ -231,8 +241,15 @@ defmodule DodoRouter.Proxy.Adapters.Zai do
     end
   end
 
-  defp build_final_response(acc, start_time) do
+  defp build_final_response(acc, timing_meta) do
     message = build_final_message(acc)
+
+    meta = %{
+      "ttfb_ms" => acc.first_chunk_time,
+      "upload_ms" => timing_meta.upload_ms,
+      "payload_size_bytes" => timing_meta.payload_size_bytes,
+      "provider_processing_ms" => timing_meta.provider_processing_ms
+    }
 
     %{
       "choices" => [
@@ -243,10 +260,7 @@ defmodule DodoRouter.Proxy.Adapters.Zai do
         }
       ],
       "usage" => acc.usage,
-      "_meta" => %{
-        "latency_ms" => latency(start_time),
-        "ttfb_ms" => acc.first_chunk_time
-      }
+      "_meta" => meta
     }
   end
 
@@ -291,4 +305,8 @@ defmodule DodoRouter.Proxy.Adapters.Zai do
   end
 
   defp latency(start_time), do: System.monotonic_time(:millisecond) - start_time
+
+  defp calculate_upload_ms(start_time) do
+    FinchTelemetry.get_upload_ms(start_time)
+  end
 end

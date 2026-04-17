@@ -191,6 +191,28 @@ defmodule DodoRouterWeb.LogLive.Show do
                   <td class="text-right font-mono">{@log.ttfb_ms || "-"} ms</td>
                 </tr>
                 <tr>
+                  <td class="text-base-content/60">Upload Time</td>
+                  <td class="text-right font-mono">{@log.upload_ms || "-"} ms</td>
+                </tr>
+                <tr>
+                  <td class="text-base-content/60">
+                    Wait Time
+                    <span class="text-xs text-base-content/40">(TTFB - Upload)</span>
+                  </td>
+                  <td class="text-right font-mono">{wait_time(@log)} ms</td>
+                </tr>
+                <tr :if={@log.provider_processing_ms}>
+                  <td class="text-base-content/60">
+                    Provider Processing
+                    <span class="text-xs text-success">(from header)</span>
+                  </td>
+                  <td class="text-right font-mono">{@log.provider_processing_ms} ms</td>
+                </tr>
+                <tr>
+                  <td class="text-base-content/60">Payload Size</td>
+                  <td class="text-right font-mono">{format_bytes(@log.payload_size_bytes)}</td>
+                </tr>
+                <tr>
                   <td class="text-base-content/60">Prompt Tokens</td>
                   <td class="text-right font-mono">{@log.prompt_tokens || "-"}</td>
                 </tr>
@@ -663,4 +685,16 @@ defmodule DodoRouterWeb.LogLive.Show do
   end
 
   defp overhead_percent(_), do: "-"
+
+  defp wait_time(%{ttfb_ms: ttfb, upload_ms: upload})
+       when is_integer(ttfb) and is_integer(upload) do
+    ttfb - upload
+  end
+
+  defp wait_time(_), do: "-"
+
+  defp format_bytes(nil), do: "-"
+  defp format_bytes(bytes) when bytes < 1024, do: "#{bytes} B"
+  defp format_bytes(bytes) when bytes < 1024 * 1024, do: "#{Float.round(bytes / 1024, 1)} KB"
+  defp format_bytes(bytes), do: "#{Float.round(bytes / 1024 / 1024, 2)} MB"
 end

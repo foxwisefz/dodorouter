@@ -19,6 +19,7 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
   require Logger
 
   alias DodoRouter.Proxy.Adapter
+  alias DodoRouter.Proxy.FinchTelemetry
   alias DodoRouter.Routers.RoutingStep
 
   @base_url "https://api.anthropic.com/v1"
@@ -66,7 +67,8 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
       {"Content-Type", "application/json"}
     ]
 
-    start_time = System.monotonic_time(:millisecond)
+    payload_size_bytes = body |> Jason.encode!() |> byte_size()
+    start_time = FinchTelemetry.mark_request_start()
     Process.delete(:__anthropic_stream_acc__)
 
     into_fun = fn {:data, data}, {req, resp} ->
@@ -119,7 +121,16 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
     case result do
       {:ok, %Req.Response{status: 200} = resp} ->
         acc = resp.private[:stream_acc] || %{content: "", tool_calls: [], usage: nil, stop_reason: nil, first_chunk_time: nil}
-        {:ok, build_final_openai_response(acc, start_time)}
+
+        upload_ms = calculate_upload_ms(start_time)
+
+        timing_meta = %{
+          payload_size_bytes: payload_size_bytes,
+          upload_ms: upload_ms,
+          provider_processing_ms: nil
+        }
+
+        {:ok, build_final_openai_response(acc, timing_meta)}
 
       {:ok, %Req.Response{status: status, body: body}} ->
         reason = Adapter.categorize_error(status, body)
@@ -309,7 +320,7 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
     "data: #{Jason.encode!(chunk)}\n\n"
   end
 
-  defp build_final_openai_response(acc, _start_time) do
+  defp build_final_openai_response(acc, timing_meta) do
     message = %{"role" => "assistant", "content" => acc.content}
 
     finish_reason = case acc.stop_reason do
@@ -319,13 +330,24 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
       other -> other || "stop"
     end
 
+    meta = %{
+      "ttfb_ms" => acc.first_chunk_time,
+      "upload_ms" => timing_meta.upload_ms,
+      "payload_size_bytes" => timing_meta.payload_size_bytes,
+      "provider_processing_ms" => timing_meta.provider_processing_ms
+    }
+
     response = %{
       "choices" => [%{"index" => 0, "message" => message, "finish_reason" => finish_reason}],
-      "_meta" => %{"ttfb_ms" => acc.first_chunk_time}
+      "_meta" => meta
     }
 
     if acc.usage, do: Map.put(response, "usage", acc.usage), else: response
   end
 
   defp latency(start_time), do: System.monotonic_time(:millisecond) - start_time
+
+  defp calculate_upload_ms(start_time) do
+    FinchTelemetry.get_upload_ms(start_time)
+  end
 end

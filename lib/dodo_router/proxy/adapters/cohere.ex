@@ -23,6 +23,7 @@ defmodule DodoRouter.Proxy.Adapters.Cohere do
   require Logger
 
   alias DodoRouter.Proxy.Adapter
+  alias DodoRouter.Proxy.FinchTelemetry
   alias DodoRouter.Routers.RoutingStep
 
   @base_url "https://api.cohere.com/v2"
@@ -67,7 +68,8 @@ defmodule DodoRouter.Proxy.Adapters.Cohere do
       {"Content-Type", "application/json"}
     ]
 
-    start_time = System.monotonic_time(:millisecond)
+    payload_size_bytes = body |> Jason.encode!() |> byte_size()
+    start_time = FinchTelemetry.mark_request_start()
 
     into_fun = fn {:data, data}, {req, resp} ->
       resp =
@@ -101,7 +103,16 @@ defmodule DodoRouter.Proxy.Adapters.Cohere do
     case result do
       {:ok, %Req.Response{status: 200} = resp} ->
         acc = resp.private[:stream_acc] || %{content: "", usage: nil, first_chunk_time: nil}
-        {:ok, build_final_response(acc)}
+
+        upload_ms = calculate_upload_ms(start_time)
+
+        timing_meta = %{
+          payload_size_bytes: payload_size_bytes,
+          upload_ms: upload_ms,
+          provider_processing_ms: nil
+        }
+
+        {:ok, build_final_response(acc, timing_meta)}
 
       {:ok, %Req.Response{status: status, body: response_body}} ->
         reason = Adapter.categorize_error(status, response_body)
@@ -236,14 +247,25 @@ defmodule DodoRouter.Proxy.Adapters.Cohere do
     end)
   end
 
-  defp build_final_response(acc) do
+  defp build_final_response(acc, timing_meta) do
+    meta = %{
+      "ttfb_ms" => acc.first_chunk_time,
+      "upload_ms" => timing_meta.upload_ms,
+      "payload_size_bytes" => timing_meta.payload_size_bytes,
+      "provider_processing_ms" => timing_meta.provider_processing_ms
+    }
+
     response = %{
       "choices" => [%{"index" => 0, "message" => %{"role" => "assistant", "content" => acc.content}, "finish_reason" => "stop"}],
-      "_meta" => %{"ttfb_ms" => acc.first_chunk_time}
+      "_meta" => meta
     }
 
     if acc.usage, do: Map.put(response, "usage", acc.usage), else: response
   end
 
   defp latency(start_time), do: System.monotonic_time(:millisecond) - start_time
+
+  defp calculate_upload_ms(start_time) do
+    FinchTelemetry.get_upload_ms(start_time)
+  end
 end

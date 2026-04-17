@@ -19,6 +19,7 @@ defmodule DodoRouter.Proxy.Adapters.OpenAI do
   require Logger
 
   alias DodoRouter.Proxy.Adapter
+  alias DodoRouter.Proxy.FinchTelemetry
   alias DodoRouter.Routers.RoutingStep
 
   @base_url "https://api.openai.com/v1"
@@ -67,7 +68,8 @@ defmodule DodoRouter.Proxy.Adapters.OpenAI do
       {"Content-Type", "application/json"}
     ]
 
-    start_time = System.monotonic_time(:millisecond)
+    payload_size_bytes = body |> Jason.encode!() |> byte_size()
+    start_time = FinchTelemetry.mark_request_start()
     Process.delete(:__openai_stream_acc__)
 
     into_fun = fn {:data, data}, {req, resp} ->
@@ -128,7 +130,17 @@ defmodule DodoRouter.Proxy.Adapters.OpenAI do
           resp.private[:stream_acc] ||
             %{content: "", tool_calls: %{}, usage: nil, finish_reason: nil, first_chunk_time: nil}
 
-        {:ok, build_final_response(acc, start_time)}
+        upload_ms = calculate_upload_ms(start_time)
+        response_headers = FinchTelemetry.get_response_headers(start_time)
+        provider_processing_ms = FinchTelemetry.extract_provider_processing_ms(response_headers)
+
+        timing_meta = %{
+          payload_size_bytes: payload_size_bytes,
+          upload_ms: upload_ms,
+          provider_processing_ms: provider_processing_ms
+        }
+
+        {:ok, build_final_response(acc, timing_meta)}
 
       {:ok, %Req.Response{status: status, body: body}} ->
         reason = Adapter.categorize_error(status, body)
@@ -149,6 +161,10 @@ defmodule DodoRouter.Proxy.Adapters.OpenAI do
   end
 
   defp latency(start_time), do: System.monotonic_time(:millisecond) - start_time
+
+  defp calculate_upload_ms(start_time) do
+    FinchTelemetry.get_upload_ms(start_time)
+  end
 
   defp parse_sse_chunk(data) do
     lines =
@@ -238,7 +254,7 @@ defmodule DodoRouter.Proxy.Adapters.OpenAI do
   defp maybe_set_usage(acc, nil), do: acc
   defp maybe_set_usage(acc, usage), do: %{acc | usage: usage}
 
-  defp build_final_response(acc, start_time) do
+  defp build_final_response(acc, timing_meta) do
     tool_calls_list =
       acc.tool_calls
       |> Enum.sort_by(fn {idx, _} -> idx end)
@@ -250,6 +266,13 @@ defmodule DodoRouter.Proxy.Adapters.OpenAI do
         if tool_calls_list != [], do: Map.put(m, "tool_calls", tool_calls_list), else: m
       end)
 
+    meta = %{
+      "ttfb_ms" => acc.first_chunk_time,
+      "upload_ms" => timing_meta.upload_ms,
+      "payload_size_bytes" => timing_meta.payload_size_bytes,
+      "provider_processing_ms" => timing_meta.provider_processing_ms
+    }
+
     response = %{
       "choices" => [
         %{
@@ -258,7 +281,7 @@ defmodule DodoRouter.Proxy.Adapters.OpenAI do
           "finish_reason" => acc.finish_reason
         }
       ],
-      "_meta" => %{"ttfb_ms" => acc.first_chunk_time}
+      "_meta" => meta
     }
 
     if acc.usage do

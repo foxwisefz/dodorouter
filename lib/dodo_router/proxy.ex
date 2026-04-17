@@ -82,6 +82,7 @@ defmodule DodoRouter.Proxy do
          recording_id,
          client_headers
        ) do
+    require Logger
     latency_ms = System.monotonic_time(:millisecond) - start_time
 
     {call_type, tools_invoked} =
@@ -106,6 +107,9 @@ defmodule DodoRouter.Proxy do
 
     truncation_flags = req_flags ++ resp_flags
 
+    meta = get_in(result.final_response || %{}, ["_meta"]) || %{}
+    Logger.info("[Proxy] log_request _meta=#{inspect(meta)}")
+
     log_attrs = %{
       router_id: router.id,
       request_id: request_id,
@@ -120,7 +124,10 @@ defmodule DodoRouter.Proxy do
       completion_tokens: usage.completion_tokens,
       total_tokens: usage.total_tokens,
       latency_ms: latency_ms,
-      ttfb_ms: get_in(result.final_response || %{}, ["_meta", "ttfb_ms"]),
+      ttfb_ms: meta["ttfb_ms"],
+      upload_ms: meta["upload_ms"],
+      payload_size_bytes: meta["payload_size_bytes"],
+      provider_processing_ms: meta["provider_processing_ms"],
       request_body: request_body,
       response_body: response_body,
       session_id: session[:session_id],
