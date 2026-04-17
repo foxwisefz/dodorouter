@@ -67,3 +67,85 @@
 @utility video-overlay {
   background: linear-gradient(to bottom, rgba(255, 255, 255, 0.3) 0%, rgba(255, 255, 255, 0.5) 40%, rgba(255, 255, 255, 0.85) 100%);
 }
+
+@utility feature-card {
+  background: hsl(0, 0%, 100%);
+  border: 1px solid var(--color-border);
+  border-radius: 1rem;
+  padding: 2rem;
+  transition: box-shadow 0.3s ease, transform 0.3s ease;
+  &:hover {
+    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.06);
+    transform: translateY(-2px);
+  }
+}
+
+@utility code-block {
+  background: hsl(220, 14%, 10%);
+  border-radius: 0.75rem;
+  color: hsl(0, 0%, 85%);
+  font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, monospace;
+  font-size: 0.8125rem;
+  line-height: 1.7;
+  overflow-x: auto;
+  & .kw { color: hsl(280, 60%, 70%); }
+  & .str { color: hsl(142, 50%, 65%); }
+  & .cm { color: hsl(215, 15%, 50%); }
+  & .fn { color: hsl(200, 70%, 70%); }
+  & .num { color: hsl(38, 90%, 65%); }
+  & .op { color: hsl(0, 0%, 70%); }
+  & .var { color: hsl(30, 70%, 70%); }
+}
+
+@utility provider-chip {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.625rem 1rem;
+  border-radius: 0.75rem;
+  border: 1px solid var(--color-border);
+  background: var(--color-background);
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--color-foreground);
+  transition: box-shadow 0.2s ease, transform 0.2s ease;
+  &:hover {
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+    transform: translateY(-1px);
+  }
+}
+
+@utility pricing-card {
+  background: var(--color-background);
+  border: 1px solid var(--color-border);
+  border-radius: 1.25rem;
+  padding: 2rem;
+  transition: box-shadow 0.3s ease, transform 0.3s ease;
+  &:hover {
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.06);
+    transform: translateY(-2px);
+  }
+}
+
+@utility pricing-card-featured {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 1px var(--color-accent), 0 12px 40px rgba(99, 102, 241, 0.1);
+  &:hover {
+    box-shadow: 0 0 0 1px var(--color-accent), 0 16px 48px rgba(99, 102, 241, 0.15);
+    transform: translateY(-2px);
+  }
+}
+
+@utility section-padding {
+  padding-top: 6rem;
+  padding-bottom: 6rem;
+}
+
+@utility section-padding-md {
+  padding-top: 8rem;
+  padding-bottom: 8rem;
+}
+
+@utility cta-gradient {
+  background: linear-gradient(135deg, hsl(239, 84%, 67%) 0%, hsl(260, 70%, 55%) 50%, hsl(280, 60%, 50%) 100%);
+}

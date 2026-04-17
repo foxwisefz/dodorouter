@@ -8,8 +8,22 @@ defmodule DodoRouter.Proxy.Adapter.Registry do
   info without hardcoding provider lists.
 
   To add a new provider, create a single adapter module that `use`s this
-  module — no other file needs to change.
+  module AND add it to @adapter_modules below.
   """
+
+  # Explicit list of all adapter modules - add new adapters here
+  @adapter_modules [
+    DodoRouter.Proxy.Adapters.OpenAI,
+    DodoRouter.Proxy.Adapters.Anthropic,
+    DodoRouter.Proxy.Adapters.Google,
+    DodoRouter.Proxy.Adapters.Groq,
+    DodoRouter.Proxy.Adapters.Mistral,
+    DodoRouter.Proxy.Adapters.XAI,
+    DodoRouter.Proxy.Adapters.DeepSeek,
+    DodoRouter.Proxy.Adapters.Cohere,
+    DodoRouter.Proxy.Adapters.Moonshot,
+    DodoRouter.Proxy.Adapters.Zai
+  ]
 
   @type adapter_config :: %{
           slug: String.t(),
@@ -43,24 +57,12 @@ defmodule DodoRouter.Proxy.Adapter.Registry do
           short_description: unquote(opts[:short_description])
         }
       end
-
-      # Register this adapter module in application env at compile time
-      DodoRouter.Proxy.Adapter.Registry.__register__(__MODULE__)
-    end
-  end
-
-  @doc false
-  def __register__(module) do
-    modules = registered_modules()
-
-    unless module in modules do
-      Application.put_env(:dodo_router, :adapter_modules, [module | modules])
     end
   end
 
   @doc false
   def registered_modules do
-    Application.get_env(:dodo_router, :adapter_modules, [])
+    @adapter_modules
   end
 
   @doc """
