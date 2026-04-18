@@ -82,13 +82,13 @@ defmodule DodoRouter.Proxy.Adapters.Zai do
 
       case parse_sse_chunk(data) do
         {:chunks, chunks} ->
-          send_chunk.(data)
+          reframe_and_send_chunks(send_chunk, chunks)
           acc = Enum.reduce(chunks, acc, &accumulate_chunk(&2, &1))
           Process.put(:__zai_stream_acc__, acc)
           {:cont, {req, Req.Response.put_private(resp, :stream_acc, acc)}}
 
         {:chunks_then_done, chunks} ->
-          send_chunk.(data)
+          reframe_and_send_chunks(send_chunk, chunks)
           acc = Enum.reduce(chunks, acc, &accumulate_chunk(&2, &1))
           Process.put(:__zai_stream_acc__, acc)
           {:halt, {req, Req.Response.put_private(resp, :stream_acc, acc)}}
@@ -296,6 +296,13 @@ defmodule DodoRouter.Proxy.Adapters.Zai do
       },
       extra
     )
+  end
+
+  defp reframe_and_send_chunks(send_chunk, chunks) do
+    Enum.each(chunks, fn chunk_data ->
+      event = "data: " <> Jason.encode!(chunk_data) <> "\n\n"
+      send_chunk.(event)
+    end)
   end
 
   defp latency(start_time), do: System.monotonic_time(:millisecond) - start_time

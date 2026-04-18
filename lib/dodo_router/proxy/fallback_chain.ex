@@ -71,6 +71,10 @@ defmodule DodoRouter.Proxy.FallbackChain do
         }
 
       {:error, reason, details} ->
+        # Track midstream fallback info (partial content already sent to client)
+        partial_content = details[:partial_content]
+        streamed_to_client = details[:chunks_sent] == true and is_binary(partial_content)
+
         attempt = %{
           provider: step.provider,
           model: step.model,
@@ -80,7 +84,10 @@ defmodule DodoRouter.Proxy.FallbackChain do
           error: to_string(reason),
           http_status: details[:status],
           error_body: truncate_error(details[:body]),
-          latency_ms: details[:latency_ms] || latency(start_time)
+          latency_ms: details[:latency_ms] || latency(start_time),
+          streamed_to_client: streamed_to_client,
+          partial_content_length:
+            if(is_binary(partial_content), do: String.length(partial_content), else: nil)
         }
 
         state = %{state | attempted_steps: state.attempted_steps ++ [attempt]}
