@@ -21,10 +21,8 @@ defmodule DodoRouter.Proxy.FinchTelemetry do
     # Create ETS table if it doesn't exist (safe for hot reloads)
     try do
       :ets.new(@table, [:ordered_set, :public, :named_table])
-      Logger.info("[FinchTelemetry] Created ETS table #{@table}")
     rescue
-      ArgumentError ->
-        Logger.info("[FinchTelemetry] ETS table #{@table} already exists")
+      ArgumentError -> :ok
     end
 
     events = [
@@ -41,8 +39,6 @@ defmodule DodoRouter.Proxy.FinchTelemetry do
       &__MODULE__.handle_event/4,
       nil
     )
-
-    Logger.info("[FinchTelemetry] Attached telemetry handlers for #{inspect(events)}")
   end
 
   @doc false
@@ -53,7 +49,6 @@ defmodule DodoRouter.Proxy.FinchTelemetry do
 
     # Store with stop_time as key for time-window lookup
     :ets.insert(@table, {{:send, stop_time}, duration_ms})
-    Logger.info("[FinchTelemetry] send:stop duration=#{duration_ms}ms stop_time=#{stop_time}")
 
     # Cleanup old entries periodically (1 in 100 chance)
     if :rand.uniform(100) == 1, do: cleanup_old_entries(stop_time)
@@ -97,8 +92,6 @@ defmodule DodoRouter.Proxy.FinchTelemetry do
          [{{:"$1", :"$2"}}]}
       ])
 
-    table_exists = :ets.info(@table) != :undefined
-    Logger.info("[FinchTelemetry] get_upload_ms start=#{start_time} now=#{now} found=#{length(result)} table_exists=#{table_exists}")
 
     case result do
       [] ->
@@ -148,11 +141,20 @@ defmodule DodoRouter.Proxy.FinchTelemetry do
   @doc """
   Extracts provider processing time from response headers.
   Currently supports OpenAI's `openai-processing-ms` header.
+  Handles both list format (from Finch) and map format (from Req).
   """
   def extract_provider_processing_ms(headers) when is_list(headers) do
     case List.keyfind(headers, "openai-processing-ms", 0) do
       {_, value} -> parse_int(value)
       nil -> nil
+    end
+  end
+
+  def extract_provider_processing_ms(headers) when is_map(headers) do
+    case Map.get(headers, "openai-processing-ms") do
+      [value | _] -> parse_int(value)
+      value when is_binary(value) -> parse_int(value)
+      _ -> nil
     end
   end
 

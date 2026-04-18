@@ -38,11 +38,22 @@ defmodule DodoRouter.Proxy.Adapters.Zai do
         {"Content-Type", "application/json"}
       ])
 
-    start_time = System.monotonic_time(:millisecond)
+    payload_size_bytes = body |> Jason.encode!() |> byte_size()
+    start_time = FinchTelemetry.mark_request_start()
 
     case Req.post(url, headers: headers, json: body, receive_timeout: @timeout_ms) do
       {:ok, %{status: 200, body: response_body, headers: resp_headers}} ->
-        {:ok, response_body, %{headers: resp_headers}}
+        total_ms = latency(start_time)
+        upload_ms = FinchTelemetry.get_upload_ms(start_time)
+
+        meta = %{
+          "ttfb_ms" => total_ms,
+          "upload_ms" => upload_ms,
+          "payload_size_bytes" => payload_size_bytes,
+          "provider_processing_ms" => nil
+        }
+
+        {:ok, Map.put(response_body, "_meta", meta), %{headers: resp_headers}}
 
       {:ok, %{status: status, body: response_body}} ->
         reason = Adapter.categorize_error(status, response_body)

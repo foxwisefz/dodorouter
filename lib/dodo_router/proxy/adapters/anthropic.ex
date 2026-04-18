@@ -37,11 +37,23 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
       {"Content-Type", "application/json"}
     ]
 
-    start_time = System.monotonic_time(:millisecond)
+    payload_size_bytes = body |> Jason.encode!() |> byte_size()
+    start_time = FinchTelemetry.mark_request_start()
 
     case Req.post(url, headers: headers, json: body, receive_timeout: @timeout_ms) do
       {:ok, %{status: 200, body: response_body}} ->
-        {:ok, convert_to_openai_format(response_body)}
+        total_ms = latency(start_time)
+        upload_ms = FinchTelemetry.get_upload_ms(start_time)
+
+        meta = %{
+          "ttfb_ms" => total_ms,
+          "upload_ms" => upload_ms,
+          "payload_size_bytes" => payload_size_bytes,
+          "provider_processing_ms" => nil
+        }
+
+        response = convert_to_openai_format(response_body)
+        {:ok, Map.put(response, "_meta", meta)}
 
       {:ok, %{status: status, body: response_body}} ->
         Logger.error("[Anthropic] Non-200 response: status=#{status} body=#{inspect(response_body)}")

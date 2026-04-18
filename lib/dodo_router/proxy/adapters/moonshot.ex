@@ -8,9 +8,10 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
   use DodoRouter.Proxy.Adapter.Registry,
     slug: "moonshot",
     display_name: "Moonshot (Kimi)",
-    key_slugs: ["moonshot"],
+    key_slugs: ["moonshot", "moonshot_coding"],
     endpoints: %{
-      "moonshot" => "https://api.moonshot.ai/v1"
+      "moonshot" => "https://api.moonshot.ai/v1",
+      "moonshot_coding" => "https://api.kimi.com/coding/v1"
     },
     models: ~w(kimi-k2.5 kimi-k2 moonshot-v1-8k moonshot-v1-32k moonshot-v1-128k),
     color: "amber",
@@ -50,11 +51,22 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
         "headers=#{inspect(safe_headers(headers))}"
     )
 
-    start_time = System.monotonic_time(:millisecond)
+    payload_size_bytes = body |> Jason.encode!() |> byte_size()
+    start_time = FinchTelemetry.mark_request_start()
 
     case Req.post(url, headers: headers, json: body, receive_timeout: @timeout_ms) do
       {:ok, %{status: 200, body: response_body, headers: resp_headers}} ->
-        {:ok, response_body, %{headers: resp_headers}}
+        total_ms = latency(start_time)
+        upload_ms = FinchTelemetry.get_upload_ms(start_time)
+
+        meta = %{
+          "ttfb_ms" => total_ms,
+          "upload_ms" => upload_ms,
+          "payload_size_bytes" => payload_size_bytes,
+          "provider_processing_ms" => nil
+        }
+
+        {:ok, Map.put(response_body, "_meta", meta), %{headers: resp_headers}}
 
       {:ok, %{status: status, body: response_body}} ->
         Logger.error("[Moonshot] Non-200 response: status=#{status}")

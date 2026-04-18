@@ -35,11 +35,23 @@ defmodule DodoRouter.Proxy.Adapters.OpenAI do
       {"Content-Type", "application/json"}
     ]
 
-    start_time = System.monotonic_time(:millisecond)
+    payload_size_bytes = body |> Jason.encode!() |> byte_size()
+    start_time = FinchTelemetry.mark_request_start()
 
     case Req.post(url, headers: headers, json: body, receive_timeout: @timeout_ms) do
-      {:ok, %{status: 200, body: response_body}} ->
-        {:ok, response_body}
+      {:ok, %{status: 200, body: response_body, headers: resp_headers}} ->
+        total_ms = latency(start_time)
+        upload_ms = FinchTelemetry.get_upload_ms(start_time)
+        provider_processing_ms = FinchTelemetry.extract_provider_processing_ms(resp_headers)
+
+        meta = %{
+          "ttfb_ms" => total_ms,
+          "upload_ms" => upload_ms,
+          "payload_size_bytes" => payload_size_bytes,
+          "provider_processing_ms" => provider_processing_ms
+        }
+
+        {:ok, Map.put(response_body, "_meta", meta)}
 
       {:ok, %{status: status, body: response_body}} ->
         Logger.error("[OpenAI] Non-200 response: status=#{status} body=#{inspect(response_body)}")

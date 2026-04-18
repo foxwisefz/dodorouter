@@ -82,7 +82,6 @@ defmodule DodoRouter.Proxy do
          recording_id,
          client_headers
        ) do
-    require Logger
     latency_ms = System.monotonic_time(:millisecond) - start_time
 
     {call_type, tools_invoked} =
@@ -108,8 +107,6 @@ defmodule DodoRouter.Proxy do
     truncation_flags = req_flags ++ resp_flags
 
     meta = get_in(result.final_response || %{}, ["_meta"]) || %{}
-    Logger.info("[Proxy] log_request _meta=#{inspect(meta)}")
-
     log_attrs = %{
       router_id: router.id,
       request_id: request_id,
