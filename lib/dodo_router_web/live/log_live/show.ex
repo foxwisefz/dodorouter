@@ -180,6 +180,15 @@ defmodule DodoRouterWeb.LogLive.Show do
                       </div>
                     </details>
                   </div>
+                  <div
+                    :if={attempt["streamed_to_client"]}
+                    class="mt-2 flex items-center gap-2 text-xs text-warning"
+                  >
+                    <span class="badge badge-warning badge-sm">midstream fallback</span>
+                    <span class="text-base-content/50">
+                      {attempt["partial_content_length"]} chars already sent to client
+                    </span>
+                  </div>
                 </div>
               <% end %>
             </div>

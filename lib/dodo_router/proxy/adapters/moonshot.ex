@@ -93,13 +93,13 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
 
       case parse_sse_chunk(data) do
         {:chunks, chunks} ->
-          send_chunk.(data)
+          reframe_and_send_chunks(send_chunk, chunks)
           acc = Enum.reduce(chunks, acc, &accumulate_chunk(&2, &1))
           Process.put(:__moonshot_stream_acc__, acc)
           {:cont, {req, Req.Response.put_private(resp, :stream_acc, acc)}}
 
         {:chunks_then_done, chunks} ->
-          send_chunk.(data)
+          reframe_and_send_chunks(send_chunk, chunks)
           acc = Enum.reduce(chunks, acc, &accumulate_chunk(&2, &1))
           Process.put(:__moonshot_stream_acc__, acc)
           {:halt, {req, Req.Response.put_private(resp, :stream_acc, acc)}}
@@ -172,21 +172,16 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
     # Client values take precedence, step defaults are fallbacks
     body =
       request
-      |> IO.inspect(label: "L175")
       |> Adapter.sanitize_request()
-      |> IO.inspect(label: "L177")
       |> Map.put("model", step.model)
       |> maybe_default("temperature", step.temperature)
       |> maybe_default("max_tokens", step.max_tokens)
       |> maybe_default("top_p", nil)
-      |> IO.inspect(label: "L181")
       |> maybe_default("frequency_penalty", nil)
       |> maybe_default("presence_penalty", nil)
       |> maybe_default("stop", nil)
       |> maybe_put_thinking(step)
-      |> IO.inspect(label: "L184")
       |> maybe_transform_kimi_reasoning(step)
-      |> IO.inspect(label: "L189")
 
     Logger.info(
       "[Moonshot] Sending request model=#{body["model"]} msg_count=#{length(body["messages"] || [])}"
@@ -402,6 +397,13 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
       },
       extra
     )
+  end
+
+  defp reframe_and_send_chunks(send_chunk, chunks) do
+    Enum.each(chunks, fn chunk_data ->
+      event = "data: " <> Jason.encode!(chunk_data) <> "\n\n"
+      send_chunk.(event)
+    end)
   end
 
   defp latency(start_time), do: System.monotonic_time(:millisecond) - start_time
