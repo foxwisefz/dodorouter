@@ -24,6 +24,7 @@ defmodule DodoRouterWeb.LogLive.Show do
       |> assign(:resp_message, resp_message)
       |> assign(:show_raw_request, false)
       |> assign(:show_raw_response, false)
+      |> assign(:expanded_messages, MapSet.new())
 
     {:ok, socket}
   end
@@ -40,6 +41,19 @@ defmodule DodoRouterWeb.LogLive.Show do
 
   def handle_event("toggle_raw_response", _params, socket) do
     {:noreply, update(socket, :show_raw_response, &(!&1))}
+  end
+
+  def handle_event("toggle_message", %{"index" => idx}, socket) do
+    idx = String.to_integer(idx)
+
+    expanded =
+      if MapSet.member?(socket.assigns.expanded_messages, idx) do
+        MapSet.delete(socket.assigns.expanded_messages, idx)
+      else
+        MapSet.put(socket.assigns.expanded_messages, idx)
+      end
+
+    {:noreply, assign(socket, :expanded_messages, expanded)}
   end
 
   @impl true
@@ -252,8 +266,12 @@ defmodule DodoRouterWeb.LogLive.Show do
             <% else %>
               <%= if length(@req_messages) > 0 do %>
                 <div class="space-y-2">
-                  <%= for msg <- @req_messages do %>
-                    <.compact_message message={msg} />
+                  <%= for {msg, idx} <- Enum.with_index(@req_messages) do %>
+                    <.compact_message
+                      message={msg}
+                      index={idx}
+                      expanded={MapSet.member?(@expanded_messages, idx)}
+                    />
                   <% end %>
                 </div>
               <% else %>
@@ -284,7 +302,11 @@ defmodule DodoRouterWeb.LogLive.Show do
               </div>
             <% else %>
               <%= if @resp_message do %>
-                <.compact_message message={@resp_message} />
+                <.compact_message
+                  message={@resp_message}
+                  index="resp"
+                  expanded={MapSet.member?(@expanded_messages, "resp")}
+                />
               <% else %>
                 <div class="mockup-code text-xs max-h-64 overflow-auto">
                   <pre><code><%= format_json(@log.response_body) %></code></pre>
@@ -395,6 +417,8 @@ defmodule DodoRouterWeb.LogLive.Show do
   defp normalize_content(other), do: inspect(other)
 
   attr :message, :map, required: true
+  attr :index, :any, required: true
+  attr :expanded, :boolean, default: false
 
   defp compact_message(assigns) do
     role = assigns.message.role
@@ -408,22 +432,38 @@ defmodule DodoRouterWeb.LogLive.Show do
         _ -> {"badge-ghost", role || "unknown"}
       end
 
+    content = assigns.message.content
+    is_truncated = String.length(content) > 120
+
     assigns =
       assigns
       |> assign(:badge_class, badge_class)
       |> assign(:label, label)
-      |> assign(:preview, truncate(assigns.message.content, 120))
+      |> assign(:display_content, if(assigns.expanded, do: content, else: truncate(content, 120)))
+      |> assign(:is_truncated, is_truncated)
 
     ~H"""
-    <div class="group">
+    <div
+      class="group cursor-pointer rounded-lg hover:bg-base-200/50 transition-colors p-1 -mx-1"
+      phx-click="toggle_message"
+      phx-value-index={@index}
+    >
       <div class="flex items-start gap-2">
         <span class={["badge badge-xs font-mono capitalize flex-shrink-0 mt-0.5", @badge_class]}>
           {@label}
         </span>
         <div class="min-w-0 flex-1">
-          <p class="text-sm text-base-content/80 leading-snug line-clamp-2">
-            {@preview}
+          <p class={[
+            "text-sm text-base-content/80 leading-snug",
+            !@expanded && "line-clamp-2"
+          ]}>
+            {@display_content}
           </p>
+          <%= if @is_truncated do %>
+            <span class="text-[10px] text-primary mt-0.5 block">
+              {if @expanded, do: "Show less", else: "Click to expand"}
+            </span>
+          <% end %>
         </div>
       </div>
       <%= if @message.tool_calls && length(@message.tool_calls) > 0 do %>
