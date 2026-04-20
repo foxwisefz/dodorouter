@@ -12,10 +12,18 @@ defmodule DodoRouterWeb.LogLive.Show do
         log -> log
       end
 
+    {req_messages, req_params} = parse_request_body(log.request_body)
+    resp_message = parse_response_body(log.response_body)
+
     socket =
       socket
       |> assign(:page_title, "Request #{String.slice(log.request_id, 0, 8)}...")
       |> assign(:log, log)
+      |> assign(:req_messages, req_messages)
+      |> assign(:req_params, req_params)
+      |> assign(:resp_message, resp_message)
+      |> assign(:show_raw_request, false)
+      |> assign(:show_raw_response, false)
 
     {:ok, socket}
   end
@@ -23,6 +31,15 @@ defmodule DodoRouterWeb.LogLive.Show do
   @impl true
   def handle_params(params, _uri, socket) do
     {:noreply, assign(socket, :return_to, params["return_to"])}
+  end
+
+  @impl true
+  def handle_event("toggle_raw_request", _params, socket) do
+    {:noreply, update(socket, :show_raw_request, &(!&1))}
+  end
+
+  def handle_event("toggle_raw_response", _params, socket) do
+    {:noreply, update(socket, :show_raw_response, &(!&1))}
   end
 
   @impl true
@@ -213,24 +230,65 @@ defmodule DodoRouterWeb.LogLive.Show do
         </div>
       </div>
       
-    <!-- Request/Response Bodies -->
-      <div :if={@log.request_body || @log.response_body} class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <div :if={@log.request_body} class="card bg-base-100 shadow">
-          <div class="card-body">
-            <h2 class="card-title text-base">Request Body</h2>
-            <div class="mockup-code text-xs max-h-96 overflow-auto">
+    <!-- Request Body -->
+      <div :if={@log.request_body} class="card bg-base-100 shadow mb-6">
+        <div class="card-body">
+          <div class="flex items-center justify-between mb-4">
+            <h2 class="card-title text-base">Request</h2>
+            <button
+              phx-click="toggle_raw_request"
+              class="btn btn-ghost btn-xs"
+            >
+              {if @show_raw_request, do: "Chat View", else: "Raw JSON"}
+            </button>
+          </div>
+
+          <%= if @show_raw_request do %>
+            <div class="mockup-code text-xs max-h-[32rem] overflow-auto">
               <pre><code><%= format_json(@log.request_body) %></code></pre>
             </div>
-          </div>
+          <% else %>
+            <%= if length(@req_messages) > 0 do %>
+              <div class="space-y-3">
+                <%= for msg <- @req_messages do %>
+                  <.message_bubble message={msg} />
+                <% end %>
+              </div>
+            <% else %>
+              <div class="mockup-code text-xs max-h-[32rem] overflow-auto">
+                <pre><code><%= format_json(@log.request_body) %></code></pre>
+              </div>
+            <% end %>
+          <% end %>
         </div>
+      </div>
+      
+    <!-- Response Body -->
+      <div :if={@log.response_body} class="card bg-base-100 shadow mb-6">
+        <div class="card-body">
+          <div class="flex items-center justify-between mb-4">
+            <h2 class="card-title text-base">Response</h2>
+            <button
+              phx-click="toggle_raw_response"
+              class="btn btn-ghost btn-xs"
+            >
+              {if @show_raw_response, do: "Chat View", else: "Raw JSON"}
+            </button>
+          </div>
 
-        <div :if={@log.response_body} class="card bg-base-100 shadow">
-          <div class="card-body">
-            <h2 class="card-title text-base">Response Body</h2>
-            <div class="mockup-code text-xs max-h-96 overflow-auto">
+          <%= if @show_raw_response do %>
+            <div class="mockup-code text-xs max-h-[32rem] overflow-auto">
               <pre><code><%= format_json(@log.response_body) %></code></pre>
             </div>
-          </div>
+          <% else %>
+            <%= if @resp_message do %>
+              <.message_bubble message={@resp_message} />
+            <% else %>
+              <div class="mockup-code text-xs max-h-[32rem] overflow-auto">
+                <pre><code><%= format_json(@log.response_body) %></code></pre>
+              </div>
+            <% end %>
+          <% end %>
         </div>
       </div>
     </div>
@@ -265,6 +323,121 @@ defmodule DodoRouterWeb.LogLive.Show do
 
     ~H"""
     <span class={"badge #{@class}"}>{@label}</span>
+    """
+  end
+
+  defp parse_request_body(nil), do: {[], %{}}
+
+  defp parse_request_body(str) when is_binary(str) do
+    case Jason.decode(str) do
+      {:ok, %{"messages" => messages} = decoded} when is_list(messages) ->
+        {Enum.map(messages, &normalize_message/1), Map.drop(decoded, ["messages"])}
+
+      _ ->
+        {[], %{}}
+    end
+  end
+
+  defp parse_response_body(nil), do: nil
+
+  defp parse_response_body(str) when is_binary(str) do
+    case Jason.decode(str) do
+      {:ok, %{"choices" => [%{"message" => msg} | _]}} ->
+        normalize_message(msg)
+
+      {:ok, %{"choices" => [%{"delta" => delta} | _]}} ->
+        normalize_message(delta)
+
+      _ ->
+        nil
+    end
+  end
+
+  defp normalize_message(%{"role" => role, "content" => content} = msg) do
+    %{
+      role: role,
+      content: normalize_content(content),
+      tool_calls: msg["tool_calls"],
+      tool_call_id: msg["tool_call_id"],
+      name: msg["name"]
+    }
+  end
+
+  defp normalize_message(%{"content" => content} = msg) do
+    %{
+      role: msg["role"] || "assistant",
+      content: normalize_content(content),
+      tool_calls: msg["tool_calls"],
+      tool_call_id: msg["tool_call_id"],
+      name: msg["name"]
+    }
+  end
+
+  defp normalize_message(msg),
+    do: %{role: "unknown", content: inspect(msg), tool_calls: nil, tool_call_id: nil, name: nil}
+
+  defp normalize_content(nil), do: ""
+  defp normalize_content(str) when is_binary(str), do: str
+
+  defp normalize_content(list) when is_list(list) do
+    list
+    |> Enum.map(fn
+      %{"type" => "text", "text" => text} -> text
+      %{"text" => text} -> text
+      other -> inspect(other)
+    end)
+    |> Enum.join("\n\n")
+  end
+
+  defp normalize_content(other), do: inspect(other)
+
+  attr :message, :map, required: true
+
+  defp message_bubble(assigns) do
+    role = assigns.message.role
+
+    {bg_class, label, align} =
+      case role do
+        "system" -> {"bg-base-300/50 text-base-content/70", "System", "start"}
+        "user" -> {"bg-primary/10 text-base-content", "You", "end"}
+        "assistant" -> {"bg-base-200", "Assistant", "start"}
+        "tool" -> {"bg-warning/10 text-warning", "Tool Result", "start"}
+        _ -> {"bg-base-200", String.capitalize(role || "unknown"), "start"}
+      end
+
+    assigns =
+      assigns
+      |> assign(:bg_class, bg_class)
+      |> assign(:label, label)
+      |> assign(:align, align)
+
+    ~H"""
+    <div class={["flex flex-col", @align == "end" && "items-end", @align == "start" && "items-start"]}>
+      <span class={[
+        "text-[10px] font-semibold uppercase tracking-wider mb-1 text-base-content/40",
+        @align == "end" && "text-right"
+      ]}>
+        {@label}
+      </span>
+      <div class={[
+        "max-w-[90%] rounded-2xl px-4 py-3 text-sm leading-relaxed whitespace-pre-wrap",
+        @bg_class
+      ]}>
+        {@message.content}
+        <%= if @message.tool_calls && length(@message.tool_calls) > 0 do %>
+          <div class="mt-2 space-y-1">
+            <%= for tool <- @message.tool_calls do %>
+              <div class="text-xs font-mono bg-base-300/50 rounded px-2 py-1">
+                <span class="text-primary">{tool["function"]["name"] || tool["name"]}</span>
+                <span class="text-base-content/50">
+                  ({tool["function"]["arguments"] || inspect(tool["arguments"])})
+                </span>
+              </div>
+            <% end %>
+          </div>
+        <% end %>
+      </div>
+    </div>
     """
   end
 
