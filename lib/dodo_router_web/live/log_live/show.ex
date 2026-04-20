@@ -21,12 +21,17 @@ defmodule DodoRouterWeb.LogLive.Show do
   end
 
   @impl true
+  def handle_params(params, _uri, socket) do
+    {:noreply, assign(socket, :return_to, params["return_to"])}
+  end
+
+  @impl true
   def render(assigns) do
     ~H"""
     <div>
       <!-- Header -->
       <div class="flex items-center gap-4 mb-6">
-        <.link navigate={~p"/logs"} class="btn btn-ghost btn-sm btn-square">
+        <.link navigate={@return_to || ~p"/logs"} class="btn btn-ghost btn-sm btn-square">
           <svg
             xmlns="http://www.w3.org/2000/svg"
             class="h-5 w-5"

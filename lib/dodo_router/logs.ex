@@ -274,7 +274,14 @@ defmodule DodoRouter.Logs do
       order_by: [desc: max(l.inserted_at)],
       limit: ^limit,
       offset: ^offset,
-      select: %{session_id: l.session_id, session_name: max(l.session_name), request_count: count(l.id), last_activity: max(l.inserted_at), total_tokens: sum(l.total_tokens), avg_latency_ms: avg(l.latency_ms)}
+      select: %{
+        session_id: l.session_id,
+        session_name: max(l.session_name),
+        request_count: count(l.id),
+        last_activity: max(l.inserted_at),
+        total_tokens: sum(l.total_tokens),
+        avg_latency_ms: avg(l.latency_ms)
+      }
     )
     |> Repo.all()
   end
@@ -332,7 +339,8 @@ defmodule DodoRouter.Logs do
         prompt_tokens: sum(l.prompt_tokens),
         completion_tokens: sum(l.completion_tokens),
         avg_latency_ms: avg(l.latency_ms),
-        successful_requests: count(fragment("CASE WHEN ? IN ('success', 'fallback') THEN 1 END", l.status)),
+        successful_requests:
+          count(fragment("CASE WHEN ? IN ('success', 'fallback') THEN 1 END", l.status)),
         error_requests: count(fragment("CASE WHEN ? = 'error' THEN 1 END", l.status)),
         first_request: min(l.inserted_at),
         last_request: max(l.inserted_at)

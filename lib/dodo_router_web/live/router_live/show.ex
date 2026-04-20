@@ -248,26 +248,48 @@ defmodule DodoRouterWeb.RouterLive.Show do
             </div>
           </div>
         </div>
-        <.link
-          patch={~p"/routers/#{@router}/routing"}
-          class="btn btn-sm bg-base-200 border-base-300/50 hover:bg-base-300 gap-2"
-        >
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            class="h-4 w-4"
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
+        <div class="flex items-center gap-2">
+          <.link
+            navigate={~p"/routers/#{@router}/sessions"}
+            class="btn btn-sm bg-base-200 border-base-300/50 hover:bg-base-300 gap-2"
           >
-            <path
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              stroke-width="2"
-              d="M4 6h16M4 12h16M4 18h7"
-            />
-          </svg>
-          Routing
-        </.link>
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              class="h-4 w-4"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+            >
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"
+              />
+            </svg>
+            Sessions
+          </.link>
+          <.link
+            patch={~p"/routers/#{@router}/routing"}
+            class="btn btn-sm bg-base-200 border-base-300/50 hover:bg-base-300 gap-2"
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              class="h-4 w-4"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+            >
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M4 6h16M4 12h16M4 18h7"
+              />
+            </svg>
+            Routing
+          </.link>
+        </div>
       </div>
       
     <!-- New API Key Alert -->
@@ -499,7 +521,12 @@ defmodule DodoRouterWeb.RouterLive.Show do
           <.link
             :for={{dom_id, log} <- @streams.recent_logs}
             id={dom_id}
-            navigate={if log.status != "pending", do: ~p"/logs/#{log}", else: nil}
+            navigate={
+              if log.status != "pending",
+                do:
+                  ~p"/logs/#{log}" <> "?return_to=" <> URI.encode_www_form("/routers/#{@router.id}"),
+                else: nil
+            }
             class={[
               "flex items-center justify-between p-3 rounded-lg text-sm transition-colors",
               log.status == "pending" && "bg-info/10 animate-pulse",

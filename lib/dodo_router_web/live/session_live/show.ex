@@ -45,44 +45,44 @@ defmodule DodoRouterWeb.SessionLive.Show do
         <a href={~p"/routers/#{@router.id}/sessions"} class="btn btn-ghost btn-sm btn-circle">←</a>
         <div>
           <h1 class="text-xl font-bold">
-            <%= if @session_name, do: @session_name, else: "Session" %>
+            {if @session_name, do: @session_name, else: "Session"}
           </h1>
-          <p class="text-sm font-mono text-base-content/50"><%= @session_id %></p>
+          <p class="text-sm font-mono text-base-content/50">{@session_id}</p>
         </div>
       </div>
-
-      <!-- Stats -->
+      
+    <!-- Stats -->
       <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
         <div class="stat bg-base-100 border border-base-300 rounded-lg p-3">
           <div class="stat-title text-xs">Requests</div>
-          <div class="stat-value text-lg"><%= @stats.request_count %></div>
+          <div class="stat-value text-lg">{@stats.request_count}</div>
         </div>
         <div class="stat bg-base-100 border border-base-300 rounded-lg p-3">
           <div class="stat-title text-xs">Total Tokens</div>
-          <div class="stat-value text-lg"><%= @stats.total_tokens || 0 %></div>
+          <div class="stat-value text-lg">{@stats.total_tokens || 0}</div>
         </div>
         <div class="stat bg-base-100 border border-base-300 rounded-lg p-3">
           <div class="stat-title text-xs">Avg Latency</div>
-          <div class="stat-value text-lg"><%= round(@stats.avg_latency_ms || 0) %>ms</div>
+          <div class="stat-value text-lg">{format_latency(@stats.avg_latency_ms)}ms</div>
         </div>
         <div class="stat bg-base-100 border border-base-300 rounded-lg p-3">
           <div class="stat-title text-xs">Success Rate</div>
           <div class="stat-value text-lg">
             <%= if @stats.request_count > 0 do %>
-              <%= round((@stats.successful_requests || 0) / @stats.request_count * 100) %>%
+              {round((@stats.successful_requests || 0) / @stats.request_count * 100)}%
             <% else %>
               —
             <% end %>
           </div>
         </div>
       </div>
-
-      <!-- Request timeline -->
+      
+    <!-- Request timeline -->
       <h2 class="text-lg font-semibold mb-3">Requests</h2>
       <div class="space-y-2">
         <%= for log <- @logs do %>
           <a
-            href={~p"/logs/#{log.id}"}
+            href={~p"/logs/#{log.id}" <> "?return_to=" <> URI.encode_www_form("/routers/#{@router.id}/sessions/#{@session_id}")}
             class="block bg-base-100 border border-base-300 rounded-lg p-3 hover:border-primary transition-colors"
           >
             <div class="flex items-center justify-between">
@@ -91,13 +91,13 @@ defmodule DodoRouterWeb.SessionLive.Show do
                   "badge badge-sm",
                   if(log.status in ["success", "fallback"], do: "badge-success", else: "badge-error")
                 ]}>
-                  <%= log.status %>
+                  {log.status}
                 </span>
-                <span class="text-sm font-medium"><%= log.final_model || "unknown" %></span>
+                <span class="text-sm font-medium">{log.final_model || "unknown"}</span>
               </div>
               <div class="text-xs text-base-content/50">
-                <%= log.latency_ms %>ms · <%= log.total_tokens || 0 %> tokens
-                · <%= Calendar.strftime(log.inserted_at, "%H:%M:%S") %>
+                {log.latency_ms}ms · {log.total_tokens || 0} tokens
+                · {Calendar.strftime(log.inserted_at, "%H:%M:%S")}
               </div>
             </div>
           </a>
@@ -125,4 +125,8 @@ defmodule DodoRouterWeb.SessionLive.Show do
     |> assign(:logs, logs)
     |> assign(:session_name, session_name)
   end
+
+  defp format_latency(nil), do: "0"
+  defp format_latency(%Decimal{} = ms), do: ms |> Decimal.round(0) |> Decimal.to_integer()
+  defp format_latency(ms), do: round(ms)
 end
