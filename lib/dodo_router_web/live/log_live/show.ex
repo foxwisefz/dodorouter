@@ -454,7 +454,7 @@ defmodule DodoRouterWeb.LogLive.Show do
         </span>
         <div class="min-w-0 flex-1">
           <p class={[
-            "text-sm text-base-content/80 leading-snug",
+            "text-sm text-base-content/80 leading-snug whitespace-pre-wrap",
             !@expanded && "line-clamp-2"
           ]}>
             {@display_content}
