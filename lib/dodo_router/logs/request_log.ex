@@ -74,6 +74,8 @@ defmodule DodoRouter.Logs.RequestLog do
     |> validate_required([:router_id, :request_id, :status, :inserted_at])
     |> validate_inclusion(:status, @statuses)
     |> validate_inclusion(:call_type, @call_types ++ [nil])
+    |> validate_length(:session_id, max: 255)
+    |> validate_length(:session_name, max: 255)
     |> foreign_key_constraint(:router_id)
     |> unique_constraint(:request_id)
   end
