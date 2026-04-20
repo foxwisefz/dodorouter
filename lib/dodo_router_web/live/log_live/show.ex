@@ -12,12 +12,53 @@ defmodule DodoRouterWeb.LogLive.Show do
         log -> log
       end
 
+    {req_messages, req_params} = parse_request_body(log.request_body)
+    resp_message = parse_response_body(log.response_body)
+
     socket =
       socket
       |> assign(:page_title, "Request #{String.slice(log.request_id, 0, 8)}...")
       |> assign(:log, log)
+      |> assign(:req_messages, req_messages)
+      |> assign(:req_params, req_params)
+      |> assign(:resp_message, resp_message)
+      |> assign(:show_raw_request, false)
+      |> assign(:show_raw_response, false)
+      |> assign(:expanded_messages, MapSet.new())
+      |> assign(:truncation_flags, log.truncation_flags || [])
 
     {:ok, socket}
+  end
+
+  @impl true
+  def handle_params(params, _uri, socket) do
+    {:noreply, assign(socket, :return_to, params["return_to"])}
+  end
+
+  @impl true
+  def handle_event("toggle_raw_request", _params, socket) do
+    {:noreply, update(socket, :show_raw_request, &(!&1))}
+  end
+
+  def handle_event("toggle_raw_response", _params, socket) do
+    {:noreply, update(socket, :show_raw_response, &(!&1))}
+  end
+
+  def handle_event("toggle_message", %{"index" => idx}, socket) do
+    idx =
+      case Integer.parse(idx) do
+        {int, ""} -> int
+        _ -> idx
+      end
+
+    expanded =
+      if MapSet.member?(socket.assigns.expanded_messages, idx) do
+        MapSet.delete(socket.assigns.expanded_messages, idx)
+      else
+        MapSet.put(socket.assigns.expanded_messages, idx)
+      end
+
+    {:noreply, assign(socket, :expanded_messages, expanded)}
   end
 
   @impl true
@@ -26,7 +67,7 @@ defmodule DodoRouterWeb.LogLive.Show do
     <div>
       <!-- Header -->
       <div class="flex items-center gap-4 mb-6">
-        <.link navigate={~p"/logs"} class="btn btn-ghost btn-sm btn-square">
+        <.link navigate={@return_to || ~p"/logs"} class="btn btn-ghost btn-sm btn-square">
           <svg
             xmlns="http://www.w3.org/2000/svg"
             class="h-5 w-5"
@@ -42,6 +83,31 @@ defmodule DodoRouterWeb.LogLive.Show do
           <code class="text-sm text-base-content/60">{@log.request_id}</code>
         </div>
       </div>
+
+      <%= if length(@truncation_flags) > 0 do %>
+        <div class="alert alert-warning mb-6">
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            class="h-5 w-5 shrink-0"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+          >
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+            />
+          </svg>
+          <div>
+            <span class="font-semibold">Content truncated</span>
+            <span class="text-sm block">
+              This request had large payloads that were truncated before storage.
+            </span>
+          </div>
+        </div>
+      <% end %>
       
     <!-- Overview Stats -->
       <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4 mb-6">
@@ -208,23 +274,75 @@ defmodule DodoRouterWeb.LogLive.Show do
         </div>
       </div>
       
-    <!-- Request/Response Bodies -->
+    <!-- Request & Response -->
       <div :if={@log.request_body || @log.response_body} class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <!-- Request -->
         <div :if={@log.request_body} class="card bg-base-100 shadow">
           <div class="card-body">
-            <h2 class="card-title text-base">Request Body</h2>
-            <div class="mockup-code text-xs max-h-96 overflow-auto">
-              <pre><code><%= format_json(@log.request_body) %></code></pre>
+            <div class="flex items-center justify-between mb-3">
+              <h2 class="card-title text-base">Request</h2>
+              <button
+                phx-click="toggle_raw_request"
+                class="btn btn-ghost btn-xs"
+              >
+                {if @show_raw_request, do: "Compact", else: "Raw JSON"}
+              </button>
             </div>
+
+            <%= if @show_raw_request do %>
+              <div class="mockup-code text-xs max-h-64 overflow-auto">
+                <pre><code><%= format_json(@log.request_body) %></code></pre>
+              </div>
+            <% else %>
+              <%= if length(@req_messages) > 0 do %>
+                <div class="space-y-2">
+                  <%= for {msg, idx} <- Enum.with_index(@req_messages) do %>
+                    <.compact_message
+                      message={msg}
+                      index={idx}
+                      expanded={MapSet.member?(@expanded_messages, idx)}
+                    />
+                  <% end %>
+                </div>
+              <% else %>
+                <div class="mockup-code text-xs max-h-64 overflow-auto">
+                  <pre><code><%= format_json(@log.request_body) %></code></pre>
+                </div>
+              <% end %>
+            <% end %>
           </div>
         </div>
-
+        
+    <!-- Response -->
         <div :if={@log.response_body} class="card bg-base-100 shadow">
           <div class="card-body">
-            <h2 class="card-title text-base">Response Body</h2>
-            <div class="mockup-code text-xs max-h-96 overflow-auto">
-              <pre><code><%= format_json(@log.response_body) %></code></pre>
+            <div class="flex items-center justify-between mb-3">
+              <h2 class="card-title text-base">Response</h2>
+              <button
+                phx-click="toggle_raw_response"
+                class="btn btn-ghost btn-xs"
+              >
+                {if @show_raw_response, do: "Compact", else: "Raw JSON"}
+              </button>
             </div>
+
+            <%= if @show_raw_response do %>
+              <div class="mockup-code text-xs max-h-64 overflow-auto">
+                <pre><code><%= format_json(@log.response_body) %></code></pre>
+              </div>
+            <% else %>
+              <%= if @resp_message do %>
+                <.compact_message
+                  message={@resp_message}
+                  index="resp"
+                  expanded={MapSet.member?(@expanded_messages, "resp")}
+                />
+              <% else %>
+                <div class="mockup-code text-xs max-h-64 overflow-auto">
+                  <pre><code><%= format_json(@log.response_body) %></code></pre>
+                </div>
+              <% end %>
+            <% end %>
           </div>
         </div>
       </div>
@@ -262,6 +380,183 @@ defmodule DodoRouterWeb.LogLive.Show do
     <span class={"badge #{@class}"}>{@label}</span>
     """
   end
+
+  defp parse_request_body(nil), do: {[], %{}}
+
+  defp parse_request_body(str) when is_binary(str) do
+    case Jason.decode(str) do
+      {:ok, %{"messages" => messages} = decoded} when is_list(messages) ->
+        {Enum.map(messages, &normalize_message/1), Map.drop(decoded, ["messages"])}
+
+      _ ->
+        {[], %{}}
+    end
+  end
+
+  defp parse_response_body(nil), do: nil
+
+  defp parse_response_body(str) when is_binary(str) do
+    case Jason.decode(str) do
+      {:ok, %{"choices" => [%{"message" => msg} | _]}} ->
+        normalize_message(msg)
+
+      {:ok, %{"choices" => [%{"delta" => delta} | _]}} ->
+        normalize_message(delta)
+
+      _ ->
+        nil
+    end
+  end
+
+  defp normalize_message(%{"role" => role, "content" => content} = msg) do
+    %{
+      role: role,
+      content: normalize_content(content),
+      tool_calls: msg["tool_calls"],
+      tool_call_id: msg["tool_call_id"],
+      name: msg["name"]
+    }
+  end
+
+  defp normalize_message(%{"content" => content} = msg) do
+    %{
+      role: msg["role"] || "assistant",
+      content: normalize_content(content),
+      tool_calls: msg["tool_calls"],
+      tool_call_id: msg["tool_call_id"],
+      name: msg["name"]
+    }
+  end
+
+  defp normalize_message(msg),
+    do: %{role: "unknown", content: inspect(msg), tool_calls: nil, tool_call_id: nil, name: nil}
+
+  defp normalize_content(nil), do: ""
+  defp normalize_content(str) when is_binary(str), do: str
+
+  defp normalize_content(list) when is_list(list) do
+    list
+    |> Enum.map(fn
+      %{"type" => "text", "text" => text} -> text
+      %{"text" => text} -> text
+      other -> inspect(other)
+    end)
+    |> Enum.join("\n\n")
+  end
+
+  defp normalize_content(other), do: inspect(other)
+
+  attr :message, :map, required: true
+  attr :index, :any, required: true
+  attr :expanded, :boolean, default: false
+
+  defp compact_message(assigns) do
+    role = assigns.message.role
+
+    {badge_class, label} =
+      case role do
+        "system" -> {"badge-ghost", "system"}
+        "user" -> {"badge-primary", "user"}
+        "assistant" -> {"badge-secondary", "assistant"}
+        "tool" -> {"badge-warning", "tool"}
+        _ -> {"badge-ghost", role || "unknown"}
+      end
+
+    content = assigns.message.content
+    is_truncated = String.length(content) > 120
+
+    assigns =
+      assigns
+      |> assign(:badge_class, badge_class)
+      |> assign(:label, label)
+      |> assign(:display_content, if(assigns.expanded, do: content, else: truncate(content, 120)))
+      |> assign(:is_truncated, is_truncated)
+
+    ~H"""
+    <div
+      class="group cursor-pointer rounded-lg hover:bg-base-200/50 transition-colors p-1 -mx-1"
+      phx-click="toggle_message"
+      phx-value-index={@index}
+    >
+      <div class="flex items-start gap-2">
+        <span class={["badge badge-xs font-mono capitalize flex-shrink-0 mt-0.5", @badge_class]}>
+          {@label}
+        </span>
+        <div class="min-w-0 flex-1">
+          <p class={[
+            "text-sm text-base-content/80 leading-snug whitespace-pre-wrap",
+            !@expanded && "line-clamp-2"
+          ]}>
+            {@display_content}
+          </p>
+          <%= if @is_truncated do %>
+            <span class="text-[10px] text-primary mt-0.5 block">
+              {if @expanded, do: "Show less", else: "Click to expand"}
+            </span>
+          <% end %>
+        </div>
+      </div>
+      <%= if @message.tool_calls && length(@message.tool_calls) > 0 do %>
+        <div class="mt-1.5 ml-10 flex flex-wrap gap-1">
+          <%= for tool <- @message.tool_calls do %>
+            <.tool_badge tool={tool} />
+          <% end %>
+        </div>
+      <% end %>
+    </div>
+    """
+  end
+
+  attr :tool, :map, required: true
+
+  defp tool_badge(assigns) do
+    name = assigns.tool["function"]["name"] || assigns.tool["name"] || "unknown"
+    args = assigns.tool["function"]["arguments"] || assigns.tool["arguments"] || "{}"
+
+    assigns =
+      assigns
+      |> assign(:name, name)
+      |> assign(:args_preview, truncate(args, 60))
+
+    ~H"""
+    <div class="inline-flex items-center gap-1 text-xs font-mono bg-primary/10 text-primary rounded px-1.5 py-0.5">
+      <svg
+        xmlns="http://www.w3.org/2000/svg"
+        class="h-3 w-3"
+        fill="none"
+        viewBox="0 0 24 24"
+        stroke="currentColor"
+      >
+        <path
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          stroke-width="2"
+          d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"
+        />
+        <path
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          stroke-width="2"
+          d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
+        />
+      </svg>
+      <span>{@name}</span>
+      <span class="text-primary/60">({@args_preview})</span>
+    </div>
+    """
+  end
+
+  defp truncate(nil, _len), do: ""
+
+  defp truncate(str, len) when is_binary(str) do
+    if String.length(str) > len do
+      String.slice(str, 0, len) <> "..."
+    else
+      str
+    end
+  end
+
+  defp truncate(other, _len), do: inspect(other)
 
   defp format_datetime(dt), do: Calendar.strftime(dt, "%Y-%m-%d %H:%M:%S UTC")
 

@@ -35,6 +35,13 @@ defmodule DodoRouter.Logs.RequestLog do
     field :request_body, :string
     field :response_body, :string
 
+    # Session grouping (Helicone-style)
+    field :session_id, :string
+    field :session_name, :string
+
+    # Truncation metadata
+    field :truncation_flags, {:array, :string}, default: []
+
     # Cost
     field :estimated_cost_usd, :decimal
 
@@ -63,11 +70,16 @@ defmodule DodoRouter.Logs.RequestLog do
       :request_body,
       :response_body,
       :estimated_cost_usd,
-      :inserted_at
+      :inserted_at,
+      :session_id,
+      :session_name,
+      :truncation_flags
     ])
     |> validate_required([:router_id, :request_id, :status, :inserted_at])
     |> validate_inclusion(:status, @statuses)
     |> validate_inclusion(:call_type, @call_types ++ [nil])
+    |> validate_length(:session_id, max: 255)
+    |> validate_length(:session_name, max: 255)
     |> foreign_key_constraint(:router_id)
     |> unique_constraint(:request_id)
   end

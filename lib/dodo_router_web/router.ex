@@ -70,6 +70,9 @@ defmodule DodoRouterWeb.Router do
       live "/logs", LogLive.Index, :index
       live "/logs/:id", LogLive.Show, :show
 
+      live "/routers/:router_id/sessions", SessionLive.Index, :index
+      live "/routers/:router_id/sessions/:session_id", SessionLive.Show, :show
+
       live "/dashboard", DashboardLive, :index
     end
   end
