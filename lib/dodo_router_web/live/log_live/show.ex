@@ -45,7 +45,11 @@ defmodule DodoRouterWeb.LogLive.Show do
   end
 
   def handle_event("toggle_message", %{"index" => idx}, socket) do
-    idx = String.to_integer(idx)
+    idx =
+      case Integer.parse(idx) do
+        {int, ""} -> int
+        _ -> idx
+      end
 
     expanded =
       if MapSet.member?(socket.assigns.expanded_messages, idx) do
