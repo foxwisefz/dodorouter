@@ -84,7 +84,7 @@ defmodule DodoRouterWeb.ProxyController do
     end
   end
 
-  defp stream_response(conn, router, params, request_id, _session) do
+  defp stream_response(conn, router, params, request_id, session) do
     conn =
       conn
       |> put_resp_content_type("text/event-stream")
@@ -97,7 +97,7 @@ defmodule DodoRouterWeb.ProxyController do
       :ok
     end
 
-    case Proxy.dispatch_streaming(router, params, send_chunk) do
+    case Proxy.dispatch_streaming(router, params, send_chunk, session: session) do
       {:ok, _response, _timing} ->
         conn
 

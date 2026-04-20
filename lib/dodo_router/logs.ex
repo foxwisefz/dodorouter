@@ -270,11 +270,11 @@ defmodule DodoRouter.Logs do
       join: r in Router,
       on: l.router_id == r.id,
       where: r.user_id == ^user.id and not is_nil(l.session_id),
-      group_by: [l.session_id, l.session_name],
+      group_by: l.session_id,
       order_by: [desc: max(l.inserted_at)],
       limit: ^limit,
       offset: ^offset,
-      select: %{session_id: l.session_id, session_name: l.session_name, request_count: count(l.id), last_activity: max(l.inserted_at), total_tokens: sum(l.total_tokens), avg_latency_ms: avg(l.latency_ms)}
+      select: %{session_id: l.session_id, session_name: max(l.session_name), request_count: count(l.id), last_activity: max(l.inserted_at), total_tokens: sum(l.total_tokens), avg_latency_ms: avg(l.latency_ms)}
     )
     |> Repo.all()
   end
@@ -288,13 +288,13 @@ defmodule DodoRouter.Logs do
 
     from(l in RequestLog,
       where: l.router_id == ^router.id and not is_nil(l.session_id),
-      group_by: [l.session_id, l.session_name],
+      group_by: l.session_id,
       order_by: [desc: max(l.inserted_at)],
       limit: ^limit,
       offset: ^offset,
       select: %{
         session_id: l.session_id,
-        session_name: l.session_name,
+        session_name: max(l.session_name),
         request_count: count(l.id),
         last_activity: max(l.inserted_at),
         total_tokens: sum(l.total_tokens),

@@ -49,8 +49,8 @@ defmodule DodoRouter.Proxy do
   @doc """
   Dispatches a streaming request.
   """
-  def dispatch_streaming(%Router{} = router, request, send_chunk) do
-    dispatch(router, request, stream: true, send_chunk: send_chunk)
+  def dispatch_streaming(%Router{} = router, request, send_chunk, opts \\ []) do
+    dispatch(router, request, Keyword.merge(opts, stream: true, send_chunk: send_chunk))
   end
 
   defp log_request(router, request, result, request_id, start_time, session) do
