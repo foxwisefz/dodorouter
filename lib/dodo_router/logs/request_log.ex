@@ -39,6 +39,9 @@ defmodule DodoRouter.Logs.RequestLog do
     field :session_id, :string
     field :session_name, :string
 
+    # Truncation metadata
+    field :truncation_flags, {:array, :string}, default: []
+
     # Cost
     field :estimated_cost_usd, :decimal
 
@@ -69,7 +72,8 @@ defmodule DodoRouter.Logs.RequestLog do
       :estimated_cost_usd,
       :inserted_at,
       :session_id,
-      :session_name
+      :session_name,
+      :truncation_flags
     ])
     |> validate_required([:router_id, :request_id, :status, :inserted_at])
     |> validate_inclusion(:status, @statuses)

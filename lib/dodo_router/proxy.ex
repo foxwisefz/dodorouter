@@ -66,10 +66,16 @@ defmodule DodoRouter.Proxy do
     last_step = List.last(result.attempted_steps)
 
     # Encode request/response for storage (truncate large payloads)
-    request_body = request |> truncate_body() |> Jason.encode!()
+    {request_body, req_flags} =
+      request |> truncate_body() |> then(&{Jason.encode!(&1), &1[:_truncation_flags] || []})
 
-    response_body =
-      result.final_response |> clean_response() |> truncate_body() |> Jason.encode!()
+    {response_body, resp_flags} =
+      result.final_response
+      |> clean_response()
+      |> truncate_body()
+      |> then(&{Jason.encode!(&1), &1[:_truncation_flags] || []})
+
+    truncation_flags = req_flags ++ resp_flags
 
     log_attrs = %{
       router_id: router.id,
@@ -89,35 +95,69 @@ defmodule DodoRouter.Proxy do
       request_body: request_body,
       response_body: response_body,
       session_id: session[:session_id],
-      session_name: session[:session_name]
+      session_name: session[:session_name],
+      truncation_flags: truncation_flags
     }
 
     Logs.create_log_async(log_attrs)
   end
 
-  defp truncate_body(nil), do: nil
+  defp truncate_body(nil), do: %{"_truncation_flags" => []}
 
   defp truncate_body(body) when is_map(body) do
-    # Truncate message content if too long
     case get_in(body, ["messages"]) do
       messages when is_list(messages) ->
-        truncated_messages =
-          Enum.map(messages, fn msg ->
+        {truncated_messages, flags} =
+          Enum.reduce(messages, {[], []}, fn msg, {acc_msgs, acc_flags} ->
             case msg["content"] do
-              content when is_binary(content) and byte_size(content) > 1000 ->
-                Map.put(msg, "content", String.slice(content, 0, 1000) <> "... [truncated]")
+              content when is_binary(content) ->
+                {truncated_content, was_truncated, flag} = smart_truncate(content)
+
+                new_msg =
+                  if was_truncated, do: Map.put(msg, "content", truncated_content), else: msg
+
+                new_flags = if flag, do: [flag | acc_flags], else: acc_flags
+
+                {[new_msg | acc_msgs], new_flags}
 
               _ ->
-                msg
+                {[msg | acc_msgs], acc_flags}
             end
           end)
 
-        Map.put(body, "messages", truncated_messages)
+        body
+        |> Map.put("messages", Enum.reverse(truncated_messages))
+        |> Map.put("_truncation_flags", Enum.reverse(flags))
 
       _ ->
-        body
+        Map.put(body, "_truncation_flags", [])
     end
   end
+
+  defp smart_truncate(content) when is_binary(content) do
+    cond do
+      # Base64 data: very aggressive truncation
+      base64?(content) and byte_size(content) > 1000 ->
+        {"[base64 data: #{byte_size(content)} bytes truncated]", true, "request_base64_truncated"}
+
+      # Regular text: generous limit
+      byte_size(content) > 50_000 ->
+        {String.slice(content, 0, 50_000) <> "\n\n... [truncated]", true,
+         "request_text_truncated"}
+
+      true ->
+        {content, false, nil}
+    end
+  end
+
+  defp base64?(content) when is_binary(content) do
+    # Base64 strings are typically long with no spaces and only base64 chars
+    byte_size(content) > 100 and
+      Regex.match?(~r/\A[A-Za-z0-9+\/=]+\z/, content) and
+      rem(byte_size(content), 4) == 0
+  end
+
+  defp base64?(_), do: false
 
   defp clean_response(nil), do: nil
 

@@ -25,6 +25,7 @@ defmodule DodoRouterWeb.LogLive.Show do
       |> assign(:show_raw_request, false)
       |> assign(:show_raw_response, false)
       |> assign(:expanded_messages, MapSet.new())
+      |> assign(:truncation_flags, log.truncation_flags || [])
 
     {:ok, socket}
   end
@@ -78,6 +79,31 @@ defmodule DodoRouterWeb.LogLive.Show do
           <code class="text-sm text-base-content/60">{@log.request_id}</code>
         </div>
       </div>
+
+      <%= if length(@truncation_flags) > 0 do %>
+        <div class="alert alert-warning mb-6">
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            class="h-5 w-5 shrink-0"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+          >
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+            />
+          </svg>
+          <div>
+            <span class="font-semibold">Content truncated</span>
+            <span class="text-sm block">
+              This request had large payloads that were truncated before storage.
+            </span>
+          </div>
+        </div>
+      <% end %>
       
     <!-- Overview Stats -->
       <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4 mb-6">
