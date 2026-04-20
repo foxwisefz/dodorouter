@@ -35,6 +35,10 @@ defmodule DodoRouter.Logs.RequestLog do
     field :request_body, :string
     field :response_body, :string
 
+    # Session grouping (Helicone-style)
+    field :session_id, :string
+    field :session_name, :string
+
     # Cost
     field :estimated_cost_usd, :decimal
 
@@ -63,7 +67,9 @@ defmodule DodoRouter.Logs.RequestLog do
       :request_body,
       :response_body,
       :estimated_cost_usd,
-      :inserted_at
+      :inserted_at,
+      :session_id,
+      :session_name
     ])
     |> validate_required([:router_id, :request_id, :status, :inserted_at])
     |> validate_inclusion(:status, @statuses)

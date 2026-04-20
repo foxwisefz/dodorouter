@@ -6,11 +6,12 @@ defmodule DodoRouterWeb.ProxyController do
   def create(conn, params) do
     router = conn.assigns.current_router
     request_id = Ecto.UUID.generate()
+    session = extract_session(conn)
 
     if params["stream"] == true do
-      stream_response(conn, router, params, request_id)
+      stream_response(conn, router, params, request_id, session)
     else
-      sync_response(conn, router, params, request_id)
+      sync_response(conn, router, params, request_id, session)
     end
   end
 
@@ -32,10 +33,17 @@ defmodule DodoRouterWeb.ProxyController do
     create(conn, params)
   end
 
-  defp sync_response(conn, router, params, request_id) do
+  defp extract_session(conn) do
+    %{
+      session_id: get_req_header(conn, "x-session-id") |> List.first(),
+      session_name: get_req_header(conn, "x-session-name") |> List.first()
+    }
+  end
+
+  defp sync_response(conn, router, params, request_id, session) do
     start_time = System.monotonic_time(:millisecond)
 
-    case Proxy.dispatch(router, params, request_id: request_id) do
+    case Proxy.dispatch(router, params, request_id: request_id, session: session) do
       {:ok, response, timing} ->
         total_ms = System.monotonic_time(:millisecond) - start_time
         provider_ms = timing[:provider_ms] || 0
@@ -76,7 +84,7 @@ defmodule DodoRouterWeb.ProxyController do
     end
   end
 
-  defp stream_response(conn, router, params, request_id) do
+  defp stream_response(conn, router, params, request_id, _session) do
     conn =
       conn
       |> put_resp_content_type("text/event-stream")

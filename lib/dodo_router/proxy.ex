@@ -15,6 +15,7 @@ defmodule DodoRouter.Proxy do
   """
   def dispatch(%Router{} = router, request, opts \\ []) do
     request_id = Keyword.get(opts, :request_id, Ecto.UUID.generate())
+    session = Keyword.get(opts, :session, %{})
     start_time = System.monotonic_time(:millisecond)
     streaming = Keyword.get(opts, :stream, false)
 
@@ -29,7 +30,7 @@ defmodule DodoRouter.Proxy do
 
       result = FallbackChain.execute(request, steps, router.id, opts)
 
-      log_request(router, request, result, request_id, start_time)
+      log_request(router, request, result, request_id, start_time, session)
       broadcast_event(router, result)
 
       # Calculate provider time (sum of all attempt latencies)
@@ -52,7 +53,7 @@ defmodule DodoRouter.Proxy do
     dispatch(router, request, stream: true, send_chunk: send_chunk)
   end
 
-  defp log_request(router, request, result, request_id, start_time) do
+  defp log_request(router, request, result, request_id, start_time, session) do
     latency_ms = System.monotonic_time(:millisecond) - start_time
 
     {call_type, tools_invoked} =
@@ -86,7 +87,9 @@ defmodule DodoRouter.Proxy do
       latency_ms: latency_ms,
       ttfb_ms: get_in(result.final_response || %{}, ["_meta", "ttfb_ms"]),
       request_body: request_body,
-      response_body: response_body
+      response_body: response_body,
+      session_id: session[:session_id],
+      session_name: session[:session_name]
     }
 
     Logs.create_log_async(log_attrs)

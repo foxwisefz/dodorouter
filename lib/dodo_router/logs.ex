@@ -257,6 +257,90 @@ defmodule DodoRouter.Logs do
     |> Repo.all()
   end
 
+  # Sessions
+
+  @doc """
+  Lists distinct sessions across all routers for a user.
+  """
+  def list_sessions_for_user(%User{} = user, opts \\ []) do
+    limit = Keyword.get(opts, :limit, 50)
+    offset = Keyword.get(opts, :offset, 0)
+
+    from(l in RequestLog,
+      join: r in Router,
+      on: l.router_id == r.id,
+      where: r.user_id == ^user.id and not is_nil(l.session_id),
+      group_by: [l.session_id, l.session_name],
+      order_by: [desc: max(l.inserted_at)],
+      limit: ^limit,
+      offset: ^offset,
+      select: %{session_id: l.session_id, session_name: l.session_name, request_count: count(l.id), last_activity: max(l.inserted_at), total_tokens: sum(l.total_tokens), avg_latency_ms: avg(l.latency_ms)}
+    )
+    |> Repo.all()
+  end
+
+  @doc """
+  Lists distinct sessions for a router, ordered by most recent activity.
+  """
+  def list_sessions(%Router{} = router, opts \\ []) do
+    limit = Keyword.get(opts, :limit, 50)
+    offset = Keyword.get(opts, :offset, 0)
+
+    from(l in RequestLog,
+      where: l.router_id == ^router.id and not is_nil(l.session_id),
+      group_by: [l.session_id, l.session_name],
+      order_by: [desc: max(l.inserted_at)],
+      limit: ^limit,
+      offset: ^offset,
+      select: %{
+        session_id: l.session_id,
+        session_name: l.session_name,
+        request_count: count(l.id),
+        last_activity: max(l.inserted_at),
+        total_tokens: sum(l.total_tokens),
+        avg_latency_ms: avg(l.latency_ms)
+      }
+    )
+    |> Repo.all()
+  end
+
+  @doc """
+  Lists all request logs belonging to a specific session.
+  """
+  def list_logs_by_session(%Router{} = router, session_id, opts \\ []) do
+    limit = Keyword.get(opts, :limit, 100)
+    offset = Keyword.get(opts, :offset, 0)
+
+    from(l in RequestLog,
+      where: l.router_id == ^router.id and l.session_id == ^session_id,
+      order_by: [asc: l.inserted_at],
+      limit: ^limit,
+      offset: ^offset
+    )
+    |> Repo.all()
+  end
+
+  @doc """
+  Gets aggregate stats for a session.
+  """
+  def session_stats(%Router{} = router, session_id) do
+    from(l in RequestLog,
+      where: l.router_id == ^router.id and l.session_id == ^session_id,
+      select: %{
+        request_count: count(l.id),
+        total_tokens: sum(l.total_tokens),
+        prompt_tokens: sum(l.prompt_tokens),
+        completion_tokens: sum(l.completion_tokens),
+        avg_latency_ms: avg(l.latency_ms),
+        successful_requests: count(fragment("CASE WHEN ? IN ('success', 'fallback') THEN 1 END", l.status)),
+        error_requests: count(fragment("CASE WHEN ? = 'error' THEN 1 END", l.status)),
+        first_request: min(l.inserted_at),
+        last_request: max(l.inserted_at)
+      }
+    )
+    |> Repo.one()
+  end
+
   # Private helpers
 
   defp maybe_filter_status(query, nil), do: query
