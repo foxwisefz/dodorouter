@@ -230,65 +230,68 @@ defmodule DodoRouterWeb.LogLive.Show do
         </div>
       </div>
       
-    <!-- Request Body -->
-      <div :if={@log.request_body} class="card bg-base-100 shadow mb-6">
-        <div class="card-body">
-          <div class="flex items-center justify-between mb-4">
-            <h2 class="card-title text-base">Request</h2>
-            <button
-              phx-click="toggle_raw_request"
-              class="btn btn-ghost btn-xs"
-            >
-              {if @show_raw_request, do: "Chat View", else: "Raw JSON"}
-            </button>
-          </div>
-
-          <%= if @show_raw_request do %>
-            <div class="mockup-code text-xs max-h-[32rem] overflow-auto">
-              <pre><code><%= format_json(@log.request_body) %></code></pre>
+    <!-- Request & Response -->
+      <div :if={@log.request_body || @log.response_body} class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <!-- Request -->
+        <div :if={@log.request_body} class="card bg-base-100 shadow">
+          <div class="card-body">
+            <div class="flex items-center justify-between mb-3">
+              <h2 class="card-title text-base">Request</h2>
+              <button
+                phx-click="toggle_raw_request"
+                class="btn btn-ghost btn-xs"
+              >
+                {if @show_raw_request, do: "Compact", else: "Raw JSON"}
+              </button>
             </div>
-          <% else %>
-            <%= if length(@req_messages) > 0 do %>
-              <div class="space-y-3">
-                <%= for msg <- @req_messages do %>
-                  <.message_bubble message={msg} />
-                <% end %>
-              </div>
-            <% else %>
-              <div class="mockup-code text-xs max-h-[32rem] overflow-auto">
+
+            <%= if @show_raw_request do %>
+              <div class="mockup-code text-xs max-h-64 overflow-auto">
                 <pre><code><%= format_json(@log.request_body) %></code></pre>
               </div>
-            <% end %>
-          <% end %>
-        </div>
-      </div>
-      
-    <!-- Response Body -->
-      <div :if={@log.response_body} class="card bg-base-100 shadow mb-6">
-        <div class="card-body">
-          <div class="flex items-center justify-between mb-4">
-            <h2 class="card-title text-base">Response</h2>
-            <button
-              phx-click="toggle_raw_response"
-              class="btn btn-ghost btn-xs"
-            >
-              {if @show_raw_response, do: "Chat View", else: "Raw JSON"}
-            </button>
-          </div>
-
-          <%= if @show_raw_response do %>
-            <div class="mockup-code text-xs max-h-[32rem] overflow-auto">
-              <pre><code><%= format_json(@log.response_body) %></code></pre>
-            </div>
-          <% else %>
-            <%= if @resp_message do %>
-              <.message_bubble message={@resp_message} />
             <% else %>
-              <div class="mockup-code text-xs max-h-[32rem] overflow-auto">
+              <%= if length(@req_messages) > 0 do %>
+                <div class="space-y-2">
+                  <%= for msg <- @req_messages do %>
+                    <.compact_message message={msg} />
+                  <% end %>
+                </div>
+              <% else %>
+                <div class="mockup-code text-xs max-h-64 overflow-auto">
+                  <pre><code><%= format_json(@log.request_body) %></code></pre>
+                </div>
+              <% end %>
+            <% end %>
+          </div>
+        </div>
+        
+    <!-- Response -->
+        <div :if={@log.response_body} class="card bg-base-100 shadow">
+          <div class="card-body">
+            <div class="flex items-center justify-between mb-3">
+              <h2 class="card-title text-base">Response</h2>
+              <button
+                phx-click="toggle_raw_response"
+                class="btn btn-ghost btn-xs"
+              >
+                {if @show_raw_response, do: "Compact", else: "Raw JSON"}
+              </button>
+            </div>
+
+            <%= if @show_raw_response do %>
+              <div class="mockup-code text-xs max-h-64 overflow-auto">
                 <pre><code><%= format_json(@log.response_body) %></code></pre>
               </div>
+            <% else %>
+              <%= if @resp_message do %>
+                <.compact_message message={@resp_message} />
+              <% else %>
+                <div class="mockup-code text-xs max-h-64 overflow-auto">
+                  <pre><code><%= format_json(@log.response_body) %></code></pre>
+                </div>
+              <% end %>
             <% end %>
-          <% end %>
+          </div>
         </div>
       </div>
     </div>
@@ -393,53 +396,97 @@ defmodule DodoRouterWeb.LogLive.Show do
 
   attr :message, :map, required: true
 
-  defp message_bubble(assigns) do
+  defp compact_message(assigns) do
     role = assigns.message.role
 
-    {bg_class, label, align} =
+    {badge_class, label} =
       case role do
-        "system" -> {"bg-base-300/50 text-base-content/70", "System", "start"}
-        "user" -> {"bg-primary/10 text-base-content", "You", "end"}
-        "assistant" -> {"bg-base-200", "Assistant", "start"}
-        "tool" -> {"bg-warning/10 text-warning", "Tool Result", "start"}
-        _ -> {"bg-base-200", String.capitalize(role || "unknown"), "start"}
+        "system" -> {"badge-ghost", "system"}
+        "user" -> {"badge-primary", "user"}
+        "assistant" -> {"badge-secondary", "assistant"}
+        "tool" -> {"badge-warning", "tool"}
+        _ -> {"badge-ghost", role || "unknown"}
       end
 
     assigns =
       assigns
-      |> assign(:bg_class, bg_class)
+      |> assign(:badge_class, badge_class)
       |> assign(:label, label)
-      |> assign(:align, align)
+      |> assign(:preview, truncate(assigns.message.content, 120))
 
     ~H"""
-    <div class={["flex flex-col", @align == "end" && "items-end", @align == "start" && "items-start"]}>
-      <span class={[
-        "text-[10px] font-semibold uppercase tracking-wider mb-1 text-base-content/40",
-        @align == "end" && "text-right"
-      ]}>
-        {@label}
-      </span>
-      <div class={[
-        "max-w-[90%] rounded-2xl px-4 py-3 text-sm leading-relaxed whitespace-pre-wrap",
-        @bg_class
-      ]}>
-        {@message.content}
-        <%= if @message.tool_calls && length(@message.tool_calls) > 0 do %>
-          <div class="mt-2 space-y-1">
-            <%= for tool <- @message.tool_calls do %>
-              <div class="text-xs font-mono bg-base-300/50 rounded px-2 py-1">
-                <span class="text-primary">{tool["function"]["name"] || tool["name"]}</span>
-                <span class="text-base-content/50">
-                  ({tool["function"]["arguments"] || inspect(tool["arguments"])})
-                </span>
-              </div>
-            <% end %>
-          </div>
-        <% end %>
+    <div class="group">
+      <div class="flex items-start gap-2">
+        <span class={["badge badge-xs font-mono capitalize flex-shrink-0 mt-0.5", @badge_class]}>
+          {@label}
+        </span>
+        <div class="min-w-0 flex-1">
+          <p class="text-sm text-base-content/80 leading-snug line-clamp-2">
+            {@preview}
+          </p>
+        </div>
       </div>
+      <%= if @message.tool_calls && length(@message.tool_calls) > 0 do %>
+        <div class="mt-1.5 ml-10 flex flex-wrap gap-1">
+          <%= for tool <- @message.tool_calls do %>
+            <.tool_badge tool={tool} />
+          <% end %>
+        </div>
+      <% end %>
     </div>
     """
   end
+
+  attr :tool, :map, required: true
+
+  defp tool_badge(assigns) do
+    name = assigns.tool["function"]["name"] || assigns.tool["name"] || "unknown"
+    args = assigns.tool["function"]["arguments"] || assigns.tool["arguments"] || "{}"
+
+    assigns =
+      assigns
+      |> assign(:name, name)
+      |> assign(:args_preview, truncate(args, 60))
+
+    ~H"""
+    <div class="inline-flex items-center gap-1 text-xs font-mono bg-primary/10 text-primary rounded px-1.5 py-0.5">
+      <svg
+        xmlns="http://www.w3.org/2000/svg"
+        class="h-3 w-3"
+        fill="none"
+        viewBox="0 0 24 24"
+        stroke="currentColor"
+      >
+        <path
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          stroke-width="2"
+          d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"
+        />
+        <path
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          stroke-width="2"
+          d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
+        />
+      </svg>
+      <span>{@name}</span>
+      <span class="text-primary/60">({@args_preview})</span>
+    </div>
+    """
+  end
+
+  defp truncate(nil, _len), do: ""
+
+  defp truncate(str, len) when is_binary(str) do
+    if String.length(str) > len do
+      String.slice(str, 0, len) <> "..."
+    else
+      str
+    end
+  end
+
+  defp truncate(other, _len), do: inspect(other)
 
   defp format_datetime(dt), do: Calendar.strftime(dt, "%Y-%m-%d %H:%M:%S UTC")
 
