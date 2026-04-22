@@ -250,6 +250,32 @@ defmodule DodoRouterWeb.RouterLive.Show do
         </div>
         <div class="flex items-center gap-2">
           <.link
+            navigate={~p"/routers/#{@router}/recordings"}
+            class="btn btn-sm bg-base-200 border-base-300/50 hover:bg-base-300 gap-2"
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              class="h-4 w-4"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+            >
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+              />
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M9 12a3 3 0 106 0 3 3 0 00-6 0z"
+              />
+            </svg>
+            Recordings
+          </.link>
+          <.link
             navigate={~p"/routers/#{@router}/sessions"}
             class="btn btn-sm bg-base-200 border-base-300/50 hover:bg-base-300 gap-2"
           >
