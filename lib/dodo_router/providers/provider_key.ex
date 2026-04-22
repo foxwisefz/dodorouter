@@ -5,7 +5,7 @@ defmodule DodoRouter.Providers.ProviderKey do
   @primary_key {:id, :binary_id, autogenerate: true}
   @foreign_key_type :binary_id
 
-  @provider_slugs ~w(zai_standard zai_coding moonshot)
+  @provider_slugs ~w(zai_standard zai_coding moonshot moonshot_coding)
 
   schema "provider_keys" do
     field :provider_slug, :string
@@ -73,6 +73,7 @@ defmodule DodoRouter.Providers.ProviderKey do
   def endpoint_for("zai_standard"), do: "https://api.z.ai/api/paas/v4"
   def endpoint_for("zai_coding"), do: "https://api.z.ai/api/coding/paas/v4"
   def endpoint_for("moonshot"), do: "https://api.moonshot.ai/v1"
+  def endpoint_for("moonshot_coding"), do: "https://api.kimi.com/coding/v1"
   def endpoint_for(_), do: nil
 
   @doc """
@@ -81,6 +82,7 @@ defmodule DodoRouter.Providers.ProviderKey do
   def display_info("zai_standard"), do: %{name: "z.ai (Standard Plan)", provider: "zai"}
   def display_info("zai_coding"), do: %{name: "z.ai (Coding Plan)", provider: "zai"}
   def display_info("moonshot"), do: %{name: "Moonshot (Kimi)", provider: "moonshot"}
+  def display_info("moonshot_coding"), do: %{name: "Moonshot (Kimi Coding)", provider: "moonshot"}
   def display_info(_), do: %{name: "Unknown", provider: nil}
 
   @doc """
@@ -88,6 +90,7 @@ defmodule DodoRouter.Providers.ProviderKey do
   """
   def to_slug("zai", "standard"), do: "zai_standard"
   def to_slug("zai", "coding"), do: "zai_coding"
+  def to_slug("moonshot", "coding"), do: "moonshot_coding"
   def to_slug("moonshot", _), do: "moonshot"
   def to_slug(provider, _), do: provider
 
@@ -96,6 +99,7 @@ defmodule DodoRouter.Providers.ProviderKey do
   """
   def adapter_provider("zai_standard"), do: "zai"
   def adapter_provider("zai_coding"), do: "zai"
+  def adapter_provider("moonshot_coding"), do: "moonshot"
   def adapter_provider("moonshot"), do: "moonshot"
   def adapter_provider(slug), do: slug
 end

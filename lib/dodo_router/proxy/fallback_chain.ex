@@ -149,8 +149,11 @@ defmodule DodoRouter.Proxy.FallbackChain do
   defp endpoint_for(%RoutingStep{provider: "zai"}),
     do: "https://api.z.ai/api/paas/v4/chat/completions"
 
+  defp endpoint_for(%RoutingStep{provider: "moonshot", plan_type: "coding"}),
+    do: "https://api.kimi.com/coding/v1/chat/completions"
+
   defp endpoint_for(%RoutingStep{provider: "moonshot"}),
-    do: "https://api.moonshot.cn/v1/chat/completions"
+    do: "https://api.moonshot.ai/v1/chat/completions"
 
   defp truncate_error(nil), do: nil
 

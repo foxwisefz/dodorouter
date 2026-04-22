@@ -640,7 +640,18 @@ defmodule DodoRouterWeb.RouterLive.Show do
           
     <!-- Moonshot specific options -->
           <div :if={@step_provider == "moonshot"}>
-            <label class="flex items-center gap-3 cursor-pointer">
+            <label class="block text-sm font-medium text-base-content/70 mb-2">Endpoint</label>
+            <select
+              name="step[plan_type]"
+              class="w-full py-2.5 px-3 bg-base-200 border border-base-300/50 rounded-lg"
+            >
+              <option value="standard">Standard (api.moonshot.ai/v1)</option>
+              <option value="coding">Kimi Code (api.kimi.com/coding/v1)</option>
+            </select>
+            <p class="text-xs text-base-content/50 mt-1.5">
+              Select the Kimi coding endpoint for code-optimized models
+            </p>
+            <label class="flex items-center gap-3 cursor-pointer mt-3">
               <input
                 type="checkbox"
                 name="step[thinking_enabled]"
