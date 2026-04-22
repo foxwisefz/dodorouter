@@ -18,6 +18,7 @@ defmodule DodoRouter.Proxy.FallbackChain do
     :router_id,
     :stream,
     :send_chunk,
+    :client_headers,
     attempted_steps: [],
     final_response: nil,
     status: nil,
@@ -27,13 +28,15 @@ defmodule DodoRouter.Proxy.FallbackChain do
   def execute(request, steps, router_id, opts \\ []) do
     stream = Keyword.get(opts, :stream, false)
     send_chunk = Keyword.get(opts, :send_chunk, fn _ -> :ok end)
+    client_headers = Keyword.get(opts, :client_headers, [])
 
     state = %__MODULE__{
       request: request,
       steps: steps,
       router_id: router_id,
       stream: stream,
-      send_chunk: send_chunk
+      send_chunk: send_chunk,
+      client_headers: client_headers
     }
 
     run_chain(state)
@@ -120,9 +123,9 @@ defmodule DodoRouter.Proxy.FallbackChain do
       {:error, :auth_error, %{reason: "Missing API key for #{step.provider}"}}
     else
       if state.stream do
-        adapter.stream(state.request, step, api_key, state.send_chunk)
+        adapter.stream(state.request, step, api_key, state.send_chunk, state.client_headers)
       else
-        adapter.call(state.request, step, api_key)
+        adapter.call(state.request, step, api_key, state.client_headers)
       end
     end
   end

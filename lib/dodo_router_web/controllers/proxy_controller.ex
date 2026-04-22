@@ -7,11 +7,12 @@ defmodule DodoRouterWeb.ProxyController do
     router = conn.assigns.current_router
     request_id = Ecto.UUID.generate()
     session = extract_session(conn)
+    client_headers = extract_forwardable_headers(conn)
 
     if params["stream"] == true do
-      stream_response(conn, router, params, request_id, session)
+      stream_response(conn, router, params, request_id, session, client_headers)
     else
-      sync_response(conn, router, params, request_id, session)
+      sync_response(conn, router, params, request_id, session, client_headers)
     end
   end
 
@@ -40,10 +41,22 @@ defmodule DodoRouterWeb.ProxyController do
     }
   end
 
-  defp sync_response(conn, router, params, request_id, session) do
+  @hop_by_hop_headers ~w(host connection content-length transfer-encoding upgrade proxy-authorization proxy-authenticate te trailer)
+                      |> Enum.map(&String.downcase/1)
+
+  defp extract_forwardable_headers(conn) do
+    conn.req_headers
+    |> Enum.reject(fn {key, _} -> String.downcase(key) in @hop_by_hop_headers end)
+  end
+
+  defp sync_response(conn, router, params, request_id, session, client_headers) do
     start_time = System.monotonic_time(:millisecond)
 
-    case Proxy.dispatch(router, params, request_id: request_id, session: session) do
+    case Proxy.dispatch(router, params,
+           request_id: request_id,
+           session: session,
+           client_headers: client_headers
+         ) do
       {:ok, response, timing} ->
         total_ms = System.monotonic_time(:millisecond) - start_time
         provider_ms = timing[:provider_ms] || 0
@@ -84,7 +97,7 @@ defmodule DodoRouterWeb.ProxyController do
     end
   end
 
-  defp stream_response(conn, router, params, request_id, session) do
+  defp stream_response(conn, router, params, request_id, session, client_headers) do
     conn =
       conn
       |> put_resp_content_type("text/event-stream")
@@ -97,7 +110,10 @@ defmodule DodoRouterWeb.ProxyController do
       :ok
     end
 
-    case Proxy.dispatch_streaming(router, params, send_chunk, session: session) do
+    case Proxy.dispatch_streaming(router, params, send_chunk,
+           session: session,
+           client_headers: client_headers
+         ) do
       {:ok, _response, _timing} ->
         conn
 

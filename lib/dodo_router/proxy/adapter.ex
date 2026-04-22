@@ -17,14 +17,15 @@ defmodule DodoRouter.Proxy.Adapter do
           | :content_policy
           | :unknown
 
-  @callback call(request(), RoutingStep.t(), api_key :: String.t()) ::
+  @callback call(request(), RoutingStep.t(), api_key :: String.t(), client_headers :: list()) ::
               {:ok, response()} | {:error, error_reason(), details :: map()}
 
   @callback stream(
               request(),
               RoutingStep.t(),
               api_key :: String.t(),
-              send_chunk :: (binary() -> :ok)
+              send_chunk :: (binary() -> :ok),
+              client_headers :: list()
             ) ::
               {:ok, response()} | {:error, error_reason(), details :: map()}
 
@@ -192,4 +193,16 @@ defmodule DodoRouter.Proxy.Adapter do
   end
 
   defp normalize_message_content(msg), do: msg
+
+  @proxy_overrides ~w(authorization content-type)
+                   |> Enum.map(&String.downcase/1)
+
+  def build_forwarded_headers(client_headers, proxy_headers) do
+    filtered =
+      Enum.reject(client_headers, fn {key, _} ->
+        String.downcase(key) in @proxy_overrides
+      end)
+
+    filtered ++ proxy_headers
+  end
 end

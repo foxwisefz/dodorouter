@@ -17,14 +17,15 @@ defmodule DodoRouter.Proxy.Adapters.Zai do
   @timeout_ms 120_000
 
   @impl true
-  def call(request, %RoutingStep{} = step, api_key) do
+  def call(request, %RoutingStep{} = step, api_key, client_headers \\ []) do
     url = base_url(step) <> "/chat/completions"
     body = build_request_body(request, step)
 
-    headers = [
-      {"Authorization", "Bearer #{api_key}"},
-      {"Content-Type", "application/json"}
-    ]
+    headers =
+      Adapter.build_forwarded_headers(client_headers, [
+        {"Authorization", "Bearer #{api_key}"},
+        {"Content-Type", "application/json"}
+      ])
 
     start_time = System.monotonic_time(:millisecond)
 
@@ -45,14 +46,15 @@ defmodule DodoRouter.Proxy.Adapters.Zai do
   end
 
   @impl true
-  def stream(request, %RoutingStep{} = step, api_key, send_chunk) do
+  def stream(request, %RoutingStep{} = step, api_key, send_chunk, client_headers \\ []) do
     url = base_url(step) <> "/chat/completions"
     body = build_request_body(request, step) |> Map.put("stream", true)
 
-    headers = [
-      {"Authorization", "Bearer #{api_key}"},
-      {"Content-Type", "application/json"}
-    ]
+    headers =
+      Adapter.build_forwarded_headers(client_headers, [
+        {"Authorization", "Bearer #{api_key}"},
+        {"Content-Type", "application/json"}
+      ])
 
     start_time = System.monotonic_time(:millisecond)
 

@@ -18,6 +18,7 @@ defmodule DodoRouter.Proxy do
     session = Keyword.get(opts, :session, %{})
     start_time = System.monotonic_time(:millisecond)
     streaming = Keyword.get(opts, :stream, false)
+    client_headers = Keyword.get(opts, :client_headers, [])
 
     steps = Routers.list_routing_steps(router)
 
@@ -28,7 +29,13 @@ defmodule DodoRouter.Proxy do
       first_step = List.first(steps)
       broadcast_request_started(router, request_id, first_step, streaming)
 
-      result = FallbackChain.execute(request, steps, router.id, opts)
+      result =
+        FallbackChain.execute(
+          request,
+          steps,
+          router.id,
+          Keyword.put(opts, :client_headers, client_headers)
+        )
 
       log_request(router, request, result, request_id, start_time, session)
       broadcast_event(router, result)
