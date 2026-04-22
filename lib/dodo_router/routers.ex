@@ -131,6 +131,13 @@ defmodule DodoRouter.Routers do
     Repo.transaction(fn ->
       step_ids
       |> Enum.with_index()
+      |> Enum.each(fn {step_id, idx} ->
+        from(s in RoutingStep, where: s.id == ^step_id and s.router_id == ^router.id)
+        |> Repo.update_all(set: [position: -(idx + 1)])
+      end)
+
+      step_ids
+      |> Enum.with_index()
       |> Enum.each(fn {step_id, position} ->
         from(s in RoutingStep, where: s.id == ^step_id and s.router_id == ^router.id)
         |> Repo.update_all(set: [position: position])
