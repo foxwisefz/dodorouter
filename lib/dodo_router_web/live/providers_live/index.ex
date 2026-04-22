@@ -22,6 +22,12 @@ defmodule DodoRouterWeb.ProvidersLive.Index do
       short: "Kimi K2 models",
       endpoint: "https://api.moonshot.ai/v1",
       color: "amber"
+    },
+    "moonshot_coding" => %{
+      name: "Moonshot Coding",
+      short: "Kimi Code (coding-optimized endpoint)",
+      endpoint: "https://api.kimi.com/coding/v1",
+      color: "amber"
     }
   }
 

@@ -12,12 +12,17 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
   alias DodoRouter.Proxy.Adapter
   alias DodoRouter.Routers.RoutingStep
 
-  @base_url "https://api.moonshot.ai/v1"
+  @standard_base_url "https://api.moonshot.ai/v1"
+  @coding_base_url "https://api.kimi.com/coding/v1"
   @timeout_ms 120_000
+
+  @doc false
+  def base_url(%RoutingStep{plan_type: "coding"}), do: @coding_base_url
+  def base_url(_), do: @standard_base_url
 
   @impl true
   def call(request, %RoutingStep{} = step, api_key) do
-    url = @base_url <> "/chat/completions"
+    url = base_url(step) <> "/chat/completions"
     body = build_request_body(request, step)
 
     headers = [
@@ -49,7 +54,7 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
 
   @impl true
   def stream(request, %RoutingStep{} = step, api_key, send_chunk) do
-    url = @base_url <> "/chat/completions"
+    url = base_url(step) <> "/chat/completions"
 
     body =
       build_request_body(request, step)
