@@ -28,7 +28,26 @@ defmodule DodoRouterWeb.RecordingLiveTest do
       {:ok, _live, html} = live(conn, ~p"/routers/#{router.id}/recordings")
 
       assert html =~ "No recordings yet"
-      assert html =~ "curl"
+      assert html =~ "Start Recording"
+    end
+
+    test "can start and stop recording from UI", %{conn: conn, router: router} do
+      {:ok, live, _html} = live(conn, ~p"/routers/#{router.id}/recordings")
+
+      # Open the start form
+      html = live |> element("button", "Start Recording") |> render_click()
+      assert html =~ "Recording Name"
+
+      # Start a recording
+      html = live |> form("form", recording: %{name: "UI Test"}) |> render_submit()
+      assert html =~ "Recording in progress"
+      assert html =~ "UI Test"
+      assert html =~ "Stop Recording"
+
+      # Stop the recording
+      html = live |> element("button", "Stop Recording") |> render_click()
+      refute html =~ "Recording in progress"
+      assert html =~ "stopped"
     end
 
     test "shows recording status badge", %{conn: conn, router: router} do
