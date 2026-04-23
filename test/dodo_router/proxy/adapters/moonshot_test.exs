@@ -221,6 +221,105 @@ defmodule DodoRouter.Proxy.Adapters.MoonshotTest do
       assistant_msg = Enum.find(body["messages"], &(&1["role"] == "assistant"))
       assert assistant_msg["reasoning_content"] == "I thought about greeting options"
     end
+
+    test "enables thinking for kimi-k2.6 by default" do
+      request = %{"messages" => [%{"role" => "user", "content" => "Hi"}]}
+
+      step = %RoutingStep{
+        provider: "moonshot",
+        model: "kimi-k2.6",
+        thinking_enabled: nil
+      }
+
+      body = Moonshot.build_request_body(request, step)
+
+      assert body["thinking"] == %{"type" => "enabled"}
+    end
+
+    test "enables thinking for kimi-k2 by default" do
+      request = %{"messages" => [%{"role" => "user", "content" => "Hi"}]}
+
+      step = %RoutingStep{
+        provider: "moonshot",
+        model: "kimi-k2",
+        thinking_enabled: nil
+      }
+
+      body = Moonshot.build_request_body(request, step)
+
+      assert body["thinking"] == %{"type" => "enabled"}
+    end
+
+    test "enables thinking for kimi-for-coding by default" do
+      request = %{"messages" => [%{"role" => "user", "content" => "Hi"}]}
+
+      step = %RoutingStep{
+        provider: "moonshot",
+        model: "kimi-for-coding",
+        thinking_enabled: nil
+      }
+
+      body = Moonshot.build_request_body(request, step)
+
+      assert body["thinking"] == %{"type" => "enabled"}
+      assert body["model"] == "kimi-for-coding"
+    end
+
+    test "adds reasoning_content for kimi-k2.6 assistant messages" do
+      request = %{
+        "messages" => [
+          %{"role" => "user", "content" => "Hello"},
+          %{"role" => "assistant", "content" => "Hi there"}
+        ]
+      }
+
+      step = %RoutingStep{
+        provider: "moonshot",
+        model: "kimi-k2.6",
+        thinking_enabled: nil
+      }
+
+      body = Moonshot.build_request_body(request, step)
+
+      assistant_msg = Enum.find(body["messages"], &(&1["role"] == "assistant"))
+      assert Map.has_key?(assistant_msg, "reasoning_content")
+    end
+
+    test "disables thinking for kimi-k2.6 when explicitly false" do
+      request = %{
+        "messages" => [
+          %{"role" => "user", "content" => "Hi"},
+          %{"role" => "assistant", "content" => "Hey"}
+        ]
+      }
+
+      step = %RoutingStep{
+        provider: "moonshot",
+        model: "kimi-k2.6",
+        thinking_enabled: false
+      }
+
+      body = Moonshot.build_request_body(request, step)
+
+      assert body["thinking"] == %{"type" => "disabled"}
+
+      assistant_msg = Enum.find(body["messages"], &(&1["role"] == "assistant"))
+      refute Map.has_key?(assistant_msg, "reasoning_content")
+    end
+
+    test "does not add thinking for moonshot-v1 models" do
+      request = %{"messages" => [%{"role" => "user", "content" => "Hi"}]}
+
+      step = %RoutingStep{
+        provider: "moonshot",
+        model: "moonshot-v1-8k",
+        thinking_enabled: nil
+      }
+
+      body = Moonshot.build_request_body(request, step)
+
+      refute Map.has_key?(body, "thinking")
+    end
   end
 
   describe "parse_sse_chunk/1" do
