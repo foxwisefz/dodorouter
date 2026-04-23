@@ -34,6 +34,8 @@ defmodule DodoRouter.Logs.RequestLog do
     # Request/response
     field :request_body, :string
     field :response_body, :string
+    field :request_headers, :string
+    field :response_headers, :string
 
     # Session grouping (Helicone-style)
     field :session_id, :string
@@ -72,6 +74,8 @@ defmodule DodoRouter.Logs.RequestLog do
       :ttfb_ms,
       :request_body,
       :response_body,
+      :request_headers,
+      :response_headers,
       :estimated_cost_usd,
       :inserted_at,
       :session_id,

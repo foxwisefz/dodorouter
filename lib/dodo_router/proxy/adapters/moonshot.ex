@@ -45,11 +45,16 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
     headers =
       Adapter.build_forwarded_headers(client_headers, proxy_headers(step, api_key))
 
+    Logger.info(
+      "[Moonshot:call] url=#{url} model=#{body["model"]} plan=#{step.plan_type || "standard"} " <>
+        "headers=#{inspect(safe_headers(headers))}"
+    )
+
     start_time = System.monotonic_time(:millisecond)
 
     case Req.post(url, headers: headers, json: body, receive_timeout: @timeout_ms) do
-      {:ok, %{status: 200, body: response_body}} ->
-        {:ok, response_body}
+      {:ok, %{status: 200, body: response_body, headers: resp_headers}} ->
+        {:ok, response_body, %{headers: resp_headers}}
 
       {:ok, %{status: status, body: response_body}} ->
         Logger.error(
@@ -78,6 +83,11 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
 
     headers =
       Adapter.build_forwarded_headers(client_headers, proxy_headers(step, api_key))
+
+    Logger.info(
+      "[Moonshot:stream] url=#{url} model=#{body["model"]} plan=#{step.plan_type || "standard"} " <>
+        "headers=#{inspect(safe_headers(headers))}"
+    )
 
     start_time = System.monotonic_time(:millisecond)
 
@@ -145,12 +155,12 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
     Process.delete(:__moonshot_raw_body__)
 
     case result do
-      {:ok, %Req.Response{status: 200} = resp} ->
+      {:ok, %Req.Response{status: 200, headers: resp_headers} = resp} ->
         acc =
           resp.private[:stream_acc] ||
             %{content: "", tool_calls: %{}, usage: nil, finish_reason: nil, first_chunk_time: nil}
 
-        {:ok, build_final_response(acc, start_time)}
+        {:ok, build_final_response(acc, start_time), %{headers: resp_headers}}
 
       {:ok, %Req.Response{status: status}} ->
         # Body was consumed by into_fun, use accumulated raw_body instead
@@ -442,4 +452,17 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
   end
 
   defp latency(start_time), do: System.monotonic_time(:millisecond) - start_time
+
+  defp safe_headers(headers) do
+    Enum.map(headers, fn
+      {"Authorization", "Bearer " <> _rest} = h ->
+        put_elem(h, 1, "Bearer sk-***")
+
+      {"Authorization", _} ->
+        {"Authorization", "***"}
+
+      other ->
+        other
+    end)
+  end
 end
