@@ -1,0 +1,182 @@
+defmodule DodoRouterWeb.RecordingLive.Show do
+  use DodoRouterWeb, :live_view
+
+  alias DodoRouter.Recordings
+  alias DodoRouter.Routers
+
+  @impl true
+  def mount(%{"router_id" => router_id, "id" => id}, _session, socket) do
+    router = Routers.get_router!(socket.assigns.current_user, router_id)
+    recording = Recordings.get_recording!(id)
+
+    if recording.router_id != router.id do
+      {:ok, redirect(socket, to: ~p"/routers/#{router.id}/recordings")}
+    else
+      if connected?(socket) do
+        Phoenix.PubSub.subscribe(DodoRouter.PubSub, "router:#{router.id}:logs")
+      end
+
+      socket =
+        socket
+        |> assign(:router, router)
+        |> assign(:recording, recording)
+        |> assign(:page_title, "Recording — #{recording.name || recording.id}")
+        |> load_data()
+
+      {:ok, socket}
+    end
+  end
+
+  def mount(_params, _socket_session, socket) do
+    {:ok, redirect(socket, to: ~p"/routers")}
+  end
+
+  @impl true
+  def handle_info({:log_created, log}, socket) do
+    if log.recording_id == socket.assigns.recording.id do
+      {:noreply, load_data(socket)}
+    else
+      {:noreply, socket}
+    end
+  end
+
+  def handle_info(_msg, socket), do: {:noreply, socket}
+
+  @impl true
+  def render(assigns) do
+    ~H"""
+    <div>
+      <div class="flex items-center gap-3 mb-6">
+        <a
+          href={~p"/routers/#{@router.id}/recordings"}
+          class="p-2 rounded-lg hover:bg-base-200 transition-colors text-base-content/60"
+        >
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            class="h-5 w-5"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+          >
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" />
+          </svg>
+        </a>
+        <div class="flex-1">
+          <div class="flex items-center gap-2">
+            <h1 class="text-xl font-bold">
+              {if @recording.name, do: @recording.name, else: "Recording"}
+            </h1>
+            <span class={[
+              "px-2 py-0.5 rounded text-xs font-medium",
+              if(@recording.status == "recording",
+                do: "bg-success/20 text-success",
+                else: "bg-base-300/50 text-base-content/50"
+              )
+            ]}>
+              {@recording.status}
+            </span>
+          </div>
+          <p class="text-sm text-base-content/50 mt-0.5">
+            {Calendar.strftime(@recording.started_at, "%b %d, %H:%M:%S")}
+            <%= if @recording.stopped_at do %>
+              <span class="mx-1">→</span>
+              {Calendar.strftime(@recording.stopped_at, "%b %d, %H:%M:%S")}
+              <span class="ml-2 text-base-content/40">
+                ({format_duration(@recording.started_at, @recording.stopped_at)})
+              </span>
+            <% end %>
+          </p>
+        </div>
+      </div>
+      
+    <!-- Stats -->
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+        <div class="stat bg-base-100 border border-base-300 rounded-lg p-3">
+          <div class="stat-title text-xs">Requests</div>
+          <div class="stat-value text-lg">{@stats.request_count}</div>
+        </div>
+        <div class="stat bg-base-100 border border-base-300 rounded-lg p-3">
+          <div class="stat-title text-xs">Total Tokens</div>
+          <div class="stat-value text-lg">{@stats.total_tokens || 0}</div>
+        </div>
+        <div class="stat bg-base-100 border border-base-300 rounded-lg p-3">
+          <div class="stat-title text-xs">Avg Latency</div>
+          <div class="stat-value text-lg">{format_latency(@stats.avg_latency_ms)}ms</div>
+        </div>
+        <div class="stat bg-base-100 border border-base-300 rounded-lg p-3">
+          <div class="stat-title text-xs">Success Rate</div>
+          <div class="stat-value text-lg">
+            <%= if @stats.request_count > 0 do %>
+              {round((@stats.successful_requests || 0) / @stats.request_count * 100)}%
+            <% else %>
+              —
+            <% end %>
+          </div>
+        </div>
+      </div>
+      
+    <!-- Request timeline -->
+      <h2 class="text-lg font-semibold mb-3">Captured Requests</h2>
+      <div class="space-y-2">
+        <%= for log <- @logs do %>
+          <a
+            href={
+              ~p"/logs/#{log.id}" <>
+                "?return_to=" <>
+                URI.encode_www_form("/routers/#{@router.id}/recordings/#{@recording.id}")
+            }
+            class="block bg-base-100 border border-base-300 rounded-lg p-3 hover:border-primary transition-colors"
+          >
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-3">
+                <span class={[
+                  "badge badge-sm",
+                  if(log.status in ["success", "fallback"], do: "badge-success", else: "badge-error")
+                ]}>
+                  {log.status}
+                </span>
+                <span class="text-sm font-medium">{log.final_model || "unknown"}</span>
+              </div>
+              <div class="text-xs text-base-content/50">
+                {log.latency_ms}ms · {log.total_tokens || 0} tokens
+                · {Calendar.strftime(log.inserted_at, "%H:%M:%S")}
+              </div>
+            </div>
+          </a>
+        <% end %>
+
+        <%= if Enum.empty?(@logs) do %>
+          <div class="text-center py-8 text-base-content/50">
+            No requests captured yet.
+          </div>
+        <% end %>
+      </div>
+    </div>
+    """
+  end
+
+  defp load_data(socket) do
+    recording = socket.assigns.recording
+
+    stats = Recordings.recording_stats(recording)
+    logs = Recordings.list_logs_for_recording(recording, limit: 100)
+
+    socket
+    |> assign(:stats, stats)
+    |> assign(:logs, logs)
+  end
+
+  defp format_latency(nil), do: "0"
+  defp format_latency(%Decimal{} = ms), do: ms |> Decimal.round(0) |> Decimal.to_integer()
+  defp format_latency(ms), do: round(ms)
+
+  defp format_duration(started, stopped) do
+    diff = DateTime.diff(stopped, started, :second)
+
+    cond do
+      diff < 60 -> "#{diff}s"
+      diff < 3600 -> "#{div(diff, 60)}m #{rem(diff, 60)}s"
+      true -> "#{div(diff, 3600)}h #{div(rem(diff, 3600), 60)}m"
+    end
+  end
+end

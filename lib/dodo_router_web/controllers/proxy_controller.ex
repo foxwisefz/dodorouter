@@ -7,13 +7,16 @@ defmodule DodoRouterWeb.ProxyController do
     router = conn.assigns.current_router
     request_id = Ecto.UUID.generate()
     session = extract_session(conn)
-    client_headers = extract_forwardable_headers(conn)
 
+    recording_id = extract_active_recording_id(router)
+    client_headers = extract_forwardable_headers(conn)
     if params["stream"] == true do
-      stream_response(conn, router, params, request_id, session, client_headers)
-    else
-      sync_response(conn, router, params, request_id, session, client_headers)
-    end
+
+      stream_response(conn, router, params, request_id, session, recording_id, client_headers)
+   else
+
+      sync_response(conn, router, params, request_id, session, recording_id, client_headers)
+   end
   end
 
   def models(conn, _params) do
@@ -41,6 +44,17 @@ defmodule DodoRouterWeb.ProxyController do
     }
   end
 
+
+  defp extract_active_recording_id(router) do
+    alias DodoRouter.Recordings
+
+    case Recordings.get_active_recording(router) do
+      nil -> nil
+      recording -> recording.id
+    end
+  end
+
+
   @hop_by_hop_headers ~w(host connection content-length transfer-encoding upgrade proxy-authorization proxy-authenticate te trailer)
                       |> Enum.map(&String.downcase/1)
 
@@ -49,14 +63,16 @@ defmodule DodoRouterWeb.ProxyController do
     |> Enum.reject(fn {key, _} -> String.downcase(key) in @hop_by_hop_headers end)
   end
 
-  defp sync_response(conn, router, params, request_id, session, client_headers) do
-    start_time = System.monotonic_time(:millisecond)
+
+  defp sync_response(conn, router, params, request_id, session, recording_id, client_headers) do
+   start_time = System.monotonic_time(:millisecond)
 
     case Proxy.dispatch(router, params,
            request_id: request_id,
            session: session,
-           client_headers: client_headers
-         ) do
+           client_headers: client_headers,
+           recording_id: recording_id
+        ) do
       {:ok, response, timing} ->
         total_ms = System.monotonic_time(:millisecond) - start_time
         provider_ms = timing[:provider_ms] || 0
@@ -97,8 +113,9 @@ defmodule DodoRouterWeb.ProxyController do
     end
   end
 
-  defp stream_response(conn, router, params, request_id, session, client_headers) do
-    conn =
+
+  defp stream_response(conn, router, params, request_id, session, client_headers, recording_id) do
+   conn =
       conn
       |> put_resp_content_type("text/event-stream")
       |> put_resp_header("cache-control", "no-cache")
@@ -112,8 +129,9 @@ defmodule DodoRouterWeb.ProxyController do
 
     case Proxy.dispatch_streaming(router, params, send_chunk,
            session: session,
+           recording_id: recording_id,
            client_headers: client_headers
-         ) do
+        ) do
       {:ok, _response, _timing} ->
         conn
 

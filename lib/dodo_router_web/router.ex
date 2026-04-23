@@ -29,6 +29,15 @@ defmodule DodoRouterWeb.Router do
     post "/chat/completions", ProxyController, :create
   end
 
+  # Recordings API - start/stop server-side request capture
+  scope "/r/:router_slug", DodoRouterWeb do
+    pipe_through :proxy_api
+
+    post "/recordings/start", RecordingsController, :start
+    get "/recordings/active", RecordingsController, :active
+    post "/recordings/active/stop", RecordingsController, :stop
+  end
+
   # Legacy endpoint (backwards compatibility)
   scope "/v1", DodoRouterWeb do
     pipe_through :proxy_api
@@ -72,6 +81,9 @@ defmodule DodoRouterWeb.Router do
 
       live "/routers/:router_id/sessions", SessionLive.Index, :index
       live "/routers/:router_id/sessions/:session_id", SessionLive.Show, :show
+
+      live "/routers/:router_id/recordings", RecordingLive.Index, :index
+      live "/routers/:router_id/recordings/:id", RecordingLive.Show, :show
 
       live "/dashboard", DashboardLive, :index
     end

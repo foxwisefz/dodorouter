@@ -39,6 +39,9 @@ defmodule DodoRouter.Logs.RequestLog do
     field :session_id, :string
     field :session_name, :string
 
+    # Recording (server-side capture)
+    field :recording_id, :binary_id
+
     # Truncation metadata
     field :truncation_flags, {:array, :string}, default: []
 
@@ -73,6 +76,7 @@ defmodule DodoRouter.Logs.RequestLog do
       :inserted_at,
       :session_id,
       :session_name,
+      :recording_id,
       :truncation_flags
     ])
     |> validate_required([:router_id, :request_id, :status, :inserted_at])
