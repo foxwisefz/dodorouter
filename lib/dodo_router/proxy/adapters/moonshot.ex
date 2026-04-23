@@ -14,11 +14,28 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
 
   @standard_base_url "https://api.moonshot.ai/v1"
   @coding_base_url "https://api.kimi.com/coding/v1"
+  @coding_user_agent "KimiCLI/1.0.0"
   @timeout_ms 120_000
 
   @doc false
   def base_url(%RoutingStep{plan_type: "coding"}), do: @coding_base_url
   def base_url(_), do: @standard_base_url
+
+  defp proxy_headers(%RoutingStep{plan_type: "coding"}, api_key) do
+    [
+      {"Authorization", "Bearer #{api_key}"},
+      {"Content-Type", "application/json"},
+      {"User-Agent", @coding_user_agent}
+    ]
+  end
+
+  defp proxy_headers(_step, api_key) do
+    [
+      {"Authorization", "Bearer #{api_key}"},
+      {"Content-Type", "application/json"},
+      {"User-Agent", "DodoRouter/1.0"}
+    ]
+  end
 
   @impl true
   def call(request, %RoutingStep{} = step, api_key, client_headers \\ []) do
@@ -26,10 +43,7 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
     body = build_request_body(request, step)
 
     headers =
-      Adapter.build_forwarded_headers(client_headers, [
-        {"Authorization", "Bearer #{api_key}"},
-        {"Content-Type", "application/json"}
-      ])
+      Adapter.build_forwarded_headers(client_headers, proxy_headers(step, api_key))
 
     start_time = System.monotonic_time(:millisecond)
 
@@ -63,10 +77,7 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
       |> Map.put("stream_options", %{"include_usage" => true})
 
     headers =
-      Adapter.build_forwarded_headers(client_headers, [
-        {"Authorization", "Bearer #{api_key}"},
-        {"Content-Type", "application/json"}
-      ])
+      Adapter.build_forwarded_headers(client_headers, proxy_headers(step, api_key))
 
     start_time = System.monotonic_time(:millisecond)
 
