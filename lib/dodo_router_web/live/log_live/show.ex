@@ -365,7 +365,11 @@ defmodule DodoRouterWeb.LogLive.Show do
             <div class="flex items-center justify-between mb-3">
               <h2 class="card-title text-base">Response</h2>
               <div class="flex gap-2">
-                <button :if={@resp_headers} phx-click="toggle_resp_headers" class="btn btn-ghost btn-xs">
+                <button
+                  :if={@resp_headers}
+                  phx-click="toggle_resp_headers"
+                  class="btn btn-ghost btn-xs"
+                >
                   Headers
                 </button>
                 <button

@@ -82,7 +82,7 @@ defmodule DodoRouter.Proxy.Adapters.Zai do
 
       acc = resp.private.stream_acc
 
-      case parse_sse_chunk(data) do
+      case Adapter.parse_sse_chunk(data) do
         {:chunks, chunks} ->
           reframe_and_send_chunks(send_chunk, chunks)
           acc = Enum.reduce(chunks, acc, &accumulate_chunk(&2, &1))
@@ -159,33 +159,6 @@ defmodule DodoRouter.Proxy.Adapters.Zai do
 
   defp maybe_default(map, key, default) do
     if Map.has_key?(map, key), do: map, else: Map.put(map, key, default)
-  end
-
-  # Parse SSE data - may contain multiple events batched together
-  @doc false
-  def parse_sse_chunk(data) do
-    lines = String.split(data, "\n")
-    has_done = Enum.any?(lines, &String.starts_with?(&1, "data: [DONE]"))
-
-    chunks =
-      lines
-      |> Enum.filter(&String.starts_with?(&1, "data: "))
-      |> Enum.reject(&String.starts_with?(&1, "data: [DONE]"))
-      |> Enum.flat_map(fn line ->
-        json = String.trim_leading(line, "data: ")
-
-        case Jason.decode(json) do
-          {:ok, parsed} -> [parsed]
-          _ -> []
-        end
-      end)
-
-    cond do
-      has_done and chunks == [] -> :done
-      has_done -> {:chunks_then_done, chunks}
-      chunks == [] -> :skip
-      true -> {:chunks, chunks}
-    end
   end
 
   defp accumulate_chunk(acc, chunk_data) do

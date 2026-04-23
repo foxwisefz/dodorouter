@@ -91,7 +91,9 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
 
       # Log first raw data chunk to see format
       if accumulated == data do
-        Logger.info("[Moonshot:stream] First raw chunk (#{byte_size(data)} bytes): #{String.slice(data, 0, 500)}")
+        Logger.info(
+          "[Moonshot:stream] First raw chunk (#{byte_size(data)} bytes): #{String.slice(data, 0, 500)}"
+        )
       end
 
       resp =
@@ -113,11 +115,14 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
 
       acc = resp.private.stream_acc
 
-      case parse_sse_chunk(data) do
+      case Adapter.parse_sse_chunk(data) do
         {:chunks, chunks} ->
           if length(chunks) > 0 and acc.content == "" do
-            Logger.info("[Moonshot:stream] Parsed #{length(chunks)} chunks, first: #{inspect(Enum.at(chunks, 0))}")
+            Logger.info(
+              "[Moonshot:stream] Parsed #{length(chunks)} chunks, first: #{inspect(Enum.at(chunks, 0))}"
+            )
           end
+
           reframe_and_send_chunks(send_chunk, chunks)
           acc = Enum.reduce(chunks, acc, &accumulate_chunk(&2, &1))
           Process.put(:__moonshot_stream_acc__, acc)
@@ -136,10 +141,12 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
         :skip ->
           # Log first few skipped chunks to see what's being ignored
           skip_count = Process.get(:__moonshot_skip_count__, 0)
+
           if skip_count < 3 do
             Logger.info("[Moonshot:stream] Skipped chunk: #{inspect(String.slice(data, 0, 200))}")
             Process.put(:__moonshot_skip_count__, skip_count + 1)
           end
+
           {:cont, {req, resp}}
       end
     end
@@ -167,6 +174,7 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
         if acc.content == "" and acc.finish_reason == nil do
           # Get last 500 chars to see how stream ended
           raw_tail = if raw_body, do: String.slice(raw_body, -500, 500), else: ""
+
           Logger.warning(
             "[Moonshot] Empty stream response, raw_body_len=#{byte_size(raw_body || "")}, " <>
               "reasoning_len=#{String.length(Map.get(acc, :reasoning_content, ""))}, " <>
@@ -303,43 +311,6 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
   # need reasoning_content, not just ones with tool_calls.
   defp ensure_reasoning_content(msg) do
     Map.put_new(msg, "reasoning_content", "")
-  end
-
-  # Parse SSE data - may contain multiple events batched together
-  # Note: coding endpoint sends "data:" (no space), standard sends "data: " (with space)
-  @doc false
-  def parse_sse_chunk(data) do
-    lines = String.split(data, "\n")
-    has_done = Enum.any?(lines, &is_done_line/1)
-
-    chunks =
-      lines
-      |> Enum.filter(&is_data_line/1)
-      |> Enum.reject(&is_done_line/1)
-      |> Enum.flat_map(fn line ->
-        json = extract_json(line)
-
-        case Jason.decode(json) do
-          {:ok, parsed} -> [parsed]
-          _ -> []
-        end
-      end)
-
-    cond do
-      has_done and chunks == [] -> :done
-      has_done -> {:chunks_then_done, chunks}
-      chunks == [] -> :skip
-      true -> {:chunks, chunks}
-    end
-  end
-
-  defp is_data_line(line), do: String.starts_with?(line, "data:") or String.starts_with?(line, "data: ")
-  defp is_done_line(line), do: String.starts_with?(line, "data: [DONE]") or String.starts_with?(line, "data:[DONE]")
-
-  defp extract_json(line) do
-    line
-    |> String.trim_leading("data: ")
-    |> String.trim_leading("data:")
   end
 
   defp accumulate_chunk(acc, chunk_data) do
