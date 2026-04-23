@@ -306,17 +306,18 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
   end
 
   # Parse SSE data - may contain multiple events batched together
+  # Note: coding endpoint sends "data:" (no space), standard sends "data: " (with space)
   @doc false
   def parse_sse_chunk(data) do
     lines = String.split(data, "\n")
-    has_done = Enum.any?(lines, &String.starts_with?(&1, "data: [DONE]"))
+    has_done = Enum.any?(lines, &is_done_line/1)
 
     chunks =
       lines
-      |> Enum.filter(&String.starts_with?(&1, "data: "))
-      |> Enum.reject(&String.starts_with?(&1, "data: [DONE]"))
+      |> Enum.filter(&is_data_line/1)
+      |> Enum.reject(&is_done_line/1)
       |> Enum.flat_map(fn line ->
-        json = String.trim_leading(line, "data: ")
+        json = extract_json(line)
 
         case Jason.decode(json) do
           {:ok, parsed} -> [parsed]
@@ -330,6 +331,15 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
       chunks == [] -> :skip
       true -> {:chunks, chunks}
     end
+  end
+
+  defp is_data_line(line), do: String.starts_with?(line, "data:") or String.starts_with?(line, "data: ")
+  defp is_done_line(line), do: String.starts_with?(line, "data: [DONE]") or String.starts_with?(line, "data:[DONE]")
+
+  defp extract_json(line) do
+    line
+    |> String.trim_leading("data: ")
+    |> String.trim_leading("data:")
   end
 
   defp accumulate_chunk(acc, chunk_data) do
