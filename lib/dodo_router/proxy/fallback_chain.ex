@@ -218,11 +218,5 @@ defmodule DodoRouter.Proxy.FallbackChain do
 
   defp latency(start_time), do: System.monotonic_time(:millisecond) - start_time
 
-  defp build_forwarded_headers(%RoutingStep{provider: "moonshot", plan_type: "coding"}) do
-    %{
-      "user-agent" => "overridden: KimiCLI/1.0.0 (coding endpoint requires coding agent UA)"
-    }
-  end
-
   defp build_forwarded_headers(_step), do: %{}
 end

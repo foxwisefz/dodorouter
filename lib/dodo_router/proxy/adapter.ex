@@ -194,7 +194,7 @@ defmodule DodoRouter.Proxy.Adapter do
 
   defp normalize_message_content(msg), do: msg
 
-  @proxy_overrides ~w(authorization content-type user-agent)
+  @proxy_overrides ~w(authorization content-type)
                    |> Enum.map(&String.downcase/1)
 
   def build_forwarded_headers(client_headers, proxy_headers) when is_list(client_headers) do

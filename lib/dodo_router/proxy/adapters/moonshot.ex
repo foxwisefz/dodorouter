@@ -14,26 +14,16 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
 
   @standard_base_url "https://api.moonshot.ai/v1"
   @coding_base_url "https://api.kimi.com/coding/v1"
-  @coding_user_agent "KimiCLI/1.0.0"
   @timeout_ms 120_000
 
   @doc false
   def base_url(%RoutingStep{plan_type: "coding"}), do: @coding_base_url
   def base_url(_), do: @standard_base_url
 
-  defp proxy_headers(%RoutingStep{plan_type: "coding"}, api_key) do
-    [
-      {"Authorization", "Bearer #{api_key}"},
-      {"Content-Type", "application/json"},
-      {"User-Agent", @coding_user_agent}
-    ]
-  end
-
   defp proxy_headers(_step, api_key) do
     [
       {"Authorization", "Bearer #{api_key}"},
-      {"Content-Type", "application/json"},
-      {"User-Agent", "DodoRouter/1.0"}
+      {"Content-Type", "application/json"}
     ]
   end
 
@@ -157,6 +147,13 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
         acc =
           resp.private[:stream_acc] ||
             %{content: "", tool_calls: %{}, usage: nil, finish_reason: nil, first_chunk_time: nil}
+
+        if acc.content == "" and acc.finish_reason == nil do
+          Logger.warning(
+            "[Moonshot] Empty stream response, raw_body_len=#{byte_size(raw_body || "")}, " <>
+              "raw_body_preview=#{String.slice(raw_body || "", 0, 500)}"
+          )
+        end
 
         {:ok, build_final_response(acc, start_time), %{headers: resp_headers}}
 
