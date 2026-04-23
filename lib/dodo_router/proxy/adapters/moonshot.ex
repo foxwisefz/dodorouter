@@ -149,12 +149,9 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
             %{content: "", tool_calls: %{}, usage: nil, finish_reason: nil, first_chunk_time: nil}
 
         if acc.content == "" and acc.finish_reason == nil do
-          # Get last 500 chars to see how stream ended
-          raw_tail = if raw_body, do: String.slice(raw_body, -500, 500), else: ""
           Logger.warning(
             "[Moonshot] Empty stream response, raw_body_len=#{byte_size(raw_body || "")}, " <>
-              "reasoning_len=#{String.length(Map.get(acc, :reasoning_content, ""))}, " <>
-              "raw_body_tail=#{raw_tail}"
+              "raw_body_preview=#{String.slice(raw_body || "", 0, 500)}"
           )
         end
 
