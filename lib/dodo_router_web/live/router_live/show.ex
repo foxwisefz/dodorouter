@@ -142,12 +142,6 @@ defmodule DodoRouterWeb.RouterLive.Show do
     end
   end
 
-  defp swap_at(list, i, j) do
-    list
-    |> List.replace_at(i, Enum.at(list, j))
-    |> List.replace_at(j, Enum.at(list, i))
-  end
-
   def handle_event("assign_key", %{"key_id" => key_id, "step_id" => step_id}, socket) do
     step = Routers.get_routing_step!(socket.assigns.router, step_id)
     provider_key_id = if key_id == "", do: nil, else: key_id
@@ -828,5 +822,11 @@ defmodule DodoRouterWeb.RouterLive.Show do
     Enum.filter(provider_keys, fn key ->
       ProviderKey.adapter_provider(key.provider_slug) == step_provider
     end)
+  end
+
+  defp swap_at(list, i, j) do
+    list
+    |> List.replace_at(i, Enum.at(list, j))
+    |> List.replace_at(j, Enum.at(list, i))
   end
 end
