@@ -82,11 +82,17 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
     # Track partial content in process dict so it survives error paths
     Process.delete(:__moonshot_stream_acc__)
     Process.delete(:__moonshot_raw_body__)
+    Process.delete(:__moonshot_skip_count__)
 
     into_fun = fn {:data, data}, {req, resp} ->
       # Accumulate raw body for error diagnostics
       accumulated = (Process.get(:__moonshot_raw_body__) || "") <> data
       Process.put(:__moonshot_raw_body__, accumulated)
+
+      # Log first raw data chunk to see format
+      if accumulated == data do
+        Logger.debug("[Moonshot:stream] First raw chunk (#{byte_size(data)} bytes): #{String.slice(data, 0, 500)}")
+      end
 
       resp =
         if resp.private[:stream_acc] == nil do
@@ -109,6 +115,9 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
 
       case parse_sse_chunk(data) do
         {:chunks, chunks} ->
+          if length(chunks) > 0 and acc.content == "" do
+            Logger.debug("[Moonshot:stream] Parsed #{length(chunks)} chunks, first: #{inspect(Enum.at(chunks, 0))}")
+          end
           reframe_and_send_chunks(send_chunk, chunks)
           acc = Enum.reduce(chunks, acc, &accumulate_chunk(&2, &1))
           Process.put(:__moonshot_stream_acc__, acc)
@@ -125,6 +134,12 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
           {:halt, {req, resp}}
 
         :skip ->
+          # Log first few skipped chunks to see what's being ignored
+          skip_count = Process.get(:__moonshot_skip_count__, 0)
+          if skip_count < 3 do
+            Logger.debug("[Moonshot:stream] Skipped chunk: #{inspect(String.slice(data, 0, 200))}")
+            Process.put(:__moonshot_skip_count__, skip_count + 1)
+          end
           {:cont, {req, resp}}
       end
     end
@@ -141,11 +156,12 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
     raw_body = Process.get(:__moonshot_raw_body__)
     Process.delete(:__moonshot_stream_acc__)
     Process.delete(:__moonshot_raw_body__)
+    Process.delete(:__moonshot_skip_count__)
 
     case result do
       {:ok, %Req.Response{status: 200, headers: resp_headers} = resp} ->
         acc =
-          resp.private[:stream_acc] ||
+          resp.private[:stream_acc] || partial_acc ||
             %{content: "", tool_calls: %{}, usage: nil, finish_reason: nil, first_chunk_time: nil}
 
         if acc.content == "" and acc.finish_reason == nil do
@@ -154,6 +170,8 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
           Logger.warning(
             "[Moonshot] Empty stream response, raw_body_len=#{byte_size(raw_body || "")}, " <>
               "reasoning_len=#{String.length(Map.get(acc, :reasoning_content, ""))}, " <>
+              "resp_private_acc=#{resp.private[:stream_acc] != nil}, " <>
+              "partial_acc=#{partial_acc != nil}, " <>
               "raw_body_tail=#{raw_tail}"
           )
         end
@@ -316,6 +334,11 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
 
   defp accumulate_chunk(acc, chunk_data) do
     choice = get_in(chunk_data, ["choices", Access.at(0)])
+
+    # Debug: log first chunk structure to see format differences
+    if acc.content == "" and Map.get(acc, :reasoning_content, "") == "" do
+      Logger.debug("[Moonshot:accumulate] First chunk structure: #{inspect(chunk_data)}")
+    end
 
     content =
       case get_in(choice, ["delta", "content"]) do
