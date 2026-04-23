@@ -252,6 +252,7 @@ defmodule DodoRouter.Proxy do
   defp encode_redacted_headers(headers) do
     headers
     |> Redact.redact_headers()
+    |> Enum.map(fn {k, v} -> [k, v] end)
     |> Jason.encode!()
   end
 end

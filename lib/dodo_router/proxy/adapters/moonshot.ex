@@ -57,9 +57,7 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
         {:ok, response_body, %{headers: resp_headers}}
 
       {:ok, %{status: status, body: response_body}} ->
-        Logger.error(
-          "[Moonshot] Non-200 response: status=#{status} body=#{inspect(response_body)}"
-        )
+        Logger.error("[Moonshot] Non-200 response: status=#{status}")
 
         reason = Adapter.categorize_error(status, response_body)
         {:error, reason, %{status: status, body: response_body, latency_ms: latency(start_time)}}
@@ -179,9 +177,7 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
               end
           end
 
-        Logger.error(
-          "[Moonshot] Stream error #{status}: #{inspect(response_body)} raw_body_len=#{byte_size(raw_body || "")}"
-        )
+        Logger.error("[Moonshot] Stream error: status=#{status}")
 
         reason = Adapter.categorize_error(status, response_body)
         {:error, reason, %{status: status, body: response_body, latency_ms: latency(start_time)}}

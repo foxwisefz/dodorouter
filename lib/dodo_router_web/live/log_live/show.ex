@@ -475,8 +475,15 @@ defmodule DodoRouterWeb.LogLive.Show do
 
   defp parse_headers(str) when is_binary(str) do
     case Jason.decode(str) do
-      {:ok, headers} when is_list(headers) -> headers
-      _ -> nil
+      {:ok, headers} when is_list(headers) ->
+        Enum.map(headers, fn
+          [k, v] -> {k, v}
+          {k, v} -> {k, v}
+          other -> other
+        end)
+
+      _ ->
+        nil
     end
   end
 
