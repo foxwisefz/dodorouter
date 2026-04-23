@@ -14,6 +14,8 @@ defmodule DodoRouterWeb.LogLive.Show do
 
     {req_messages, req_params} = parse_request_body(log.request_body)
     resp_message = parse_response_body(log.response_body)
+    req_headers = parse_headers(log.request_headers)
+    resp_headers = parse_headers(log.response_headers)
 
     socket =
       socket
@@ -22,8 +24,12 @@ defmodule DodoRouterWeb.LogLive.Show do
       |> assign(:req_messages, req_messages)
       |> assign(:req_params, req_params)
       |> assign(:resp_message, resp_message)
+      |> assign(:req_headers, req_headers)
+      |> assign(:resp_headers, resp_headers)
       |> assign(:show_raw_request, false)
       |> assign(:show_raw_response, false)
+      |> assign(:show_req_headers, false)
+      |> assign(:show_resp_headers, false)
       |> assign(:expanded_messages, MapSet.new())
       |> assign(:truncation_flags, log.truncation_flags || [])
 
@@ -42,6 +48,14 @@ defmodule DodoRouterWeb.LogLive.Show do
 
   def handle_event("toggle_raw_response", _params, socket) do
     {:noreply, update(socket, :show_raw_response, &(!&1))}
+  end
+
+  def handle_event("toggle_req_headers", _params, socket) do
+    {:noreply, update(socket, :show_req_headers, &(!&1))}
+  end
+
+  def handle_event("toggle_resp_headers", _params, socket) do
+    {:noreply, update(socket, :show_resp_headers, &(!&1))}
   end
 
   def handle_event("toggle_message", %{"index" => idx}, socket) do
@@ -247,6 +261,21 @@ defmodule DodoRouterWeb.LogLive.Show do
                     </details>
                   </div>
                   <div
+                    :if={attempt["forwarded_headers"] && map_size(attempt["forwarded_headers"]) > 0}
+                    class="mt-2 text-xs"
+                  >
+                    <div class="text-base-content/60 mb-1">Headers modified:</div>
+                    <div class="space-y-0.5 font-mono">
+                      <%= for {header, note} <- attempt["forwarded_headers"] do %>
+                        <div class="flex gap-2 items-start">
+                          <span class="badge badge-xs badge-ghost">→</span>
+                          <span class="font-medium">{header}:</span>
+                          <span class="text-base-content/70">{note}</span>
+                        </div>
+                      <% end %>
+                    </div>
+                  </div>
+                  <div
                     :if={attempt["streamed_to_client"]}
                     class="mt-2 flex items-center gap-2 text-xs text-warning"
                   >
@@ -281,12 +310,29 @@ defmodule DodoRouterWeb.LogLive.Show do
           <div class="card-body">
             <div class="flex items-center justify-between mb-3">
               <h2 class="card-title text-base">Request</h2>
-              <button
-                phx-click="toggle_raw_request"
-                class="btn btn-ghost btn-xs"
-              >
-                {if @show_raw_request, do: "Compact", else: "Raw JSON"}
-              </button>
+              <div class="flex gap-2">
+                <button :if={@req_headers} phx-click="toggle_req_headers" class="btn btn-ghost btn-xs">
+                  Headers
+                </button>
+                <button
+                  phx-click="toggle_raw_request"
+                  class="btn btn-ghost btn-xs"
+                >
+                  {if @show_raw_request, do: "Compact", else: "Raw JSON"}
+                </button>
+              </div>
+            </div>
+
+            <div
+              :if={@show_req_headers && @req_headers}
+              class="mb-3 p-2 bg-base-200 rounded-lg text-xs font-mono space-y-1"
+            >
+              <%= for {key, value} <- @req_headers do %>
+                <div class="flex gap-2">
+                  <span class="text-base-content/60 shrink-0">{key}:</span>
+                  <span class="break-all">{value}</span>
+                </div>
+              <% end %>
             </div>
 
             <%= if @show_raw_request do %>
@@ -318,12 +364,29 @@ defmodule DodoRouterWeb.LogLive.Show do
           <div class="card-body">
             <div class="flex items-center justify-between mb-3">
               <h2 class="card-title text-base">Response</h2>
-              <button
-                phx-click="toggle_raw_response"
-                class="btn btn-ghost btn-xs"
-              >
-                {if @show_raw_response, do: "Compact", else: "Raw JSON"}
-              </button>
+              <div class="flex gap-2">
+                <button :if={@resp_headers} phx-click="toggle_resp_headers" class="btn btn-ghost btn-xs">
+                  Headers
+                </button>
+                <button
+                  phx-click="toggle_raw_response"
+                  class="btn btn-ghost btn-xs"
+                >
+                  {if @show_raw_response, do: "Compact", else: "Raw JSON"}
+                </button>
+              </div>
+            </div>
+
+            <div
+              :if={@show_resp_headers && @resp_headers}
+              class="mb-3 p-2 bg-base-200 rounded-lg text-xs font-mono space-y-1"
+            >
+              <%= for {key, value} <- @resp_headers do %>
+                <div class="flex gap-2">
+                  <span class="text-base-content/60 shrink-0">{key}:</span>
+                  <span class="break-all">{value}</span>
+                </div>
+              <% end %>
             </div>
 
             <%= if @show_raw_response do %>
@@ -405,6 +468,15 @@ defmodule DodoRouterWeb.LogLive.Show do
 
       _ ->
         nil
+    end
+  end
+
+  defp parse_headers(nil), do: nil
+
+  defp parse_headers(str) when is_binary(str) do
+    case Jason.decode(str) do
+      {:ok, headers} when is_list(headers) -> headers
+      _ -> nil
     end
   end
 

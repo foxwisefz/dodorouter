@@ -1,6 +1,8 @@
 defmodule DodoRouterWeb.ProxyController do
   use DodoRouterWeb, :controller
 
+  require Logger
+
   alias DodoRouter.Proxy
 
   def create(conn, params) do
@@ -10,6 +12,12 @@ defmodule DodoRouterWeb.ProxyController do
 
     recording_id = extract_active_recording_id(router)
     client_headers = extract_forwardable_headers(conn)
+
+    Logger.info(
+      "[Proxy] request_id=#{request_id} router=#{router.slug} stream=#{params["stream"]} " <>
+        "model=#{params["model"]} msg_count=#{length(params["messages"] || [])} " <>
+        "client_headers=#{inspect(redact_headers(client_headers))}"
+    )
 
     if params["stream"] == true do
       stream_response(conn, router, params, request_id, session, client_headers, recording_id)
@@ -146,5 +154,13 @@ defmodule DodoRouterWeb.ProxyController do
         chunk(conn, "data: [DONE]\n\n")
         conn
     end
+  end
+
+  defp redact_headers(headers) do
+    Enum.map(headers, fn
+      {"authorization", _} -> {"authorization", "***"}
+      {k, _v} when k in ["cookie", "set-cookie"] -> {k, "***"}
+      other -> other
+    end)
   end
 end

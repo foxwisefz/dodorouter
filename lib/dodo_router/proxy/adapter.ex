@@ -18,7 +18,7 @@ defmodule DodoRouter.Proxy.Adapter do
           | :unknown
 
   @callback call(request(), RoutingStep.t(), api_key :: String.t(), client_headers :: list()) ::
-              {:ok, response()} | {:error, error_reason(), details :: map()}
+              {:ok, response(), meta :: map()} | {:error, error_reason(), details :: map()}
 
   @callback stream(
               request(),
@@ -27,7 +27,7 @@ defmodule DodoRouter.Proxy.Adapter do
               send_chunk :: (binary() -> :ok),
               client_headers :: list()
             ) ::
-              {:ok, response()} | {:error, error_reason(), details :: map()}
+              {:ok, response(), meta :: map()} | {:error, error_reason(), details :: map()}
 
   @doc """
   Categorizes HTTP status codes into error reasons.

@@ -21,6 +21,7 @@ defmodule DodoRouter.Proxy.FallbackChain do
     :client_headers,
     attempted_steps: [],
     final_response: nil,
+    response_headers: nil,
     status: nil,
     partial_content: ""
   ]
@@ -51,14 +52,15 @@ defmodule DodoRouter.Proxy.FallbackChain do
     endpoint = endpoint_for(step)
 
     case execute_step(step, state) do
-      {:ok, response} ->
+      {:ok, response, meta} ->
         attempt = %{
           provider: step.provider,
           model: step.model,
           endpoint: endpoint,
           plan_type: step.plan_type,
           status: "success",
-          latency_ms: latency(start_time)
+          latency_ms: latency(start_time),
+          forwarded_headers: build_forwarded_headers(step)
         }
 
         status = if length(state.attempted_steps) > 0, do: :fallback, else: :success
@@ -69,6 +71,7 @@ defmodule DodoRouter.Proxy.FallbackChain do
         %{
           state
           | final_response: response,
+            response_headers: meta[:headers],
             attempted_steps: state.attempted_steps ++ [attempt],
             status: status
         }
@@ -90,7 +93,8 @@ defmodule DodoRouter.Proxy.FallbackChain do
           latency_ms: details[:latency_ms] || latency(start_time),
           streamed_to_client: streamed_to_client,
           partial_content_length:
-            if(is_binary(partial_content), do: String.length(partial_content), else: nil)
+            if(is_binary(partial_content), do: String.length(partial_content), else: nil),
+          forwarded_headers: build_forwarded_headers(step)
         }
 
         state = %{state | attempted_steps: state.attempted_steps ++ [attempt]}
@@ -213,4 +217,12 @@ defmodule DodoRouter.Proxy.FallbackChain do
   end
 
   defp latency(start_time), do: System.monotonic_time(:millisecond) - start_time
+
+  defp build_forwarded_headers(%RoutingStep{provider: "moonshot", plan_type: "coding"}) do
+    %{
+      "user-agent" => "overridden: KimiCLI/1.0.0 (coding endpoint requires coding agent UA)"
+    }
+  end
+
+  defp build_forwarded_headers(_step), do: %{}
 end

@@ -30,8 +30,8 @@ defmodule DodoRouter.Proxy.Adapters.Zai do
     start_time = System.monotonic_time(:millisecond)
 
     case Req.post(url, headers: headers, json: body, receive_timeout: @timeout_ms) do
-      {:ok, %{status: 200, body: response_body}} ->
-        {:ok, response_body}
+      {:ok, %{status: 200, body: response_body, headers: resp_headers}} ->
+        {:ok, response_body, %{headers: resp_headers}}
 
       {:ok, %{status: status, body: response_body}} ->
         reason = Adapter.categorize_error(status, response_body)
@@ -116,12 +116,12 @@ defmodule DodoRouter.Proxy.Adapters.Zai do
     Process.delete(:__zai_stream_acc__)
 
     case result do
-      {:ok, %Req.Response{status: 200} = resp} ->
+      {:ok, %Req.Response{status: 200, headers: resp_headers} = resp} ->
         acc =
           resp.private[:stream_acc] ||
             %{content: "", tool_calls: %{}, usage: nil, finish_reason: nil, first_chunk_time: nil}
 
-        {:ok, build_final_response(acc, start_time)}
+        {:ok, build_final_response(acc, start_time), %{headers: resp_headers}}
 
       {:ok, %Req.Response{status: status, body: response_body}} ->
         reason = Adapter.categorize_error(status, response_body)

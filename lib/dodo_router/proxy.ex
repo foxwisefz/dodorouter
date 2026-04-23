@@ -7,6 +7,7 @@ defmodule DodoRouter.Proxy do
   alias DodoRouter.Routers.Router
   alias DodoRouter.Proxy.{Adapter, FallbackChain}
   alias DodoRouter.Logs
+  alias DodoRouter.Redact
 
   @doc """
   Dispatches a request through the router's routing chain.
@@ -38,7 +39,17 @@ defmodule DodoRouter.Proxy do
           Keyword.put(opts, :client_headers, client_headers)
         )
 
-      log_request(router, request, result, request_id, start_time, session, recording_id)
+      log_request(
+        router,
+        request,
+        result,
+        request_id,
+        start_time,
+        session,
+        recording_id,
+        client_headers
+      )
+
       broadcast_event(router, result)
 
       # Calculate provider time (sum of all attempt latencies)
@@ -61,7 +72,16 @@ defmodule DodoRouter.Proxy do
     dispatch(router, request, Keyword.merge(opts, stream: true, send_chunk: send_chunk))
   end
 
-  defp log_request(router, request, result, request_id, start_time, session, recording_id) do
+  defp log_request(
+         router,
+         request,
+         result,
+         request_id,
+         start_time,
+         session,
+         recording_id,
+         client_headers
+       ) do
     latency_ms = System.monotonic_time(:millisecond) - start_time
 
     {call_type, tools_invoked} =
@@ -105,7 +125,9 @@ defmodule DodoRouter.Proxy do
       session_id: session[:session_id],
       session_name: session[:session_name],
       recording_id: recording_id,
-      truncation_flags: truncation_flags
+      truncation_flags: truncation_flags,
+      request_headers: encode_redacted_headers(client_headers),
+      response_headers: encode_redacted_headers(result.response_headers)
     }
 
     Logs.create_log_async(log_attrs)
@@ -134,12 +156,11 @@ defmodule DodoRouter.Proxy do
             end
           end)
 
-        body
-        |> Map.put("messages", Enum.reverse(truncated_messages))
-        |> Map.put("_truncation_flags", Enum.reverse(flags))
+        body = Map.put(body, "messages", Enum.reverse(truncated_messages))
+        {Map.put(body, "_truncation_flags", Enum.reverse(flags)), Enum.reverse(flags)}
 
       _ ->
-        Map.put(body, "_truncation_flags", [])
+        {body, []}
     end
   end
 
@@ -222,5 +243,13 @@ defmodule DodoRouter.Proxy do
       "router:#{router.id}:events",
       {:proxy_event, event}
     )
+  end
+
+  defp encode_redacted_headers(nil), do: nil
+
+  defp encode_redacted_headers(headers) do
+    headers
+    |> Redact.redact_headers()
+    |> Jason.encode!()
   end
 end
