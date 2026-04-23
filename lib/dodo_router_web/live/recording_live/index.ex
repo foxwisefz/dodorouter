@@ -100,28 +100,34 @@ defmodule DodoRouterWeb.RecordingLive.Index do
               phx-click="stop_recording"
               class="btn btn-sm btn-error gap-2"
             >
-              <span class="w-2 h-2 rounded-full bg-error-content animate-pulse"></span>
-              Stop Recording
+              <span class="w-2 h-2 rounded-full bg-error-content animate-pulse"></span> Stop Recording
             </button>
           <% else %>
             <button
               phx-click="toggle_start_form"
               class="btn btn-sm btn-primary gap-2"
             >
-              <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="currentColor" viewBox="0 0 24 24">
-                <circle cx="12" cy="12" r="8"/>
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                class="h-4 w-4"
+                fill="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <circle cx="12" cy="12" r="8" />
               </svg>
               Start Recording
             </button>
           <% end %>
         </div>
       </div>
-
-      <!-- Start Recording Form -->
+      
+    <!-- Start Recording Form -->
       <div :if={@show_start_form} class="card-bordered p-4 mb-6 bg-primary/5 border-primary/30">
         <form phx-submit="start_recording" class="flex items-end gap-3">
           <div class="flex-1">
-            <label class="block text-sm font-medium text-base-content/70 mb-1">Recording Name (optional)</label>
+            <label class="block text-sm font-medium text-base-content/70 mb-1">
+              Recording Name (optional)
+            </label>
             <input
               type="text"
               name="recording[name]"
@@ -135,8 +141,8 @@ defmodule DodoRouterWeb.RecordingLive.Index do
           <button type="button" phx-click="toggle_start_form" class="btn btn-ghost">Cancel</button>
         </form>
       </div>
-
-      <!-- Active Recording Banner -->
+      
+    <!-- Active Recording Banner -->
       <div :if={@active_recording} class="card-bordered p-4 mb-6 bg-success/10 border-success/30">
         <div class="flex items-center justify-between">
           <div class="flex items-center gap-3">
