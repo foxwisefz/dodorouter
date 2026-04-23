@@ -209,4 +209,48 @@ defmodule DodoRouter.Proxy.Adapter do
   def build_forwarded_headers(client_headers, proxy_headers) when is_nil(client_headers) do
     proxy_headers
   end
+
+  # SSE parsing utilities
+
+  @doc """
+  Parses SSE data - may contain multiple events batched together.
+  Handles both "data:" (no space) and "data: " (with space) formats.
+  Returns :done, :skip, {:chunks, chunks}, or {:chunks_then_done, chunks}.
+  """
+  def parse_sse_chunk(data) do
+    lines = String.split(data, "\n")
+    has_done = Enum.any?(lines, &is_done_line/1)
+
+    chunks =
+      lines
+      |> Enum.filter(&is_data_line/1)
+      |> Enum.reject(&is_done_line/1)
+      |> Enum.flat_map(fn line ->
+        json = extract_json(line)
+
+        case Jason.decode(json) do
+          {:ok, parsed} -> [parsed]
+          _ -> []
+        end
+      end)
+
+    cond do
+      has_done and chunks == [] -> :done
+      has_done -> {:chunks_then_done, chunks}
+      chunks == [] -> :skip
+      true -> {:chunks, chunks}
+    end
+  end
+
+  defp is_data_line(line),
+    do: String.starts_with?(line, "data:") or String.starts_with?(line, "data: ")
+
+  defp is_done_line(line),
+    do: String.starts_with?(line, "data: [DONE]") or String.starts_with?(line, "data:[DONE]")
+
+  defp extract_json(line) do
+    line
+    |> String.trim_leading("data: ")
+    |> String.trim_leading("data:")
+  end
 end

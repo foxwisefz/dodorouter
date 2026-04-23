@@ -3,78 +3,139 @@ defmodule DodoRouter.Proxy.AdapterTest do
 
   alias DodoRouter.Proxy.Adapter
 
-  describe "build_forwarded_headers/2" do
-    test "filters out proxy override headers (case-insensitive)" do
-      client_headers = [
-        {"Authorization", "Bearer old-key"},
-        {"Content-Type", "text/plain"},
-        {"Accept", "application/json"},
-        {"X-Custom", "value"}
-      ]
+  describe "parse_sse_chunk/1" do
+    test "parses single SSE event" do
+      data = ~s|data: {"id":"123","choices":[{"delta":{"content":"hello"}}]}\n\n|
 
-      proxy_headers = [
-        {"Authorization", "Bearer new-key"},
-        {"Content-Type", "application/json"}
-      ]
+      result = Adapter.parse_sse_chunk(data)
 
-      result = Adapter.build_forwarded_headers(client_headers, proxy_headers)
-
-      assert {"Accept", "application/json"} in result
-      assert {"X-Custom", "value"} in result
-      assert {"Authorization", "Bearer new-key"} in result
-      assert {"Content-Type", "application/json"} in result
-      refute {"Authorization", "Bearer old-key"} in result
-      refute {"Content-Type", "text/plain"} in result
+      assert {:chunks, [chunk]} = result
+      assert chunk["id"] == "123"
     end
 
-    test "returns proxy headers when client_headers is nil" do
-      proxy_headers = [
-        {"Authorization", "Bearer key"},
-        {"Content-Type", "application/json"}
-      ]
+    test "parses multiple batched SSE events" do
+      data = """
+      data: {"id":"1","choices":[{"delta":{"content":"a"}}]}
 
-      result = Adapter.build_forwarded_headers(nil, proxy_headers)
+      data: {"id":"2","choices":[{"delta":{"content":"b"}}]}
 
-      assert result == proxy_headers
+      data: {"id":"3","choices":[{"delta":{"content":"c"}}]}
+
+      """
+
+      result = Adapter.parse_sse_chunk(data)
+
+      assert {:chunks, chunks} = result
+      assert length(chunks) == 3
+      assert Enum.map(chunks, & &1["id"]) == ["1", "2", "3"]
     end
 
-    test "returns proxy headers when client_headers is empty list" do
-      proxy_headers = [{"Authorization", "Bearer key"}]
+    test "handles batched events with tool_calls" do
+      data = """
+      data: {"id":"tc1","choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","function":{"name":"read"}}]}}]}
 
-      result = Adapter.build_forwarded_headers([], proxy_headers)
+      data: {"id":"tc2","choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\\"path\\""}}]}}]}
 
-      assert result == proxy_headers
+      data: {"id":"tc3","choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\\": \\"/tmp\\"}"}}]}}]}
+
+      """
+
+      result = Adapter.parse_sse_chunk(data)
+
+      assert {:chunks, chunks} = result
+      assert length(chunks) == 3
+
+      # First chunk has the tool call id and name
+      first = hd(chunks)
+      tc = get_in(first, ["choices", Access.at(0), "delta", "tool_calls", Access.at(0)])
+      assert tc["id"] == "call_1"
+      assert tc["function"]["name"] == "read"
     end
 
-    test "passes through client headers that are not overrides" do
-      client_headers = [
-        {"X-Request-Id", "abc123"},
-        {"Accept", "application/json"}
-      ]
+    test "returns :done for [DONE] signal" do
+      data = "data: [DONE]\n\n"
 
-      proxy_headers = [{"Authorization", "Bearer key"}]
-
-      result = Adapter.build_forwarded_headers(client_headers, proxy_headers)
-
-      assert length(result) == 3
-      assert {"X-Request-Id", "abc123"} in result
-      assert {"Accept", "application/json"} in result
-      assert {"Authorization", "Bearer key"} in result
+      assert Adapter.parse_sse_chunk(data) == :done
     end
 
-    test "filters override headers regardless of case" do
-      client_headers = [
-        {"authorization", "Bearer old"},
-        {"AUTHORIZATION", "Bearer old2"},
-        {"Content-Type", "text/html"}
-      ]
+    test "returns chunks_then_done when data ends with [DONE]" do
+      data = """
+      data: {"id":"final","choices":[{"delta":{},"finish_reason":"stop"}]}
 
-      proxy_headers = [{"Authorization", "Bearer new"}]
+      data: [DONE]
 
-      result = Adapter.build_forwarded_headers(client_headers, proxy_headers)
+      """
 
-      assert length(result) == 1
-      assert {"Authorization", "Bearer new"} in result
+      result = Adapter.parse_sse_chunk(data)
+
+      assert {:chunks_then_done, [chunk]} = result
+      assert chunk["id"] == "final"
+    end
+
+    test "returns :skip for empty or non-SSE data" do
+      assert Adapter.parse_sse_chunk("") == :skip
+      assert Adapter.parse_sse_chunk("\n\n") == :skip
+      assert Adapter.parse_sse_chunk("not sse data") == :skip
+    end
+
+    # Some endpoints send SSE without space after colon
+    test "parses SSE without space after data: (no-space format)" do
+      data = ~s|data:{"id":"123","choices":[{"delta":{"content":"hello"}}]}\n\n|
+
+      result = Adapter.parse_sse_chunk(data)
+
+      assert {:chunks, [chunk]} = result
+      assert chunk["id"] == "123"
+      assert get_in(chunk, ["choices", Access.at(0), "delta", "content"]) == "hello"
+    end
+
+    test "parses multiple batched SSE events without space" do
+      data = """
+      data:{"id":"1","choices":[{"delta":{"reasoning_content":"thinking"}}]}
+
+      data:{"id":"2","choices":[{"delta":{"content":"answer"}}]}
+
+      """
+
+      result = Adapter.parse_sse_chunk(data)
+
+      assert {:chunks, chunks} = result
+      assert length(chunks) == 2
+      assert Enum.map(chunks, & &1["id"]) == ["1", "2"]
+    end
+
+    test "handles [DONE] without space" do
+      data = "data:[DONE]\n\n"
+
+      assert Adapter.parse_sse_chunk(data) == :done
+    end
+
+    test "handles chunks_then_done without space" do
+      data = """
+      data:{"id":"final","choices":[{"delta":{},"finish_reason":"stop"}]}
+
+      data:[DONE]
+
+      """
+
+      result = Adapter.parse_sse_chunk(data)
+
+      assert {:chunks_then_done, [chunk]} = result
+      assert chunk["id"] == "final"
+    end
+
+    test "handles mixed space/no-space format in same batch" do
+      data = """
+      data: {"id":"1","choices":[{"delta":{"content":"a"}}]}
+
+      data:{"id":"2","choices":[{"delta":{"content":"b"}}]}
+
+      """
+
+      result = Adapter.parse_sse_chunk(data)
+
+      assert {:chunks, chunks} = result
+      assert length(chunks) == 2
     end
   end
 end

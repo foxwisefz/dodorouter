@@ -23,42 +23,6 @@ defmodule DodoRouter.Proxy.Adapters.ZaiTest do
     end
   end
 
-  describe "parse_sse_chunk/1" do
-    test "parses single SSE event" do
-      data = "data: {\"id\":\"123\",\"choices\":[{\"delta\":{\"content\":\"hello\"}}]}\n\n"
-      assert {:chunks, [chunk]} = Zai.parse_sse_chunk(data)
-      assert chunk["id"] == "123"
-    end
-
-    test "parses multiple batched SSE events" do
-      data =
-        "data: {\"id\":\"1\",\"choices\":[{\"delta\":{\"content\":\"a\"}}]}\n\ndata: {\"id\":\"2\",\"choices\":[{\"delta\":{\"content\":\"b\"}}]}\n\ndata: {\"id\":\"3\",\"choices\":[{\"delta\":{\"content\":\"c\"}}]}\n\n"
-
-      assert {:chunks, chunks} = Zai.parse_sse_chunk(data)
-      assert length(chunks) == 3
-      assert Enum.map(chunks, & &1["id"]) == ["1", "2", "3"]
-    end
-
-    test "returns :done for [DONE] signal" do
-      assert Zai.parse_sse_chunk("data: [DONE]\n\n") == :done
-    end
-
-    test "returns chunks_then_done when data ends with [DONE]" do
-      data =
-        "data: {\"id\":\"final\",\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n"
-
-      assert {:chunks_then_done, [chunk]} =
-               Zai.parse_sse_chunk(data)
-
-      assert chunk["id"] == "final"
-    end
-
-    test "returns :skip for empty data" do
-      assert Zai.parse_sse_chunk("") == :skip
-      assert Zai.parse_sse_chunk("\n\n") == :skip
-    end
-  end
-
   describe "accumulate_tool_calls/2" do
     test "accumulates streamed tool call arguments" do
       existing = %{}
