@@ -197,12 +197,16 @@ defmodule DodoRouter.Proxy.Adapter do
   @proxy_overrides ~w(authorization content-type)
                    |> Enum.map(&String.downcase/1)
 
-  def build_forwarded_headers(client_headers, proxy_headers) do
+  def build_forwarded_headers(client_headers, proxy_headers) when is_list(client_headers) do
     filtered =
       Enum.reject(client_headers, fn {key, _} ->
         String.downcase(key) in @proxy_overrides
       end)
 
     filtered ++ proxy_headers
+  end
+
+  def build_forwarded_headers(client_headers, proxy_headers) when is_nil(client_headers) do
+    proxy_headers
   end
 end
