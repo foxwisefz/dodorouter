@@ -91,7 +91,7 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
 
       # Log first raw data chunk to see format
       if accumulated == data do
-        Logger.debug("[Moonshot:stream] First raw chunk (#{byte_size(data)} bytes): #{String.slice(data, 0, 500)}")
+        Logger.info("[Moonshot:stream] First raw chunk (#{byte_size(data)} bytes): #{String.slice(data, 0, 500)}")
       end
 
       resp =
@@ -116,7 +116,7 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
       case parse_sse_chunk(data) do
         {:chunks, chunks} ->
           if length(chunks) > 0 and acc.content == "" do
-            Logger.debug("[Moonshot:stream] Parsed #{length(chunks)} chunks, first: #{inspect(Enum.at(chunks, 0))}")
+            Logger.info("[Moonshot:stream] Parsed #{length(chunks)} chunks, first: #{inspect(Enum.at(chunks, 0))}")
           end
           reframe_and_send_chunks(send_chunk, chunks)
           acc = Enum.reduce(chunks, acc, &accumulate_chunk(&2, &1))
@@ -137,7 +137,7 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
           # Log first few skipped chunks to see what's being ignored
           skip_count = Process.get(:__moonshot_skip_count__, 0)
           if skip_count < 3 do
-            Logger.debug("[Moonshot:stream] Skipped chunk: #{inspect(String.slice(data, 0, 200))}")
+            Logger.info("[Moonshot:stream] Skipped chunk: #{inspect(String.slice(data, 0, 200))}")
             Process.put(:__moonshot_skip_count__, skip_count + 1)
           end
           {:cont, {req, resp}}
@@ -337,7 +337,7 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
 
     # Debug: log first chunk structure to see format differences
     if acc.content == "" and Map.get(acc, :reasoning_content, "") == "" do
-      Logger.debug("[Moonshot:accumulate] First chunk structure: #{inspect(chunk_data)}")
+      Logger.info("[Moonshot:accumulate] First chunk structure: #{inspect(chunk_data)}")
     end
 
     content =
