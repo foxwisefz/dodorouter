@@ -396,6 +396,66 @@ defmodule DodoRouter.Proxy.Adapters.MoonshotTest do
       assert Moonshot.parse_sse_chunk("\n\n") == :skip
       assert Moonshot.parse_sse_chunk("not sse data") == :skip
     end
+
+    # Coding endpoint sends SSE without space after colon
+    test "parses SSE without space after data: (coding endpoint format)" do
+      data = ~s|data:{"id":"123","choices":[{"delta":{"content":"hello"}}]}\n\n|
+
+      result = Moonshot.parse_sse_chunk(data)
+
+      assert {:chunks, [chunk]} = result
+      assert chunk["id"] == "123"
+      assert get_in(chunk, ["choices", Access.at(0), "delta", "content"]) == "hello"
+    end
+
+    test "parses multiple batched SSE events without space (coding endpoint)" do
+      data = """
+      data:{"id":"1","choices":[{"delta":{"reasoning_content":"thinking"}}]}
+
+      data:{"id":"2","choices":[{"delta":{"content":"answer"}}]}
+
+      """
+
+      result = Moonshot.parse_sse_chunk(data)
+
+      assert {:chunks, chunks} = result
+      assert length(chunks) == 2
+      assert Enum.map(chunks, & &1["id"]) == ["1", "2"]
+    end
+
+    test "handles [DONE] without space (coding endpoint)" do
+      data = "data:[DONE]\n\n"
+
+      assert Moonshot.parse_sse_chunk(data) == :done
+    end
+
+    test "handles chunks_then_done without space (coding endpoint)" do
+      data = """
+      data:{"id":"final","choices":[{"delta":{},"finish_reason":"stop"}]}
+
+      data:[DONE]
+
+      """
+
+      result = Moonshot.parse_sse_chunk(data)
+
+      assert {:chunks_then_done, [chunk]} = result
+      assert chunk["id"] == "final"
+    end
+
+    test "handles mixed space/no-space format in same batch" do
+      data = """
+      data: {"id":"1","choices":[{"delta":{"content":"a"}}]}
+
+      data:{"id":"2","choices":[{"delta":{"content":"b"}}]}
+
+      """
+
+      result = Moonshot.parse_sse_chunk(data)
+
+      assert {:chunks, chunks} = result
+      assert length(chunks) == 2
+    end
   end
 
   describe "accumulate_tool_calls/2" do
