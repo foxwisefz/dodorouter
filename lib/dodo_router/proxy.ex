@@ -94,14 +94,15 @@ defmodule DodoRouter.Proxy do
     last_step = List.last(result.attempted_steps)
 
     # Encode request/response for storage (truncate large payloads)
-    {request_body, req_flags} =
-      request |> truncate_body() |> then(&{Jason.encode!(&1), &1[:_truncation_flags] || []})
+    {truncated_req, req_flags} = truncate_body(request)
+    request_body = Jason.encode!(truncated_req)
 
-    {response_body, resp_flags} =
+    {truncated_resp, resp_flags} =
       result.final_response
       |> clean_response()
       |> truncate_body()
-      |> then(&{Jason.encode!(&1), &1[:_truncation_flags] || []})
+
+    response_body = Jason.encode!(truncated_resp)
 
     truncation_flags = req_flags ++ resp_flags
 
@@ -133,9 +134,10 @@ defmodule DodoRouter.Proxy do
     Logs.create_log_async(log_attrs)
   end
 
-  defp truncate_body(nil), do: %{"_truncation_flags" => []}
+  @doc false
+  def truncate_body(nil), do: {nil, []}
 
-  defp truncate_body(body) when is_map(body) do
+  def truncate_body(body) when is_map(body) do
     case get_in(body, ["messages"]) do
       messages when is_list(messages) ->
         {truncated_messages, flags} =

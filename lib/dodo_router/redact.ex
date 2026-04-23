@@ -14,6 +14,8 @@ defmodule DodoRouter.Redact do
     end)
   end
 
+  def redact_secrets(value), do: value
+
   defp secret_patterns do
     case :persistent_term.get({__MODULE__, :patterns}, nil) do
       nil ->
@@ -28,20 +30,18 @@ defmodule DodoRouter.Redact do
 
   defp compile_patterns do
     [
-      ~S/Bearer\s+[A-Za-z0-9\-._~+\/]{10,}=*/,
-      ~S/Basic\s+[A-Za-z0-9+\/]{10,}={0,2}/,
-      ~S/sk-[A-Za-z0-9\-_]{20,}/,
-      ~S/(?:api[_-]?key)['\"]?\s*[:=]\s*['\"]?[^\s,'\"})\]{}>]{8,}/,
-      ~S/\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*/,
-      ~S/(?:AKIA|ASIA)[0-9A-Z]{16}/,
-      ~S/AIza[0-9A-Za-z\-_]{35}/,
-      ~S/dapi[0-9a-f]{32}/,
-      ~S/\bya29\.[A-Za-z0-9_.~+\/-]+/
+      "Bearer\\s+[A-Za-z0-9\\-._~+/]{10,}=*",
+      "Basic\\s+[A-Za-z0-9+/]{10,}={0,2}",
+      "sk-[A-Za-z0-9\\-_]{20,}",
+      "(?:api[_-]?key)['\"]?\\s*[:=]\\s*['\"]?[^\\s,'\"})\\]{}>]{8,}",
+      "\\beyJ[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]*",
+      "(?:AKIA|ASIA)[0-9A-Z]{16}",
+      "AIza[0-9A-Za-z\\-_]{35}",
+      "dapi[0-9a-f]{32}",
+      "\\bya29\\.[A-Za-z0-9_.~+/-]+"
     ]
     |> Enum.map(&Regex.compile!(&1, "i"))
   end
-
-  def redact_secrets(value), do: value
 
   @doc """
   Redact headers - both by key name and by value patterns.
