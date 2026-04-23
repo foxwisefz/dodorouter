@@ -22,6 +22,7 @@ defmodule DodoRouter.Recordings.Recording do
     recording
     |> cast(attrs, [:name, :status, :started_at, :stopped_at, :router_id])
     |> validate_required([:status, :started_at, :router_id])
+    |> validate_length(:name, max: 255)
     |> validate_inclusion(:status, @statuses)
     |> foreign_key_constraint(:router_id)
   end

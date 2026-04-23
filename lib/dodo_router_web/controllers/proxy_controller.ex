@@ -64,7 +64,7 @@ defmodule DodoRouterWeb.ProxyController do
   end
 
 
-  defp sync_response(conn, router, params, request_id, session, client_headers) do
+  defp sync_response(conn, router, params, request_id, session, recording_id, client_headers) do
    start_time = System.monotonic_time(:millisecond)
 
     case Proxy.dispatch(router, params,

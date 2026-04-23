@@ -131,7 +131,12 @@ defmodule DodoRouterWeb.RecordingLive.Index do
   end
 
   defp apply_action(socket, params) do
-    page = String.to_integer(params["page"] || "1")
+    page =
+      case Integer.parse(params["page"] || "1") do
+        {n, _} when n > 0 -> n
+        _ -> 1
+      end
+
     per_page = 20
 
     recordings =
