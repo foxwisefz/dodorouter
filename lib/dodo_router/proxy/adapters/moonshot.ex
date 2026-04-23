@@ -204,24 +204,27 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
     if Map.has_key?(map, key), do: map, else: Map.put(map, key, default)
   end
 
-  # kimi-k2.5 has thinking enabled by default - only disable if explicitly false
-  defp maybe_put_thinking(body, %RoutingStep{model: "kimi-k2.5", thinking_enabled: false}) do
+  defguardp is_kimi_thinking_model(model)
+            when is_binary(model) and
+                   (binary_part(model, 0, 7) == "kimi-k2" or model == "kimi-for-coding")
+
+  defp maybe_put_thinking(body, %RoutingStep{model: model, thinking_enabled: false})
+       when is_kimi_thinking_model(model) do
     Map.put(body, "thinking", %{"type" => "disabled"})
   end
 
-  defp maybe_put_thinking(body, %RoutingStep{model: "kimi-k2.5"}) do
+  defp maybe_put_thinking(body, %RoutingStep{model: model, thinking_enabled: thinking})
+       when is_kimi_thinking_model(model) and thinking != false do
     Map.put(body, "thinking", %{"type" => "enabled"})
   end
 
   defp maybe_put_thinking(body, _step), do: body
 
-  # kimi-k2 models require reasoning_content on assistant messages when thinking is enabled.
-  # Converts reasoning_details (OpenRouter-style) → reasoning_content (kimi-k2 flat format).
-  # Only adds reasoning_content if thinking is NOT explicitly disabled.
   defp maybe_transform_kimi_reasoning(body, %RoutingStep{model: model, thinking_enabled: thinking})
        when is_binary(model) do
-    # Only transform if kimi model AND thinking is not explicitly disabled
-    if String.starts_with?(model, "kimi") and thinking != false do
+    is_kimi_k2 = String.starts_with?(model, "kimi-k2") or model == "kimi-for-coding"
+
+    if is_kimi_k2 and thinking != false do
       messages =
         Enum.map(body["messages"] || [], fn msg ->
           case msg["role"] do
@@ -295,19 +298,27 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
   end
 
   defp accumulate_chunk(acc, chunk_data) do
+    choice = get_in(chunk_data, ["choices", Access.at(0)])
+
     content =
-      case get_in(chunk_data, ["choices", Access.at(0), "delta", "content"]) do
+      case get_in(choice, ["delta", "content"]) do
         nil -> acc.content
         c -> acc.content <> c
+      end
+
+    reasoning_content =
+      case get_in(choice, ["delta", "reasoning_content"]) do
+        nil -> Map.get(acc, :reasoning_content, "")
+        rc -> Map.get(acc, :reasoning_content, "") <> rc
       end
 
     tool_calls = accumulate_tool_calls(acc.tool_calls, chunk_data)
     usage = chunk_data["usage"] || acc.usage
 
-    finish_reason =
-      get_in(chunk_data, ["choices", Access.at(0), "finish_reason"]) || acc.finish_reason
+    finish_reason = get_in(choice, ["finish_reason"]) || acc.finish_reason
 
     %{acc | content: content, tool_calls: tool_calls, usage: usage, finish_reason: finish_reason}
+    |> Map.put(:reasoning_content, reasoning_content)
   end
 
   @doc false
@@ -376,8 +387,14 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
   defp build_final_message(acc) do
     base = %{"role" => "assistant", "content" => acc.content}
 
+    base =
+      case Map.get(acc, :reasoning_content) do
+        nil -> base
+        "" -> base
+        rc -> Map.put(base, "reasoning_content", rc)
+      end
+
     if map_size(acc.tool_calls) > 0 do
-      # Convert tool_calls map (keyed by index) to sorted list
       tool_calls_list =
         acc.tool_calls
         |> Enum.sort_by(fn {index, _} -> index end)

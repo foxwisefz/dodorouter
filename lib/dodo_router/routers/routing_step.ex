@@ -61,7 +61,8 @@ defmodule DodoRouter.Routers.RoutingStep do
   def available_models("zai"), do: ~w(glm-5.1 glm-5 glm-5-turbo glm-4.7 glm-4.6 glm-4.5)
 
   def available_models("moonshot"),
-    do: ~w(kimi-k2.5 kimi-k2 moonshot-v1-8k moonshot-v1-32k moonshot-v1-128k)
+    do:
+      ~w(kimi-k2.5 kimi-k2 kimi-k2.6 kimi-for-coding moonshot-v1-8k moonshot-v1-32k moonshot-v1-128k)
 
   def available_models(_), do: []
 end
