@@ -72,11 +72,18 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
 
         {:ok, Map.put(response_body, "_meta", meta), %{headers: resp_headers}}
 
-      {:ok, %{status: status, body: response_body}} ->
+      {:ok, %{status: status, body: response_body, headers: resp_headers}} ->
         Logger.error("[Moonshot] Non-200 response: status=#{status}")
 
         reason = Adapter.categorize_error(status, response_body)
-        {:error, reason, %{status: status, body: response_body, latency_ms: latency(start_time)}}
+
+        {:error, reason,
+         %{
+           status: status,
+           body: response_body,
+           latency_ms: latency(start_time),
+           headers: resp_headers
+         }}
 
       {:error, %Req.TransportError{reason: :timeout}} ->
         {:error, :timeout, %{latency_ms: latency(start_time)}}
@@ -93,7 +100,6 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
     body =
       build_request_body(request, step)
       |> Map.put("stream", true)
-      |> Map.put("stream_options", %{"include_usage" => true})
 
     headers =
       Adapter.build_forwarded_headers(client_headers, proxy_headers(step, api_key))
@@ -178,11 +184,13 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
 
         {:ok, build_final_response(acc, timing_meta), %{headers: resp_headers}}
 
-      {:ok, %Req.Response{status: status}} ->
+      {:ok, %Req.Response{status: status, body: body, headers: resp_headers}} ->
         Logger.error("[Moonshot] Stream error: status=#{status}")
 
-        reason = Adapter.categorize_error(status, %{"error" => "stream error"})
-        {:error, reason, %{status: status, latency_ms: latency(start_time)}}
+        reason = Adapter.categorize_error(status, body)
+
+        {:error, reason,
+         %{status: status, body: body, latency_ms: latency(start_time), headers: resp_headers}}
 
       {:error, %Req.TransportError{reason: :timeout}} ->
         {:error, :timeout, build_stream_error_details(partial_acc, start_time)}
