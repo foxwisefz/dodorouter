@@ -69,9 +69,10 @@ defmodule DodoRouter.Proxy.Adapters.AnthropicTest do
       step = %RoutingStep{model: "claude-sonnet-4-20250514"}
       body = Anthropic.build_anthropic_request(request, step)
 
-      tool_msg = Enum.find(body["messages"], fn m ->
-        is_list(m["content"]) and Enum.any?(m["content"], &(&1["type"] == "tool_result"))
-      end)
+      tool_msg =
+        Enum.find(body["messages"], fn m ->
+          is_list(m["content"]) and Enum.any?(m["content"], &(&1["type"] == "tool_result"))
+        end)
 
       assert tool_msg["role"] == "user"
       tool_result = hd(tool_msg["content"])
@@ -165,14 +166,20 @@ defmodule DodoRouter.Proxy.Adapters.AnthropicTest do
 
     test "maps stop_reason values correctly" do
       assert get_in(
-        Anthropic.convert_to_openai_format(%{"content" => [], "stop_reason" => "end_turn"}),
-        ["choices", Access.at(0), "finish_reason"]
-      ) == "stop"
+               Anthropic.convert_to_openai_format(%{
+                 "content" => [],
+                 "stop_reason" => "end_turn"
+               }),
+               ["choices", Access.at(0), "finish_reason"]
+             ) == "stop"
 
       assert get_in(
-        Anthropic.convert_to_openai_format(%{"content" => [], "stop_reason" => "max_tokens"}),
-        ["choices", Access.at(0), "finish_reason"]
-      ) == "length"
+               Anthropic.convert_to_openai_format(%{
+                 "content" => [],
+                 "stop_reason" => "max_tokens"
+               }),
+               ["choices", Access.at(0), "finish_reason"]
+             ) == "length"
     end
   end
 end

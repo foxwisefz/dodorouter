@@ -36,7 +36,9 @@ defmodule DodoRouter.Proxy do
           request,
           steps,
           router.id,
-          opts |> Keyword.put(:client_headers, client_headers) |> Keyword.put(:request_id, request_id)
+          opts
+          |> Keyword.put(:client_headers, client_headers)
+          |> Keyword.put(:request_id, request_id)
         )
 
       log_request(
@@ -107,12 +109,13 @@ defmodule DodoRouter.Proxy do
     truncation_flags = req_flags ++ resp_flags
 
     meta = get_in(result.final_response || %{}, ["_meta"]) || %{}
+
     log_attrs = %{
       router_id: router.id,
       request_id: request_id,
       status: to_string(result.status),
       http_status: if(result.status == :error, do: 502, else: 200),
-      attempted_steps: stringify_keys(result.attempted_steps),
+      attempted_steps: stringify_keys(truncate_step_responses(result.attempted_steps)),
       final_provider: last_step[:provider],
       final_model: last_step[:model],
       call_type: call_type,
@@ -259,5 +262,45 @@ defmodule DodoRouter.Proxy do
     |> Redact.redact_headers()
     |> Enum.map(fn {k, v} -> [k, v] end)
     |> Jason.encode!()
+  end
+
+  defp truncate_step_responses(steps) when is_list(steps) do
+    Enum.map(steps, &truncate_step_response/1)
+  end
+
+  defp truncate_step_response(step) do
+    step
+    |> maybe_truncate_step_field(:response_body)
+    |> maybe_redact_step_headers()
+  end
+
+  defp maybe_truncate_step_field(step, :response_body) do
+    case Map.get(step, :response_body) do
+      nil ->
+        step
+
+      body ->
+        {truncated, _flags} =
+          body
+          |> clean_response()
+          |> truncate_body()
+
+        Map.put(step, :response_body, Jason.encode!(truncated))
+    end
+  end
+
+  defp maybe_redact_step_headers(step) do
+    case Map.get(step, :response_headers) do
+      nil ->
+        step
+
+      headers ->
+        redacted =
+          headers
+          |> Redact.redact_headers()
+          |> Enum.map(fn {k, v} -> [k, v] end)
+
+        Map.put(step, :response_headers, redacted)
+    end
   end
 end

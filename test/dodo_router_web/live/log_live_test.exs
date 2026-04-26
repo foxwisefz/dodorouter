@@ -51,4 +51,177 @@ defmodule DodoRouterWeb.LogLiveTest do
       assert html =~ "error"
     end
   end
+
+  describe "Show" do
+    test "renders per-step response body in routing chain", %{conn: conn, user: user} do
+      {router, _api_key} = RoutersFixtures.router_fixture(user)
+
+      attempted_steps = [
+        %{
+          "provider" => "openai",
+          "model" => "gpt-4o",
+          "status" => "success",
+          "latency_ms" => 200,
+          "response_body" =>
+            Jason.encode!(%{"choices" => [%{"message" => %{"content" => "hello"}}]})
+        }
+      ]
+
+      log =
+        LogsFixtures.log_fixture(router, %{
+          attempted_steps: attempted_steps,
+          status: "success"
+        })
+
+      {:ok, _live, html} = live(conn, ~p"/logs/#{log.request_id}")
+
+      assert html =~ "Response Body"
+      assert html =~ "hello"
+    end
+
+    test "renders per-step response headers in routing chain", %{conn: conn, user: user} do
+      {router, _api_key} = RoutersFixtures.router_fixture(user)
+
+      attempted_steps = [
+        %{
+          "provider" => "openai",
+          "model" => "gpt-4o",
+          "status" => "success",
+          "latency_ms" => 200,
+          "response_headers" => [
+            ["x-request-id", "req-123"],
+            ["content-type", "application/json"]
+          ]
+        }
+      ]
+
+      log =
+        LogsFixtures.log_fixture(router, %{
+          attempted_steps: attempted_steps,
+          status: "success"
+        })
+
+      {:ok, _live, html} = live(conn, ~p"/logs/#{log.request_id}")
+
+      assert html =~ "Response Headers"
+      assert html =~ "x-request-id"
+      assert html =~ "req-123"
+    end
+
+    test "renders error body for failed step", %{conn: conn, user: user} do
+      {router, _api_key} = RoutersFixtures.router_fixture(user)
+
+      attempted_steps = [
+        %{
+          "provider" => "anthropic",
+          "model" => "claude-sonnet-4-20250514",
+          "status" => "error",
+          "latency_ms" => 100,
+          "error" => "rate_limited",
+          "error_body" => "{\"error\":\"rate limited\"}"
+        },
+        %{
+          "provider" => "openai",
+          "model" => "gpt-4o",
+          "status" => "success",
+          "latency_ms" => 300,
+          "response_body" =>
+            Jason.encode!(%{"choices" => [%{"message" => %{"content" => "fallback response"}}]})
+        }
+      ]
+
+      log =
+        LogsFixtures.log_fixture(router, %{
+          attempted_steps: attempted_steps,
+          status: "fallback"
+        })
+
+      {:ok, _live, html} = live(conn, ~p"/logs/#{log.request_id}")
+
+      assert html =~ "Error Response"
+      assert html =~ "rate limited"
+      assert html =~ "Response Body"
+      assert html =~ "fallback response"
+    end
+
+    test "hides response body and headers when not present", %{conn: conn, user: user} do
+      {router, _api_key} = RoutersFixtures.router_fixture(user)
+
+      attempted_steps = [
+        %{
+          "provider" => "openai",
+          "model" => "gpt-4o",
+          "status" => "success",
+          "latency_ms" => 200
+        }
+      ]
+
+      log =
+        LogsFixtures.log_fixture(router, %{
+          attempted_steps: attempted_steps,
+          status: "success"
+        })
+
+      {:ok, _live, html} = live(conn, ~p"/logs/#{log.request_id}")
+
+      refute html =~ "Response Body"
+      refute html =~ "Response Headers"
+    end
+
+    test "shows plan_type badge for coding and standard variants", %{conn: conn, user: user} do
+      {router, _api_key} = RoutersFixtures.router_fixture(user)
+
+      attempted_steps = [
+        %{
+          "provider" => "moonshot",
+          "model" => "kimi-k2.5",
+          "status" => "success",
+          "latency_ms" => 300,
+          "plan_type" => "coding"
+        },
+        %{
+          "provider" => "zai",
+          "model" => "glm-5.1",
+          "status" => "success",
+          "latency_ms" => 250,
+          "plan_type" => "standard"
+        }
+      ]
+
+      log =
+        LogsFixtures.log_fixture(router, %{
+          attempted_steps: attempted_steps,
+          status: "success"
+        })
+
+      {:ok, _live, html} = live(conn, ~p"/logs/#{log.request_id}")
+
+      assert html =~ "coding"
+      assert html =~ "standard"
+    end
+
+    test "hides plan_type badge when not present", %{conn: conn, user: user} do
+      {router, _api_key} = RoutersFixtures.router_fixture(user)
+
+      attempted_steps = [
+        %{
+          "provider" => "openai",
+          "model" => "gpt-4o",
+          "status" => "success",
+          "latency_ms" => 200
+        }
+      ]
+
+      log =
+        LogsFixtures.log_fixture(router, %{
+          attempted_steps: attempted_steps,
+          status: "success"
+        })
+
+      {:ok, _live, html} = live(conn, ~p"/logs/#{log.request_id}")
+
+      refute html =~ "standard"
+      refute html =~ "coding"
+    end
+  end
 end

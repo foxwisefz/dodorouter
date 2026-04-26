@@ -196,15 +196,13 @@ defmodule DodoRouterWeb.LogLive.Show do
                 </tr>
                 <tr>
                   <td class="text-base-content/60">
-                    Wait Time
-                    <span class="text-xs text-base-content/40">(TTFB - Upload)</span>
+                    Wait Time <span class="text-xs text-base-content/40">(TTFB - Upload)</span>
                   </td>
                   <td class="text-right font-mono">{wait_time(@log)} ms</td>
                 </tr>
                 <tr :if={@log.provider_processing_ms}>
                   <td class="text-base-content/60">
-                    Provider Processing
-                    <span class="text-xs text-success">(from header)</span>
+                    Provider Processing <span class="text-xs text-success">(from header)</span>
                   </td>
                   <td class="text-right font-mono">{@log.provider_processing_ms} ms</td>
                 </tr>
@@ -245,10 +243,14 @@ defmodule DodoRouterWeb.LogLive.Show do
                     <span class="font-medium">{attempt["provider"]}</span>
                     <span class="text-base-content/60">/ {attempt["model"]}</span>
                     <span
-                      :if={attempt["plan_type"] == "coding"}
-                      class="badge badge-secondary badge-sm"
+                      :if={attempt["plan_type"] && attempt["plan_type"] != ""}
+                      class={[
+                        "badge badge-sm",
+                        attempt["plan_type"] == "coding" && "badge-secondary",
+                        attempt["plan_type"] != "coding" && "badge-ghost"
+                      ]}
                     >
-                      coding
+                      {attempt["plan_type"]}
                     </span>
                   </div>
                   <div class="flex items-center gap-2">
@@ -275,7 +277,26 @@ defmodule DodoRouterWeb.LogLive.Show do
                   <details class="collapse collapse-arrow bg-base-200">
                     <summary class="collapse-title text-xs py-1 min-h-0">Error Response</summary>
                     <div class="collapse-content">
-                      <pre class="text-xs overflow-auto"><%= attempt["error_body"] %></pre>
+                      <pre class="text-xs overflow-auto">{attempt["error_body"]}</pre>
+                    </div>
+                  </details>
+                </div>
+                <div :if={attempt["response_body"]} class="mt-2">
+                  <details class="collapse collapse-arrow bg-base-200">
+                    <summary class="collapse-title text-xs py-1 min-h-0">Response Body</summary>
+                    <div class="collapse-content">
+                      <pre class="text-xs overflow-auto max-h-64">{format_json(attempt["response_body"])}</pre>
+                    </div>
+                  </details>
+                </div>
+                <div
+                  :if={attempt["response_headers"] && length(attempt["response_headers"]) > 0}
+                  class="mt-2"
+                >
+                  <details class="collapse collapse-arrow bg-base-200">
+                    <summary class="collapse-title text-xs py-1 min-h-0">Response Headers</summary>
+                    <div class="collapse-content">
+                      <pre class="text-xs overflow-auto">{format_headers(attempt["response_headers"])}</pre>
                     </div>
                   </details>
                 </div>
@@ -372,8 +393,8 @@ defmodule DodoRouterWeb.LogLive.Show do
             <% end %>
           <% end %>
         </div>
-
-        <!-- Response -->
+        
+    <!-- Response -->
         <div :if={@log.response_body} class="card-bordered">
           <div class="flex items-center justify-between mb-3">
             <h2 class="section-title mb-0">Response</h2>
@@ -662,6 +683,17 @@ defmodule DodoRouterWeb.LogLive.Show do
       {:ok, decoded} -> Jason.encode!(decoded, pretty: true)
       _ -> str
     end
+  end
+
+  defp format_headers(nil), do: ""
+
+  defp format_headers(headers) when is_list(headers) do
+    headers
+    |> Enum.map(fn
+      [k, v] -> "#{k}: #{v}"
+      other -> inspect(other)
+    end)
+    |> Enum.join("\n")
   end
 
   defp provider_time(%{attempted_steps: steps}) when is_list(steps) do

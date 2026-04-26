@@ -66,7 +66,9 @@ defmodule DodoRouter.Proxy.FallbackChain do
           plan_type: step.plan_type,
           status: "success",
           latency_ms: latency(start_time),
-          forwarded_headers: build_forwarded_headers(step)
+          forwarded_headers: build_forwarded_headers(step),
+          response_body: response,
+          response_headers: meta[:headers]
         }
 
         status = if length(state.attempted_steps) > 0, do: :fallback, else: :success
@@ -103,7 +105,8 @@ defmodule DodoRouter.Proxy.FallbackChain do
           streamed_to_client: streamed_to_client,
           partial_content_length:
             if(is_binary(partial_content), do: String.length(partial_content), else: nil),
-          forwarded_headers: build_forwarded_headers(step)
+          forwarded_headers: build_forwarded_headers(step),
+          response_headers: details[:headers]
         }
 
         state = %{state | attempted_steps: state.attempted_steps ++ [attempt]}

@@ -92,7 +92,6 @@ defmodule DodoRouter.Proxy.FinchTelemetry do
          [{{:"$1", :"$2"}}]}
       ])
 
-
     case result do
       [] ->
         nil

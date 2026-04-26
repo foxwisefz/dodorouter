@@ -94,19 +94,31 @@ defmodule DodoRouter.Proxy.Adapters.GoogleTest do
 
     test "maps finish reasons" do
       assert get_in(
-        Google.convert_to_openai_format(%{"candidates" => [%{"content" => %{"parts" => [%{"text" => ""}]}, "finishReason" => "STOP"}]}),
-        ["choices", Access.at(0), "finish_reason"]
-      ) == "stop"
+               Google.convert_to_openai_format(%{
+                 "candidates" => [
+                   %{"content" => %{"parts" => [%{"text" => ""}]}, "finishReason" => "STOP"}
+                 ]
+               }),
+               ["choices", Access.at(0), "finish_reason"]
+             ) == "stop"
 
       assert get_in(
-        Google.convert_to_openai_format(%{"candidates" => [%{"content" => %{"parts" => [%{"text" => ""}]}, "finishReason" => "MAX_TOKENS"}]}),
-        ["choices", Access.at(0), "finish_reason"]
-      ) == "length"
+               Google.convert_to_openai_format(%{
+                 "candidates" => [
+                   %{"content" => %{"parts" => [%{"text" => ""}]}, "finishReason" => "MAX_TOKENS"}
+                 ]
+               }),
+               ["choices", Access.at(0), "finish_reason"]
+             ) == "length"
 
       assert get_in(
-        Google.convert_to_openai_format(%{"candidates" => [%{"content" => %{"parts" => [%{"text" => ""}]}, "finishReason" => "SAFETY"}]}),
-        ["choices", Access.at(0), "finish_reason"]
-      ) == "content_filter"
+               Google.convert_to_openai_format(%{
+                 "candidates" => [
+                   %{"content" => %{"parts" => [%{"text" => ""}]}, "finishReason" => "SAFETY"}
+                 ]
+               }),
+               ["choices", Access.at(0), "finish_reason"]
+             ) == "content_filter"
     end
 
     test "handles empty candidates gracefully" do

@@ -12,7 +12,8 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
     endpoints: %{
       "anthropic" => "https://api.anthropic.com/v1"
     },
-    models: ~w(claude-sonnet-4-20250514 claude-opus-4-20250514 claude-3-5-sonnet-20241022 claude-3-5-haiku-20241022 claude-3-opus-20240229),
+    models:
+      ~w(claude-sonnet-4-20250514 claude-opus-4-20250514 claude-3-5-sonnet-20241022 claude-3-5-haiku-20241022 claude-3-opus-20240229),
     color: "orange",
     short_description: "Claude Sonnet, Opus, Haiku"
 
@@ -27,7 +28,7 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
   @api_version "2023-06-01"
 
   @impl true
-  def call(request, %RoutingStep{} = step, api_key) do
+  def call(request, %RoutingStep{} = step, api_key, _client_headers \\ []) do
     url = @base_url <> "/messages"
     body = build_anthropic_request(request, step)
 
@@ -41,7 +42,7 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
     start_time = FinchTelemetry.mark_request_start()
 
     case Req.post(url, headers: headers, json: body, receive_timeout: @timeout_ms) do
-      {:ok, %{status: 200, body: response_body}} ->
+      {:ok, %{status: 200, body: response_body, headers: resp_headers}} ->
         total_ms = latency(start_time)
         upload_ms = FinchTelemetry.get_upload_ms(start_time)
 
@@ -53,12 +54,22 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
         }
 
         response = convert_to_openai_format(response_body)
-        {:ok, Map.put(response, "_meta", meta)}
+        {:ok, Map.put(response, "_meta", meta), %{headers: resp_headers}}
 
-      {:ok, %{status: status, body: response_body}} ->
-        Logger.error("[Anthropic] Non-200 response: status=#{status} body=#{inspect(response_body)}")
+      {:ok, %{status: status, body: response_body, headers: resp_headers}} ->
+        Logger.error(
+          "[Anthropic] Non-200 response: status=#{status} body=#{inspect(response_body)}"
+        )
+
         reason = Adapter.categorize_error(status, response_body)
-        {:error, reason, %{status: status, body: response_body, latency_ms: latency(start_time)}}
+
+        {:error, reason,
+         %{
+           status: status,
+           body: response_body,
+           latency_ms: latency(start_time),
+           headers: resp_headers
+         }}
 
       {:error, %Req.TransportError{reason: :timeout}} ->
         {:error, :timeout, %{latency_ms: latency(start_time)}}
@@ -69,7 +80,7 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
   end
 
   @impl true
-  def stream(request, %RoutingStep{} = step, api_key, send_chunk) do
+  def stream(request, %RoutingStep{} = step, api_key, send_chunk, _client_headers \\ []) do
     url = @base_url <> "/messages"
     body = build_anthropic_request(request, step) |> Map.put("stream", true)
 
@@ -132,7 +143,9 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
 
     case result do
       {:ok, %Req.Response{status: 200} = resp} ->
-        acc = resp.private[:stream_acc] || %{content: "", tool_calls: [], usage: nil, stop_reason: nil, first_chunk_time: nil}
+        acc =
+          resp.private[:stream_acc] ||
+            %{content: "", tool_calls: [], usage: nil, stop_reason: nil, first_chunk_time: nil}
 
         upload_ms = calculate_upload_ms(start_time)
 
@@ -142,7 +155,7 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
           provider_processing_ms: nil
         }
 
-        {:ok, build_final_openai_response(acc, timing_meta)}
+        {:ok, build_final_openai_response(acc, timing_meta), %{headers: resp.headers}}
 
       {:ok, %Req.Response{status: status, body: body}} ->
         reason = Adapter.categorize_error(status, body)
@@ -171,9 +184,17 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
     body = if system_msg, do: Map.put(body, "system", system_msg), else: body
 
     # Optional params
-    body = if request["temperature"], do: Map.put(body, "temperature", request["temperature"]), else: body
+    body =
+      if request["temperature"],
+        do: Map.put(body, "temperature", request["temperature"]),
+        else: body
+
     body = if request["top_p"], do: Map.put(body, "top_p", request["top_p"]), else: body
-    body = if request["stop"], do: Map.put(body, "stop_sequences", List.wrap(request["stop"])), else: body
+
+    body =
+      if request["stop"],
+        do: Map.put(body, "stop_sequences", List.wrap(request["stop"])),
+        else: body
 
     # Tools
     if request["tools"] do
@@ -186,30 +207,39 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
 
   defp extract_system_message(messages) do
     case Enum.split_with(messages, &(&1["role"] == "system")) do
-      {[], other} -> {nil, other}
+      {[], other} ->
+        {nil, other}
+
       {system_msgs, other} ->
-        system_content = system_msgs |> Enum.map(&(&1["content"])) |> Enum.join("\n\n")
+        system_content = system_msgs |> Enum.map(& &1["content"]) |> Enum.join("\n\n")
         {system_content, other}
     end
   end
 
-  defp convert_message_to_anthropic(%{"role" => "assistant", "tool_calls" => tool_calls} = msg) when is_list(tool_calls) do
-    content = [
-      if(msg["content"], do: %{"type" => "text", "text" => msg["content"]}, else: nil)
-      | Enum.map(tool_calls, fn tc ->
-          %{
-            "type" => "tool_use",
-            "id" => tc["id"],
-            "name" => get_in(tc, ["function", "name"]),
-            "input" => Jason.decode!(get_in(tc, ["function", "arguments"]) || "{}")
-          }
-        end)
-    ] |> Enum.reject(&is_nil/1)
+  defp convert_message_to_anthropic(%{"role" => "assistant", "tool_calls" => tool_calls} = msg)
+       when is_list(tool_calls) do
+    content =
+      [
+        if(msg["content"], do: %{"type" => "text", "text" => msg["content"]}, else: nil)
+        | Enum.map(tool_calls, fn tc ->
+            %{
+              "type" => "tool_use",
+              "id" => tc["id"],
+              "name" => get_in(tc, ["function", "name"]),
+              "input" => Jason.decode!(get_in(tc, ["function", "arguments"]) || "{}")
+            }
+          end)
+      ]
+      |> Enum.reject(&is_nil/1)
 
     %{"role" => "assistant", "content" => content}
   end
 
-  defp convert_message_to_anthropic(%{"role" => "tool", "tool_call_id" => id, "content" => content}) do
+  defp convert_message_to_anthropic(%{
+         "role" => "tool",
+         "tool_call_id" => id,
+         "content" => content
+       }) do
     %{
       "role" => "user",
       "content" => [%{"type" => "tool_result", "tool_use_id" => id, "content" => content}]
@@ -235,7 +265,9 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
     {text_content, tool_calls} =
       Enum.reduce(content_blocks, {"", []}, fn block, {text, tools} ->
         case block["type"] do
-          "text" -> {text <> (block["text"] || ""), tools}
+          "text" ->
+            {text <> (block["text"] || ""), tools}
+
           "tool_use" ->
             tool_call = %{
               "id" => block["id"],
@@ -245,28 +277,35 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
                 "arguments" => Jason.encode!(block["input"] || %{})
               }
             }
+
             {text, tools ++ [tool_call]}
-          _ -> {text, tools}
+
+          _ ->
+            {text, tools}
         end
       end)
 
     message = %{"role" => "assistant", "content" => text_content}
     message = if tool_calls != [], do: Map.put(message, "tool_calls", tool_calls), else: message
 
-    finish_reason = case anthropic_response["stop_reason"] do
-      "end_turn" -> "stop"
-      "tool_use" -> "tool_calls"
-      "max_tokens" -> "length"
-      other -> other
-    end
+    finish_reason =
+      case anthropic_response["stop_reason"] do
+        "end_turn" -> "stop"
+        "tool_use" -> "tool_calls"
+        "max_tokens" -> "length"
+        other -> other
+      end
 
-    usage = if anthropic_response["usage"] do
-      %{
-        "prompt_tokens" => anthropic_response["usage"]["input_tokens"],
-        "completion_tokens" => anthropic_response["usage"]["output_tokens"],
-        "total_tokens" => (anthropic_response["usage"]["input_tokens"] || 0) + (anthropic_response["usage"]["output_tokens"] || 0)
-      }
-    end
+    usage =
+      if anthropic_response["usage"] do
+        %{
+          "prompt_tokens" => anthropic_response["usage"]["input_tokens"],
+          "completion_tokens" => anthropic_response["usage"]["output_tokens"],
+          "total_tokens" =>
+            (anthropic_response["usage"]["input_tokens"] || 0) +
+              (anthropic_response["usage"]["output_tokens"] || 0)
+        }
+      end
 
     response = %{
       "choices" => [%{"index" => 0, "message" => message, "finish_reason" => finish_reason}]
@@ -301,11 +340,13 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
       case event["type"] do
         "content_block_delta" ->
           delta = event["delta"]
+
           case delta["type"] do
             "text_delta" ->
               new_acc = %{acc | content: acc.content <> (delta["text"] || "")}
               chunk = build_openai_stream_chunk(%{"content" => delta["text"]})
               {new_acc, chunks ++ [chunk]}
+
             _ ->
               {acc, chunks}
           end
@@ -313,11 +354,19 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
         "message_delta" ->
           new_acc = %{acc | stop_reason: event["delta"]["stop_reason"]}
           usage = event["usage"]
-          new_acc = if usage, do: %{new_acc | usage: %{
-            "prompt_tokens" => usage["input_tokens"],
-            "completion_tokens" => usage["output_tokens"],
-            "total_tokens" => (usage["input_tokens"] || 0) + (usage["output_tokens"] || 0)
-          }}, else: new_acc
+
+          new_acc =
+            if usage,
+              do: %{
+                new_acc
+                | usage: %{
+                    "prompt_tokens" => usage["input_tokens"],
+                    "completion_tokens" => usage["output_tokens"],
+                    "total_tokens" => (usage["input_tokens"] || 0) + (usage["output_tokens"] || 0)
+                  }
+              },
+              else: new_acc
+
           {new_acc, chunks}
 
         _ ->
@@ -330,18 +379,20 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
     chunk = %{
       "choices" => [%{"index" => 0, "delta" => delta}]
     }
+
     "data: #{Jason.encode!(chunk)}\n\n"
   end
 
   defp build_final_openai_response(acc, timing_meta) do
     message = %{"role" => "assistant", "content" => acc.content}
 
-    finish_reason = case acc.stop_reason do
-      "end_turn" -> "stop"
-      "tool_use" -> "tool_calls"
-      "max_tokens" -> "length"
-      other -> other || "stop"
-    end
+    finish_reason =
+      case acc.stop_reason do
+        "end_turn" -> "stop"
+        "tool_use" -> "tool_calls"
+        "max_tokens" -> "length"
+        other -> other || "stop"
+      end
 
     meta = %{
       "ttfb_ms" => acc.first_chunk_time,

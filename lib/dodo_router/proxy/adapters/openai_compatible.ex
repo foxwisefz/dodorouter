@@ -35,13 +35,24 @@ defmodule DodoRouter.Proxy.Adapters.OpenAICompatible do
           "provider_processing_ms" => provider_processing_ms
         }
 
-        {:ok, Map.put(response_body, "_meta", meta)}
+        {:ok, Map.put(response_body, "_meta", meta), %{headers: resp_headers}}
 
-      {:ok, %{status: status, body: response_body}} ->
+      {:ok, %{status: status, body: response_body, headers: resp_headers}} ->
         provider = Keyword.get(opts, :provider, "unknown")
-        Logger.error("[#{provider}] Non-200 response: status=#{status} body=#{inspect(response_body)}")
+
+        Logger.error(
+          "[#{provider}] Non-200 response: status=#{status} body=#{inspect(response_body)}"
+        )
+
         reason = Adapter.categorize_error(status, response_body)
-        {:error, reason, %{status: status, body: response_body, latency_ms: latency(start_time)}}
+
+        {:error, reason,
+         %{
+           status: status,
+           body: response_body,
+           latency_ms: latency(start_time),
+           headers: resp_headers
+         }}
 
       {:error, %Req.TransportError{reason: :timeout}} ->
         {:error, :timeout, %{latency_ms: latency(start_time)}}
@@ -129,7 +140,7 @@ defmodule DodoRouter.Proxy.Adapters.OpenAICompatible do
           provider_processing_ms: provider_processing_ms
         }
 
-        {:ok, build_final_response(acc, timing_meta)}
+        {:ok, build_final_response(acc, timing_meta), %{headers: resp.headers}}
 
       {:ok, %Req.Response{status: status, body: body}} ->
         reason = Adapter.categorize_error(status, body)
@@ -225,14 +236,23 @@ defmodule DodoRouter.Proxy.Adapters.OpenAICompatible do
     updated =
       Enum.reduce(tool_calls, acc.tool_calls, fn tc, tools ->
         idx = tc["index"]
-        existing = Map.get(tools, idx, %{"id" => nil, "type" => "function", "function" => %{"name" => "", "arguments" => ""}})
+
+        existing =
+          Map.get(tools, idx, %{
+            "id" => nil,
+            "type" => "function",
+            "function" => %{"name" => "", "arguments" => ""}
+          })
 
         merged = %{
           "id" => tc["id"] || existing["id"],
           "type" => tc["type"] || existing["type"],
           "function" => %{
-            "name" => get_in(tc, ["function", "name"]) || get_in(existing, ["function", "name"]) || "",
-            "arguments" => (get_in(existing, ["function", "arguments"]) || "") <> (get_in(tc, ["function", "arguments"]) || "")
+            "name" =>
+              get_in(tc, ["function", "name"]) || get_in(existing, ["function", "name"]) || "",
+            "arguments" =>
+              (get_in(existing, ["function", "arguments"]) || "") <>
+                (get_in(tc, ["function", "arguments"]) || "")
           }
         }
 

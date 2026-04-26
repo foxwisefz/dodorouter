@@ -30,7 +30,7 @@ defmodule DodoRouter.Proxy.Adapters.Cohere do
   @timeout_ms 120_000
 
   @impl true
-  def call(request, %RoutingStep{} = step, api_key) do
+  def call(request, %RoutingStep{} = step, api_key, _client_headers \\ []) do
     url = @base_url <> "/chat"
     body = build_cohere_request(request, step)
 
@@ -43,7 +43,7 @@ defmodule DodoRouter.Proxy.Adapters.Cohere do
     start_time = FinchTelemetry.mark_request_start()
 
     case Req.post(url, headers: headers, json: body, receive_timeout: @timeout_ms) do
-      {:ok, %{status: 200, body: response_body}} ->
+      {:ok, %{status: 200, body: response_body, headers: resp_headers}} ->
         total_ms = latency(start_time)
         upload_ms = FinchTelemetry.get_upload_ms(start_time)
 
@@ -55,12 +55,19 @@ defmodule DodoRouter.Proxy.Adapters.Cohere do
         }
 
         response = convert_to_openai_format(response_body)
-        {:ok, Map.put(response, "_meta", meta)}
+        {:ok, Map.put(response, "_meta", meta), %{headers: resp_headers}}
 
-      {:ok, %{status: status, body: response_body}} ->
+      {:ok, %{status: status, body: response_body, headers: resp_headers}} ->
         Logger.error("[Cohere] Non-200 response: status=#{status} body=#{inspect(response_body)}")
         reason = Adapter.categorize_error(status, response_body)
-        {:error, reason, %{status: status, body: response_body, latency_ms: latency(start_time)}}
+
+        {:error, reason,
+         %{
+           status: status,
+           body: response_body,
+           latency_ms: latency(start_time),
+           headers: resp_headers
+         }}
 
       {:error, %Req.TransportError{reason: :timeout}} ->
         {:error, :timeout, %{latency_ms: latency(start_time)}}
@@ -71,7 +78,7 @@ defmodule DodoRouter.Proxy.Adapters.Cohere do
   end
 
   @impl true
-  def stream(request, %RoutingStep{} = step, api_key, send_chunk) do
+  def stream(request, %RoutingStep{} = step, api_key, send_chunk, _client_headers \\ []) do
     url = @base_url <> "/chat"
     body = build_cohere_request(request, step) |> Map.put("stream", true)
 
@@ -110,7 +117,8 @@ defmodule DodoRouter.Proxy.Adapters.Cohere do
       end
     end
 
-    result = Req.post(url, headers: headers, json: body, receive_timeout: @timeout_ms, into: into_fun)
+    result =
+      Req.post(url, headers: headers, json: body, receive_timeout: @timeout_ms, into: into_fun)
 
     case result do
       {:ok, %Req.Response{status: 200} = resp} ->
@@ -124,11 +132,18 @@ defmodule DodoRouter.Proxy.Adapters.Cohere do
           provider_processing_ms: nil
         }
 
-        {:ok, build_final_response(acc, timing_meta)}
+        {:ok, build_final_response(acc, timing_meta), %{headers: resp.headers}}
 
-      {:ok, %Req.Response{status: status, body: response_body}} ->
+      {:ok, %Req.Response{status: status, body: response_body, headers: resp_headers}} ->
         reason = Adapter.categorize_error(status, response_body)
-        {:error, reason, %{status: status, body: response_body, latency_ms: latency(start_time)}}
+
+        {:error, reason,
+         %{
+           status: status,
+           body: response_body,
+           latency_ms: latency(start_time),
+           headers: resp_headers
+         }}
 
       {:error, %Req.TransportError{reason: :timeout}} ->
         {:error, :timeout, %{latency_ms: latency(start_time)}}
@@ -178,7 +193,9 @@ defmodule DodoRouter.Proxy.Adapters.Cohere do
     openai_message = %{"role" => "assistant", "content" => content}
 
     openai_message =
-      if tool_calls != [], do: Map.put(openai_message, "tool_calls", tool_calls), else: openai_message
+      if tool_calls != [],
+        do: Map.put(openai_message, "tool_calls", tool_calls),
+        else: openai_message
 
     usage =
       case cohere_response["usage"]["tokens"] do
@@ -229,7 +246,9 @@ defmodule DodoRouter.Proxy.Adapters.Cohere do
           new_acc = %{acc | content: acc.content <> text}
 
           if text != "" do
-            chunk = "data: #{Jason.encode!(%{"choices" => [%{"index" => 0, "delta" => %{"content" => text}}]})}\n\n"
+            chunk =
+              "data: #{Jason.encode!(%{"choices" => [%{"index" => 0, "delta" => %{"content" => text}}]})}\n\n"
+
             {new_acc, chunks ++ [chunk]}
           else
             {new_acc, chunks}
@@ -269,7 +288,13 @@ defmodule DodoRouter.Proxy.Adapters.Cohere do
     }
 
     response = %{
-      "choices" => [%{"index" => 0, "message" => %{"role" => "assistant", "content" => acc.content}, "finish_reason" => "stop"}],
+      "choices" => [
+        %{
+          "index" => 0,
+          "message" => %{"role" => "assistant", "content" => acc.content},
+          "finish_reason" => "stop"
+        }
+      ],
       "_meta" => meta
     }
 

@@ -34,7 +34,11 @@ defmodule DodoRouterWeb.ProvidersLiveTest do
 
     test "shows key_hint next to key label", %{conn: conn, user: user} do
       %ProviderKey{}
-      |> ProviderKey.create_changeset(%{"provider_slug" => "zai_standard"}, user.id, "sk-•••••••xyz")
+      |> ProviderKey.create_changeset(
+        %{"provider_slug" => "zai_standard"},
+        user.id,
+        "sk-•••••••xyz"
+      )
       |> Repo.insert!()
 
       {:ok, _live, html} = live(conn, ~p"/providers")

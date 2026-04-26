@@ -19,7 +19,8 @@ defmodule DodoRouter.Proxy.Adapters.Groq do
     endpoints: %{
       "groq" => "https://api.groq.com/openai/v1"
     },
-    models: ~w(llama-3.3-70b-versatile llama-3.1-8b-instant llama-4-scout-17b-16e-instruct llama-4-maverick-17b-128e-instruct),
+    models:
+      ~w(llama-3.3-70b-versatile llama-3.1-8b-instant llama-4-scout-17b-16e-instruct llama-4-maverick-17b-128e-instruct),
     color: "purple",
     short_description: "Llama models with ultra-fast inference"
 
@@ -29,22 +30,26 @@ defmodule DodoRouter.Proxy.Adapters.Groq do
   @base_url "https://api.groq.com/openai/v1"
 
   @impl true
-  def call(request, %RoutingStep{} = step, api_key) do
+  def call(request, %RoutingStep{} = step, api_key, client_headers \\ []) do
     request
     |> transform_request()
-    |> OpenAICompatible.call(step, api_key, @base_url, provider: "groq")
+    |> OpenAICompatible.call(step, api_key, @base_url,
+      provider: "groq",
+      client_headers: client_headers
+    )
   end
 
   @impl true
-  def stream(request, %RoutingStep{} = step, api_key, send_chunk) do
+  def stream(request, %RoutingStep{} = step, api_key, send_chunk, client_headers \\ []) do
     request = transform_request(request)
 
-    # Groq doesn't support response_format + streaming together
-    # Fall back to non-streaming and send full response as single chunk
     if needs_fake_stream?(request) do
       fake_stream(request, step, api_key, send_chunk)
     else
-      OpenAICompatible.stream(request, step, api_key, send_chunk, @base_url, provider: "groq")
+      OpenAICompatible.stream(request, step, api_key, send_chunk, @base_url,
+        provider: "groq",
+        client_headers: client_headers
+      )
     end
   end
 
@@ -78,11 +83,10 @@ defmodule DodoRouter.Proxy.Adapters.Groq do
   # Fake streaming: make non-streaming call, send response as SSE chunk
   defp fake_stream(request, step, api_key, send_chunk) do
     case OpenAICompatible.call(request, step, api_key, @base_url, provider: "groq") do
-      {:ok, response} ->
-        # Send as SSE format
+      {:ok, response, meta} ->
         send_chunk.("data: #{Jason.encode!(response)}\n\n")
         send_chunk.("data: [DONE]\n\n")
-        {:ok, response}
+        {:ok, response, meta}
 
       error ->
         error

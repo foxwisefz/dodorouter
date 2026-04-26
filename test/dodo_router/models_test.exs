@@ -50,7 +50,12 @@ defmodule DodoRouter.ModelsTest do
   describe "list_models/0 and list_models_by_provider/1" do
     test "lists all models ordered by provider and model_id" do
       Models.create_model(%{provider_slug: "openai", model_id: "gpt-4o", display_name: "GPT-4o"})
-      Models.create_model(%{provider_slug: "anthropic", model_id: "claude-3", display_name: "Claude 3"})
+
+      Models.create_model(%{
+        provider_slug: "anthropic",
+        model_id: "claude-3",
+        display_name: "Claude 3"
+      })
 
       models = Models.list_models()
       assert length(models) >= 2
@@ -58,7 +63,12 @@ defmodule DodoRouter.ModelsTest do
 
     test "filters by provider" do
       Models.create_model(%{provider_slug: "openai", model_id: "gpt-4o", display_name: "GPT-4o"})
-      Models.create_model(%{provider_slug: "anthropic", model_id: "claude-3", display_name: "Claude 3"})
+
+      Models.create_model(%{
+        provider_slug: "anthropic",
+        model_id: "claude-3",
+        display_name: "Claude 3"
+      })
 
       models = Models.list_models_by_provider("openai")
       assert Enum.all?(models, &(&1.provider_slug == "openai"))
@@ -68,12 +78,16 @@ defmodule DodoRouter.ModelsTest do
   describe "check_capabilities/2" do
     test "returns ok when all capabilities supported" do
       model = %Model{supports_vision: true, supports_function_calling: true}
-      assert {:ok, ^model} = Models.check_capabilities(model, [:supports_vision, :supports_function_calling])
+
+      assert {:ok, ^model} =
+               Models.check_capabilities(model, [:supports_vision, :supports_function_calling])
     end
 
     test "returns error with missing capabilities" do
       model = %Model{supports_vision: false, supports_function_calling: true}
-      assert {:error, :missing_capabilities, [:supports_vision]} = Models.check_capabilities(model, [:supports_vision, :supports_function_calling])
+
+      assert {:error, :missing_capabilities, [:supports_vision]} =
+               Models.check_capabilities(model, [:supports_vision, :supports_function_calling])
     end
   end
 

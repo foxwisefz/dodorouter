@@ -14,6 +14,7 @@ defmodule DodoRouter.Proxy.Adapters.XAITest do
       }
 
       result = XAI.transform_request(request, "grok-3")
+
       for msg <- result["messages"] do
         refute Map.has_key?(msg, "name")
       end
@@ -72,7 +73,7 @@ defmodule DodoRouter.Proxy.Adapters.XAITest do
         ]
       }
 
-      {:ok, result} = XAI.transform_response({:ok, response})
+      {:ok, result, _meta} = XAI.transform_response({:ok, response, %{}})
       assert get_in(result, ["choices", Access.at(0), "finish_reason"]) == "tool_calls"
     end
 

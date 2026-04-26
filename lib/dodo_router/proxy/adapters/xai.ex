@@ -29,18 +29,24 @@ defmodule DodoRouter.Proxy.Adapters.XAI do
   @base_url "https://api.x.ai/v1"
 
   @impl true
-  def call(request, %RoutingStep{} = step, api_key) do
+  def call(request, %RoutingStep{} = step, api_key, client_headers \\ []) do
     request
     |> transform_request(step.model)
-    |> OpenAICompatible.call(step, api_key, @base_url, provider: "xai")
+    |> OpenAICompatible.call(step, api_key, @base_url,
+      provider: "xai",
+      client_headers: client_headers
+    )
     |> transform_response()
   end
 
   @impl true
-  def stream(request, %RoutingStep{} = step, api_key, send_chunk) do
+  def stream(request, %RoutingStep{} = step, api_key, send_chunk, client_headers \\ []) do
     request
     |> transform_request(step.model)
-    |> OpenAICompatible.stream(step, api_key, send_chunk, @base_url, provider: "xai")
+    |> OpenAICompatible.stream(step, api_key, send_chunk, @base_url,
+      provider: "xai",
+      client_headers: client_headers
+    )
     |> transform_response()
   end
 
@@ -57,21 +63,23 @@ defmodule DodoRouter.Proxy.Adapters.XAI do
     |> maybe_remove_frequency_penalty(model)
   end
 
-  defp maybe_remove_stop(request, model) when model in ["grok-3-mini", "grok-4", "grok-code-fast"] do
+  defp maybe_remove_stop(request, model)
+       when model in ["grok-3-mini", "grok-4", "grok-code-fast"] do
     Map.delete(request, "stop")
   end
 
   defp maybe_remove_stop(request, _model), do: request
 
-  defp maybe_remove_frequency_penalty(request, model) when model in ["grok-4", "grok-code-fast"] do
+  defp maybe_remove_frequency_penalty(request, model)
+       when model in ["grok-4", "grok-code-fast"] do
     Map.delete(request, "frequency_penalty")
   end
 
   defp maybe_remove_frequency_penalty(request, _model), do: request
 
   @doc false
-  def transform_response({:ok, response}) do
-    {:ok, Adapter.fix_tool_call_finish_reason(response)}
+  def transform_response({:ok, response, meta}) do
+    {:ok, Adapter.fix_tool_call_finish_reason(response), meta}
   end
 
   def transform_response(error), do: error

@@ -29,17 +29,23 @@ defmodule DodoRouter.Proxy.Adapters.Mistral do
   @base_url "https://api.mistral.ai/v1"
 
   @impl true
-  def call(request, %RoutingStep{} = step, api_key) do
+  def call(request, %RoutingStep{} = step, api_key, client_headers \\ []) do
     request
     |> transform_request()
-    |> OpenAICompatible.call(step, api_key, @base_url, provider: "mistral")
+    |> OpenAICompatible.call(step, api_key, @base_url,
+      provider: "mistral",
+      client_headers: client_headers
+    )
   end
 
   @impl true
-  def stream(request, %RoutingStep{} = step, api_key, send_chunk) do
+  def stream(request, %RoutingStep{} = step, api_key, send_chunk, client_headers \\ []) do
     request
     |> transform_request()
-    |> OpenAICompatible.stream(step, api_key, send_chunk, @base_url, provider: "mistral")
+    |> OpenAICompatible.stream(step, api_key, send_chunk, @base_url,
+      provider: "mistral",
+      client_headers: client_headers
+    )
   end
 
   @doc false

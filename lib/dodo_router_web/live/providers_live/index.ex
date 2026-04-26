@@ -263,7 +263,9 @@ defmodule DodoRouterWeb.ProvidersLive.Index do
                           class="text-sm hover:text-primary transition-colors"
                         >
                           {key.label}
-                          <span class="text-base-content/40 font-mono text-xs ml-1.5">{key.key_hint}</span>
+                          <span class="text-base-content/40 font-mono text-xs ml-1.5">
+                            {key.key_hint}
+                          </span>
                         </button>
                       </div>
                       <button

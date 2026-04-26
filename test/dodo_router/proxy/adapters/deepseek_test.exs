@@ -22,7 +22,11 @@ defmodule DodoRouter.Proxy.Adapters.DeepSeekTest do
 
   describe "normalize_thinking_param/1" do
     test "normalizes thinking with budget_tokens to simple enabled" do
-      request = %{"messages" => [], "thinking" => %{"type" => "enabled", "budget_tokens" => 10000}}
+      request = %{
+        "messages" => [],
+        "thinking" => %{"type" => "enabled", "budget_tokens" => 10000}
+      }
+
       result = DeepSeek.normalize_thinking_param(request)
       assert result["thinking"] == %{"type" => "enabled"}
       refute Map.has_key?(result["thinking"], "budget_tokens")

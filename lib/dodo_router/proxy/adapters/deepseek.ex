@@ -28,17 +28,23 @@ defmodule DodoRouter.Proxy.Adapters.DeepSeek do
   @base_url "https://api.deepseek.com/v1"
 
   @impl true
-  def call(request, %RoutingStep{} = step, api_key) do
+  def call(request, %RoutingStep{} = step, api_key, client_headers \\ []) do
     request
     |> transform_request()
-    |> OpenAICompatible.call(step, api_key, @base_url, provider: "deepseek")
+    |> OpenAICompatible.call(step, api_key, @base_url,
+      provider: "deepseek",
+      client_headers: client_headers
+    )
   end
 
   @impl true
-  def stream(request, %RoutingStep{} = step, api_key, send_chunk) do
+  def stream(request, %RoutingStep{} = step, api_key, send_chunk, client_headers \\ []) do
     request
     |> transform_request()
-    |> OpenAICompatible.stream(step, api_key, send_chunk, @base_url, provider: "deepseek")
+    |> OpenAICompatible.stream(step, api_key, send_chunk, @base_url,
+      provider: "deepseek",
+      client_headers: client_headers
+    )
   end
 
   @doc false

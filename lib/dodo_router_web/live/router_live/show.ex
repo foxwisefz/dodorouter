@@ -407,7 +407,7 @@ defmodule DodoRouterWeb.RouterLive.Show do
             Routing
           </.link>
         </div>
-
+        
     <!-- Stats -->
         <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-8">
           <div class="stat-card">
@@ -676,7 +676,7 @@ defmodule DodoRouterWeb.RouterLive.Show do
             No requests yet. Use the Quick Start snippet above to make your first request.
           </p>
         </div>
-
+        
     <!-- Live Events -->
         <div :if={length(@recent_events) > 0} class="card-bordered">
           <div class="flex items-center gap-3 mb-3">

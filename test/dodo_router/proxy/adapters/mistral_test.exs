@@ -84,7 +84,10 @@ defmodule DodoRouter.Proxy.Adapters.MistralTest do
         "messages" => [
           %{
             "role" => "user",
-            "content" => [%{"type" => "text", "text" => "hello"}, %{"type" => "text", "text" => " world"}]
+            "content" => [
+              %{"type" => "text", "text" => "hello"},
+              %{"type" => "text", "text" => " world"}
+            ]
           }
         ]
       }

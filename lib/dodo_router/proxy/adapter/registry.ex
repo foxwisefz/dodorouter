@@ -179,6 +179,7 @@ defmodule DodoRouter.Proxy.Adapter.Registry do
     |> Enum.flat_map(fn {_slug, config} ->
       for key_slug <- config.key_slugs do
         name = Map.get(config.key_display_names || %{}, key_slug, config.display_name)
+
         {key_slug,
          %{
            name: name,

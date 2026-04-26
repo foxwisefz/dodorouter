@@ -27,11 +27,21 @@ defmodule DodoRouter.Proxy.AdapterHelpersTest do
 
     test "shows first 3 and last 3 for keys 12+ chars" do
       assert Providers.generate_key_hint("sk-abcdefg1234") == "sk-••••••••234"
-      assert Providers.generate_key_hint("sk-proj-abc123def456ghi789xyz") == "sk-•••••••••••••••••••••••xyz"
+
+      assert Providers.generate_key_hint("sk-proj-abc123def456ghi789xyz") ==
+               "sk-•••••••••••••••••••••••xyz"
     end
 
     test "never reveals the full API key" do
-      for key <- ["x", "ab", "abcde", "sk-1234", "sk-abcde1", "sk-abcdefg1234", "sk-proj-abc123def456ghi789xyz"] do
+      for key <- [
+            "x",
+            "ab",
+            "abcde",
+            "sk-1234",
+            "sk-abcde1",
+            "sk-abcdefg1234",
+            "sk-proj-abc123def456ghi789xyz"
+          ] do
         hint = Providers.generate_key_hint(key)
         assert hint != key, "Hint should not equal the full key for: #{key}"
         assert String.length(hint) == String.length(key), "Hint should be same length as key"
@@ -60,12 +70,17 @@ defmodule DodoRouter.Proxy.AdapterHelpersTest do
     end
 
     test "400 with content keyword returns content_policy" do
-      assert Adapter.categorize_error(400, %{"error" => %{"message" => "Content policy violation"}}) == :content_policy
-      assert Adapter.categorize_error(400, %{"error" => %{"message" => "Policy blocked"}}) == :content_policy
+      assert Adapter.categorize_error(400, %{
+               "error" => %{"message" => "Content policy violation"}
+             }) == :content_policy
+
+      assert Adapter.categorize_error(400, %{"error" => %{"message" => "Policy blocked"}}) ==
+               :content_policy
     end
 
     test "400 without content keyword returns bad_request" do
-      assert Adapter.categorize_error(400, %{"error" => %{"message" => "Invalid request"}}) == :bad_request
+      assert Adapter.categorize_error(400, %{"error" => %{"message" => "Invalid request"}}) ==
+               :bad_request
     end
   end
 
@@ -87,7 +102,10 @@ defmodule DodoRouter.Proxy.AdapterHelpersTest do
 
   describe "extract_usage/1" do
     test "extracts usage from response" do
-      response = %{"usage" => %{"prompt_tokens" => 10, "completion_tokens" => 20, "total_tokens" => 30}}
+      response = %{
+        "usage" => %{"prompt_tokens" => 10, "completion_tokens" => 20, "total_tokens" => 30}
+      }
+
       usage = Adapter.extract_usage(response)
       assert usage.prompt_tokens == 10
       assert usage.completion_tokens == 20
@@ -105,7 +123,11 @@ defmodule DodoRouter.Proxy.AdapterHelpersTest do
   describe "detect_call_type/2" do
     test "detects tool_call when response has tool_calls" do
       request = %{"tools" => [%{"name" => "test"}]}
-      response = %{"choices" => [%{"message" => %{"tool_calls" => [%{"function" => %{"name" => "read"}}]}}]}
+
+      response = %{
+        "choices" => [%{"message" => %{"tool_calls" => [%{"function" => %{"name" => "read"}}]}}]
+      }
+
       assert {type, tools} = Adapter.detect_call_type(request, response)
       assert type == "tool_call"
       assert tools == ["read"]
@@ -201,7 +223,15 @@ defmodule DodoRouter.Proxy.AdapterHelpersTest do
 
   describe "has_images?/1" do
     test "returns true when image_url in content" do
-      request = %{"messages" => [%{"role" => "user", "content" => [%{"type" => "image_url", "image_url" => %{"url" => "http://x"}}]}]}
+      request = %{
+        "messages" => [
+          %{
+            "role" => "user",
+            "content" => [%{"type" => "image_url", "image_url" => %{"url" => "http://x"}}]
+          }
+        ]
+      }
+
       assert Adapter.has_images?(request) == true
     end
 
@@ -328,7 +358,11 @@ defmodule DodoRouter.Proxy.AdapterHelpersTest do
                 "additionalProperties" => false,
                 "type" => "object",
                 "properties" => %{
-                  "name" => %{"type" => "string", "$id" => "nested-id", "additionalProperties" => true}
+                  "name" => %{
+                    "type" => "string",
+                    "$id" => "nested-id",
+                    "additionalProperties" => true
+                  }
                 }
               }
             }
@@ -434,8 +468,8 @@ defmodule DodoRouter.Proxy.AdapterHelpersTest do
       assert {"Content-Type", "application/json"} in result
 
       refute Enum.any?(result, fn {k, v} ->
-        String.downcase(k) == "authorization" and v == "Bearer client-token"
-      end)
+               String.downcase(k) == "authorization" and v == "Bearer client-token"
+             end)
     end
 
     test "handles nil client_headers" do
@@ -451,6 +485,7 @@ defmodule DodoRouter.Proxy.AdapterHelpersTest do
         supports_vision: false,
         supports_function_calling: false
       }
+
       %{model: model}
     end
 
