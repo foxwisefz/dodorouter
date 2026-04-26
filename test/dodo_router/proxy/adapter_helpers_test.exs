@@ -2,6 +2,51 @@ defmodule DodoRouter.Proxy.AdapterHelpersTest do
   use ExUnit.Case, async: true
 
   alias DodoRouter.Proxy.Adapter
+  alias DodoRouter.Providers
+
+  describe "generate_key_hint/1" do
+    test "returns empty string for nil" do
+      assert Providers.generate_key_hint(nil) == ""
+    end
+
+    test "fully masks keys 1-4 chars" do
+      assert Providers.generate_key_hint("a") == "•"
+      assert Providers.generate_key_hint("ab") == "••"
+      assert Providers.generate_key_hint("abcd") == "••••"
+    end
+
+    test "shows first 2 chars for keys 5-8 chars" do
+      assert Providers.generate_key_hint("abcde") == "ab•••"
+      assert Providers.generate_key_hint("sk-1234") == "sk•••••"
+    end
+
+    test "shows first 3 chars for keys 9-11 chars" do
+      assert Providers.generate_key_hint("sk-abcde1") == "sk-••••••"
+      assert Providers.generate_key_hint("sk-abcdefgh") == "sk-••••••••"
+    end
+
+    test "shows first 3 and last 3 for keys 12+ chars" do
+      assert Providers.generate_key_hint("sk-abcdefg1234") == "sk-••••••••234"
+      assert Providers.generate_key_hint("sk-proj-abc123def456ghi789xyz") == "sk-•••••••••••••••••••••••xyz"
+    end
+
+    test "never reveals the full API key" do
+      for key <- ["x", "ab", "abcde", "sk-1234", "sk-abcde1", "sk-abcdefg1234", "sk-proj-abc123def456ghi789xyz"] do
+        hint = Providers.generate_key_hint(key)
+        assert hint != key, "Hint should not equal the full key for: #{key}"
+        assert String.length(hint) == String.length(key), "Hint should be same length as key"
+        assert String.contains?(hint, "•"), "Hint must contain at least one bullet for: #{key}"
+      end
+    end
+
+    test "hint is always shorter than or equal to key length" do
+      for len <- 1..50 do
+        key = String.duplicate("a", len)
+        hint = Providers.generate_key_hint(key)
+        assert String.length(hint) <= len
+      end
+    end
+  end
 
   describe "categorize_error/2" do
     test "maps status codes to error reasons" do

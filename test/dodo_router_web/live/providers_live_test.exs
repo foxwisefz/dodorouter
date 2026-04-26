@@ -2,6 +2,8 @@ defmodule DodoRouterWeb.ProvidersLiveTest do
   use DodoRouterWeb.ConnCase, async: true
 
   import Phoenix.LiveViewTest
+  alias DodoRouter.Repo
+  alias DodoRouter.Providers.ProviderKey
 
   setup :register_and_log_in_user
 
@@ -28,6 +30,16 @@ defmodule DodoRouterWeb.ProvidersLiveTest do
       assert html =~ "xAI"
       assert html =~ "DeepSeek"
       assert html =~ "Cohere"
+    end
+
+    test "shows key_hint next to key label", %{conn: conn, user: user} do
+      %ProviderKey{}
+      |> ProviderKey.create_changeset(%{"provider_slug" => "zai_standard"}, user.id, "sk-•••••••xyz")
+      |> Repo.insert!()
+
+      {:ok, _live, html} = live(conn, ~p"/providers")
+
+      assert html =~ "sk-•••••••xyz"
     end
 
     test "can open add key form", %{conn: conn} do

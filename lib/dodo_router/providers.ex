@@ -111,28 +111,32 @@ defmodule DodoRouter.Providers do
   end
 
   # show bits of API key
-  defp generate_key_hint(nil), do: ""
+  @doc false
+  def generate_key_hint(nil), do: ""
 
-  defp generate_key_hint(key) do
+  @doc false
+  def generate_key_hint(key) do
     len = String.length(key)
 
     hint =
       cond do
-        # For keys 1-4: Mask everything
         len <= 4 ->
           String.duplicate("•", len)
 
-        # For keys 5-8: Show 2 chars, mask the rest
         len < 9 ->
           prefix = String.slice(key, 0, 2)
           bullets = String.duplicate("•", len - 2)
           prefix <> bullets
 
-        # For keys 12+: Show 3 at start, 3 at end, mask the middle
+        len < 12 ->
+          prefix = String.slice(key, 0, 3)
+          bullets = String.duplicate("•", len - 3)
+          prefix <> bullets
+
         true ->
           prefix = String.slice(key, 0, 3)
           suffix = String.slice(key, -3..-1)
-          bullets = String.duplicate("•", len - 7)
+          bullets = String.duplicate("•", len - 6)
           "#{prefix}#{bullets}#{suffix}"
       end
 

@@ -541,7 +541,7 @@ defmodule DodoRouterWeb.RouterLive.Show do
                         <option value="">-- Select API Key --</option>
                         <%= for key <- matching_keys(@provider_keys, step.provider) do %>
                           <option value={key.id} selected={step.provider_key_id == key.id}>
-                            {key.label}
+                            {key.label} ({key.key_hint})
                           </option>
                         <% end %>
                       </select>
