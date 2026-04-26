@@ -90,13 +90,15 @@ defmodule DodoRouter.Proxy.Adapters.Zai do
       ])
 
     payload_size_bytes = body |> Jason.encode!() |> byte_size()
+
+    Process.delete(:__zai_stream_acc__)
+    Process.delete(:__zai_stream_raw__)
     start_time = FinchTelemetry.mark_request_start()
 
-    # Track partial content in process dict so it survives error paths
-    # (Req's into_fun error path loses the resp.private accumulator)
-    Process.delete(:__zai_stream_acc__)
-
     into_fun = fn {:data, data}, {req, resp} ->
+      raw = Process.get(:__zai_stream_raw__, "")
+      Process.put(:__zai_stream_raw__, raw <> data)
+
       resp =
         if resp.private[:stream_acc] == nil do
           ttfb = System.monotonic_time(:millisecond) - start_time
@@ -147,7 +149,9 @@ defmodule DodoRouter.Proxy.Adapters.Zai do
       )
 
     partial_acc = Process.get(:__zai_stream_acc__)
+    raw_error = Process.get(:__zai_stream_raw__)
     Process.delete(:__zai_stream_acc__)
+    Process.delete(:__zai_stream_raw__)
 
     case result do
       {:ok, %Req.Response{status: 200, headers: resp_headers} = resp} ->
@@ -165,13 +169,14 @@ defmodule DodoRouter.Proxy.Adapters.Zai do
 
         {:ok, build_final_response(acc, timing_meta), %{headers: resp_headers}}
 
-      {:ok, %Req.Response{status: status, body: response_body, headers: resp_headers}} ->
-        reason = Adapter.categorize_error(status, response_body)
+      {:ok, %Req.Response{status: status, body: body, headers: resp_headers}} ->
+        error_body = if body in ["", nil], do: parse_raw_error(raw_error), else: body
+        reason = Adapter.categorize_error(status, error_body)
 
         {:error, reason,
          %{
            status: status,
-           body: response_body,
+           body: error_body,
            latency_ms: latency(start_time),
            headers: resp_headers
          }}
@@ -337,5 +342,16 @@ defmodule DodoRouter.Proxy.Adapters.Zai do
 
   defp calculate_upload_ms(start_time) do
     FinchTelemetry.get_upload_ms(start_time)
+  end
+
+  @doc false
+  def parse_raw_error(nil), do: nil
+
+  @doc false
+  def parse_raw_error(data) when is_binary(data) do
+    case Jason.decode(data) do
+      {:ok, decoded} -> decoded
+      _ -> data
+    end
   end
 end

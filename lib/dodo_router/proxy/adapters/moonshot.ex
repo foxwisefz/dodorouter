@@ -110,12 +110,16 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
     )
 
     payload_size_bytes = body |> Jason.encode!() |> byte_size()
-    start_time = FinchTelemetry.mark_request_start()
 
     # Track partial content in process dict so it survives error paths
     Process.delete(:__moonshot_stream_acc__)
+    Process.delete(:__moonshot_stream_raw__)
+    start_time = FinchTelemetry.mark_request_start()
 
     into_fun = fn {:data, data}, {req, resp} ->
+      raw = Process.get(:__moonshot_stream_raw__, "")
+      Process.put(:__moonshot_stream_raw__, raw <> data)
+
       resp =
         if resp.private[:stream_acc] == nil do
           ttfb = System.monotonic_time(:millisecond) - start_time
@@ -166,7 +170,9 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
       )
 
     partial_acc = Process.get(:__moonshot_stream_acc__)
+    raw_error = Process.get(:__moonshot_stream_raw__)
     Process.delete(:__moonshot_stream_acc__)
+    Process.delete(:__moonshot_stream_raw__)
 
     case result do
       {:ok, %Req.Response{status: 200, headers: resp_headers} = resp} ->
@@ -185,12 +191,18 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
         {:ok, build_final_response(acc, timing_meta), %{headers: resp_headers}}
 
       {:ok, %Req.Response{status: status, body: body, headers: resp_headers}} ->
-        Logger.error("[Moonshot] Stream error: status=#{status}")
+        error_body = if body in ["", nil], do: parse_raw_error(raw_error), else: body
+        Logger.error("[Moonshot] Stream error: status=#{status} body=#{inspect(error_body)}")
 
-        reason = Adapter.categorize_error(status, body)
+        reason = Adapter.categorize_error(status, error_body)
 
         {:error, reason,
-         %{status: status, body: body, latency_ms: latency(start_time), headers: resp_headers}}
+         %{
+           status: status,
+           body: error_body,
+           latency_ms: latency(start_time),
+           headers: resp_headers
+         }}
 
       {:error, %Req.TransportError{reason: :timeout}} ->
         {:error, :timeout, build_stream_error_details(partial_acc, start_time)}
@@ -493,6 +505,28 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
       other ->
         other
     end)
+  end
+
+  @doc false
+  def parse_raw_error(nil), do: nil
+
+  @doc false
+  def parse_raw_error(data) when is_binary(data) do
+    case Adapter.parse_sse_chunk(data) do
+      {:chunks, chunks} ->
+        text =
+          chunks
+          |> Enum.map(fn c -> get_in(c, ["choices", Access.at(0), "delta", "content"]) || "" end)
+          |> Enum.join()
+
+        if text != "", do: text, else: nil
+
+      _ ->
+        case Jason.decode(data) do
+          {:ok, decoded} -> decoded
+          _ -> data
+        end
+    end
   end
 
   defp calculate_upload_ms(start_time) do

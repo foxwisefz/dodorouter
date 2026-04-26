@@ -216,10 +216,13 @@ defmodule DodoRouter.Proxy.FallbackChain do
     if base, do: base <> "/chat/completions", else: nil
   end
 
-  defp truncate_error(nil), do: nil
-  defp truncate_error(""), do: nil
+  @doc false
+  def truncate_error(nil), do: nil
+  @doc false
+  def truncate_error(""), do: nil
 
-  defp truncate_error(body) when is_map(body) do
+  @doc false
+  def truncate_error(body) when is_map(body) do
     case Jason.encode(body) do
       {:ok, json} when byte_size(json) > 500 -> String.slice(json, 0, 500) <> "..."
       {:ok, json} -> json
@@ -227,7 +230,8 @@ defmodule DodoRouter.Proxy.FallbackChain do
     end
   end
 
-  defp truncate_error(body), do: inspect(body) |> String.slice(0, 500)
+  @doc false
+  def truncate_error(body), do: inspect(body) |> String.slice(0, 500)
 
   def error_body_fallback(:timeout, _details), do: "Request timed out"
   def error_body_fallback(:auth_error, %{reason: reason}) when is_binary(reason), do: reason
