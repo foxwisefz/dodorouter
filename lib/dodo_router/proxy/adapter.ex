@@ -168,6 +168,7 @@ defmodule DodoRouter.Proxy.Adapter do
           ~w(role content name tool_calls tool_call_id function_call reasoning_details reasoning_content)
         )
         |> normalize_message_content()
+        |> migrate_function_call()
       end)
 
     Map.put(request, "messages", sanitized)
@@ -193,6 +194,102 @@ defmodule DodoRouter.Proxy.Adapter do
   end
 
   defp normalize_message_content(msg), do: msg
+
+  @doc """
+  Merges consecutive messages with the same role into a single message.
+  Required for providers like Anthropic and Google that enforce alternating roles.
+
+  For tool messages (which become "user" role in Anthropic), merges content blocks.
+  For regular messages, concatenates text content.
+  """
+  def merge_consecutive_roles(messages) when is_list(messages) do
+    messages
+    |> Enum.reduce([], fn msg, acc ->
+      case acc do
+        [] ->
+          [msg]
+
+        [prev | rest] ->
+          if same_effective_role?(prev["role"], msg["role"]) do
+            [merge_messages(prev, msg) | rest]
+          else
+            [msg | acc]
+          end
+      end
+    end)
+    |> Enum.reverse()
+  end
+
+  defp same_effective_role?("tool", "tool"), do: true
+  defp same_effective_role?(a, b), do: a == b
+
+  defp merge_messages(prev, msg) do
+    cond do
+      prev["role"] == "tool" and msg["role"] == "tool" ->
+        merged_content = (prev["content"] || "") <> "\n" <> (msg["content"] || "")
+        Map.put(prev, "content", merged_content)
+
+      prev["role"] == "assistant" and msg["role"] == "assistant" ->
+        prev_text = prev["content"] || ""
+        msg_text = msg["content"] || ""
+        prev_tool_calls = prev["tool_calls"] || []
+        msg_tool_calls = msg["tool_calls"] || []
+
+        merged =
+          prev
+          |> Map.put("content", prev_text <> msg_text)
+
+        merged =
+          if prev_tool_calls != [] or msg_tool_calls != [],
+            do: Map.put(merged, "tool_calls", prev_tool_calls ++ msg_tool_calls),
+            else: Map.delete(merged, "tool_calls")
+
+        merged
+
+      true ->
+        prev_text = text_content(prev)
+        msg_text = text_content(msg)
+        Map.merge(prev, %{"content" => prev_text <> "\n" <> msg_text})
+    end
+  end
+
+  defp text_content(%{"content" => c}) when is_binary(c), do: c
+  defp text_content(%{"content" => c}) when is_list(c), do: flatten_content_list(c)
+  defp text_content(_), do: ""
+
+  defp flatten_content_list(content) do
+    content
+    |> Enum.map(fn
+      %{"type" => "text", "text" => t} -> t
+      %{"text" => t} -> t
+      _ -> ""
+    end)
+    |> Enum.join("\n")
+  end
+
+  @doc """
+  Converts deprecated function_call field to modern tool_calls format.
+  """
+  def migrate_function_call(%{"function_call" => fc} = msg) when is_map(fc) do
+    tool_call = %{
+      "id" => msg["tool_call_id"] || generate_tool_call_id(),
+      "type" => "function",
+      "function" => %{
+        "name" => fc["name"],
+        "arguments" => fc["arguments"] || "{}"
+      }
+    }
+
+    msg
+    |> Map.put("tool_calls", [tool_call])
+    |> Map.delete("function_call")
+  end
+
+  def migrate_function_call(msg), do: msg
+
+  defp generate_tool_call_id do
+    "call_" <> (:crypto.strong_rand_bytes(12) |> Base.encode16(case: :lower))
+  end
 
   @proxy_overrides ~w(authorization content-type)
                    |> Enum.map(&String.downcase/1)

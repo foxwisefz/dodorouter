@@ -182,4 +182,100 @@ defmodule DodoRouter.Proxy.Adapters.AnthropicTest do
              ) == "length"
     end
   end
+
+  describe "edge cases" do
+    test "merges consecutive tool_result messages (same role)" do
+      request = %{
+        "messages" => [
+          %{"role" => "user", "content" => "use tools"},
+          %{
+            "role" => "assistant",
+            "content" => nil,
+            "tool_calls" => [
+              %{
+                "id" => "c1",
+                "type" => "function",
+                "function" => %{"name" => "f1", "arguments" => "{}"}
+              },
+              %{
+                "id" => "c2",
+                "type" => "function",
+                "function" => %{"name" => "f2", "arguments" => "{}"}
+              }
+            ]
+          },
+          %{"role" => "tool", "content" => "result1", "tool_call_id" => "c1"},
+          %{"role" => "tool", "content" => "result2", "tool_call_id" => "c2"},
+          %{"role" => "user", "content" => "thanks"}
+        ]
+      }
+
+      step = %RoutingStep{model: "claude-sonnet-4-20250514"}
+      body = Anthropic.build_anthropic_request(request, step)
+
+      tool_msg =
+        Enum.find(body["messages"], fn m ->
+          is_list(m["content"]) and Enum.any?(m["content"], &(&1["type"] == "tool_result"))
+        end)
+
+      assert tool_msg["role"] == "user"
+      tool_results = Enum.filter(tool_msg["content"], &(&1["type"] == "tool_result"))
+      assert length(tool_results) == 2
+      ids = Enum.map(tool_results, & &1["tool_use_id"]) |> Enum.sort()
+      assert ids == ["c1", "c2"]
+    end
+
+    test "handles malformed JSON in tool_call arguments gracefully" do
+      request = %{
+        "messages" => [
+          %{"role" => "user", "content" => "hi"},
+          %{
+            "role" => "assistant",
+            "content" => nil,
+            "tool_calls" => [
+              %{
+                "id" => "c1",
+                "type" => "function",
+                "function" => %{"name" => "test", "arguments" => "not valid json{{{"}
+              }
+            ]
+          }
+        ]
+      }
+
+      step = %RoutingStep{model: "claude-sonnet-4-20250514"}
+      body = Anthropic.build_anthropic_request(request, step)
+
+      assistant_msg = Enum.find(body["messages"], &(&1["role"] == "assistant"))
+      tool_use = Enum.find(assistant_msg["content"], &(&1["type"] == "tool_use"))
+      assert tool_use["input"] == %{}
+    end
+
+    test "handles empty assistant content with tool_calls by using placeholder" do
+      request = %{
+        "messages" => [
+          %{"role" => "user", "content" => "hi"},
+          %{
+            "role" => "assistant",
+            "content" => nil,
+            "tool_calls" => [
+              %{
+                "id" => "c1",
+                "type" => "function",
+                "function" => %{"name" => "f", "arguments" => "{}"}
+              }
+            ]
+          }
+        ]
+      }
+
+      step = %RoutingStep{model: "claude-sonnet-4-20250514"}
+      body = Anthropic.build_anthropic_request(request, step)
+
+      assistant_msg = Enum.find(body["messages"], &(&1["role"] == "assistant"))
+      assert is_list(assistant_msg["content"])
+      assert length(assistant_msg["content"]) == 1
+      assert hd(assistant_msg["content"])["type"] == "tool_use"
+    end
+  end
 end

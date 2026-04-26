@@ -44,6 +44,7 @@ defmodule DodoRouter.Proxy.Adapters.Mistral do
     |> transform_request()
     |> OpenAICompatible.stream(step, api_key, send_chunk, @base_url,
       provider: "mistral",
+      supports_stream_options: false,
       client_headers: client_headers
     )
   end

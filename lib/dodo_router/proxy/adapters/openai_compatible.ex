@@ -65,10 +65,21 @@ defmodule DodoRouter.Proxy.Adapters.OpenAICompatible do
   def stream(request, %RoutingStep{} = step, api_key, send_chunk, base_url, opts \\ []) do
     url = base_url <> "/chat/completions"
 
+    stream_opts =
+      if Keyword.get(opts, :supports_stream_options, true) do
+        %{"include_usage" => true}
+      else
+        nil
+      end
+
     body =
       build_request_body(request, step)
       |> Map.put("stream", true)
-      |> Map.put("stream_options", %{"include_usage" => true})
+
+    body =
+      if stream_opts,
+        do: Map.put(body, "stream_options", stream_opts),
+        else: body
 
     headers = build_headers(api_key, opts)
     payload_size_bytes = body |> Jason.encode!() |> byte_size()
@@ -123,6 +134,8 @@ defmodule DodoRouter.Proxy.Adapters.OpenAICompatible do
         receive_timeout: @timeout_ms,
         into: into_fun
       )
+
+    Process.delete(:"__#{provider}_stream_acc__")
 
     case result do
       {:ok, %Req.Response{status: 200} = resp} ->

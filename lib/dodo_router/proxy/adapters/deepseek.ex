@@ -43,6 +43,7 @@ defmodule DodoRouter.Proxy.Adapters.DeepSeek do
     |> transform_request()
     |> OpenAICompatible.stream(step, api_key, send_chunk, @base_url,
       provider: "deepseek",
+      supports_stream_options: false,
       client_headers: client_headers
     )
   end
