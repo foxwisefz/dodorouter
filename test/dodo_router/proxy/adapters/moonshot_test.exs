@@ -322,6 +322,31 @@ defmodule DodoRouter.Proxy.Adapters.MoonshotTest do
     end
   end
 
+  describe "base_url and endpoint routing" do
+    test "returns coding URL for coding plan_type" do
+      step = %RoutingStep{plan_type: "coding"}
+      assert Moonshot.base_url(step) == "https://api.kimi.com/coding/v1"
+    end
+
+    test "returns standard URL for standard plan_type" do
+      step = %RoutingStep{plan_type: "standard"}
+      assert Moonshot.base_url(step) == "https://api.moonshot.ai/v1"
+    end
+
+    test "returns standard URL for nil plan_type" do
+      step = %RoutingStep{plan_type: nil}
+      assert Moonshot.base_url(step) == "https://api.moonshot.ai/v1"
+    end
+
+    test "does not include stream_options in build_request_body" do
+      request = %{"messages" => [%{"role" => "user", "content" => "hi"}]}
+      step = %RoutingStep{model: "kimi-k2", provider: "moonshot"}
+
+      body = Moonshot.build_request_body(request, step)
+      refute Map.has_key?(body, "stream_options")
+    end
+  end
+
   describe "accumulate_tool_calls/2" do
     test "accumulates tool call chunks by index" do
       existing = %{}

@@ -130,5 +130,13 @@ defmodule DodoRouter.Proxy.Adapters.ZaiTest do
       body = Zai.build_request_body(request, step)
       assert body["temperature"] == 0.9
     end
+
+    test "does not include stream_options (ZAI doesn't support it)" do
+      request = %{"messages" => [%{"role" => "user", "content" => "hi"}]}
+      step = %RoutingStep{model: "glm-4-plus", provider: "zai"}
+
+      body = Zai.build_request_body(request, step)
+      refute Map.has_key?(body, "stream_options")
+    end
   end
 end

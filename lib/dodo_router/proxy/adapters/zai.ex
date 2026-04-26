@@ -59,9 +59,16 @@ defmodule DodoRouter.Proxy.Adapters.Zai do
 
         {:ok, Map.put(response_body, "_meta", meta), %{headers: resp_headers}}
 
-      {:ok, %{status: status, body: response_body}} ->
+      {:ok, %{status: status, body: response_body, headers: resp_headers}} ->
         reason = Adapter.categorize_error(status, response_body)
-        {:error, reason, %{status: status, body: response_body, latency_ms: latency(start_time)}}
+
+        {:error, reason,
+         %{
+           status: status,
+           body: response_body,
+           latency_ms: latency(start_time),
+           headers: resp_headers
+         }}
 
       {:error, %Req.TransportError{reason: :timeout}} ->
         {:error, :timeout, %{latency_ms: latency(start_time)}}
@@ -158,9 +165,16 @@ defmodule DodoRouter.Proxy.Adapters.Zai do
 
         {:ok, build_final_response(acc, timing_meta), %{headers: resp_headers}}
 
-      {:ok, %Req.Response{status: status, body: response_body}} ->
+      {:ok, %Req.Response{status: status, body: response_body, headers: resp_headers}} ->
         reason = Adapter.categorize_error(status, response_body)
-        {:error, reason, %{status: status, body: response_body, latency_ms: latency(start_time)}}
+
+        {:error, reason,
+         %{
+           status: status,
+           body: response_body,
+           latency_ms: latency(start_time),
+           headers: resp_headers
+         }}
 
       {:error, %Req.TransportError{reason: :timeout}} ->
         {:error, :timeout, build_stream_error_details(partial_acc, start_time)}
