@@ -4,836 +4,724 @@ title: Dodo Router - OpenAI-Compatible LLM Proxy with Automatic Fallback
 description: Drop-in LLM proxy that routes requests across providers with automatic fallback. OpenAI-compatible API, streaming support, and real-time analytics.
 ---
 
-{# ──────────────────────────────────────────────
-   HERO SECTION - Warm, friendly, approachable
-   ────────────────────────────────────────────── #}
-<section class="relative overflow-hidden pt-28 pb-20 md:pt-36 md:pb-32">
-  {# Background effects #}
-  <div class="absolute inset-0 -z-10">
-    <div class="absolute inset-0 bg-cream-50"></div>
-    <div class="absolute top-0 left-1/2 -translate-x-1/2 h-[600px] w-[600px] rounded-full bg-amber-200/30 blur-[100px]"></div>
-    <div class="absolute top-40 right-1/4 h-[300px] w-[300px] rounded-full bg-rose-200/20 blur-[80px]"></div>
-    <div class="absolute bottom-0 left-1/4 h-[300px] w-[300px] rounded-full bg-sky-200/20 blur-[80px]"></div>
-    <div class="absolute inset-0 dot-pattern opacity-40"></div>
-  </div>
+<section class="relative h-screen flex flex-col bg-background overflow-hidden">
 
-  <div class="relative mx-auto max-w-6xl px-6 text-center">
-    {# Announcement badge #}
-    <a href="https://github.com/foxwise-ai/dodorouter" target="_blank" rel="noopener noreferrer" class="mx-auto inline-flex items-center gap-2.5 rounded-full border-2 border-amber-300 bg-amber-100 px-4 py-1.5 text-sm font-bold text-amber-700 transition-all hover:bg-amber-200 hover:border-amber-400 hover:shadow-lg hover:shadow-amber-200/30">
-      <span class="relative flex h-2.5 w-2.5">
-        <span class="absolute inline-flex h-full w-full animate-ping rounded-full bg-go-500 opacity-75"></span>
-        <span class="relative inline-flex h-2.5 w-2.5 rounded-full bg-go-500"></span>
+  {# Background Video #}
+  <video class="absolute inset-0 w-full h-full object-cover z-0" autoplay muted loop playsinline>
+    <source src="https://d8j0ntlcm91z4.cloudfront.net/user_38xzZboKViGWJOttwIXH07lWA1P/hf_20260319_015952_e1deeb12-8fb7-4071-a42a-60779fc64ab6.mp4" type="video/mp4" />
+  </video>
+
+  {# White overlay so content is readable #}
+  <div class="absolute inset-0 z-[1] video-overlay"></div>
+
+  {# All content above video #}
+  <div class="relative z-10 flex flex-col items-center w-full flex-1">
+
+    {# 1. Badge #}
+    <div class="animate-fade-up mt-6 inline-flex items-center gap-1.5 rounded-full border border-border bg-background px-4 py-1.5 text-sm text-muted-foreground font-body" style="--fade-y: 10px; --fade-duration: 0.5s; --fade-delay: 0s;">
+      <span class="relative flex h-2 w-2">
+        <span class="absolute inline-flex h-full w-full animate-ping rounded-full bg-go opacity-75"></span>
+        <span class="relative inline-flex h-2 w-2 rounded-full bg-go"></span>
       </span>
-      Open-Source &amp; Self-Hostable
-      <svg class="h-4 w-4" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"/></svg>
-    </a>
+      Now with streaming &amp; tool call support
+    </div>
 
-    {# Headline #}
-    <h1 class="mx-auto mt-8 max-w-4xl text-5xl font-black tracking-tight text-ink-950 sm:text-6xl lg:text-7xl leading-[1.1]">
-      LLM proxy with
-      <span class="text-gradient">automatic fallback</span>
+    {# 2. Headline #}
+    <h1 class="animate-fade-up mt-6 text-center font-display text-5xl md:text-6xl lg:text-[5rem] leading-[0.95] tracking-tight text-foreground max-w-xl" style="--fade-y: 16px; --fade-duration: 0.6s; --fade-delay: 0.1s;">
+      The LLM proxy with <em>automatic</em> fallback
     </h1>
 
-    {# Subheadline #}
-    <p class="mx-auto mt-6 max-w-2xl text-lg leading-relaxed text-ink-600 sm:text-xl">
-      Drop-in OpenAI-compatible proxy that routes requests across providers with automatic fallback. <strong class="text-ink-900">Change the base URL once &mdash; then swap providers, reorder chains, and adjust models on the fly from the dashboard.</strong>
+    {# 3. Subheadline #}
+    <p class="animate-fade-up mt-4 text-center text-base md:text-lg text-muted-foreground max-w-[650px] leading-relaxed font-body" style="--fade-y: 16px; --fade-duration: 0.6s; --fade-delay: 0.2s;">
+      Drop-in OpenAI-compatible proxy that routes requests across providers. Change your base URL once &mdash; then swap providers, reorder chains, and adjust models on the fly from the dashboard.
     </p>
 
-    {# CTAs #}
-    <div class="mt-10 flex flex-col items-center justify-center gap-4 sm:flex-row">
-      <a href="https://api.dodorouter.com/users/register" class="group inline-flex items-center gap-2 rounded-2xl bg-amber-400 px-7 py-4 text-base font-extrabold text-ink-950 shadow-lg shadow-amber-200/50 transition-all hover:bg-amber-300 hover:shadow-xl hover:shadow-amber-300/50 hover:-translate-y-1">
+    {# 4. CTA Buttons #}
+    <div class="animate-fade-up mt-5 flex items-center gap-3" style="--fade-y: 16px; --fade-duration: 0.6s; --fade-delay: 0.3s;">
+      <a href="https://api.dodorouter.com/users/register" class="rounded-full bg-primary px-6 py-3 text-sm font-medium font-body text-primary-foreground transition-all hover:opacity-90">
         Get Started Free
-        <svg class="h-5 w-5 transition-transform group-hover:translate-x-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M13 7l5 5m0 0l-5 5m5-5H6" /></svg>
       </a>
-      <a href="/#how-it-works" class="inline-flex items-center gap-2 rounded-2xl border-2 border-ink-200 bg-white px-7 py-4 text-base font-bold text-ink-700 transition-all hover:border-amber-300 hover:bg-amber-50 hover:text-ink-900 hover:-translate-y-0.5">
-        See How It Works
+      <a href="https://github.com/foxwise-ai/dodorouter" target="_blank" rel="noopener noreferrer" class="flex h-11 w-11 items-center justify-center rounded-full border-0 bg-background shadow-[0_2px_12px_rgba(0,0,0,0.08)] transition-all hover:bg-background/80">
+        <svg class="h-4 w-4 fill-foreground" viewBox="0 0 24 24"><path d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"/></svg>
       </a>
     </div>
 
-    {# Code snippet - sticker-style terminal #}
-    <div class="mt-16 mx-auto max-w-3xl">
-      <div class="code-block p-1.5">
-        <div class="rounded-[16px] bg-ink-950 p-6 text-left">
-          <div class="flex items-center gap-2 mb-5">
-            <span class="h-3.5 w-3.5 rounded-full bg-stop-400"></span>
-            <span class="h-3.5 w-3.5 rounded-full bg-slow-400"></span>
-            <span class="h-3.5 w-3.5 rounded-full bg-go-400"></span>
-            <span class="ml-4 text-xs text-ink-500 font-bold">The only code change you'll ever make</span>
+    {# 5. Dashboard Preview — custom coded, NOT an image #}
+    <div class="animate-fade-up mt-8 w-full max-w-5xl px-4 md:px-6" style="--fade-y: 30px; --fade-duration: 0.8s; --fade-delay: 0.5s;">
+      <div class="frosted-glass rounded-2xl overflow-hidden p-3 md:p-4">
+        <div class="dashboard-mockup rounded-xl bg-white/90 overflow-hidden">
+
+          {# Top bar #}
+          <div class="flex items-center justify-between border-b border-border px-4 py-2.5">
+            <div class="flex items-center gap-2">
+              <div class="flex h-6 w-6 items-center justify-center rounded-md bg-accent text-[10px] font-bold text-accent-foreground">D</div>
+              <span class="text-xs font-semibold text-foreground">DodoRouter</span>
+              <svg class="h-3 w-3 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" /></svg>
+            </div>
+            <div class="hidden items-center gap-1.5 rounded-md border border-border bg-secondary px-3 py-1.5 text-[10px] text-muted-foreground sm:flex">
+              <svg class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8" /><path d="M21 21l-4.35-4.35" /></svg>
+              Search requests...
+              <span class="ml-auto rounded border border-border bg-background px-1 py-0.5 text-[9px]">&cmd;K</span>
+            </div>
+            <div class="flex items-center gap-3">
+              <span class="text-[10px] font-medium text-muted-foreground hidden sm:inline">Dashboard</span>
+              <div class="relative">
+                <svg class="h-3.5 w-3.5 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M14.857 17.082a23.848 23.848 0 005.454-1.31A8.967 8.967 0 0118 9.75v-.7V9A6 6 0 006 9v.75a8.967 8.967 0 01-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 01-5.714 0m5.714 0a3 3 0 11-5.714 0" /></svg>
+                <span class="absolute -top-0.5 -right-0.5 h-1.5 w-1.5 rounded-full bg-accent"></span>
+              </div>
+              <div class="flex h-6 w-6 items-center justify-center rounded-full bg-accent/10 text-[10px] font-bold text-accent">DR</div>
+            </div>
           </div>
-          <pre class="text-sm font-mono leading-relaxed overflow-x-auto"><code><span class="text-amber-400">import</span> <span class="text-ink-200">OpenAI</span>
 
-<span class="text-ink-200">client</span> <span class="text-ink-500">=</span> <span class="text-ink-200">OpenAI(</span>
-  <span class="text-ink-400">base_url</span><span class="text-ink-500">=</span><span class="text-go-400">"https://your-dodo.com/r/my-router/v1"</span><span class="text-ink-500">,</span>
-  <span class="text-ink-400">api_key</span><span class="text-ink-500">=</span><span class="text-go-400">"sk-dodo-..."</span>
-<span class="text-ink-200">)</span>
+          {# Body: Sidebar + Main #}
+          <div class="flex">
 
-<span class="text-ink-600"># That's it. Requests now route through your fallback chain.</span>
-<span class="text-ink-200">response</span> <span class="text-ink-500">=</span> <span class="text-ink-200">client.chat.completions.create(</span>
-  <span class="text-ink-400">model</span><span class="text-ink-500">=</span><span class="text-go-400">"auto"</span><span class="text-ink-500">,</span>
-  <span class="text-ink-400">messages</span><span class="text-ink-500">=</span><span class="text-ink-200">[{</span><span class="text-go-400">"role"</span><span class="text-ink-500">:</span> <span class="text-go-400">"user"</span><span class="text-ink-500">,</span> <span class="text-go-400">"content"</span><span class="text-ink-500">:</span> <span class="text-go-400">"Hello!"</span><span class="text-ink-200">}]</span>
-<span class="text-ink-200">)</span></code></pre>
+            {# Sidebar #}
+            <div class="hidden w-40 shrink-0 border-r border-border p-3 sm:block">
+              <div class="space-y-0.5">
+                <div class="flex items-center gap-2 rounded-md bg-accent/10 px-2.5 py-1.5 text-[10px] font-semibold text-accent">
+                  <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" /></svg>
+                  Dashboard
+                </div>
+                <div class="flex items-center justify-between rounded-md px-2.5 py-1.5 text-[10px] text-muted-foreground hover:bg-secondary">
+                  <div class="flex items-center gap-2">
+                    <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                    Requests
+                  </div>
+                  <span class="rounded-full bg-accent/10 px-1.5 py-0.5 text-[9px] font-bold text-accent">1.2K</span>
+                </div>
+                <div class="flex items-center gap-2 rounded-md px-2.5 py-1.5 text-[10px] text-muted-foreground hover:bg-secondary">
+                  <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M10.5 6h9.75M10.5 6a1.5 1.5 0 11-3 0m3 0a1.5 1.5 0 10-3 0M3.75 6H7.5m3 12h9.75m-9.75 0a1.5 1.5 0 01-3 0m3 0a1.5 1.5 0 00-3 0m-3.75 0H7.5m9-6h3.75m-3.75 0a1.5 1.5 0 01-3 0m3 0a1.5 1.5 0 00-3 0m-9.75 0h9.75" /></svg>
+                  Routers
+                </div>
+                <div class="flex items-center gap-2 rounded-md px-2.5 py-1.5 text-[10px] text-muted-foreground hover:bg-secondary">
+                  <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M2.25 18.75a60.07 60.07 0 0115.797 2.101c.727.198 1.453-.342 1.453-1.096V18.75M3.75 4.5v.75A.75.75 0 013 6h-.75m0 0v-.375c0-.621.504-1.125 1.125-1.125H20.25M2.25 6v9m18-10.5v.75c0 .414.336.75.75.75h.75m-1.5-1.5h.375c.621 0 1.125.504 1.125 1.125v9.75c0 .621-.504 1.125-1.125 1.125h-.375m1.5-1.5H21a.75.75 0 00-.75.75v.75m0 0H3.75m0 0h-.375a1.125 1.125 0 01-1.125-1.125V15m1.5 1.5v-.75A.75.75 0 003 15h-.75M15 10.5a3 3 0 11-6 0 3 3 0 016 0zm3 0h.008v.008H18V10.5zm-12 0h.008v.008H6V10.5z" /></svg>
+                  Costs
+                </div>
+                <div class="flex items-center gap-2 rounded-md px-2.5 py-1.5 text-[10px] text-muted-foreground hover:bg-secondary">
+                  <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 5.25a3 3 0 013 3m3 0a6 6 0 01-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25v2.25H6v2.25H2.25v-2.818c0-.597.237-1.17.659-1.591l6.499-6.499c.404-.404.527-1 .43-1.563A6 6 0 1121.75 8.25z" /></svg>
+                  API Keys
+                </div>
+              </div>
+              <div class="mt-4">
+                <p class="mb-1 px-2.5 text-[9px] font-semibold uppercase tracking-wider text-muted-foreground">Providers</p>
+                <div class="space-y-0.5">
+                  <div class="flex items-center gap-2 rounded-md px-2.5 py-1.5 text-[10px] text-muted-foreground hover:bg-secondary">
+                    <span class="flex h-4 w-4 items-center justify-center rounded bg-amber-100 text-[8px] font-bold text-amber-700">Z</span>
+                    z.ai
+                  </div>
+                  <div class="flex items-center gap-2 rounded-md px-2.5 py-1.5 text-[10px] text-muted-foreground hover:bg-secondary">
+                    <span class="flex h-4 w-4 items-center justify-center rounded bg-sky-100 text-[8px] font-bold text-sky-700">M</span>
+                    Moonshot
+                  </div>
+                </div>
+              </div>
+              <div class="mt-4">
+                <p class="mb-1 px-2.5 text-[9px] font-semibold uppercase tracking-wider text-muted-foreground">Settings</p>
+                <div class="space-y-0.5">
+                  <div class="flex items-center gap-2 rounded-md px-2.5 py-1.5 text-[10px] text-muted-foreground hover:bg-secondary">
+                    <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.324.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 011.37.49l1.296 2.247a1.125 1.125 0 01-.26 1.431l-1.003.827c-.293.24-.438.613-.431.992a6.759 6.759 0 010 .255c-.007.378.138.75.43.99l1.005.828c.424.35.534.954.26 1.43l-1.298 2.247a1.125 1.125 0 01-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.57 6.57 0 01-.22.128c-.331.183-.581.495-.644.869l-.213 1.28c-.09.543-.56.941-1.11.941h-2.594c-.55 0-1.02-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 01-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 01-1.369-.49l-1.297-2.247a1.125 1.125 0 01.26-1.431l1.004-.827c.292-.24.437-.613.43-.992a6.932 6.932 0 010-.255c.007-.378-.138-.75-.43-.99l-1.004-.828a1.125 1.125 0 01-.26-1.43l1.297-2.247a1.125 1.125 0 011.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.087.22-.128.332-.183.582-.495.644-.869l.214-1.281z" /><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+                    Settings
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {# Main content #}
+            <div class="flex-1 bg-secondary/30 p-4">
+
+              {# Stats row #}
+              <div class="mb-4 flex items-center justify-between">
+                <div>
+                  <p class="text-xs font-semibold text-foreground">Router Overview</p>
+                  <p class="text-[10px] text-muted-foreground">my-production-router</p>
+                </div>
+                <div class="flex items-center gap-2">
+                  <span class="flex items-center gap-1 rounded-full bg-green-50 px-2 py-0.5 text-[9px] font-semibold text-go">
+                    <span class="h-1.5 w-1.5 rounded-full bg-go"></span>
+                    Live
+                  </span>
+                </div>
+              </div>
+
+              {# Stat cards #}
+              <div class="grid grid-cols-2 gap-3 md:grid-cols-4">
+                <div class="rounded-lg border border-border bg-background p-3">
+                  <p class="text-[9px] font-medium text-muted-foreground">Total Requests</p>
+                  <p class="mt-0.5 text-sm font-semibold text-foreground">12,847</p>
+                  <p class="mt-0.5 text-[9px] font-medium text-go">+14.2%</p>
+                </div>
+                <div class="rounded-lg border border-border bg-background p-3">
+                  <p class="text-[9px] font-medium text-muted-foreground">Success Rate</p>
+                  <p class="mt-0.5 text-sm font-semibold text-foreground">99.7%</p>
+                  <p class="mt-0.5 text-[9px] font-medium text-muted-foreground">23 fallbacks recovered</p>
+                </div>
+                <div class="rounded-lg border border-border bg-background p-3">
+                  <p class="text-[9px] font-medium text-muted-foreground">p95 Latency</p>
+                  <p class="mt-0.5 text-sm font-semibold text-foreground">340ms</p>
+                  <p class="mt-0.5 text-[9px] font-medium text-go">-8%</p>
+                </div>
+                <div class="rounded-lg border border-border bg-background p-3">
+                  <p class="text-[9px] font-medium text-muted-foreground">Total Cost</p>
+                  <p class="mt-0.5 text-sm font-semibold text-foreground">$12.84</p>
+                  <p class="mt-0.5 text-[9px] font-medium text-muted-foreground">4.2M tokens</p>
+                </div>
+              </div>
+
+              {# Two cards side by side: Chart + Routing Chain #}
+              <div class="mt-3 flex gap-3">
+                {# Chart card #}
+                <div class="flex-1 basis-0 rounded-lg border border-border bg-background p-3">
+                  <div class="flex items-center justify-between">
+                    <p class="text-[10px] font-semibold text-foreground">Request Volume</p>
+                    <p class="text-[9px] text-muted-foreground">Last 24h</p>
+                  </div>
+                  <div class="mt-2">
+                    <svg viewBox="0 0 200 60" class="h-16 w-full" preserveAspectRatio="none">
+                      <defs>
+                        <linearGradient id="chartFill" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0%" stop-color="hsl(239, 84%, 67%)" stop-opacity="0.15" />
+                          <stop offset="100%" stop-color="hsl(239, 84%, 67%)" stop-opacity="0" />
+                        </linearGradient>
+                      </defs>
+                      <path d="M0,45 C20,42 30,35 50,30 C70,25 80,38 100,28 C120,18 130,22 150,15 C170,8 180,12 200,5 L200,60 L0,60 Z" fill="url(#chartFill)" />
+                      <path d="M0,45 C20,42 30,35 50,30 C70,25 80,38 100,28 C120,18 130,22 150,15 C170,8 180,12 200,5" fill="none" stroke="hsl(239, 84%, 67%)" stroke-width="1.5" />
+                    </svg>
+                  </div>
+                </div>
+
+                {# Routing Chain card #}
+                <div class="flex-1 basis-0 rounded-lg border border-border bg-background p-3">
+                  <div class="flex items-center justify-between">
+                    <p class="text-[10px] font-semibold text-foreground">Routing Chain</p>
+                    <p class="text-[9px] text-muted-foreground">3 steps</p>
+                  </div>
+                  <div class="mt-2 space-y-1.5">
+                    <div class="flex items-center justify-between rounded-md bg-accent/5 px-2 py-1.5 border-l-2 border-accent">
+                      <div class="flex items-center gap-1.5">
+                        <span class="flex h-4 w-4 items-center justify-center rounded bg-amber-100 text-[8px] font-bold text-amber-700">Z</span>
+                        <span class="text-[10px] font-medium text-foreground">z.ai / GLM-5.1</span>
+                      </div>
+                      <span class="rounded-full bg-green-50 px-1.5 py-0.5 text-[8px] font-semibold text-go">Primary</span>
+                    </div>
+                    <div class="flex items-center justify-between rounded-md bg-secondary px-2 py-1.5">
+                      <div class="flex items-center gap-1.5">
+                        <span class="flex h-4 w-4 items-center justify-center rounded bg-sky-100 text-[8px] font-bold text-sky-700">M</span>
+                        <span class="text-[10px] font-medium text-foreground">Moonshot / Kimi-K2</span>
+                      </div>
+                      <span class="rounded-full bg-amber-50 px-1.5 py-0.5 text-[8px] font-semibold text-warn">Fallback</span>
+                    </div>
+                    <div class="flex items-center justify-between rounded-md bg-secondary px-2 py-1.5">
+                      <div class="flex items-center gap-1.5">
+                        <span class="flex h-4 w-4 items-center justify-center rounded bg-amber-100 text-[8px] font-bold text-amber-700">Z</span>
+                        <span class="text-[10px] font-medium text-foreground">z.ai / GLM-5</span>
+                      </div>
+                      <span class="rounded-full bg-red-50 px-1.5 py-0.5 text-[8px] font-semibold text-error">Last Resort</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {# Request Log Table #}
+              <div class="mt-3 rounded-lg border border-border bg-background overflow-hidden">
+                <div class="flex items-center justify-between border-b border-border px-3 py-2">
+                  <p class="text-[10px] font-semibold text-foreground">Recent Requests</p>
+                  <span class="flex items-center gap-1 text-[9px] text-muted-foreground">
+                    <span class="h-1.5 w-1.5 rounded-full bg-accent animate-soft-pulse"></span>
+                    Streaming
+                  </span>
+                </div>
+                <table class="w-full text-left">
+                  <thead>
+                    <tr class="border-b border-border bg-secondary/50">
+                      <th class="px-3 py-1.5 text-[9px] font-medium text-muted-foreground">Time</th>
+                      <th class="px-3 py-1.5 text-[9px] font-medium text-muted-foreground">Status</th>
+                      <th class="px-3 py-1.5 text-[9px] font-medium text-muted-foreground hidden sm:table-cell">Provider / Model</th>
+                      <th class="px-3 py-1.5 text-[9px] font-medium text-muted-foreground hidden md:table-cell">Tokens</th>
+                      <th class="px-3 py-1.5 text-[9px] font-medium text-muted-foreground">Latency</th>
+                    </tr>
+                  </thead>
+                  <tbody class="divide-y divide-border">
+                    <tr>
+                      <td class="px-3 py-1.5 text-[10px] font-mono text-muted-foreground">14:23:01</td>
+                      <td class="px-3 py-1.5"><span class="rounded-full bg-green-50 px-1.5 py-0.5 text-[8px] font-semibold text-go">success</span></td>
+                      <td class="px-3 py-1.5 text-[10px] font-medium text-foreground hidden sm:table-cell">z.ai / GLM-5</td>
+                      <td class="px-3 py-1.5 text-[10px] font-mono text-muted-foreground hidden md:table-cell">1,247</td>
+                      <td class="px-3 py-1.5 text-[10px] font-mono text-muted-foreground">285ms</td>
+                    </tr>
+                    <tr>
+                      <td class="px-3 py-1.5 text-[10px] font-mono text-muted-foreground">14:22:58</td>
+                      <td class="px-3 py-1.5"><span class="rounded-full bg-amber-50 px-1.5 py-0.5 text-[8px] font-semibold text-warn">fallback</span></td>
+                      <td class="px-3 py-1.5 text-[10px] hidden sm:table-cell"><span class="line-through text-red-300/60">z.ai</span> <span class="text-muted-foreground">&rarr;</span> <span class="font-medium text-foreground">Moonshot / Kimi-K2</span></td>
+                      <td class="px-3 py-1.5 text-[10px] font-mono text-muted-foreground hidden md:table-cell">892</td>
+                      <td class="px-3 py-1.5 text-[10px] font-mono text-muted-foreground">1,240ms</td>
+                    </tr>
+                    <tr>
+                      <td class="px-3 py-1.5 text-[10px] font-mono text-muted-foreground">14:22:55</td>
+                      <td class="px-3 py-1.5"><span class="rounded-full bg-green-50 px-1.5 py-0.5 text-[8px] font-semibold text-go">success</span></td>
+                      <td class="px-3 py-1.5 text-[10px] font-medium text-foreground hidden sm:table-cell">z.ai / GLM-5.1</td>
+                      <td class="px-3 py-1.5 text-[10px] font-mono text-muted-foreground hidden md:table-cell">2,103</td>
+                      <td class="px-3 py-1.5 text-[10px] font-mono text-muted-foreground">412ms</td>
+                    </tr>
+                    <tr>
+                      <td class="px-3 py-1.5 text-[10px] font-mono text-muted-foreground">14:22:51</td>
+                      <td class="px-3 py-1.5"><span class="rounded-full bg-green-50 px-1.5 py-0.5 text-[8px] font-semibold text-go">success</span></td>
+                      <td class="px-3 py-1.5 text-[10px] font-medium text-foreground hidden sm:table-cell">Moonshot / Kimi-K2.5</td>
+                      <td class="px-3 py-1.5 text-[10px] font-mono text-muted-foreground hidden md:table-cell">567</td>
+                      <td class="px-3 py-1.5 text-[10px] font-mono text-muted-foreground">198ms</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+
+            </div>
+          </div>
         </div>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+{# ─────────────────────────────────────────────
+   SECTION 2 — How It Works
+   ───────────────────────────────────────────── #}
+<section id="how-it-works" class="section-padding md:section-padding-md bg-background">
+  <div class="mx-auto max-w-6xl px-6 md:px-12 lg:px-20">
+    <div class="grid items-center gap-12 lg:grid-cols-2 lg:gap-20">
+      <div>
+        <p class="text-sm font-semibold tracking-wide text-accent font-body">Drop-in compatible</p>
+        <h2 class="mt-3 font-display text-3xl md:text-4xl lg:text-5xl leading-[1.05] tracking-tight text-foreground">
+          Swap your base URL.<br/>That&rsquo;s it.
+        </h2>
+        <p class="mt-5 text-base md:text-lg text-muted-foreground leading-relaxed font-body max-w-lg">
+          DodoRouter speaks the OpenAI API protocol. Point your existing SDK or HTTP client at our endpoint and every request is automatically routed through your provider chain with instant fallback on failures.
+        </p>
+        <ul class="mt-6 space-y-3">
+          <li class="flex items-start gap-3">
+            <span class="mt-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-go/10">
+              <svg class="h-3 w-3 text-go" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
+            </span>
+            <span class="text-sm text-foreground font-body">Zero code changes &mdash; just update <code class="rounded bg-secondary px-1.5 py-0.5 text-xs font-mono text-accent">base_url</code></span>
+          </li>
+          <li class="flex items-start gap-3">
+            <span class="mt-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-go/10">
+              <svg class="h-3 w-3 text-go" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
+            </span>
+            <span class="text-sm text-foreground font-body">Streaming &amp; tool calls work out of the box</span>
+          </li>
+          <li class="flex items-start gap-3">
+            <span class="mt-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-go/10">
+              <svg class="h-3 w-3 text-go" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
+            </span>
+            <span class="text-sm text-foreground font-body">Automatic retry &amp; fallback to the next provider in your chain</span>
+          </li>
+        </ul>
+      </div>
+      <div class="code-block p-5 md:p-6">
+        <div class="flex items-center gap-1.5 mb-4">
+          <span class="h-3 w-3 rounded-full bg-red-400/80"></span>
+          <span class="h-3 w-3 rounded-full bg-yellow-400/80"></span>
+          <span class="h-3 w-3 rounded-full bg-green-400/80"></span>
+          <span class="ml-3 text-xs text-white/30">quickstart.py</span>
+        </div>
+        <pre class="whitespace-pre"><span class="cm"># Before: call OpenAI directly</span>
+<span class="kw">from</span> openai <span class="kw">import</span> OpenAI
+
+client <span class="op">=</span> <span class="fn">OpenAI</span>(
+  api_key<span class="op">=</span><span class="str">"sk-..."</span>,
+  base_url<span class="op">=</span><span class="str">"https://api.openai.com/v1"</span>
+)
+
+<span class="cm"># After: route through DodoRouter</span>
+client <span class="op">=</span> <span class="fn">OpenAI</span>(
+  api_key<span class="op">=</span><span class="str">"dr-..."</span>,
+  base_url<span class="op">=</span><span class="str">"https://api.dodorouter.com/v1"</span>
+)
+
+<span class="cm"># That's it. Same SDK, same types.</span>
+resp <span class="op">=</span> client.chat.completions.<span class="fn">create</span>(
+  model<span class="op">=</span><span class="str">"my-production-router"</span>,
+  messages<span class="op">=</span>[
+    {<span class="str">"role"</span>: <span class="str">"user"</span>,
+     <span class="str">"content"</span>: <span class="str">"Hello!"</span>}
+  ],
+  stream<span class="op">=</span><span class="kw">True</span>
+)</pre>
       </div>
     </div>
   </div>
 </section>
 
-{# ──────────────────────────────────────────────
-   TRUST BAR
-   ────────────────────────────────────────────── #}
-<section class="relative border-y-2 border-ink-200 bg-cream-100 py-12">
-  <div class="mx-auto max-w-6xl px-6 text-center">
-    <p class="text-sm font-bold text-ink-500">Configure once in code. Manage everything from the UI. Zero redeployments.</p>
-  </div>
-</section>
-
-{# ──────────────────────────────────────────────
-   FEATURES SECTION - Bento grid with sticker cards
-   ────────────────────────────────────────────── #}
-<section id="features" class="relative py-24 md:py-32">
-  <div class="absolute inset-0 -z-10 bg-cream-50"></div>
-  <div class="relative mx-auto max-w-6xl px-6">
-    <div class="text-center">
-      <p class="text-sm font-extrabold uppercase tracking-widest text-amber-500">Features</p>
-      <h2 class="mt-4 text-3xl font-black tracking-tight text-ink-950 sm:text-4xl lg:text-5xl">Configure once in code.<br>Manage everything in the UI.</h2>
-      <p class="mx-auto mt-4 max-w-2xl text-lg text-ink-600">Route requests across providers, automatically fall back on failures, and reorder your chain on the fly &mdash; all from the dashboard.</p>
+{# ─────────────────────────────────────────────
+   SECTION 3 — Features
+   ───────────────────────────────────────────── #}
+<section id="features" class="section-padding md:section-padding-md bg-secondary/40">
+  <div class="mx-auto max-w-6xl px-6 md:px-12 lg:px-20">
+    <div class="text-center max-w-2xl mx-auto">
+      <p class="text-sm font-semibold tracking-wide text-accent font-body">Features</p>
+      <h2 class="mt-3 font-display text-3xl md:text-4xl lg:text-5xl leading-[1.05] tracking-tight text-foreground">
+        Everything between your app and the model
+      </h2>
+      <p class="mt-4 text-base text-muted-foreground leading-relaxed font-body">
+        One proxy to manage routing, fallbacks, cost tracking, and observability across every LLM provider.
+      </p>
     </div>
 
-    <div class="mt-20 grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+    <div class="mt-14 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
       {# Feature 1 #}
-      <div class="card-hover group rounded-3xl bg-white p-8">
-        <div class="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-amber-100 text-amber-600 transition-all group-hover:bg-amber-200 group-hover:scale-110">
-          <svg class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M7.5 21L3 16.5m0 0L7.5 12M3 16.5h13.5m0-13.5L21 7.5m0 0L16.5 12M21 7.5H7.5" /></svg>
+      <div class="feature-card">
+        <div class="flex h-10 w-10 items-center justify-center rounded-xl bg-accent/10">
+          <svg class="h-5 w-5 text-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 13.5l10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75z" /></svg>
         </div>
-        <h3 class="mt-5 text-lg font-extrabold text-ink-950">Automatic Fallback Chain</h3>
-        <p class="mt-2 text-sm leading-relaxed text-ink-600">Configure an ordered list of providers and models. If one fails (rate limit, outage, timeout), the next takes over automatically.</p>
+        <h3 class="mt-4 text-base font-semibold text-foreground font-body">Automatic Fallback</h3>
+        <p class="mt-2 text-sm text-muted-foreground leading-relaxed font-body">Provider goes down? DodoRouter instantly retries on the next model in your chain. Your users never see an error.</p>
       </div>
 
       {# Feature 2 #}
-      <div class="card-hover group rounded-3xl bg-white p-8">
-        <div class="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-sky-100 text-sky-600 transition-all group-hover:bg-sky-200 group-hover:scale-110">
-          <svg class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 13.5l10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75z" /></svg>
+      <div class="feature-card">
+        <div class="flex h-10 w-10 items-center justify-center rounded-xl bg-accent/10">
+          <svg class="h-5 w-5 text-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M17.25 6.75L22.5 12l-5.25 5.25m-10.5 0L1.5 12l5.25-5.25m7.5-3l-4.5 16.5" /></svg>
         </div>
-        <h3 class="mt-5 text-lg font-extrabold text-ink-950">Streaming Support</h3>
-        <p class="mt-2 text-sm leading-relaxed text-ink-600">Full SSE streaming with partial content preservation. If a stream fails mid-way, the next provider continues from where it left off.</p>
+        <h3 class="mt-4 text-base font-semibold text-foreground font-body">OpenAI-Compatible</h3>
+        <p class="mt-2 text-sm text-muted-foreground leading-relaxed font-body">Drop-in replacement. Use the same OpenAI SDK, same request shapes, same response format. No vendor lock-in.</p>
       </div>
 
-      {# Feature 3 - UI Management (HERO FEATURE) #}
-      <div class="card-hover group rounded-3xl bg-amber-50 border-2 border-amber-300 p-8 lg:col-span-2">
-        <div class="flex flex-col sm:flex-row sm:items-start gap-6">
-          <div class="inline-flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-amber-400 text-ink-950 transition-all group-hover:bg-amber-300 group-hover:scale-110 shadow-lg shadow-amber-200/40">
-            <svg class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M10.5 6h9.75M10.5 6a1.5 1.5 0 11-3 0m3 0a1.5 1.5 0 10-3 0M3.75 6H7.5m3 12h9.75m-9.75 0a1.5 1.5 0 01-3 0m3 0a1.5 1.5 0 00-3 0m-3.75 0H7.5m9-6h3.75m-3.75 0a1.5 1.5 0 01-3 0m3 0a1.5 1.5 0 00-3 0m-9.75 0h9.75" /></svg>
-          </div>
-          <div>
-            <h3 class="text-lg font-extrabold text-ink-950">Zero-Code Provider Management</h3>
-            <p class="mt-2 text-sm leading-relaxed text-ink-600">Change the <code class="rounded-lg bg-cream-200 px-1.5 py-0.5 text-xs font-bold text-amber-700">base_url</code> in your code <strong class="text-ink-900">once</strong>. After that, everything is managed from the dashboard &mdash; swap providers, reorder your fallback chain, change models, adjust temperature &mdash; all without redeploying your app.</p>
-            <div class="mt-4 flex flex-wrap gap-2">
-              <span class="inline-flex items-center gap-1.5 rounded-full bg-go-400/15 px-3 py-1 text-xs font-bold text-go-600">
-                <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
-                Swap providers on the fly
-              </span>
-              <span class="inline-flex items-center gap-1.5 rounded-full bg-go-400/15 px-3 py-1 text-xs font-bold text-go-600">
-                <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
-                Reorder fallback chain
-              </span>
-              <span class="inline-flex items-center gap-1.5 rounded-full bg-go-400/15 px-3 py-1 text-xs font-bold text-go-600">
-                <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
-                No redeploy needed
-              </span>
-              <span class="inline-flex items-center gap-1.5 rounded-full bg-go-400/15 px-3 py-1 text-xs font-bold text-go-600">
-                <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
-                OpenAI-compatible
-              </span>
-            </div>
-          </div>
+      {# Feature 3 #}
+      <div class="feature-card">
+        <div class="flex h-10 w-10 items-center justify-center rounded-xl bg-accent/10">
+          <svg class="h-5 w-5 text-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 3v11.25A2.25 2.25 0 006 16.5h2.25M3.75 3h-1.5m1.5 0h16.5m0 0h1.5m-1.5 0v11.25A2.25 2.25 0 0118 16.5h-2.25m-7.5 0h7.5m-7.5 0l-1 3m8.5-3l1 3m0 0l.5 1.5m-.5-1.5h-9.5m0 0l-.5 1.5" /></svg>
         </div>
+        <h3 class="mt-4 text-base font-semibold text-foreground font-body">Streaming Support</h3>
+        <p class="mt-2 text-sm text-muted-foreground leading-relaxed font-body">Full SSE streaming passthrough. Tokens arrive in real-time just like calling the provider directly.</p>
       </div>
 
       {# Feature 4 #}
-      <div class="card-hover group rounded-3xl bg-white p-8">
-        <div class="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-go-400/20 text-go-600 transition-all group-hover:bg-go-400/30 group-hover:scale-110">
-          <svg class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 013 19.875v-6.75zM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V8.625zM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V4.125z" /></svg>
+      <div class="feature-card">
+        <div class="flex h-10 w-10 items-center justify-center rounded-xl bg-accent/10">
+          <svg class="h-5 w-5 text-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.324.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 011.37.49l1.296 2.247a1.125 1.125 0 01-.26 1.431l-1.003.827c-.293.24-.438.613-.431.992a6.759 6.759 0 010 .255c-.007.378.138.75.43.99l1.005.828c.424.35.534.954.26 1.43l-1.298 2.247a1.125 1.125 0 01-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.57 6.57 0 01-.22.128c-.331.183-.581.495-.644.869l-.213 1.28c-.09.543-.56.941-1.11.941h-2.594c-.55 0-1.02-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 01-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 01-1.369-.49l-1.297-2.247a1.125 1.125 0 01.26-1.431l1.004-.827c.292-.24.437-.613.43-.992a6.932 6.932 0 010-.255c.007-.378-.138-.75-.43-.99l-1.004-.828a1.125 1.125 0 01-.26-1.43l1.297-2.247a1.125 1.125 0 011.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.087.22-.128.332-.183.582-.495.644-.869l.214-1.281z" /><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
         </div>
-        <h3 class="mt-5 text-lg font-extrabold text-ink-950">Real-Time Dashboard</h3>
-        <p class="mt-2 text-sm leading-relaxed text-ink-600">Monitor success rates, latency percentiles (p50/p95/p99), token usage, and per-model leaderboards. Auto-refreshes live.</p>
+        <h3 class="mt-4 text-base font-semibold text-foreground font-body">Dashboard Control</h3>
+        <p class="mt-2 text-sm text-muted-foreground leading-relaxed font-body">Reorder chains, swap providers, adjust models, and manage API keys from a real-time dashboard &mdash; no redeploy needed.</p>
       </div>
 
       {# Feature 5 #}
-      <div class="card-hover group rounded-3xl bg-white p-8">
-        <div class="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-amber-100 text-amber-600 transition-all group-hover:bg-amber-200 group-hover:scale-110">
-          <svg class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+      <div class="feature-card">
+        <div class="flex h-10 w-10 items-center justify-center rounded-xl bg-accent/10">
+          <svg class="h-5 w-5 text-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M2.25 18.75a60.07 60.07 0 0115.797 2.101c.727.198 1.453-.342 1.453-1.096V18.75M3.75 4.5v.75A.75.75 0 013 6h-.75m0 0v-.375c0-.621.504-1.125 1.125-1.125H20.25M2.25 6v9m18-10.5v.75c0 .414.336.75.75.75h.75m-1.5-1.5h.375c.621 0 1.125.504 1.125 1.125v9.75c0 .621-.504 1.125-1.125 1.125h-.375m1.5-1.5H21a.75.75 0 00-.75.75v.75m0 0H3.75m0 0h-.375a1.125 1.125 0 01-1.125-1.125V15m1.5 1.5v-.75A.75.75 0 003 15h-.75M15 10.5a3 3 0 11-6 0 3 3 0 016 0zm3 0h.008v.008H18V10.5zm-12 0h.008v.008H6V10.5z" /></svg>
         </div>
-        <h3 class="mt-5 text-lg font-extrabold text-ink-950">Detailed Request Logs</h3>
-        <p class="mt-2 text-sm leading-relaxed text-ink-600">Every request is logged with full routing chain details, per-step latency, token counts, cost tracking, request/response bodies, and tool calls. Large payloads are smart-truncated with clear indicators, and message content is expandable for easy inspection.</p>
+        <h3 class="mt-4 text-base font-semibold text-foreground font-body">Cost Tracking</h3>
+        <p class="mt-2 text-sm text-muted-foreground leading-relaxed font-body">See spend per provider, per model, per router. Token counts and dollar costs broken down in real-time.</p>
       </div>
 
-      {# Feature 6 - Smart Log Inspection (NEW) #}
-      <div class="card-hover group rounded-3xl bg-amber-50 border-2 border-amber-300 p-8">
-        <div class="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-amber-400 text-ink-950 transition-all group-hover:bg-amber-300 group-hover:scale-110 shadow-lg shadow-amber-200/40">
-          <svg class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" /><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+      {# Feature 6 #}
+      <div class="feature-card">
+        <div class="flex h-10 w-10 items-center justify-center rounded-xl bg-accent/10">
+          <svg class="h-5 w-5 text-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 5.25a3 3 0 013 3m3 0a6 6 0 01-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25v2.25H6v2.25H2.25v-2.818c0-.597.237-1.17.659-1.591l6.499-6.499c.404-.404.527-1 .43-1.563A6 6 0 1121.75 8.25z" /></svg>
         </div>
-        <h3 class="mt-5 text-lg font-extrabold text-ink-950">Smart Log Inspection</h3>
-        <p class="mt-2 text-sm leading-relaxed text-ink-600">Inspect request and response bodies with expandable message cards. Large payloads are smart-truncated with clear visual warnings. Navigate seamlessly between sessions and individual requests.</p>
-        <div class="mt-4 flex flex-wrap gap-2">
-          <span class="inline-flex items-center gap-1.5 rounded-full bg-go-400/15 px-3 py-1 text-xs font-bold text-go-600">
-            <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
-            Expandable messages
-          </span>
-          <span class="inline-flex items-center gap-1.5 rounded-full bg-go-400/15 px-3 py-1 text-xs font-bold text-go-600">
-            <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
-            Truncation warnings
-          </span>
-          <span class="inline-flex items-center gap-1.5 rounded-full bg-go-400/15 px-3 py-1 text-xs font-bold text-go-600">
-            <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
-            Session navigation
-          </span>
-        </div>
-      </div>
-
-      {# Feature 7 #}
-      <div class="card-hover group rounded-3xl bg-white p-8">
-        <div class="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-rose-100 text-rose-500 transition-all group-hover:bg-rose-200 group-hover:scale-110">
-          <svg class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z" /></svg>
-        </div>
-        <h3 class="mt-5 text-lg font-extrabold text-ink-950">Secure Key Management</h3>
-        <p class="mt-2 text-sm leading-relaxed text-ink-600">Your provider API keys are stored in Infisical (external secrets manager), never in the database. Router keys are SHA256-hashed with a pepper.</p>
-      </div>
-
-      {# Feature 8 #}
-      <div class="card-hover group rounded-3xl bg-white p-8">
-        <div class="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-sky-100 text-sky-500 transition-all group-hover:bg-sky-200 group-hover:scale-110">
-          <svg class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M6.75 7.5l3 2.25-3 2.25m4.5 0h3m-9 8.25h13.5A2.25 2.25 0 0021 18V6a2.25 2.25 0 00-2.25-2.25H5.25A2.25 2.25 0 003 6v12a2.25 2.25 0 002.25 2.25z" /></svg>
-        </div>
-        <h3 class="mt-5 text-lg font-extrabold text-ink-950">Tool Calls &amp; Thinking</h3>
-        <p class="mt-2 text-sm leading-relaxed text-ink-600">Full support for function/tool calling and extended thinking modes. Automatic detection and normalization across providers.</p>
-      </div>
-
-      {# Feature 9 #}
-      <div class="card-hover group rounded-3xl bg-white p-8">
-        <div class="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-amber-100 text-amber-600 transition-all group-hover:bg-amber-200 group-hover:scale-110">
-          <svg class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M2.25 18.75a60.07 60.07 0 0115.797 2.101c.727.198 1.453-.342 1.453-1.096V18.75M3.75 4.5v.75A.75.75 0 013 6h-.75m0 0v-.375c0-.621.504-1.125 1.125-1.125H20.25M2.25 6v9m18-10.5v.75c0 .414.336.75.75.75h.75m-1.5-1.5h.375c.621 0 1.125.504 1.125 1.125v9.75c0 .621-.504 1.125-1.125 1.125h-.375m1.5-1.5H21a.75.75 0 00-.75.75v.75m0 0H3.75m0 0h-.375a1.125 1.125 0 01-1.125-1.125V15m1.5 1.5v-.75A.75.75 0 003 15h-.75M15 10.5a3 3 0 11-6 0 3 3 0 016 0zm3 0h.008v.008H18V10.5zm-12 0h.008v.008H6V10.5z" /></svg>
-        </div>
-        <h3 class="mt-5 text-lg font-extrabold text-ink-950">Cost Tracking</h3>
-        <p class="mt-2 text-sm leading-relaxed text-ink-600">Automatic cost estimation per request in USD. Track spend by provider, model, and router with aggregated analytics.</p>
-      </div>
-
-      {# Feature 10 #}
-      <div class="card-hover group rounded-3xl bg-white p-8">
-        <div class="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-go-400/20 text-go-600 transition-all group-hover:bg-go-400/30 group-hover:scale-110">
-          <svg class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.455 2.456L21.75 6l-1.036.259a3.375 3.375 0 00-2.455 2.456z" /></svg>
-        </div>
-        <h3 class="mt-5 text-lg font-extrabold text-ink-950">Real-Time Log Streaming</h3>
-        <p class="mt-2 text-sm leading-relaxed text-ink-600">Watch requests flow through your routers in real-time via WebSockets. Instant visibility into routing decisions and fallback events.</p>
+        <h3 class="mt-4 text-base font-semibold text-foreground font-body">Tool Call Support</h3>
+        <p class="mt-2 text-sm text-muted-foreground leading-relaxed font-body">Function calling and tool use pass through seamlessly. Your agents keep working even when providers switch mid-chain.</p>
       </div>
     </div>
   </div>
 </section>
 
-{# ──────────────────────────────────────────────
-   DASHBOARD PREVIEW - Dark sticker-style mockup
-   ────────────────────────────────────────────── #}
-<section id="screenshots" class="relative py-24 md:py-32">
-  <div class="absolute inset-0 -z-10 bg-cream-100"></div>
-  <div class="relative mx-auto max-w-6xl px-6">
-    <div class="text-center">
-      <p class="text-sm font-extrabold uppercase tracking-widest text-amber-500">See It In Action</p>
-      <h2 class="mt-4 text-3xl font-black tracking-tight text-ink-950 sm:text-4xl lg:text-5xl">Real-time observability built in</h2>
-      <p class="mx-auto mt-4 max-w-2xl text-lg text-ink-600">Every request is tracked with detailed logs, routing chain visualization, and live analytics &mdash; no extra setup required.</p>
+{# ─────────────────────────────────────────────
+   SECTION 4 — Providers
+   ───────────────────────────────────────────── #}
+<section id="providers" class="section-padding md:section-padding-md bg-background">
+  <div class="mx-auto max-w-6xl px-6 md:px-12 lg:px-20">
+    <div class="grid items-center gap-12 lg:grid-cols-2 lg:gap-20">
+      <div class="order-2 lg:order-1">
+        <div class="grid grid-cols-2 gap-3 sm:grid-cols-3">
+          <div class="provider-chip">
+            <span class="flex h-7 w-7 items-center justify-center rounded-lg bg-emerald-100 text-xs font-bold text-emerald-700">O</span>
+            OpenAI
+          </div>
+          <div class="provider-chip">
+            <span class="flex h-7 w-7 items-center justify-center rounded-lg bg-blue-100 text-xs font-bold text-blue-700">A</span>
+            Anthropic
+          </div>
+          <div class="provider-chip">
+            <span class="flex h-7 w-7 items-center justify-center rounded-lg bg-sky-100 text-xs font-bold text-sky-700">M</span>
+            Moonshot
+          </div>
+          <div class="provider-chip">
+            <span class="flex h-7 w-7 items-center justify-center rounded-lg bg-amber-100 text-xs font-bold text-amber-700">Z</span>
+            z.ai
+          </div>
+          <div class="provider-chip">
+            <span class="flex h-7 w-7 items-center justify-center rounded-lg bg-purple-100 text-xs font-bold text-purple-700">D</span>
+            DeepSeek
+          </div>
+          <div class="provider-chip">
+            <span class="flex h-7 w-7 items-center justify-center rounded-lg bg-orange-100 text-xs font-bold text-orange-700">G</span>
+            Google
+          </div>
+          <div class="provider-chip">
+            <span class="flex h-7 w-7 items-center justify-center rounded-lg bg-indigo-100 text-xs font-bold text-indigo-700">X</span>
+            xAI
+          </div>
+          <div class="provider-chip">
+            <span class="flex h-7 w-7 items-center justify-center rounded-lg bg-rose-100 text-xs font-bold text-rose-700">M</span>
+            Mistral
+          </div>
+          <div class="provider-chip border-dashed border-muted-foreground/30 text-muted-foreground">
+            <span class="flex h-7 w-7 items-center justify-center rounded-lg bg-secondary text-xs text-muted-foreground">+</span>
+            More soon
+          </div>
+        </div>
+      </div>
+      <div class="order-1 lg:order-2">
+        <p class="text-sm font-semibold tracking-wide text-accent font-body">Providers</p>
+        <h2 class="mt-3 font-display text-3xl md:text-4xl lg:text-5xl leading-[1.05] tracking-tight text-foreground">
+          Any model.<br/>One endpoint.
+        </h2>
+        <p class="mt-5 text-base md:text-lg text-muted-foreground leading-relaxed font-body max-w-lg">
+          Route across OpenAI, Anthropic, Google, DeepSeek, Moonshot, and more through a single unified API. Mix and match providers in your chains to optimize for cost, speed, and reliability.
+        </p>
+        <div class="mt-6 flex items-center gap-2">
+          <span class="rounded-full bg-go/10 px-3 py-1 text-xs font-medium text-go font-body">GPT-4o</span>
+          <span class="rounded-full bg-go/10 px-3 py-1 text-xs font-medium text-go font-body">Claude 4</span>
+          <span class="rounded-full bg-go/10 px-3 py-1 text-xs font-medium text-go font-body">Gemini 2.5</span>
+          <span class="rounded-full bg-go/10 px-3 py-1 text-xs font-medium text-go font-body hidden sm:inline-flex">DeepSeek V3</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+{# ─────────────────────────────────────────────
+   SECTION 5 — Observability / Analytics
+   ───────────────────────────────────────────── #}
+<section id="analytics" class="section-padding md:section-padding-md bg-secondary/40">
+  <div class="mx-auto max-w-6xl px-6 md:px-12 lg:px-20">
+    <div class="text-center max-w-2xl mx-auto">
+      <p class="text-sm font-semibold tracking-wide text-accent font-body">Observability</p>
+      <h2 class="mt-3 font-display text-3xl md:text-4xl lg:text-5xl leading-[1.05] tracking-tight text-foreground">
+        See everything. Debug anything.
+      </h2>
+      <p class="mt-4 text-base text-muted-foreground leading-relaxed font-body">
+        Full request logs, latency breakdowns, token counts, and cost attribution across every provider in your chain.
+      </p>
     </div>
 
-    {# Dashboard mockup #}
-    <div class="mt-16">
-      <div class="card-dark rounded-3xl bg-ink-950 p-1.5 shadow-xl">
-        <div class="rounded-[20px] bg-ink-950 p-6 sm:p-8">
-          <div class="mb-5 flex items-center gap-3">
-            <div class="flex h-9 w-9 items-center justify-center rounded-xl bg-amber-400/20 text-amber-400">
-              <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 013 19.875v-6.75z" /></svg>
-            </div>
-            <h3 class="text-lg font-extrabold text-white">Dashboard</h3>
-            <span class="ml-auto flex items-center gap-1.5 rounded-full status-go px-3 py-1 text-xs font-bold">
-              <span class="h-2 w-2 rounded-full bg-go-500"></span>
+    <div class="mt-14">
+      <div class="rounded-2xl border border-border bg-white p-4 md:p-6 shadow-[0_8px_40px_rgba(0,0,0,0.04)]">
+        {# Mini dashboard mockup #}
+        <div class="flex items-center justify-between mb-5">
+          <div>
+            <p class="text-sm font-semibold text-foreground font-body">Request Analytics</p>
+            <p class="text-xs text-muted-foreground font-body">Last 7 days &middot; all routers</p>
+          </div>
+          <div class="flex items-center gap-2">
+            <span class="flex items-center gap-1 rounded-full bg-green-50 px-2.5 py-1 text-xs font-semibold text-go font-body">
+              <span class="h-1.5 w-1.5 rounded-full bg-go"></span>
               Live
             </span>
           </div>
-          <div class="grid grid-cols-2 gap-3 md:grid-cols-4">
-            <div class="rounded-2xl border-2 border-ink-800 bg-ink-900 p-4">
-              <p class="text-xs font-bold text-ink-400">Total Requests</p>
-              <p class="mt-1 text-2xl font-black text-white">12,847</p>
-              <p class="mt-0.5 text-xs font-bold text-go-400">+14.2%</p>
-            </div>
-            <div class="rounded-2xl border-2 border-ink-800 bg-ink-900 p-4">
-              <p class="text-xs font-bold text-ink-400">Success Rate</p>
-              <p class="mt-1 text-2xl font-black text-white">99.7%</p>
-              <p class="mt-0.5 text-xs font-bold text-ink-400">23 fallbacks recovered</p>
-            </div>
-            <div class="rounded-2xl border-2 border-ink-800 bg-ink-900 p-4">
-              <p class="text-xs font-bold text-ink-400">p95 Latency</p>
-              <p class="mt-1 text-2xl font-black text-white">340ms</p>
-              <p class="mt-0.5 text-xs font-bold text-go-400">-8%</p>
-            </div>
-            <div class="rounded-2xl border-2 border-ink-800 bg-ink-900 p-4">
-              <p class="text-xs font-bold text-ink-400">Total Tokens</p>
-              <p class="mt-1 text-2xl font-black text-white">4.2M</p>
-              <p class="mt-0.5 text-xs font-bold text-ink-400">$12.84 cost</p>
-            </div>
+        </div>
+
+        {# Stat cards #}
+        <div class="grid grid-cols-2 gap-3 md:grid-cols-4 mb-5">
+          <div class="rounded-xl border border-border bg-secondary/30 p-4">
+            <p class="text-xs font-medium text-muted-foreground font-body">Total Requests</p>
+            <p class="mt-1 text-xl font-semibold text-foreground font-body">89,241</p>
+            <p class="mt-1 text-xs font-medium text-go font-body">+23.4%</p>
           </div>
-          {# Mini chart #}
-          <div class="mt-4 flex h-28 items-end gap-1 rounded-2xl border-2 border-ink-800 bg-ink-900 p-4">
-            <div class="w-full flex items-end gap-0.5 h-16">
-              <div class="flex-1 rounded-t-lg bg-amber-400/20" style="height:45%"></div>
-              <div class="flex-1 rounded-t-lg bg-amber-400/25" style="height:60%"></div>
-              <div class="flex-1 rounded-t-lg bg-amber-400/30" style="height:55%"></div>
-              <div class="flex-1 rounded-t-lg bg-amber-400/35" style="height:70%"></div>
-              <div class="flex-1 rounded-t-lg bg-amber-400/40" style="height:65%"></div>
-              <div class="flex-1 rounded-t-lg bg-amber-400/45" style="height:80%"></div>
-              <div class="flex-1 rounded-t-lg bg-amber-400/50" style="height:75%"></div>
-              <div class="flex-1 rounded-t-lg bg-amber-400/55" style="height:90%"></div>
-              <div class="flex-1 rounded-t-lg bg-amber-400/60" style="height:85%"></div>
-              <div class="flex-1 rounded-t-lg bg-amber-400/65" style="height:95%"></div>
-              <div class="flex-1 rounded-t-lg bg-amber-400/80" style="height:100%"></div>
-              <div class="flex-1 rounded-t-lg bg-amber-400/70" style="height:88%"></div>
-            </div>
+          <div class="rounded-xl border border-border bg-secondary/30 p-4">
+            <p class="text-xs font-medium text-muted-foreground font-body">Success Rate</p>
+            <p class="mt-1 text-xl font-semibold text-foreground font-body">99.8%</p>
+            <p class="mt-1 text-xs font-medium text-muted-foreground font-body">47 fallbacks recovered</p>
+          </div>
+          <div class="rounded-xl border border-border bg-secondary/30 p-4">
+            <p class="text-xs font-medium text-muted-foreground font-body">Avg Latency</p>
+            <p class="mt-1 text-xl font-semibold text-foreground font-body">312ms</p>
+            <p class="mt-1 text-xs font-medium text-go font-body">-12% vs last week</p>
+          </div>
+          <div class="rounded-xl border border-border bg-secondary/30 p-4">
+            <p class="text-xs font-medium text-muted-foreground font-body">Total Spend</p>
+            <p class="mt-1 text-xl font-semibold text-foreground font-body">$84.12</p>
+            <p class="mt-1 text-xs font-medium text-muted-foreground font-body">28.4M tokens</p>
           </div>
         </div>
-      </div>
-    </div>
 
-    {# Logs mockup #}
-    <div class="mt-6">
-      <div class="card-dark rounded-3xl bg-ink-950 p-1.5 shadow-xl">
-        <div class="rounded-[20px] bg-ink-950 p-6 sm:p-8">
-          <div class="mb-5 flex items-center gap-3">
-            <div class="flex h-9 w-9 items-center justify-center rounded-xl bg-amber-400/20 text-amber-400">
-              <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-            </div>
-            <h3 class="text-lg font-extrabold text-white">Request Logs</h3>
-            <span class="ml-auto flex items-center gap-1.5 rounded-full status-slow px-3 py-1 text-xs font-bold">
-              <span class="h-2 w-2 rounded-full bg-slow-500 animate-pulse"></span>
-              Streaming
-            </span>
-          </div>
-          {# Mock log table #}
-          <div class="overflow-hidden rounded-2xl border-2 border-ink-800">
-            <table class="w-full text-left text-sm">
-              <thead class="bg-ink-900">
-                <tr>
-                  <th class="px-4 py-3 text-xs font-bold text-ink-400">Time</th>
-                  <th class="px-4 py-3 text-xs font-bold text-ink-400">Status</th>
-                  <th class="px-4 py-3 text-xs font-bold text-ink-400">Provider / Model</th>
-                  <th class="px-4 py-3 text-xs font-bold text-ink-400 hidden sm:table-cell">Type</th>
-                  <th class="px-4 py-3 text-xs font-bold text-ink-400 hidden md:table-cell">Tokens</th>
-                  <th class="px-4 py-3 text-xs font-bold text-ink-400">Latency</th>
-                </tr>
-              </thead>
-              <tbody class="divide-y divide-ink-800">
-                <tr class="hover:bg-ink-900/50 transition-colors">
-                  <td class="px-4 py-3 font-mono text-xs text-ink-400">14:23:01</td>
-                  <td class="px-4 py-3"><span class="status-go rounded-lg px-2.5 py-1 text-xs font-bold">success</span></td>
-                  <td class="px-4 py-3 font-semibold text-ink-200">z.ai / GLM-5</td>
-                  <td class="px-4 py-3 hidden sm:table-cell"><span class="rounded-lg bg-ink-800 px-2 py-0.5 text-xs font-bold text-ink-300">Chat</span></td>
-                  <td class="px-4 py-3 font-mono text-xs text-ink-400 hidden md:table-cell">1,247</td>
-                  <td class="px-4 py-3 font-mono text-xs text-ink-400">285ms</td>
-                </tr>
-                <tr class="hover:bg-ink-900/50 transition-colors">
-                  <td class="px-4 py-3 font-mono text-xs text-ink-400">14:22:58</td>
-                  <td class="px-4 py-3"><span class="status-slow rounded-lg px-2.5 py-1 text-xs font-bold">fallback</span></td>
-                  <td class="px-4 py-3">
-                    <span class="text-xs"><span class="line-through text-stop-400/60">z.ai</span> <span class="text-ink-600">&rarr;</span> <span class="font-semibold text-ink-200">Moonshot / Kimi-K2</span></span>
-                  </td>
-                  <td class="px-4 py-3 hidden sm:table-cell"><span class="rounded-lg bg-amber-400/15 px-2 py-0.5 text-xs font-bold text-amber-400">Tool+</span></td>
-                  <td class="px-4 py-3 font-mono text-xs text-ink-400 hidden md:table-cell">892</td>
-                  <td class="px-4 py-3 font-mono text-xs text-ink-400">1,240ms</td>
-                </tr>
-                <tr class="hover:bg-ink-900/50 transition-colors">
-                  <td class="px-4 py-3 font-mono text-xs text-ink-400">14:22:55</td>
-                  <td class="px-4 py-3"><span class="status-go rounded-lg px-2.5 py-1 text-xs font-bold">success</span></td>
-                  <td class="px-4 py-3 font-semibold text-ink-200">z.ai / GLM-5.1</td>
-                  <td class="px-4 py-3 hidden sm:table-cell"><span class="rounded-lg bg-ink-800 px-2 py-0.5 text-xs font-bold text-ink-300">Chat</span></td>
-                  <td class="px-4 py-3 font-mono text-xs text-ink-400 hidden md:table-cell">2,103</td>
-                  <td class="px-4 py-3 font-mono text-xs text-ink-400">412ms</td>
-                </tr>
-                <tr class="hover:bg-ink-900/50 transition-colors">
-                  <td class="px-4 py-3 font-mono text-xs text-ink-400">14:22:51</td>
-                  <td class="px-4 py-3"><span class="status-go rounded-lg px-2.5 py-1 text-xs font-bold">success</span></td>
-                  <td class="px-4 py-3 font-semibold text-ink-200">Moonshot / Kimi-K2.5</td>
-                  <td class="px-4 py-3 hidden sm:table-cell"><span class="rounded-lg bg-ink-800 px-2 py-0.5 text-xs font-bold text-ink-300">Tool</span></td>
-                  <td class="px-4 py-3 font-mono text-xs text-ink-400 hidden md:table-cell">567</td>
-                  <td class="px-4 py-3 font-mono text-xs text-ink-400">198ms</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    {# Request detail mockup #}
-    <div class="mt-6">
-      <div class="card-dark rounded-3xl bg-ink-950 p-1.5 shadow-xl">
-        <div class="rounded-[20px] bg-ink-950 p-6 sm:p-8">
-          <div class="mb-5 flex items-center gap-3">
-            <div class="flex h-9 w-9 items-center justify-center rounded-xl bg-amber-400/20 text-amber-400">
-              <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" /></svg>
-            </div>
-            <h3 class="text-lg font-extrabold text-white">Request Detail</h3>
-            <code class="ml-2 rounded-lg bg-ink-800 px-2 py-0.5 text-xs font-bold text-ink-400">req_a3f8...</code>
-          </div>
-          <div class="grid gap-4 md:grid-cols-2">
-            {# Performance card #}
-            <div class="rounded-2xl border-2 border-ink-800 bg-ink-900 p-5">
-              <h4 class="text-sm font-extrabold text-white">Performance</h4>
-              <div class="mt-4 space-y-3 text-sm">
-                <div class="flex justify-between"><span class="text-ink-400">Total Latency</span><span class="font-mono font-bold text-ink-200">1,240ms</span></div>
-                <div class="flex justify-between"><span class="text-ink-400">Provider Time</span><span class="font-mono font-bold text-ink-200">1,195ms</span></div>
-                <div class="flex justify-between"><span class="text-ink-400">DodoRouter Overhead</span><span class="font-mono font-bold text-ink-200">45ms <span class="text-go-400 text-xs">(3.6%)</span></span></div>
-                <div class="flex justify-between"><span class="text-ink-400">Time to First Byte</span><span class="font-mono font-bold text-ink-200">180ms</span></div>
-                <div class="flex justify-between"><span class="text-ink-400">Prompt / Completion</span><span class="font-mono font-bold text-ink-200">412 / 480</span></div>
-              </div>
-            </div>
-            {# Routing chain card #}
-            <div class="rounded-2xl border-2 border-ink-800 bg-ink-900 p-5">
-              <h4 class="text-sm font-extrabold text-white">Routing Chain</h4>
-              <div class="mt-4 space-y-3">
-                <div class="rounded-xl border-l-4 border-stop-500 bg-stop-500/10 p-3">
-                  <div class="flex items-center justify-between text-sm">
-                    <div class="flex items-center gap-2">
-                      <span class="rounded-lg bg-ink-800 px-2 py-0.5 text-xs font-bold text-ink-300">1</span>
-                      <span class="font-bold text-ink-200">z.ai</span>
-                      <span class="text-ink-500">/ GLM-5</span>
-                    </div>
-                    <div class="flex items-center gap-2">
-                      <span class="status-stop rounded-lg px-2 py-0.5 text-xs font-bold">error</span>
-                      <span class="font-mono text-xs text-ink-400">520ms</span>
-                    </div>
-                  </div>
-                  <p class="mt-1.5 text-xs font-semibold text-stop-400">HTTP 429: Rate limit exceeded</p>
-                </div>
-                <div class="rounded-xl border-l-4 border-go-500 bg-go-500/10 p-3">
-                  <div class="flex items-center justify-between text-sm">
-                    <div class="flex items-center gap-2">
-                      <span class="rounded-lg bg-ink-800 px-2 py-0.5 text-xs font-bold text-ink-300">2</span>
-                      <span class="font-bold text-ink-200">Moonshot</span>
-                      <span class="text-ink-500">/ Kimi-K2</span>
-                    </div>
-                    <div class="flex items-center gap-2">
-                      <span class="status-go rounded-lg px-2 py-0.5 text-xs font-bold">success</span>
-                      <span class="font-mono text-xs text-ink-400">675ms</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  </div>
-</section>
-
-{# ──────────────────────────────────────────────
-   HOW IT WORKS - Clean numbered steps
-   ────────────────────────────────────────────── #}
-<section id="how-it-works" class="relative py-24 md:py-32">
-  <div class="absolute inset-0 -z-10 bg-cream-50 dot-pattern opacity-30"></div>
-  <div class="relative mx-auto max-w-6xl px-6">
-    <div class="text-center">
-      <p class="text-sm font-extrabold uppercase tracking-widest text-amber-500">How It Works</p>
-      <h2 class="mt-4 text-3xl font-black tracking-tight text-ink-950 sm:text-4xl lg:text-5xl">One code change.<br>Then it's all UI.</h2>
-    </div>
-
-    <div class="mt-20 grid gap-8 md:grid-cols-3">
-      <div class="card-hover rounded-3xl bg-white p-8 text-center">
-        <div class="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-amber-400 text-xl font-black text-ink-950 shadow-lg shadow-amber-200/50">1</div>
-        <h3 class="mt-6 text-lg font-extrabold text-ink-950">Add Your Provider Keys</h3>
-        <p class="mt-3 text-sm leading-relaxed text-ink-600">Register your API keys for z.ai, Moonshot, and more. Keys are stored securely in Infisical &mdash; never in the database.</p>
-      </div>
-      <div class="card-hover rounded-3xl bg-white p-8 text-center">
-        <div class="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-amber-400 text-xl font-black text-ink-950 shadow-lg shadow-amber-200/50">2</div>
-        <h3 class="mt-6 text-lg font-extrabold text-ink-950">Build Your Router in the UI</h3>
-        <p class="mt-3 text-sm leading-relaxed text-ink-600">Create a router, then add routing steps: pick provider, model, temperature, and drag to reorder your fallback chain. All from the dashboard.</p>
-      </div>
-      <div class="card-hover rounded-3xl border-2 border-amber-400 bg-amber-50 p-8 text-center relative">
-        <div class="absolute -top-3.5 left-1/2 -translate-x-1/2">
-          <span class="rounded-full bg-amber-400 px-4 py-1 text-xs font-black text-ink-950 shadow-lg shadow-amber-300/50">ONLY CODE CHANGE</span>
-        </div>
-        <div class="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-amber-400 text-xl font-black text-ink-950 shadow-lg shadow-amber-200/50">3</div>
-        <h3 class="mt-6 text-lg font-extrabold text-ink-950">Change 1 Line &amp; You're Done</h3>
-        <p class="mt-3 text-sm leading-relaxed text-ink-600">Update your OpenAI SDK's <code class="rounded-lg bg-cream-200 px-1.5 py-0.5 text-xs font-bold text-amber-700">base_url</code> to your router endpoint. That's it. From now on, <strong class="text-ink-900">every change happens in the dashboard</strong>.</p>
-      </div>
-    </div>
-
-    {# Fallback flow diagram #}
-    <div class="mt-16 card-hover rounded-3xl bg-white p-8">
-      <p class="mb-8 text-center text-sm font-extrabold uppercase tracking-widest text-ink-400">Fallback Flow</p>
-      <div class="flex flex-col items-center gap-3 md:flex-row md:justify-center md:gap-5">
-        <div class="rounded-2xl border-2 border-ink-200 bg-cream-100 px-6 py-4 text-center">
-          <p class="text-xs font-bold text-ink-500">Your App</p>
-          <p class="text-sm font-extrabold text-ink-950">OpenAI SDK</p>
-        </div>
-        <svg class="h-6 w-6 text-amber-400 rotate-90 md:rotate-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M13 7l5 5m0 0l-5 5m5-5H6" /></svg>
-        <div class="rounded-2xl border-2 border-amber-400 bg-amber-50 px-6 py-4 text-center">
-          <p class="text-xs font-bold text-amber-600">Dodo Router</p>
-          <p class="text-sm font-extrabold text-amber-700">Proxy + Fallback</p>
-        </div>
-        <svg class="h-6 w-6 text-amber-400 rotate-90 md:rotate-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M13 7l5 5m0 0l-5 5m5-5H6" /></svg>
-        <div class="flex flex-col gap-2">
-          <div class="rounded-xl border-2 border-go-500/30 bg-go-400/10 px-5 py-2.5 text-center">
-            <p class="text-xs font-bold text-go-600">z.ai / GLM-5</p>
-          </div>
-          <div class="text-center text-xs font-bold text-ink-400">or fallback</div>
-          <div class="rounded-xl border-2 border-sky-400/30 bg-sky-400/10 px-5 py-2.5 text-center">
-            <p class="text-xs font-bold text-sky-600">Moonshot / Kimi-K2</p>
-          </div>
-        </div>
-      </div>
-    </div>
-  </div>
-</section>
-
-{# ──────────────────────────────────────────────
-   DASHBOARD MANAGEMENT - Show the router config UI
-   ────────────────────────────────────────────── #}
-<section id="dashboard-management" class="relative py-24 md:py-32">
-  <div class="absolute inset-0 -z-10 bg-cream-100"></div>
-  <div class="relative mx-auto max-w-6xl px-6">
-    <div class="text-center">
-      <p class="text-sm font-extrabold uppercase tracking-widest text-amber-500">Dashboard Management</p>
-      <h2 class="mt-4 text-3xl font-black tracking-tight text-ink-950 sm:text-4xl lg:text-5xl">Your code stays the same.<br>The dashboard does the rest.</h2>
-      <p class="mx-auto mt-4 max-w-2xl text-lg text-ink-600">After the initial URL change, <strong class=\"text-ink-900\">everything is configured from the UI</strong>. Swap providers, reorder chains, change models &mdash; no redeploy, no code changes.</p>
-    </div>
-
-    {# Router config UI mockup #}
-    <div class="mt-16">
-      <div class="card-dark rounded-3xl bg-ink-950 p-1.5 shadow-xl">
-        <div class="rounded-[20px] bg-ink-950 p-6 sm:p-8">
-          <div class="mb-6 flex items-center justify-between">
+        {# Chart #}
+        <div class="rounded-xl border border-border bg-secondary/20 p-4">
+          <div class="flex items-center justify-between mb-3">
+            <p class="text-xs font-semibold text-foreground font-body">Request Volume</p>
             <div class="flex items-center gap-3">
-              <div class="flex h-9 w-9 items-center justify-center rounded-xl bg-amber-400/20 text-amber-400">
-                <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M10.5 6h9.75M10.5 6a1.5 1.5 0 11-3 0m3 0a1.5 1.5 0 10-3 0M3.75 6H7.5m3 12h9.75m-9.75 0a1.5 1.5 0 01-3 0m3 0a1.5 1.5 0 00-3 0m-3.75 0H7.5m9-6h3.75m-3.75 0a1.5 1.5 0 01-3 0m3 0a1.5 1.5 0 00-3 0m-9.75 0h9.75\" /></svg>
-              </div>
-              <div>
-                <h3 class="text-lg font-extrabold text-white\">Edit Router</h3>
-                <p class=\"text-xs text-ink-400\">my-production-router</p>
-              </div>
-            </div>
-            <div class="flex items-center gap-2">
-              <span class="flex items-center gap-1.5 rounded-full status-go px-3 py-1 text-xs font-bold">
-                <span class="h-2 w-2 rounded-full bg-go-500"></span>
-                Active
-              </span>
-              <button class="rounded-xl bg-amber-400 px-4 py-2 text-xs font-bold text-ink-950">Save Changes</button>
+              <span class="flex items-center gap-1 text-[10px] text-muted-foreground font-body"><span class="h-2 w-2 rounded-full bg-accent"></span> Success</span>
+              <span class="flex items-center gap-1 text-[10px] text-muted-foreground font-body"><span class="h-2 w-2 rounded-full bg-warn"></span> Fallback</span>
             </div>
           </div>
-
-          {# Routing steps - draggable UI mockup #}
-          <div class="space-y-3">
-            <p class="text-xs font-bold text-ink-400 uppercase tracking-wider mb-3">Routing Steps <span class="text-ink-500">(drag to reorder)</span></p>
-
-            {# Step 1 - primary #}
-            <div class="group relative rounded-2xl border-2 border-amber-400/40 bg-amber-400/5 p-4 transition-all hover:border-amber-400/60">
-              <div class="flex items-center gap-4">
-                <div class="flex h-8 w-8 shrink-0 cursor-grab items-center justify-center rounded-lg bg-ink-800 text-ink-400 hover:text-ink-200">
-                  <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" /></svg>
-                </div>
-                <span class="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-amber-400/20 text-xs font-black text-amber-400">1</span>
-                <div class="flex flex-1 flex-wrap items-center gap-2">
-                  <span class="rounded-lg bg-amber-400/15 px-2.5 py-1 text-xs font-bold text-amber-400">z.ai</span>
-                  <span class="text-ink-500">/</span>
-                  <span class="rounded-lg bg-ink-800 px-2.5 py-1 text-xs font-bold text-ink-200">GLM-5.1</span>
-                  <span class="rounded-lg bg-ink-800 px-2.5 py-1 text-xs font-bold text-ink-300">temp: 0.7</span>
-                </div>
-                <span class="rounded-lg bg-go-500/15 px-2.5 py-1 text-xs font-bold text-go-400">Primary</span>
-              </div>
-            </div>
-
-            {# Step 2 - fallback #}
-            <div class="group relative rounded-2xl border-2 border-ink-700 bg-ink-900/50 p-4 transition-all hover:border-ink-600">
-              <div class="flex items-center gap-4">
-                <div class="flex h-8 w-8 shrink-0 cursor-grab items-center justify-center rounded-lg bg-ink-800 text-ink-400 hover:text-ink-200">
-                  <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" /></svg>
-                </div>
-                <span class="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-ink-800 text-xs font-black text-ink-400">2</span>
-                <div class="flex flex-1 flex-wrap items-center gap-2">
-                  <span class="rounded-lg bg-sky-400/15 px-2.5 py-1 text-xs font-bold text-sky-400">Moonshot</span>
-                  <span class="text-ink-500">/</span>
-                  <span class="rounded-lg bg-ink-800 px-2.5 py-1 text-xs font-bold text-ink-200">Kimi-K2.5</span>
-                  <span class="rounded-lg bg-ink-800 px-2.5 py-1 text-xs font-bold text-ink-300">temp: 0.7</span>
-                </div>
-                <span class="rounded-lg bg-slow-500/15 px-2.5 py-1 text-xs font-bold text-slow-400">Fallback</span>
-              </div>
-            </div>
-
-            {# Step 3 - last resort #}
-            <div class="group relative rounded-2xl border-2 border-ink-700 bg-ink-900/50 p-4 transition-all hover:border-ink-600">
-              <div class="flex items-center gap-4">
-                <div class="flex h-8 w-8 shrink-0 cursor-grab items-center justify-center rounded-lg bg-ink-800 text-ink-400 hover:text-ink-200">
-                  <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" /></svg>
-                </div>
-                <span class="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-ink-800 text-xs font-black text-ink-400">3</span>
-                <div class="flex flex-1 flex-wrap items-center gap-2">
-                  <span class="rounded-lg bg-amber-400/15 px-2.5 py-1 text-xs font-bold text-amber-400">z.ai</span>
-                  <span class="text-ink-500">/</span>
-                  <span class="rounded-lg bg-ink-800 px-2.5 py-1 text-xs font-bold text-ink-200">GLM-5</span>
-                  <span class="rounded-lg bg-ink-800 px-2.5 py-1 text-xs font-bold text-ink-300">temp: 0.7</span>
-                </div>
-                <span class="rounded-lg bg-stop-500/15 px-2.5 py-1 text-xs font-bold text-stop-400">Last Resort</span>
-              </div>
-            </div>
+          <svg viewBox="0 0 400 80" class="h-24 w-full" preserveAspectRatio="none">
+            <defs>
+              <linearGradient id="analyticsFill" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stop-color="hsl(239, 84%, 67%)" stop-opacity="0.12" />
+                <stop offset="100%" stop-color="hsl(239, 84%, 67%)" stop-opacity="0" />
+              </linearGradient>
+            </defs>
+            <path d="M0,55 C15,50 25,45 40,38 C55,31 65,42 80,35 C95,28 105,22 120,18 C135,14 145,20 160,25 C175,30 185,15 200,12 C215,9 225,18 240,15 C255,12 265,8 280,10 C295,12 305,6 320,8 C335,10 345,5 360,7 C375,9 385,4 400,3 L400,80 L0,80 Z" fill="url(#analyticsFill)" />
+            <path d="M0,55 C15,50 25,45 40,38 C55,31 65,42 80,35 C95,28 105,22 120,18 C135,14 145,20 160,25 C175,30 185,15 200,12 C215,9 225,18 240,15 C255,12 265,8 280,10 C295,12 305,6 320,8 C335,10 345,5 360,7 C375,9 385,4 400,3" fill="none" stroke="hsl(239, 84%, 67%)" stroke-width="2" />
+            {# Fallback blip #}
+            <circle cx="160" cy="25" r="3" fill="hsl(38, 92%, 50%)" />
+            <circle cx="280" cy="10" r="3" fill="hsl(38, 92%, 50%)" />
+          </svg>
+          <div class="mt-2 flex justify-between text-[10px] text-muted-foreground font-body">
+            <span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span><span>Sun</span>
           </div>
-
-          {# Add step button #}
-          <div class="mt-4 flex items-center justify-center">
-            <button class="flex items-center gap-2 rounded-xl border-2 border-dashed border-ink-700 px-6 py-3 text-xs font-bold text-ink-400 transition-all hover:border-amber-400/50 hover:text-amber-400">
-              <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg>
-              Add Routing Step
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    {# Below the mockup: benefit pills #}
-    <div class="mt-10 flex flex-wrap items-center justify-center gap-4">
-      <div class="flex items-center gap-2 rounded-2xl bg-white px-5 py-3 shadow-sm border-2 border-ink-100">
-        <svg class="h-5 w-5 text-go-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
-        <span class="text-sm font-bold text-ink-700">Reorder by drag &amp; drop</span>
-      </div>
-      <div class="flex items-center gap-2 rounded-2xl bg-white px-5 py-3 shadow-sm border-2 border-ink-100">
-        <svg class="h-5 w-5 text-go-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
-        <span class="text-sm font-bold text-ink-700">Swap models instantly</span>
-      </div>
-      <div class="flex items-center gap-2 rounded-2xl bg-white px-5 py-3 shadow-sm border-2 border-ink-100">
-        <svg class="h-5 w-5 text-go-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
-        <span class="text-sm font-bold text-ink-700">Changes take effect immediately</span>
-      </div>
-      <div class="flex items-center gap-2 rounded-2xl bg-white px-5 py-3 shadow-sm border-2 border-ink-100">
-        <svg class="h-5 w-5 text-go-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
-        <span class="text-sm font-bold text-ink-700">No redeploy needed</span>
-      </div>
-    </div>
-  </div>
-</section>
-
-{# ──────────────────────────────────────────────
-   PROVIDERS SECTION
-   ────────────────────────────────────────────── #}
-<section id="providers" class="relative py-24 md:py-32">
-  <div class="absolute inset-0 -z-10 bg-cream-100"></div>
-  <div class="relative mx-auto max-w-6xl px-6">
-    <div class="text-center">
-      <p class="text-sm font-extrabold uppercase tracking-widest text-amber-500">Supported Providers</p>
-      <h2 class="mt-4 text-3xl font-black tracking-tight text-ink-950 sm:text-4xl lg:text-5xl">Route across the best LLMs</h2>
-      <p class="mx-auto mt-4 max-w-2xl text-lg text-ink-600">Mix and match providers in your fallback chain. More adapters coming soon.</p>
-    </div>
-
-    <div class="mt-16 grid gap-6 md:grid-cols-2">
-      {# z.ai #}
-      <div class="card-hover rounded-3xl bg-white p-8">
-        <div class="flex items-center gap-4">
-          <div class="flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-amber-400 to-amber-600 text-xl font-black text-white shadow-lg shadow-amber-300/30">Z</div>
-          <div>
-            <h3 class="text-lg font-extrabold text-ink-950">z.ai</h3>
-            <p class="text-sm font-semibold text-ink-500">Standard &amp; Coding plans</p>
-          </div>
-        </div>
-        <div class="mt-5 flex flex-wrap gap-2">
-          <span class="rounded-full border-2 border-ink-100 bg-cream-100 px-3 py-1 text-xs font-bold text-ink-700">GLM-5.1</span>
-          <span class="rounded-full border-2 border-ink-100 bg-cream-100 px-3 py-1 text-xs font-bold text-ink-700">GLM-5</span>
-          <span class="rounded-full border-2 border-ink-100 bg-cream-100 px-3 py-1 text-xs font-bold text-ink-700">GLM-5 Turbo</span>
-          <span class="rounded-full border-2 border-ink-100 bg-cream-100 px-3 py-1 text-xs font-bold text-ink-700">GLM-4.7</span>
-          <span class="rounded-full border-2 border-ink-100 bg-cream-100 px-3 py-1 text-xs font-bold text-ink-700">GLM-4.6</span>
-          <span class="rounded-full border-2 border-ink-100 bg-cream-100 px-3 py-1 text-xs font-bold text-ink-700">GLM-4.5</span>
-        </div>
-      </div>
-
-      {# Moonshot #}
-      <div class="card-hover rounded-3xl bg-white p-8">
-        <div class="flex items-center gap-4">
-          <div class="flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-sky-400 to-sky-600 text-xl font-black text-white shadow-lg shadow-sky-300/30">M</div>
-          <div>
-            <h3 class="text-lg font-extrabold text-ink-950">Moonshot AI</h3>
-            <p class="text-sm font-semibold text-ink-500">Kimi models with thinking mode</p>
-          </div>
-        </div>
-        <div class="mt-5 flex flex-wrap gap-2">
-          <span class="rounded-full border-2 border-ink-100 bg-cream-100 px-3 py-1 text-xs font-bold text-ink-700">Kimi-K2.5</span>
-          <span class="rounded-full border-2 border-ink-100 bg-cream-100 px-3 py-1 text-xs font-bold text-ink-700">Kimi-K2</span>
-          <span class="rounded-full border-2 border-ink-100 bg-cream-100 px-3 py-1 text-xs font-bold text-ink-700">Moonshot v1-8K</span>
-          <span class="rounded-full border-2 border-ink-100 bg-cream-100 px-3 py-1 text-xs font-bold text-ink-700">Moonshot v1-32K</span>
-          <span class="rounded-full border-2 border-ink-100 bg-cream-100 px-3 py-1 text-xs font-bold text-ink-700">Moonshot v1-128K</span>
         </div>
       </div>
     </div>
   </div>
 </section>
 
-{# ──────────────────────────────────────────────
-   PRICING SECTION - Warm sticker cards
-   ────────────────────────────────────────────── #}
-<section id="pricing" class="relative py-24 md:py-32">
-  <div class="absolute inset-0 -z-10 bg-cream-50"></div>
-  <div class="relative mx-auto max-w-6xl px-6">
-    <div class="text-center">
-      <p class="text-sm font-extrabold uppercase tracking-widest text-amber-500">Pricing</p>
-      <h2 class="mt-4 text-3xl font-black tracking-tight text-ink-950 sm:text-4xl lg:text-5xl">Simple, usage-based pricing</h2>
-      <p class="mx-auto mt-4 max-w-2xl text-lg text-ink-600">You bring your own provider API keys. We just route and observe. <strong class="text-ink-900">No token markup</strong> &mdash; you pay provider costs directly.</p>
+{# ─────────────────────────────────────────────
+   SECTION 6 — Pricing
+   ───────────────────────────────────────────── #}
+<section id="pricing" class="section-padding md:section-padding-md bg-background">
+  <div class="mx-auto max-w-6xl px-6 md:px-12 lg:px-20">
+    <div class="text-center max-w-2xl mx-auto">
+      <p class="text-sm font-semibold tracking-wide text-accent font-body">Pricing</p>
+      <h2 class="mt-3 font-display text-3xl md:text-4xl lg:text-5xl leading-[1.05] tracking-tight text-foreground">
+        Start free. Scale when ready.
+      </h2>
+      <p class="mt-4 text-base text-muted-foreground leading-relaxed font-body">
+        Pay only for the LLM tokens you use. The proxy layer is free.
+      </p>
     </div>
 
-    <div class="mt-16 grid gap-6 md:grid-cols-3">
+    <div class="mt-14 grid gap-6 md:grid-cols-3 max-w-4xl mx-auto">
       {# Free Tier #}
-      <div class="card-hover rounded-3xl bg-white p-8">
-        <div>
-          <h3 class="text-lg font-extrabold text-ink-950">Free</h3>
-          <p class="mt-1 text-sm font-semibold text-ink-500">For side projects and experiments</p>
-          <div class="mt-6">
-            <span class="text-4xl font-black text-ink-950">$0</span>
-            <span class="text-sm font-bold text-ink-500">/month</span>
-          </div>
+      <div class="pricing-card flex flex-col">
+        <p class="text-sm font-semibold text-muted-foreground font-body">Hobby</p>
+        <div class="mt-3 flex items-baseline gap-1">
+          <span class="text-4xl font-display text-foreground">$0</span>
+          <span class="text-sm text-muted-foreground font-body">/month</span>
         </div>
-        <ul class="mt-8 space-y-3.5">
-          <li class="flex items-start gap-3">
-            <svg class="mt-0.5 h-5 w-5 shrink-0 text-go-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
-            <span class="text-sm font-semibold text-ink-600">Up to 1,000 requests/month</span>
+        <p class="mt-2 text-sm text-muted-foreground font-body">Perfect for side projects and testing.</p>
+        <ul class="mt-6 space-y-3 flex-1">
+          <li class="flex items-center gap-2 text-sm text-foreground font-body">
+            <svg class="h-4 w-4 shrink-0 text-go" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
+            1 router
           </li>
-          <li class="flex items-start gap-3">
-            <svg class="mt-0.5 h-5 w-5 shrink-0 text-go-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
-            <span class="text-sm font-semibold text-ink-600">1 router with fallback chain</span>
+          <li class="flex items-center gap-2 text-sm text-foreground font-body">
+            <svg class="h-4 w-4 shrink-0 text-go" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
+            3 providers
           </li>
-          <li class="flex items-start gap-3">
-            <svg class="mt-0.5 h-5 w-5 shrink-0 text-go-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
-            <span class="text-sm font-semibold text-ink-600">7-day request log retention</span>
+          <li class="flex items-center gap-2 text-sm text-foreground font-body">
+            <svg class="h-4 w-4 shrink-0 text-go" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
+            10K requests/month
           </li>
-          <li class="flex items-start gap-3">
-            <svg class="mt-0.5 h-5 w-5 shrink-0 text-go-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
-            <span class="text-sm font-semibold text-ink-600">Real-time dashboard</span>
-          </li>
-          <li class="flex items-start gap-3">
-            <svg class="mt-0.5 h-5 w-5 shrink-0 text-go-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
-            <span class="text-sm font-semibold text-ink-600">Cost tracking</span>
+          <li class="flex items-center gap-2 text-sm text-foreground font-body">
+            <svg class="h-4 w-4 shrink-0 text-go" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
+            Basic analytics
           </li>
         </ul>
-        <a href="https://api.dodorouter.com/users/register" class="mt-8 block w-full rounded-2xl border-2 border-ink-200 bg-white px-6 py-3.5 text-center text-sm font-extrabold text-ink-700 transition-all hover:border-amber-300 hover:bg-amber-50 hover:text-ink-950">
-          Get Started Free
+        <a href="https://api.dodorouter.com/users/register" class="mt-8 block rounded-full border border-border bg-background py-2.5 text-center text-sm font-medium text-foreground transition-all hover:bg-secondary font-body">
+          Get Started
         </a>
       </div>
 
       {# Pro Tier #}
-      <div class="relative rounded-3xl border-2 border-amber-400 bg-amber-50 p-8 shadow-lg shadow-amber-200/30">
-        <div class="absolute -top-4 left-1/2 -translate-x-1/2">
-          <span class="rounded-full bg-amber-400 px-5 py-1.5 text-xs font-black text-ink-950 shadow-lg shadow-amber-300/50">POPULAR</span>
+      <div class="pricing-card pricing-card-featured flex flex-col relative">
+        <span class="absolute -top-3 left-1/2 -translate-x-1/2 rounded-full bg-accent px-3 py-0.5 text-xs font-semibold text-white font-body">Popular</span>
+        <p class="text-sm font-semibold text-accent font-body">Pro</p>
+        <div class="mt-3 flex items-baseline gap-1">
+          <span class="text-4xl font-display text-foreground">$29</span>
+          <span class="text-sm text-muted-foreground font-body">/month</span>
         </div>
-        <div>
-          <h3 class="text-lg font-extrabold text-ink-950">Pro</h3>
-          <p class="mt-1 text-sm font-semibold text-ink-500">For production apps and teams</p>
-          <div class="mt-6">
-            <span class="text-4xl font-black text-ink-950">$19</span>
-            <span class="text-sm font-bold text-ink-500">/month</span>
-          </div>
-          <p class="mt-1 text-xs font-bold text-ink-400">+ $2 per 10K requests</p>
-        </div>
-        <ul class="mt-8 space-y-3.5">
-          <li class="flex items-start gap-3">
-            <svg class="mt-0.5 h-5 w-5 shrink-0 text-go-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
-            <span class="text-sm font-semibold text-ink-600"><strong class="text-ink-950">Unlimited</strong> requests</span>
+        <p class="mt-2 text-sm text-muted-foreground font-body">For production apps that need reliability.</p>
+        <ul class="mt-6 space-y-3 flex-1">
+          <li class="flex items-center gap-2 text-sm text-foreground font-body">
+            <svg class="h-4 w-4 shrink-0 text-go" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
+            Unlimited routers
           </li>
-          <li class="flex items-start gap-3">
-            <svg class="mt-0.5 h-5 w-5 shrink-0 text-go-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
-            <span class="text-sm font-semibold text-ink-600">Unlimited routers</span>
+          <li class="flex items-center gap-2 text-sm text-foreground font-body">
+            <svg class="h-4 w-4 shrink-0 text-go" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
+            All providers
           </li>
-          <li class="flex items-start gap-3">
-            <svg class="mt-0.5 h-5 w-5 shrink-0 text-go-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
-            <span class="text-sm font-semibold text-ink-600">90-day request log retention</span>
+          <li class="flex items-center gap-2 text-sm text-foreground font-body">
+            <svg class="h-4 w-4 shrink-0 text-go" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
+            500K requests/month
           </li>
-          <li class="flex items-start gap-3">
-            <svg class="mt-0.5 h-5 w-5 shrink-0 text-go-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
-            <span class="text-sm font-semibold text-ink-600">Full dashboard &amp; analytics</span>
+          <li class="flex items-center gap-2 text-sm text-foreground font-body">
+            <svg class="h-4 w-4 shrink-0 text-go" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
+            Advanced analytics
           </li>
-          <li class="flex items-start gap-3">
-            <svg class="mt-0.5 h-5 w-5 shrink-0 text-go-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
-            <span class="text-sm font-semibold text-ink-600">Streaming support</span>
-          </li>
-          <li class="flex items-start gap-3">
-            <svg class="mt-0.5 h-5 w-5 shrink-0 text-go-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
-            <span class="text-sm font-semibold text-ink-600">Tool calls &amp; thinking mode</span>
-          </li>
-          <li class="flex items-start gap-3">
-            <svg class="mt-0.5 h-5 w-5 shrink-0 text-go-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
-            <span class="text-sm font-semibold text-ink-600">Priority support</span>
+          <li class="flex items-center gap-2 text-sm text-foreground font-body">
+            <svg class="h-4 w-4 shrink-0 text-go" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
+            Priority support
           </li>
         </ul>
-        <a href="https://api.dodorouter.com/users/register" class="mt-8 block w-full rounded-2xl bg-amber-400 px-6 py-3.5 text-center text-sm font-extrabold text-ink-950 shadow-lg shadow-amber-300/40 transition-all hover:bg-amber-300 hover:shadow-xl hover:shadow-amber-300/50">
-          Start Pro Trial
+        <a href="https://api.dodorouter.com/users/register" class="mt-8 block rounded-full bg-accent py-2.5 text-center text-sm font-medium text-white transition-all hover:opacity-90 font-body">
+          Start Free Trial
         </a>
       </div>
 
       {# Enterprise Tier #}
-      <div class="card-hover rounded-3xl bg-white p-8">
-        <div>
-          <h3 class="text-lg font-extrabold text-ink-950">Enterprise</h3>
-          <p class="mt-1 text-sm font-semibold text-ink-500">For teams with custom requirements</p>
-          <div class="mt-6">
-            <span class="text-4xl font-black text-ink-950">Custom</span>
-          </div>
+      <div class="pricing-card flex flex-col">
+        <p class="text-sm font-semibold text-muted-foreground font-body">Enterprise</p>
+        <div class="mt-3 flex items-baseline gap-1">
+          <span class="text-4xl font-display text-foreground">Custom</span>
         </div>
-        <ul class="mt-8 space-y-3.5">
-          <li class="flex items-start gap-3">
-            <svg class="mt-0.5 h-5 w-5 shrink-0 text-go-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
-            <span class="text-sm font-semibold text-ink-600">Everything in Pro</span>
+        <p class="mt-2 text-sm text-muted-foreground font-body">For teams with custom SLA and compliance needs.</p>
+        <ul class="mt-6 space-y-3 flex-1">
+          <li class="flex items-center gap-2 text-sm text-foreground font-body">
+            <svg class="h-4 w-4 shrink-0 text-go" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
+            Everything in Pro
           </li>
-          <li class="flex items-start gap-3">
-            <svg class="mt-0.5 h-5 w-5 shrink-0 text-go-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
-            <span class="text-sm font-semibold text-ink-600">Unlimited log retention</span>
+          <li class="flex items-center gap-2 text-sm text-foreground font-body">
+            <svg class="h-4 w-4 shrink-0 text-go" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
+            Unlimited requests
           </li>
-          <li class="flex items-start gap-3">
-            <svg class="mt-0.5 h-5 w-5 shrink-0 text-go-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
-            <span class="text-sm font-semibold text-ink-600">Self-hosted deployment option</span>
+          <li class="flex items-center gap-2 text-sm text-foreground font-body">
+            <svg class="h-4 w-4 shrink-0 text-go" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
+            Custom SLAs
           </li>
-          <li class="flex items-start gap-3">
-            <svg class="mt-0.5 h-5 w-5 shrink-0 text-go-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
-            <span class="text-sm font-semibold text-ink-600">Custom SLA &amp; uptime guarantee</span>
+          <li class="flex items-center gap-2 text-sm text-foreground font-body">
+            <svg class="h-4 w-4 shrink-0 text-go" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
+            SSO &amp; audit logs
           </li>
-          <li class="flex items-start gap-3">
-            <svg class="mt-0.5 h-5 w-5 shrink-0 text-go-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
-            <span class="text-sm font-semibold text-ink-600">SSO &amp; team management</span>
-          </li>
-          <li class="flex items-start gap-3">
-            <svg class="mt-0.5 h-5 w-5 shrink-0 text-go-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
-            <span class="text-sm font-semibold text-ink-600">Dedicated support &amp; onboarding</span>
+          <li class="flex items-center gap-2 text-sm text-foreground font-body">
+            <svg class="h-4 w-4 shrink-0 text-go" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
+            Dedicated support
           </li>
         </ul>
-        <a href="mailto:hello@dodorouter.com" class="mt-8 block w-full rounded-2xl border-2 border-ink-200 bg-white px-6 py-3.5 text-center text-sm font-extrabold text-ink-700 transition-all hover:border-amber-300 hover:bg-amber-50 hover:text-ink-950">
-          Contact Us
+        <a href="mailto:hello@dodorouter.com" class="mt-8 block rounded-full border border-border bg-background py-2.5 text-center text-sm font-medium text-foreground transition-all hover:bg-secondary font-body">
+          Contact Sales
         </a>
       </div>
-    </div>
-
-    <div class="mt-12 text-center">
-      <p class="text-sm font-semibold text-ink-500">All plans include streaming support, tool calls, cost tracking, and real-time logs. <strong class="text-ink-600">No token markup</strong> &mdash; you pay your provider directly.</p>
     </div>
   </div>
 </section>
 
-{# ──────────────────────────────────────────────
-   CTA SECTION - Warm, inviting closing
-   ────────────────────────────────────────────── #}
-<section class="relative py-24 md:py-32 overflow-hidden">
-  <div class="absolute inset-0 -z-10">
-    <div class="absolute inset-0 bg-gradient-to-br from-amber-100 via-cream-200 to-cream-100"></div>
-    <div class="absolute top-0 left-1/2 -translate-x-1/2 h-[500px] w-[500px] rounded-full bg-amber-300/30 blur-[100px]"></div>
-    <div class="absolute bottom-0 right-1/4 h-[300px] w-[300px] rounded-full bg-sky-200/30 blur-[80px]"></div>
-    <div class="absolute inset-0 dot-pattern opacity-30"></div>
-  </div>
-  <div class="relative mx-auto max-w-4xl px-6 text-center">
-    <h2 class="text-3xl font-black tracking-tight text-ink-950 sm:text-4xl lg:text-5xl">One URL change.<br>Then manage everything from the UI.</h2>
-    <p class="mx-auto mt-6 max-w-xl text-lg text-ink-600">Set up your fallback chain in minutes. Swap providers, reorder models, and adjust settings on the fly &mdash; all from the dashboard. <strong class="text-ink-900">No code changes after the initial setup.</strong></p>
-    <div class="mt-10 flex flex-col items-center justify-center gap-4 sm:flex-row">
-      <a href="https://api.dodorouter.com/users/register" class="group inline-flex items-center gap-2 rounded-2xl bg-amber-400 px-8 py-4 text-base font-extrabold text-ink-950 shadow-lg shadow-amber-300/40 transition-all hover:bg-amber-300 hover:shadow-xl hover:shadow-amber-300/50 hover:-translate-y-1">
-        Get Started Free
-        <svg class="h-5 w-5 transition-transform group-hover:translate-x-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M13 7l5 5m0 0l-5 5m5-5H6" /></svg>
-      </a>
-      <a href="mailto:hello@dodorouter.com" class="inline-flex items-center gap-2 rounded-2xl border-2 border-ink-200 bg-white px-8 py-4 text-base font-bold text-ink-700 transition-all hover:border-amber-300 hover:bg-amber-50 hover:text-ink-900 hover:-translate-y-0.5">
-        Contact Us
-      </a>
+{# ─────────────────────────────────────────────
+   SECTION 7 — Final CTA
+   ───────────────────────────────────────────── #}
+<section class="section-padding md:section-padding-md bg-background">
+  <div class="mx-auto max-w-6xl px-6 md:px-12 lg:px-20">
+    <div class="cta-gradient rounded-3xl px-8 py-16 md:px-16 md:py-20 text-center relative overflow-hidden">
+      {# Decorative circles #}
+      <div class="absolute -top-20 -right-20 h-64 w-64 rounded-full bg-white/5"></div>
+      <div class="absolute -bottom-16 -left-16 h-48 w-48 rounded-full bg-white/5"></div>
+
+      <h2 class="relative font-display text-3xl md:text-4xl lg:text-5xl leading-[1.05] tracking-tight text-white">
+        Stop worrying about<br/>provider downtime.
+      </h2>
+      <p class="relative mt-5 text-base md:text-lg text-white/80 max-w-xl mx-auto leading-relaxed font-body">
+        Set up your first router in under two minutes. Free to start, no credit card required.
+      </p>
+      <div class="relative mt-8 flex flex-col sm:flex-row items-center justify-center gap-3">
+        <a href="https://api.dodorouter.com/users/register" class="rounded-full bg-white px-8 py-3.5 text-sm font-semibold text-accent transition-all hover:bg-white/90 font-body">
+          Get Started Free
+        </a>
+        <a href="https://github.com/foxwise-ai/dodorouter" target="_blank" rel="noopener noreferrer" class="flex items-center gap-2 rounded-full border border-white/25 px-6 py-3.5 text-sm font-medium text-white transition-all hover:bg-white/10 font-body">
+          <svg class="h-4 w-4 fill-white" viewBox="0 0 24 24"><path d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"/></svg>
+          View on GitHub
+        </a>
+      </div>
     </div>
   </div>
 </section>

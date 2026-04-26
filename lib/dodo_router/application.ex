@@ -7,6 +7,9 @@ defmodule DodoRouter.Application do
 
   @impl true
   def start(_type, _args) do
+    # Attach Finch telemetry handlers for request timing
+    DodoRouter.Proxy.FinchTelemetry.attach()
+
     children = [
       DodoRouter.ShutdownListener,
       DodoRouterWeb.Telemetry,

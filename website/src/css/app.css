@@ -2,142 +2,150 @@
 @source "../src";
 
 @theme {
-  /* Cream/Beige primary - from the dodo's body */
-  --color-cream-50: #fefdfb;
-  --color-cream-100: #fdf8f0;
-  --color-cream-200: #faf0de;
-  --color-cream-300: #f5e4c4;
-  --color-cream-400: #edd4a3;
-  --color-cream-500: #e3c085;
-
-  /* Muted Orange/Amber - from the beak and feet */
-  --color-amber-50: #fff9eb;
-  --color-amber-100: #ffefc6;
-  --color-amber-200: #ffdf88;
-  --color-amber-300: #ffc94a;
-  --color-amber-400: #ffb020;
-  --color-amber-500: #f59407;
-  --color-amber-600: #d97002;
-  --color-amber-700: #b44d06;
-  --color-amber-800: #923a0c;
-  --color-amber-900: #78300d;
-
-  /* Dark outline color - from the logo's thick strokes */
-  --color-ink-50: #f5f5f6;
-  --color-ink-100: #e5e5e7;
-  --color-ink-200: #ceced2;
-  --color-ink-300: #b0b0b7;
-  --color-ink-400: #888890;
-  --color-ink-500: #6d6d76;
-  --color-ink-600: #5c5c64;
-  --color-ink-700: #4e4e55;
-  --color-ink-800: #444449;
-  --color-ink-900: #2a2a2e;
-  --color-ink-950: #1a1a1d;
-
-  /* Traffic Light Trio - status colors */
-  --color-go-400: #4ade80;
-  --color-go-500: #22c55e;
-  --color-go-600: #16a34a;
-  --color-slow-400: #facc15;
-  --color-slow-500: #eab308;
-  --color-slow-600: #ca8a04;
-  --color-stop-400: #f87171;
-  --color-stop-500: #ef4444;
-  --color-stop-600: #dc2626;
-
-  /* Pastel accents - from tail feathers */
-  --color-sky-300: #7dd3fc;
-  --color-sky-400: #38bdf8;
-  --color-sky-500: #0ea5e9;
-  --color-rose-300: #fda4af;
-  --color-rose-400: #fb7185;
-  --color-rose-500: #f43f5e;
-
-  --font-display: "Nunito", ui-sans-serif, system-ui, sans-serif;
+  --color-background: hsl(0, 0%, 100%);
+  --color-foreground: hsl(210, 14%, 17%);
+  --color-primary: hsl(210, 14%, 17%);
+  --color-primary-foreground: hsl(0, 0%, 100%);
+  --color-secondary: hsl(0, 0%, 96%);
+  --color-secondary-foreground: hsl(0, 0%, 9%);
+  --color-muted: hsl(0, 0%, 96%);
+  --color-muted-foreground: hsl(184, 5%, 55%);
+  --color-accent: hsl(239, 84%, 67%);
+  --color-accent-foreground: hsl(0, 0%, 100%);
+  --color-border: hsl(0, 0%, 90%);
+  --color-ring: hsl(239, 84%, 67%);
+  --color-go: hsl(142, 71%, 45%);
+  --color-go-foreground: hsl(0, 0%, 100%);
+  --color-warn: hsl(38, 92%, 50%);
+  --color-warn-foreground: hsl(0, 0%, 9%);
+  --color-error: hsl(0, 84%, 60%);
+  --color-error-foreground: hsl(0, 0%, 100%);
+  --font-display: 'Instrument Serif', serif;
+  --font-body: 'Inter', ui-sans-serif, system-ui, sans-serif;
+  --shadow-dashboard: 0 25px 80px -12px rgba(0, 0, 0, 0.08), 0 0 0 1px rgba(0, 0, 0, 0.06);
 }
 
-/* Smooth scrolling */
-html {
-  scroll-behavior: smooth;
+@layer base {
+  html { scroll-behavior: smooth; }
 }
 
-/* Bouncy spring animation */
-@keyframes bounce-in {
-  0% { transform: translateY(20px); opacity: 0; }
-  60% { transform: translateY(-4px); opacity: 1; }
-  80% { transform: translateY(2px); }
-  100% { transform: translateY(0); }
+@keyframes fade-up {
+  from { opacity: 0; transform: translateY(var(--fade-y, 16px)); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
-.animate-bounce-in {
-  animation: bounce-in 0.6s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+@utility animate-fade-up {
+  animation: fade-up var(--fade-duration, 0.6s) var(--fade-delay, 0s) cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  opacity: 0;
 }
 
-/* Gentle float animation for hero elements */
-@keyframes gentle-float {
-  0%, 100% { transform: translateY(0); }
-  50% { transform: translateY(-8px); }
+@keyframes soft-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
 }
 
-.animate-float {
-  animation: gentle-float 3s ease-in-out infinite;
+@utility animate-soft-pulse {
+  animation: soft-pulse 2s ease-in-out infinite;
 }
 
-/* Gradient text - warm amber gradient */
-.text-gradient {
-  background: linear-gradient(135deg, var(--color-amber-400), var(--color-amber-600));
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
+@utility dashboard-mockup {
+  font-family: var(--font-body);
+  font-size: 11px;
+  user-select: none;
+  pointer-events: none;
+  & * { user-select: none; pointer-events: none; }
 }
 
-/* Code block styling - sticker-style with thick border */
-.code-block {
-  background: var(--color-ink-950);
-  border: 2.5px solid var(--color-ink-900);
-  border-radius: 20px;
-  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.12);
+@utility frosted-glass {
+  background: rgba(255, 255, 255, 0.4);
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  box-shadow: var(--shadow-dashboard);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
 }
 
-/* Sticker card - the core card style */
-.card-hover {
-  transition: all 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
-  border: 2px solid var(--color-ink-200);
-}
-.card-hover:hover {
-  transform: translateY(-6px) scale(1.01);
-  border-color: var(--color-amber-300);
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.1), 0 0 0 2px var(--color-amber-100);
+@utility video-overlay {
+  background: linear-gradient(to bottom, rgba(255, 255, 255, 0.3) 0%, rgba(255, 255, 255, 0.5) 40%, rgba(255, 255, 255, 0.85) 100%);
 }
 
-/* Sticker card dark variant (for dashboard mockups) */
-.card-dark {
-  border: 2px solid var(--color-ink-800);
-  transition: all 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
-}
-.card-dark:hover {
-  transform: translateY(-4px);
-  border-color: var(--color-amber-500);
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.3);
-}
-
-/* Subtle dot pattern for backgrounds */
-.dot-pattern {
-  background-image: radial-gradient(var(--color-amber-200) 1px, transparent 1px);
-  background-size: 24px 24px;
+@utility feature-card {
+  background: hsl(0, 0%, 100%);
+  border: 1px solid var(--color-border);
+  border-radius: 1rem;
+  padding: 2rem;
+  transition: box-shadow 0.3s ease, transform 0.3s ease;
+  &:hover {
+    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.06);
+    transform: translateY(-2px);
+  }
 }
 
-/* Status pill styles */
-.status-go {
-  background: color-mix(in oklab, var(--color-go-500) 15%, transparent);
-  color: var(--color-go-600);
+@utility code-block {
+  background: hsl(220, 14%, 10%);
+  border-radius: 0.75rem;
+  color: hsl(0, 0%, 85%);
+  font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, monospace;
+  font-size: 0.8125rem;
+  line-height: 1.7;
+  overflow-x: auto;
+  & .kw { color: hsl(280, 60%, 70%); }
+  & .str { color: hsl(142, 50%, 65%); }
+  & .cm { color: hsl(215, 15%, 50%); }
+  & .fn { color: hsl(200, 70%, 70%); }
+  & .num { color: hsl(38, 90%, 65%); }
+  & .op { color: hsl(0, 0%, 70%); }
+  & .var { color: hsl(30, 70%, 70%); }
 }
-.status-slow {
-  background: color-mix(in oklab, var(--color-slow-500) 15%, transparent);
-  color: var(--color-slow-600);
+
+@utility provider-chip {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.625rem 1rem;
+  border-radius: 0.75rem;
+  border: 1px solid var(--color-border);
+  background: var(--color-background);
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--color-foreground);
+  transition: box-shadow 0.2s ease, transform 0.2s ease;
+  &:hover {
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+    transform: translateY(-1px);
+  }
 }
-.status-stop {
-  background: color-mix(in oklab, var(--color-stop-500) 15%, transparent);
-  color: var(--color-stop-600);
+
+@utility pricing-card {
+  background: var(--color-background);
+  border: 1px solid var(--color-border);
+  border-radius: 1.25rem;
+  padding: 2rem;
+  transition: box-shadow 0.3s ease, transform 0.3s ease;
+  &:hover {
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.06);
+    transform: translateY(-2px);
+  }
+}
+
+@utility pricing-card-featured {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 1px var(--color-accent), 0 12px 40px rgba(99, 102, 241, 0.1);
+  &:hover {
+    box-shadow: 0 0 0 1px var(--color-accent), 0 16px 48px rgba(99, 102, 241, 0.15);
+    transform: translateY(-2px);
+  }
+}
+
+@utility section-padding {
+  padding-top: 6rem;
+  padding-bottom: 6rem;
+}
+
+@utility section-padding-md {
+  padding-top: 8rem;
+  padding-bottom: 8rem;
+}
+
+@utility cta-gradient {
+  background: linear-gradient(135deg, hsl(239, 84%, 67%) 0%, hsl(260, 70%, 55%) 50%, hsl(280, 60%, 50%) 100%);
 }

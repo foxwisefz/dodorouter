@@ -7,7 +7,7 @@ defmodule DodoRouter.Proxy.FallbackChain do
   """
 
   alias DodoRouter.Proxy.Adapter
-  alias DodoRouter.Proxy.Adapters.{Zai, Moonshot}
+  alias DodoRouter.Proxy.Adapter.Registry
   alias DodoRouter.Providers
   alias DodoRouter.Routers.RoutingStep
   alias DodoRouter.Secrets
@@ -16,6 +16,7 @@ defmodule DodoRouter.Proxy.FallbackChain do
     :request,
     :steps,
     :router_id,
+    :request_id,
     :stream,
     :send_chunk,
     :client_headers,
@@ -30,11 +31,13 @@ defmodule DodoRouter.Proxy.FallbackChain do
     stream = Keyword.get(opts, :stream, false)
     send_chunk = Keyword.get(opts, :send_chunk, fn _ -> :ok end)
     client_headers = Keyword.get(opts, :client_headers, [])
+    request_id = Keyword.get(opts, :request_id)
 
     state = %__MODULE__{
       request: request,
       steps: steps,
       router_id: router_id,
+      request_id: request_id,
       stream: stream,
       send_chunk: send_chunk,
       client_headers: client_headers
@@ -44,10 +47,13 @@ defmodule DodoRouter.Proxy.FallbackChain do
   end
 
   defp run_chain(%{steps: []} = state) do
+    broadcast_step_completed(state.router_id, nil, :error, nil)
     %{state | status: :error}
   end
 
   defp run_chain(%{steps: [step | rest]} = state) do
+    step_index = length(state.attempted_steps)
+    broadcast_step_started(state.router_id, state.request_id, step, step_index)
     start_time = System.monotonic_time(:millisecond)
     endpoint = endpoint_for(step)
 
@@ -60,7 +66,9 @@ defmodule DodoRouter.Proxy.FallbackChain do
           plan_type: step.plan_type,
           status: "success",
           latency_ms: latency(start_time),
-          forwarded_headers: build_forwarded_headers(step)
+          forwarded_headers: build_forwarded_headers(step),
+          response_body: response,
+          response_headers: meta[:headers]
         }
 
         status = if length(state.attempted_steps) > 0, do: :fallback, else: :success
@@ -68,13 +76,16 @@ defmodule DodoRouter.Proxy.FallbackChain do
         # Prepend any partial content from previous failed attempts
         response = prepend_partial_content(response, state.partial_content)
 
-        %{
+        final_state = %{
           state
           | final_response: response,
             response_headers: meta[:headers],
             attempted_steps: state.attempted_steps ++ [attempt],
             status: status
         }
+
+        broadcast_step_completed(state.router_id, step, status, latency(start_time))
+        final_state
 
       {:error, reason, details} ->
         # Track midstream fallback info (partial content already sent to client)
@@ -94,12 +105,14 @@ defmodule DodoRouter.Proxy.FallbackChain do
           streamed_to_client: streamed_to_client,
           partial_content_length:
             if(is_binary(partial_content), do: String.length(partial_content), else: nil),
-          forwarded_headers: build_forwarded_headers(step)
+          forwarded_headers: build_forwarded_headers(step),
+          response_headers: details[:headers]
         }
 
         state = %{state | attempted_steps: state.attempted_steps ++ [attempt]}
 
         if Adapter.should_fallback?(reason) and length(rest) > 0 do
+          broadcast_step_completed(state.router_id, step, :fallback, latency(start_time))
           state = accumulate_partial_content(state, details)
           # Reconstruct request with partial assistant message so next provider continues
           state = reconstruct_request(state)
@@ -114,9 +127,42 @@ defmodule DodoRouter.Proxy.FallbackChain do
             )
           end
 
+          broadcast_step_completed(state.router_id, step, :error, latency(start_time))
           %{state | status: :error}
         end
     end
+  end
+
+  defp broadcast_step_started(router_id, request_id, step, step_index) do
+    Phoenix.PubSub.broadcast(
+      DodoRouter.PubSub,
+      "router:#{router_id}:events",
+      {:step_started,
+       %{
+         request_id: request_id,
+         step_id: step.id,
+         provider: step.provider,
+         model: step.model,
+         step_index: step_index,
+         timestamp: DateTime.utc_now()
+       }}
+    )
+  end
+
+  defp broadcast_step_completed(router_id, step, status, latency_ms) do
+    Phoenix.PubSub.broadcast(
+      DodoRouter.PubSub,
+      "router:#{router_id}:events",
+      {:step_completed,
+       %{
+         step_id: if(step, do: step.id),
+         provider: if(step, do: step.provider),
+         model: if(step, do: step.model),
+         status: status,
+         latency_ms: latency_ms,
+         timestamp: DateTime.utc_now()
+       }}
+    )
   end
 
   defp execute_step(%RoutingStep{} = step, state) do
@@ -134,8 +180,9 @@ defmodule DodoRouter.Proxy.FallbackChain do
     end
   end
 
-  defp adapter_for("zai"), do: Zai
-  defp adapter_for("moonshot"), do: Moonshot
+  defp adapter_for(provider) do
+    Registry.adapter_for(provider)
+  end
 
   # Get API key - prefer provider_key if assigned, fall back to legacy router secrets
   defp get_api_key(%RoutingStep{provider_key: %{} = provider_key}, _router_id) do
@@ -150,17 +197,20 @@ defmodule DodoRouter.Proxy.FallbackChain do
     Secrets.moonshot_api_key(router_id)
   end
 
-  defp endpoint_for(%RoutingStep{provider: "zai", plan_type: "coding"}),
-    do: "https://api.z.ai/api/coding/paas/v4/chat/completions"
+  defp endpoint_for(%RoutingStep{provider: provider} = step) do
+    base =
+      case Registry.all_adapters()[provider] do
+        %{endpoints: endpoints} ->
+          # Find the endpoint matching the plan_type, or fall back to first
+          key_slug = Registry.to_key_slug(provider, step.plan_type || "standard")
+          Map.get(endpoints, key_slug) || endpoints |> Map.values() |> List.first()
 
-  defp endpoint_for(%RoutingStep{provider: "zai"}),
-    do: "https://api.z.ai/api/paas/v4/chat/completions"
+        nil ->
+          nil
+      end
 
-  defp endpoint_for(%RoutingStep{provider: "moonshot", plan_type: "coding"}),
-    do: "https://api.kimi.com/coding/v1/chat/completions"
-
-  defp endpoint_for(%RoutingStep{provider: "moonshot"}),
-    do: "https://api.moonshot.ai/v1/chat/completions"
+    if base, do: base <> "/chat/completions", else: nil
+  end
 
   defp truncate_error(nil), do: nil
 

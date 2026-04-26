@@ -5,11 +5,26 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
   Supports kimi-k2.5 with thinking mode, kimi-k2 series, and moonshot-v1 series.
   """
 
-  @behaviour DodoRouter.Proxy.Adapter
+  use DodoRouter.Proxy.Adapter.Registry,
+    slug: "moonshot",
+    display_name: "Moonshot (Kimi)",
+    key_slugs: ["moonshot", "moonshot_coding"],
+    key_display_names: %{
+      "moonshot" => "Moonshot (Kimi)",
+      "moonshot_coding" => "Kimi Coding"
+    },
+    endpoints: %{
+      "moonshot" => "https://api.moonshot.ai/v1",
+      "moonshot_coding" => "https://api.kimi.com/coding/v1"
+    },
+    models: ~w(kimi-k2.5 kimi-k2 moonshot-v1-8k moonshot-v1-32k moonshot-v1-128k),
+    color: "amber",
+    short_description: "Kimi K2 models"
 
   require Logger
 
   alias DodoRouter.Proxy.Adapter
+  alias DodoRouter.Proxy.FinchTelemetry
   alias DodoRouter.Routers.RoutingStep
 
   @standard_base_url "https://api.moonshot.ai/v1"
@@ -40,11 +55,22 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
         "headers=#{inspect(safe_headers(headers))}"
     )
 
-    start_time = System.monotonic_time(:millisecond)
+    payload_size_bytes = body |> Jason.encode!() |> byte_size()
+    start_time = FinchTelemetry.mark_request_start()
 
     case Req.post(url, headers: headers, json: body, receive_timeout: @timeout_ms) do
       {:ok, %{status: 200, body: response_body, headers: resp_headers}} ->
-        {:ok, response_body, %{headers: resp_headers}}
+        total_ms = latency(start_time)
+        upload_ms = FinchTelemetry.get_upload_ms(start_time)
+
+        meta = %{
+          "ttfb_ms" => total_ms,
+          "upload_ms" => upload_ms,
+          "payload_size_bytes" => payload_size_bytes,
+          "provider_processing_ms" => nil
+        }
+
+        {:ok, Map.put(response_body, "_meta", meta), %{headers: resp_headers}}
 
       {:ok, %{status: status, body: response_body}} ->
         Logger.error("[Moonshot] Non-200 response: status=#{status}")
@@ -77,7 +103,8 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
         "headers=#{inspect(safe_headers(headers))}"
     )
 
-    start_time = System.monotonic_time(:millisecond)
+    payload_size_bytes = body |> Jason.encode!() |> byte_size()
+    start_time = FinchTelemetry.mark_request_start()
 
     # Track partial content in process dict so it survives error paths
     Process.delete(:__moonshot_stream_acc__)
@@ -141,7 +168,15 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
           resp.private[:stream_acc] || partial_acc ||
             %{content: "", tool_calls: %{}, usage: nil, finish_reason: nil, first_chunk_time: nil}
 
-        {:ok, build_final_response(acc, start_time), %{headers: resp_headers}}
+        upload_ms = calculate_upload_ms(start_time)
+
+        timing_meta = %{
+          payload_size_bytes: payload_size_bytes,
+          upload_ms: upload_ms,
+          provider_processing_ms: nil
+        }
+
+        {:ok, build_final_response(acc, timing_meta), %{headers: resp_headers}}
 
       {:ok, %Req.Response{status: status}} ->
         Logger.error("[Moonshot] Stream error: status=#{status}")
@@ -164,6 +199,7 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
     body =
       request
       |> Adapter.sanitize_request()
+      |> Adapter.flatten_content_to_string()
       |> Map.put("model", step.model)
       |> maybe_default("temperature", step.temperature)
       |> maybe_default("max_tokens", step.max_tokens)
@@ -171,6 +207,8 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
       |> maybe_default("frequency_penalty", nil)
       |> maybe_default("presence_penalty", nil)
       |> maybe_default("stop", nil)
+      |> clamp_temperature()
+      |> handle_tool_choice_required()
       |> maybe_put_thinking(step)
       |> maybe_transform_kimi_reasoning(step)
 
@@ -188,10 +226,53 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
     if Map.has_key?(map, key), do: map, else: Map.put(map, key, default)
   end
 
+  # Moonshot temperature range is [0, 1], OpenAI is [0, 2]
+  # Also: if temp < 0.3 and n > 1, Moonshot raises an exception
+  defp clamp_temperature(body) do
+    case body["temperature"] do
+      nil ->
+        body
+
+      temp when is_number(temp) ->
+        n = body["n"] || 1
+        clamped = temp |> max(0.0) |> min(1.0)
+
+        # Bump to 0.3 if n > 1 and temp < 0.3
+        clamped = if clamped < 0.3 and n > 1, do: 0.3, else: clamped
+
+        Map.put(body, "temperature", clamped)
+
+      _ ->
+        body
+    end
+  end
+
+  # Moonshot doesn't support tool_choice="required"
+  # Workaround: add a user message asking to select a tool
+  defp handle_tool_choice_required(%{"tool_choice" => "required"} = body) do
+    messages = body["messages"] || []
+
+    messages =
+      messages ++
+        [
+          %{
+            "role" => "user",
+            "content" => "Please select a tool to handle the current issue."
+          }
+        ]
+
+    body
+    |> Map.put("messages", messages)
+    |> Map.delete("tool_choice")
+  end
+
+  defp handle_tool_choice_required(body), do: body
+
   defguardp is_kimi_thinking_model(model)
             when is_binary(model) and
                    (binary_part(model, 0, 7) == "kimi-k2" or model == "kimi-for-coding")
 
+  # kimi thinking models have thinking enabled by default - only disable if explicitly false
   defp maybe_put_thinking(body, %RoutingStep{model: model, thinking_enabled: false})
        when is_kimi_thinking_model(model) do
     Map.put(body, "thinking", %{"type" => "disabled"})
@@ -322,8 +403,15 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
     end
   end
 
-  defp build_final_response(acc, start_time) do
+  defp build_final_response(acc, timing_meta) do
     message = build_final_message(acc)
+
+    meta = %{
+      "ttfb_ms" => acc.first_chunk_time,
+      "upload_ms" => timing_meta.upload_ms,
+      "payload_size_bytes" => timing_meta.payload_size_bytes,
+      "provider_processing_ms" => timing_meta.provider_processing_ms
+    }
 
     %{
       "choices" => [
@@ -334,10 +422,7 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
         }
       ],
       "usage" => acc.usage,
-      "_meta" => %{
-        "latency_ms" => latency(start_time),
-        "ttfb_ms" => acc.first_chunk_time
-      }
+      "_meta" => meta
     }
   end
 
@@ -400,5 +485,9 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
       other ->
         other
     end)
+  end
+
+  defp calculate_upload_ms(start_time) do
+    FinchTelemetry.get_upload_ms(start_time)
   end
 end

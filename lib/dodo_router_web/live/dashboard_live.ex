@@ -112,7 +112,7 @@ defmodule DodoRouterWeb.DashboardLive do
 
       <%= if @selected_router && @stats do %>
         <!-- Stats Grid -->
-        <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+        <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
           <div class="stat-card">
             <div class="stat-label">Requests (24h)</div>
             <div class="stat-value">{@stats.total_requests}</div>
@@ -141,7 +141,7 @@ defmodule DodoRouterWeb.DashboardLive do
         </div>
         
     <!-- Latency Stats -->
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-6">
           <div class="stat-card flex items-center gap-4">
             <div class="stat-icon">
               <svg
@@ -216,7 +216,7 @@ defmodule DodoRouterWeb.DashboardLive do
         </div>
         
     <!-- Model Leaderboard -->
-        <div :if={length(@stats_by_model) > 0} class="card-bordered p-5 mb-6">
+        <div :if={length(@stats_by_model) > 0} class="card-bordered mb-6">
           <h2 class="section-title">Model Leaderboard</h2>
           <p class="section-desc mb-4">Performance ranking (24h)</p>
           <div class="space-y-2">
@@ -263,7 +263,7 @@ defmodule DodoRouterWeb.DashboardLive do
         </div>
         
     <!-- Charts Row -->
-        <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-3 mb-6">
           <!-- Requests per Minute -->
           <div class="chart-container">
             <h2 class="section-title">Requests per Minute</h2>
@@ -342,7 +342,7 @@ defmodule DodoRouterWeb.DashboardLive do
         </div>
       <% else %>
         <!-- Empty State -->
-        <div class="card-bordered p-12 text-center">
+        <div class="card-bordered text-center">
           <div class="max-w-md mx-auto">
             <div class="stat-icon w-16 h-16 mx-auto mb-6">
               <svg

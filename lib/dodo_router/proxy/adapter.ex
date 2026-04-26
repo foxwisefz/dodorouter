@@ -253,4 +253,262 @@ defmodule DodoRouter.Proxy.Adapter do
     |> String.trim_leading("data: ")
     |> String.trim_leading("data:")
   end
+
+  # ===========================================================================
+  # Request Transformations
+  # ===========================================================================
+
+  @doc """
+  Checks if a request can be handled by a model based on capabilities.
+  Returns :ok or {:error, reason}.
+  """
+  def can_handle?(request, model) do
+    cond do
+      has_images?(request) and not model.supports_vision ->
+        {:error, :no_vision_support}
+
+      has_tools?(request) and not model.supports_function_calling ->
+        {:error, :no_tool_support}
+
+      true ->
+        :ok
+    end
+  end
+
+  @doc """
+  Checks if request contains image content.
+  """
+  def has_images?(request) do
+    messages = request["messages"] || []
+
+    Enum.any?(messages, fn msg ->
+      case msg["content"] do
+        content when is_list(content) ->
+          Enum.any?(content, fn
+            %{"type" => "image_url"} -> true
+            %{"type" => "image"} -> true
+            _ -> false
+          end)
+
+        _ ->
+          false
+      end
+    end)
+  end
+
+  @doc """
+  Checks if request uses tools.
+  """
+  def has_tools?(request) do
+    tools = request["tools"] || []
+    is_list(tools) and length(tools) > 0
+  end
+
+  @doc """
+  Converts content arrays to strings for providers that don't support list format.
+  Only converts text-only content; preserves arrays with images/audio.
+  """
+  def flatten_content_to_string(request) do
+    messages = request["messages"] || []
+
+    updated =
+      Enum.map(messages, fn msg ->
+        case msg["content"] do
+          content when is_list(content) ->
+            if all_text_content?(content) do
+              text =
+                content
+                |> Enum.map(fn
+                  %{"type" => "text", "text" => t} -> t
+                  %{"text" => t} -> t
+                  _ -> ""
+                end)
+                |> Enum.join("")
+
+              Map.put(msg, "content", text)
+            else
+              msg
+            end
+
+          _ ->
+            msg
+        end
+      end)
+
+    Map.put(request, "messages", updated)
+  end
+
+  defp all_text_content?(content) when is_list(content) do
+    Enum.all?(content, fn
+      %{"type" => "text"} -> true
+      %{"type" => type} when type in ["image_url", "image", "audio", "file", "video_url"] -> false
+      _ -> true
+    end)
+  end
+
+  @doc """
+  Strips `name` field from messages (some providers don't support it).
+  Options:
+    - :all - strip from all messages
+    - :non_tool - strip from all except tool messages
+  """
+  def strip_name_from_messages(request, mode \\ :all) do
+    messages = request["messages"] || []
+
+    updated =
+      Enum.map(messages, fn msg ->
+        should_strip =
+          case mode do
+            :all -> true
+            :non_tool -> msg["role"] != "tool"
+          end
+
+        if should_strip, do: Map.delete(msg, "name"), else: msg
+      end)
+
+    Map.put(request, "messages", updated)
+  end
+
+  @doc """
+  Removes empty assistant messages (some providers reject them).
+  """
+  def filter_empty_assistant_messages(request) do
+    messages = request["messages"] || []
+
+    updated =
+      Enum.reject(messages, fn msg ->
+        msg["role"] == "assistant" and
+          empty_content?(msg["content"]) and
+          empty_or_nil?(msg["tool_calls"])
+      end)
+
+    Map.put(request, "messages", updated)
+  end
+
+  defp empty_content?(nil), do: true
+  defp empty_content?(""), do: true
+  defp empty_content?([]), do: true
+  defp empty_content?(_), do: false
+
+  defp empty_or_nil?(nil), do: true
+  defp empty_or_nil?([]), do: true
+  defp empty_or_nil?(_), do: false
+
+  @doc """
+  Cleans tool schemas by removing fields that some providers reject.
+  Removes: $id, $schema, additionalProperties, strict
+  """
+  def clean_tool_schemas(request) do
+    tools = request["tools"]
+
+    if is_list(tools) and length(tools) > 0 do
+      cleaned = Enum.map(tools, &clean_single_tool/1)
+      Map.put(request, "tools", cleaned)
+    else
+      request
+    end
+  end
+
+  defp clean_single_tool(%{"function" => func} = tool) do
+    cleaned_func =
+      func
+      |> Map.delete("strict")
+      |> update_in_if_exists(["parameters"], &clean_json_schema/1)
+
+    Map.put(tool, "function", cleaned_func)
+  end
+
+  defp clean_single_tool(tool), do: tool
+
+  defp clean_json_schema(schema) when is_map(schema) do
+    schema
+    |> Map.delete("$id")
+    |> Map.delete("$schema")
+    |> Map.delete("additionalProperties")
+    |> update_in_if_exists(["properties"], fn props ->
+      Map.new(props, fn {k, v} -> {k, clean_json_schema(v)} end)
+    end)
+    |> update_in_if_exists(["items"], &clean_json_schema/1)
+  end
+
+  defp clean_json_schema(other), do: other
+
+  defp update_in_if_exists(map, keys, func) do
+    case get_in(map, keys) do
+      nil -> map
+      val -> put_in(map, keys, func.(val))
+    end
+  end
+
+  @doc """
+  Removes `strict` field from tool definitions.
+  """
+  def remove_strict_from_tools(request) do
+    tools = request["tools"]
+
+    if is_list(tools) and length(tools) > 0 do
+      cleaned =
+        Enum.map(tools, fn tool ->
+          case tool do
+            %{"function" => func} ->
+              Map.put(tool, "function", Map.delete(func, "strict"))
+
+            _ ->
+              tool
+          end
+        end)
+
+      Map.put(request, "tools", cleaned)
+    else
+      request
+    end
+  end
+
+  @doc """
+  Clamps temperature to a specific range.
+  """
+  def clamp_temperature(request, min_val, max_val) do
+    case request["temperature"] do
+      nil ->
+        request
+
+      temp when is_number(temp) ->
+        clamped = temp |> max(min_val) |> min(max_val)
+        Map.put(request, "temperature", clamped)
+
+      _ ->
+        request
+    end
+  end
+
+  @doc """
+  Fixes finish_reason for tool calls (some providers return empty string).
+  """
+  def fix_tool_call_finish_reason(response) do
+    case response do
+      %{"choices" => choices} when is_list(choices) ->
+        fixed =
+          Enum.map(choices, fn choice ->
+            has_tools =
+              case choice do
+                %{"message" => %{"tool_calls" => calls}} when is_list(calls) and calls != [] ->
+                  true
+
+                _ ->
+                  false
+              end
+
+            if has_tools and choice["finish_reason"] in [nil, ""] do
+              Map.put(choice, "finish_reason", "tool_calls")
+            else
+              choice
+            end
+          end)
+
+        Map.put(response, "choices", fixed)
+
+      _ ->
+        response
+    end
+  end
 end

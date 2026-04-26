@@ -129,6 +129,16 @@ defmodule DodoRouter.Routers do
 
   def reorder_routing_steps(%Router{} = router, step_ids) when is_list(step_ids) do
     Repo.transaction(fn ->
+      # First, shift all positions to temporary negative values to avoid
+      # unique constraint collisions when swapping positions
+      step_ids
+      |> Enum.with_index()
+      |> Enum.each(fn {step_id, idx} ->
+        from(s in RoutingStep, where: s.id == ^step_id and s.router_id == ^router.id)
+        |> Repo.update_all(set: [position: -(idx + 1)])
+      end)
+
+      # Then set the final positions
       step_ids
       |> Enum.with_index()
       |> Enum.each(fn {step_id, idx} ->

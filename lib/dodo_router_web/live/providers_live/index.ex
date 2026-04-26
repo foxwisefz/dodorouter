@@ -3,33 +3,7 @@ defmodule DodoRouterWeb.ProvidersLive.Index do
 
   alias DodoRouter.Providers
   alias DodoRouter.Providers.ProviderKey
-
-  @provider_info %{
-    "zai_standard" => %{
-      name: "z.ai Standard",
-      short: "GLM models for general use",
-      endpoint: "https://api.z.ai/api/paas/v4",
-      color: "emerald"
-    },
-    "zai_coding" => %{
-      name: "z.ai Coding",
-      short: "Optimized for code generation",
-      endpoint: "https://api.z.ai/api/coding/paas/v4",
-      color: "emerald"
-    },
-    "moonshot" => %{
-      name: "Moonshot",
-      short: "Kimi K2 models",
-      endpoint: "https://api.moonshot.ai/v1",
-      color: "amber"
-    },
-    "moonshot_coding" => %{
-      name: "Moonshot Coding",
-      short: "Kimi Code (coding-optimized endpoint)",
-      endpoint: "https://api.kimi.com/coding/v1",
-      color: "amber"
-    }
-  }
+  alias DodoRouter.Proxy.Adapter.Registry
 
   @impl true
   def mount(_params, _session, socket) do
@@ -39,7 +13,7 @@ defmodule DodoRouterWeb.ProvidersLive.Index do
       socket
       |> assign(:page_title, "Providers")
       |> assign(:provider_keys, provider_keys)
-      |> assign(:provider_info, @provider_info)
+      |> assign(:provider_info, Registry.provider_info())
       |> assign(:adding_to, nil)
       |> assign(:editing_key, nil)
       |> assign(:form, nil)
@@ -182,7 +156,7 @@ defmodule DodoRouterWeb.ProvidersLive.Index do
           <% keys = Map.get(@provider_keys, provider_slug, []) %>
           <% key_count = length(keys) %>
 
-          <div class="bg-base-100 rounded-xl border border-base-300/40 overflow-hidden">
+          <div class="card-bordered overflow-hidden">
             <!-- Provider Header -->
             <div class="p-4 flex items-center justify-between">
               <div class="flex items-center gap-3">
@@ -289,6 +263,9 @@ defmodule DodoRouterWeb.ProvidersLive.Index do
                           class="text-sm hover:text-primary transition-colors"
                         >
                           {key.label}
+                          <span class="text-base-content/40 font-mono text-xs ml-1.5">
+                            {key.key_hint}
+                          </span>
                         </button>
                       </div>
                       <button

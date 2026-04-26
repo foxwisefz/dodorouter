@@ -7,9 +7,24 @@ defmodule DodoRouter.Proxy.Adapters.Zai do
   - Coding plan: https://api.z.ai/api/coding/paas/v4
   """
 
-  @behaviour DodoRouter.Proxy.Adapter
+  use DodoRouter.Proxy.Adapter.Registry,
+    slug: "zai",
+    display_name: "z.ai",
+    key_slugs: ["zai_standard", "zai_coding"],
+    key_display_names: %{
+      "zai_standard" => "z.ai Standard",
+      "zai_coding" => "z.ai Coding"
+    },
+    endpoints: %{
+      "zai_standard" => "https://api.z.ai/api/paas/v4",
+      "zai_coding" => "https://api.z.ai/api/coding/paas/v4"
+    },
+    models: ~w(glm-5.1 glm-5 glm-5-turbo glm-4.7 glm-4.6 glm-4.5),
+    color: "emerald",
+    short_description: "GLM models for general use"
 
   alias DodoRouter.Proxy.Adapter
+  alias DodoRouter.Proxy.FinchTelemetry
   alias DodoRouter.Routers.RoutingStep
 
   @standard_base_url "https://api.z.ai/api/paas/v4"
@@ -27,11 +42,22 @@ defmodule DodoRouter.Proxy.Adapters.Zai do
         {"Content-Type", "application/json"}
       ])
 
-    start_time = System.monotonic_time(:millisecond)
+    payload_size_bytes = body |> Jason.encode!() |> byte_size()
+    start_time = FinchTelemetry.mark_request_start()
 
     case Req.post(url, headers: headers, json: body, receive_timeout: @timeout_ms) do
       {:ok, %{status: 200, body: response_body, headers: resp_headers}} ->
-        {:ok, response_body, %{headers: resp_headers}}
+        total_ms = latency(start_time)
+        upload_ms = FinchTelemetry.get_upload_ms(start_time)
+
+        meta = %{
+          "ttfb_ms" => total_ms,
+          "upload_ms" => upload_ms,
+          "payload_size_bytes" => payload_size_bytes,
+          "provider_processing_ms" => nil
+        }
+
+        {:ok, Map.put(response_body, "_meta", meta), %{headers: resp_headers}}
 
       {:ok, %{status: status, body: response_body}} ->
         reason = Adapter.categorize_error(status, response_body)
@@ -56,7 +82,8 @@ defmodule DodoRouter.Proxy.Adapters.Zai do
         {"Content-Type", "application/json"}
       ])
 
-    start_time = System.monotonic_time(:millisecond)
+    payload_size_bytes = body |> Jason.encode!() |> byte_size()
+    start_time = FinchTelemetry.mark_request_start()
 
     # Track partial content in process dict so it survives error paths
     # (Req's into_fun error path loses the resp.private accumulator)
@@ -121,7 +148,15 @@ defmodule DodoRouter.Proxy.Adapters.Zai do
           resp.private[:stream_acc] ||
             %{content: "", tool_calls: %{}, usage: nil, finish_reason: nil, first_chunk_time: nil}
 
-        {:ok, build_final_response(acc, start_time), %{headers: resp_headers}}
+        upload_ms = calculate_upload_ms(start_time)
+
+        timing_meta = %{
+          payload_size_bytes: payload_size_bytes,
+          upload_ms: upload_ms,
+          provider_processing_ms: nil
+        }
+
+        {:ok, build_final_response(acc, timing_meta), %{headers: resp_headers}}
 
       {:ok, %Req.Response{status: status, body: response_body}} ->
         reason = Adapter.categorize_error(status, response_body)
@@ -221,8 +256,15 @@ defmodule DodoRouter.Proxy.Adapters.Zai do
     end
   end
 
-  defp build_final_response(acc, start_time) do
+  defp build_final_response(acc, timing_meta) do
     message = build_final_message(acc)
+
+    meta = %{
+      "ttfb_ms" => acc.first_chunk_time,
+      "upload_ms" => timing_meta.upload_ms,
+      "payload_size_bytes" => timing_meta.payload_size_bytes,
+      "provider_processing_ms" => timing_meta.provider_processing_ms
+    }
 
     %{
       "choices" => [
@@ -233,10 +275,7 @@ defmodule DodoRouter.Proxy.Adapters.Zai do
         }
       ],
       "usage" => acc.usage,
-      "_meta" => %{
-        "latency_ms" => latency(start_time),
-        "ttfb_ms" => acc.first_chunk_time
-      }
+      "_meta" => meta
     }
   end
 
@@ -281,4 +320,8 @@ defmodule DodoRouter.Proxy.Adapters.Zai do
   end
 
   defp latency(start_time), do: System.monotonic_time(:millisecond) - start_time
+
+  defp calculate_upload_ms(start_time) do
+    FinchTelemetry.get_upload_ms(start_time)
+  end
 end

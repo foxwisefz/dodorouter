@@ -73,7 +73,7 @@ defmodule DodoRouterWeb.RouterLive.Index do
       </div>
       
     <!-- New API Key Alert -->
-      <div :if={assigns[:show_api_key]} class="card-bordered p-4 mb-6 border-warning/50 bg-warning/5">
+      <div :if={assigns[:show_api_key]} class="card-bordered mb-6 border-warning/50 bg-warning/5">
         <div class="flex gap-3">
           <div class="stat-icon bg-warning/10 text-warning flex-shrink-0">
             <svg
@@ -123,7 +123,7 @@ defmodule DodoRouterWeb.RouterLive.Index do
         <div
           :for={{dom_id, router} <- @streams.routers}
           id={dom_id}
-          class="card-bordered p-5 hover:border-base-300 transition-colors"
+          class="card-bordered hover:bg-base-200/30 transition-colors"
         >
           <div class="flex items-start justify-between mb-4">
             <div>
@@ -199,7 +199,7 @@ defmodule DodoRouterWeb.RouterLive.Index do
       </div>
       
     <!-- Empty State -->
-      <div :if={Enum.empty?(@streams.routers.inserts)} class="card-bordered p-12 text-center">
+      <div :if={Enum.empty?(@streams.routers.inserts)} class="card-bordered text-center">
         <div class="max-w-md mx-auto">
           <div class="stat-icon w-16 h-16 mx-auto mb-6">
             <svg

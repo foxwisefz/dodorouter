@@ -124,34 +124,34 @@ defmodule DodoRouterWeb.LogLive.Show do
       <% end %>
       
     <!-- Overview Stats -->
-      <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4 mb-6">
-        <div class="stat bg-base-100 rounded-box shadow p-4">
-          <div class="stat-title text-xs">Status</div>
+      <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3 mb-6">
+        <div class="stat-card">
+          <div class="stat-label text-xs">Status</div>
           <div class="stat-value text-lg"><.status_badge status={@log.status} /></div>
         </div>
 
-        <div class="stat bg-base-100 rounded-box shadow p-4">
-          <div class="stat-title text-xs">Provider</div>
+        <div class="stat-card">
+          <div class="stat-label text-xs">Provider</div>
           <div class="stat-value text-lg">{@log.final_provider}</div>
         </div>
 
-        <div class="stat bg-base-100 rounded-box shadow p-4">
-          <div class="stat-title text-xs">Model</div>
+        <div class="stat-card">
+          <div class="stat-label text-xs">Model</div>
           <div class="stat-value text-sm font-mono">{@log.final_model}</div>
         </div>
 
-        <div class="stat bg-base-100 rounded-box shadow p-4">
-          <div class="stat-title text-xs">Latency</div>
+        <div class="stat-card">
+          <div class="stat-label text-xs">Latency</div>
           <div class="stat-value text-lg">{@log.latency_ms || "-"}ms</div>
         </div>
 
-        <div class="stat bg-base-100 rounded-box shadow p-4">
-          <div class="stat-title text-xs">Tokens</div>
+        <div class="stat-card">
+          <div class="stat-label text-xs">Tokens</div>
           <div class="stat-value text-lg">{@log.total_tokens || "-"}</div>
         </div>
 
-        <div class="stat bg-base-100 rounded-box shadow p-4">
-          <div class="stat-title text-xs">Cost</div>
+        <div class="stat-card">
+          <div class="stat-label text-xs">Cost</div>
           <div class="stat-value text-lg">
             {if @log.estimated_cost_usd,
               do: "$#{Decimal.round(@log.estimated_cost_usd, 4)}",
@@ -162,255 +162,288 @@ defmodule DodoRouterWeb.LogLive.Show do
 
       <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
         <!-- Performance Card -->
-        <div class="card bg-base-100 shadow">
-          <div class="card-body">
-            <h2 class="card-title text-base">Performance</h2>
-            <div class="overflow-x-auto">
-              <table class="table table-sm">
-                <tbody>
-                  <tr>
-                    <td class="text-base-content/60">Call Type</td>
-                    <td class="text-right"><.call_type_badge type={@log.call_type} /></td>
-                  </tr>
-                  <tr>
-                    <td class="text-base-content/60">Total Latency</td>
-                    <td class="text-right font-mono">{@log.latency_ms || "-"} ms</td>
-                  </tr>
-                  <tr>
-                    <td class="text-base-content/60">Provider Time</td>
-                    <td class="text-right font-mono">{provider_time(@log)} ms</td>
-                  </tr>
-                  <tr>
-                    <td class="text-base-content/60">DodoRouter Overhead</td>
-                    <td class="text-right">
-                      <span class="font-mono">{overhead_time(@log)} ms</span>
-                      <span class="text-success text-xs ml-1">({overhead_percent(@log)})</span>
-                    </td>
-                  </tr>
-                  <tr>
-                    <td class="text-base-content/60">Time to First Byte</td>
-                    <td class="text-right font-mono">{@log.ttfb_ms || "-"} ms</td>
-                  </tr>
-                  <tr>
-                    <td class="text-base-content/60">Prompt Tokens</td>
-                    <td class="text-right font-mono">{@log.prompt_tokens || "-"}</td>
-                  </tr>
-                  <tr>
-                    <td class="text-base-content/60">Completion Tokens</td>
-                    <td class="text-right font-mono">{@log.completion_tokens || "-"}</td>
-                  </tr>
-                  <tr>
-                    <td class="text-base-content/60">Timestamp</td>
-                    <td class="text-right font-mono text-xs">{format_datetime(@log.inserted_at)}</td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
+        <div class="card-bordered">
+          <h2 class="section-title mb-3">Performance</h2>
+          <div class="overflow-x-auto">
+            <table class="table table-sm">
+              <tbody>
+                <tr>
+                  <td class="text-base-content/60">Call Type</td>
+                  <td class="text-right"><.call_type_badge type={@log.call_type} /></td>
+                </tr>
+                <tr>
+                  <td class="text-base-content/60">Total Latency</td>
+                  <td class="text-right font-mono">{@log.latency_ms || "-"} ms</td>
+                </tr>
+                <tr>
+                  <td class="text-base-content/60">Provider Time</td>
+                  <td class="text-right font-mono">{provider_time(@log)} ms</td>
+                </tr>
+                <tr>
+                  <td class="text-base-content/60">DodoRouter Overhead</td>
+                  <td class="text-right">
+                    <span class="font-mono">{overhead_time(@log)} ms</span>
+                    <span class="text-success text-xs ml-1">({overhead_percent(@log)})</span>
+                  </td>
+                </tr>
+                <tr>
+                  <td class="text-base-content/60">Time to First Byte</td>
+                  <td class="text-right font-mono">{@log.ttfb_ms || "-"} ms</td>
+                </tr>
+                <tr>
+                  <td class="text-base-content/60">Upload Time</td>
+                  <td class="text-right font-mono">{@log.upload_ms || "-"} ms</td>
+                </tr>
+                <tr>
+                  <td class="text-base-content/60">
+                    Wait Time <span class="text-xs text-base-content/40">(TTFB - Upload)</span>
+                  </td>
+                  <td class="text-right font-mono">{wait_time(@log)} ms</td>
+                </tr>
+                <tr :if={@log.provider_processing_ms}>
+                  <td class="text-base-content/60">
+                    Provider Processing <span class="text-xs text-success">(from header)</span>
+                  </td>
+                  <td class="text-right font-mono">{@log.provider_processing_ms} ms</td>
+                </tr>
+                <tr>
+                  <td class="text-base-content/60">Payload Size</td>
+                  <td class="text-right font-mono">{format_bytes(@log.payload_size_bytes)}</td>
+                </tr>
+                <tr>
+                  <td class="text-base-content/60">Prompt Tokens</td>
+                  <td class="text-right font-mono">{@log.prompt_tokens || "-"}</td>
+                </tr>
+                <tr>
+                  <td class="text-base-content/60">Completion Tokens</td>
+                  <td class="text-right font-mono">{@log.completion_tokens || "-"}</td>
+                </tr>
+                <tr>
+                  <td class="text-base-content/60">Timestamp</td>
+                  <td class="text-right font-mono text-xs">{format_datetime(@log.inserted_at)}</td>
+                </tr>
+              </tbody>
+            </table>
           </div>
         </div>
         
     <!-- Routing Chain Card -->
-        <div class="card bg-base-100 shadow">
-          <div class="card-body">
-            <h2 class="card-title text-base">Routing Chain</h2>
-            <div class="space-y-4 mt-2">
-              <%= for {attempt, idx} <- Enum.with_index(@log.attempted_steps) do %>
-                <div class={[
-                  "p-3 rounded-lg border-l-4",
-                  attempt["status"] == "success" && "bg-success/10 border-success",
-                  attempt["status"] != "success" && "bg-error/10 border-error"
-                ]}>
-                  <div class="flex items-center justify-between">
-                    <div class="flex items-center gap-2">
-                      <span class="badge badge-neutral">{idx + 1}</span>
-                      <span class="font-medium">{attempt["provider"]}</span>
-                      <span class="text-base-content/60">/ {attempt["model"]}</span>
-                      <span
-                        :if={attempt["plan_type"] == "coding"}
-                        class="badge badge-secondary badge-sm"
-                      >
-                        coding
-                      </span>
-                    </div>
-                    <div class="flex items-center gap-2">
-                      <span :if={attempt["http_status"]} class="badge badge-ghost badge-sm">
-                        HTTP {attempt["http_status"]}
-                      </span>
-                      <span class={[
+        <div class="card-bordered">
+          <h2 class="section-title mb-3">Routing Chain</h2>
+          <div class="space-y-4 mt-2">
+            <%= for {attempt, idx} <- Enum.with_index(@log.attempted_steps) do %>
+              <div class={[
+                "p-3 rounded-lg border-l-4",
+                attempt["status"] == "success" && "bg-success/10 border-success",
+                attempt["status"] != "success" && "bg-error/10 border-error"
+              ]}>
+                <div class="flex items-center justify-between">
+                  <div class="flex items-center gap-2">
+                    <span class="badge badge-neutral">{idx + 1}</span>
+                    <span class="font-medium">{attempt["provider"]}</span>
+                    <span class="text-base-content/60">/ {attempt["model"]}</span>
+                    <span
+                      :if={attempt["plan_type"] && attempt["plan_type"] != ""}
+                      class={[
                         "badge badge-sm",
-                        attempt["status"] == "success" && "badge-success",
-                        attempt["status"] != "success" && "badge-error"
-                      ]}>
-                        {attempt["status"]}
-                      </span>
-                      <span class="font-mono text-sm">{attempt["latency_ms"]}ms</span>
-                    </div>
-                  </div>
-                  <div :if={attempt["endpoint"]} class="mt-2">
-                    <code class="text-xs text-base-content/70 break-all">{attempt["endpoint"]}</code>
-                  </div>
-                  <div :if={attempt["error"]} class="mt-2 text-sm text-error">
-                    <strong>Error:</strong> {attempt["error"]}
-                  </div>
-                  <div :if={attempt["error_body"]} class="mt-2">
-                    <details class="collapse collapse-arrow bg-base-200">
-                      <summary class="collapse-title text-xs py-1 min-h-0">Error Response</summary>
-                      <div class="collapse-content">
-                        <pre class="text-xs overflow-auto"><%= attempt["error_body"] %></pre>
-                      </div>
-                    </details>
-                  </div>
-                  <div
-                    :if={attempt["forwarded_headers"] && map_size(attempt["forwarded_headers"]) > 0}
-                    class="mt-2 text-xs"
-                  >
-                    <div class="text-base-content/60 mb-1">Headers modified:</div>
-                    <div class="space-y-0.5 font-mono">
-                      <%= for {header, note} <- attempt["forwarded_headers"] do %>
-                        <div class="flex gap-2 items-start">
-                          <span class="badge badge-xs badge-ghost">→</span>
-                          <span class="font-medium">{header}:</span>
-                          <span class="text-base-content/70">{note}</span>
-                        </div>
-                      <% end %>
-                    </div>
-                  </div>
-                  <div
-                    :if={attempt["streamed_to_client"]}
-                    class="mt-2 flex items-center gap-2 text-xs text-warning"
-                  >
-                    <span class="badge badge-warning badge-sm">midstream fallback</span>
-                    <span class="text-base-content/50">
-                      {attempt["partial_content_length"]} chars already sent to client
+                        attempt["plan_type"] == "coding" && "badge-secondary",
+                        attempt["plan_type"] != "coding" && "badge-ghost"
+                      ]}
+                    >
+                      {attempt["plan_type"]}
                     </span>
                   </div>
+                  <div class="flex items-center gap-2">
+                    <span :if={attempt["http_status"]} class="badge badge-ghost badge-sm">
+                      HTTP {attempt["http_status"]}
+                    </span>
+                    <span class={[
+                      "badge badge-sm",
+                      attempt["status"] == "success" && "badge-success",
+                      attempt["status"] != "success" && "badge-error"
+                    ]}>
+                      {attempt["status"]}
+                    </span>
+                    <span class="font-mono text-sm">{attempt["latency_ms"]}ms</span>
+                  </div>
                 </div>
-              <% end %>
-            </div>
+                <div :if={attempt["endpoint"]} class="mt-2">
+                  <code class="text-xs text-base-content/70 break-all">{attempt["endpoint"]}</code>
+                </div>
+                <div :if={attempt["error"]} class="mt-2 text-sm text-error">
+                  <strong>Error:</strong> {attempt["error"]}
+                </div>
+                <div :if={attempt["error_body"]} class="mt-2">
+                  <details class="collapse collapse-arrow bg-base-200">
+                    <summary class="collapse-title text-xs py-1 min-h-0">Error Response</summary>
+                    <div class="collapse-content">
+                      <pre class="text-xs overflow-auto">{attempt["error_body"]}</pre>
+                    </div>
+                  </details>
+                </div>
+                <div :if={attempt["response_body"]} class="mt-2">
+                  <details class="collapse collapse-arrow bg-base-200">
+                    <summary class="collapse-title text-xs py-1 min-h-0">Response Body</summary>
+                    <div class="collapse-content">
+                      <pre class="text-xs overflow-auto max-h-64">{format_json(attempt["response_body"])}</pre>
+                    </div>
+                  </details>
+                </div>
+                <div
+                  :if={attempt["response_headers"] && length(attempt["response_headers"]) > 0}
+                  class="mt-2"
+                >
+                  <details class="collapse collapse-arrow bg-base-200">
+                    <summary class="collapse-title text-xs py-1 min-h-0">Response Headers</summary>
+                    <div class="collapse-content">
+                      <pre class="text-xs overflow-auto">{format_headers(attempt["response_headers"])}</pre>
+                    </div>
+                  </details>
+                </div>
+                <div
+                  :if={attempt["forwarded_headers"] && map_size(attempt["forwarded_headers"]) > 0}
+                  class="mt-2 text-xs"
+                >
+                  <div class="text-base-content/60 mb-1">Headers modified:</div>
+                  <div class="space-y-0.5 font-mono">
+                    <%= for {header, note} <- attempt["forwarded_headers"] do %>
+                      <div class="flex gap-2 items-start">
+                        <span class="badge badge-xs badge-ghost">→</span>
+                        <span class="font-medium">{header}:</span>
+                        <span class="text-base-content/70">{note}</span>
+                      </div>
+                    <% end %>
+                  </div>
+                </div>
+                <div
+                  :if={attempt["streamed_to_client"]}
+                  class="mt-2 flex items-center gap-2 text-xs text-warning"
+                >
+                  <span class="badge badge-warning badge-sm">midstream fallback</span>
+                  <span class="text-base-content/50">
+                    {attempt["partial_content_length"]} chars already sent to client
+                  </span>
+                </div>
+              </div>
+            <% end %>
           </div>
         </div>
       </div>
       
     <!-- Tools Invoked -->
-      <div :if={length(@log.tools_invoked) > 0} class="card bg-base-100 shadow mb-6">
-        <div class="card-body">
-          <h2 class="card-title text-base">Tools Invoked</h2>
-          <div class="flex flex-wrap gap-2">
-            <span :for={tool <- @log.tools_invoked} class="badge badge-secondary badge-lg font-mono">
-              {tool}
-            </span>
-          </div>
+      <div :if={length(@log.tools_invoked) > 0} class="card-bordered mb-6">
+        <h2 class="section-title mb-3">Tools Invoked</h2>
+        <div class="flex flex-wrap gap-2">
+          <span :for={tool <- @log.tools_invoked} class="badge badge-secondary badge-lg font-mono">
+            {tool}
+          </span>
         </div>
       </div>
       
     <!-- Request & Response -->
       <div :if={@log.request_body || @log.response_body} class="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <!-- Request -->
-        <div :if={@log.request_body} class="card bg-base-100 shadow">
-          <div class="card-body">
-            <div class="flex items-center justify-between mb-3">
-              <h2 class="card-title text-base">Request</h2>
+        <div :if={@log.request_body} class="card-bordered">
+          <div class="flex items-center justify-between mb-3">
+            <h2 class="section-title mb-0">Request</h2>
+            <div class="flex gap-2">
+              <button :if={@req_headers} phx-click="toggle_req_headers" class="btn btn-ghost btn-xs">
+                Headers
+              </button>
+              <button
+                phx-click="toggle_raw_request"
+                class="btn btn-ghost btn-xs"
+              >
+                {if @show_raw_request, do: "Compact", else: "Raw JSON"}
+              </button>
+            </div>
+          </div>
+
+          <div
+            :if={@show_req_headers && @req_headers}
+            class="mb-3 p-2 bg-base-200 rounded-lg text-xs font-mono space-y-1"
+          >
+            <%= for {key, value} <- @req_headers do %>
               <div class="flex gap-2">
-                <button :if={@req_headers} phx-click="toggle_req_headers" class="btn btn-ghost btn-xs">
-                  Headers
-                </button>
-                <button
-                  phx-click="toggle_raw_request"
-                  class="btn btn-ghost btn-xs"
-                >
-                  {if @show_raw_request, do: "Compact", else: "Raw JSON"}
-                </button>
+                <span class="text-base-content/60 shrink-0">{key}:</span>
+                <span class="break-all">{value}</span>
               </div>
-            </div>
+            <% end %>
+          </div>
 
-            <div
-              :if={@show_req_headers && @req_headers}
-              class="mb-3 p-2 bg-base-200 rounded-lg text-xs font-mono space-y-1"
-            >
-              <%= for {key, value} <- @req_headers do %>
-                <div class="flex gap-2">
-                  <span class="text-base-content/60 shrink-0">{key}:</span>
-                  <span class="break-all">{value}</span>
-                </div>
-              <% end %>
+          <%= if @show_raw_request do %>
+            <div class="mockup-code text-xs max-h-64 overflow-auto">
+              <pre><code><%= format_json(@log.request_body) %></code></pre>
             </div>
-
-            <%= if @show_raw_request do %>
+          <% else %>
+            <%= if length(@req_messages) > 0 do %>
+              <div class="space-y-2">
+                <%= for {msg, idx} <- Enum.with_index(@req_messages) do %>
+                  <.compact_message
+                    message={msg}
+                    index={idx}
+                    expanded={MapSet.member?(@expanded_messages, idx)}
+                  />
+                <% end %>
+              </div>
+            <% else %>
               <div class="mockup-code text-xs max-h-64 overflow-auto">
                 <pre><code><%= format_json(@log.request_body) %></code></pre>
               </div>
-            <% else %>
-              <%= if length(@req_messages) > 0 do %>
-                <div class="space-y-2">
-                  <%= for {msg, idx} <- Enum.with_index(@req_messages) do %>
-                    <.compact_message
-                      message={msg}
-                      index={idx}
-                      expanded={MapSet.member?(@expanded_messages, idx)}
-                    />
-                  <% end %>
-                </div>
-              <% else %>
-                <div class="mockup-code text-xs max-h-64 overflow-auto">
-                  <pre><code><%= format_json(@log.request_body) %></code></pre>
-                </div>
-              <% end %>
             <% end %>
-          </div>
+          <% end %>
         </div>
         
     <!-- Response -->
-        <div :if={@log.response_body} class="card bg-base-100 shadow">
-          <div class="card-body">
-            <div class="flex items-center justify-between mb-3">
-              <h2 class="card-title text-base">Response</h2>
+        <div :if={@log.response_body} class="card-bordered">
+          <div class="flex items-center justify-between mb-3">
+            <h2 class="section-title mb-0">Response</h2>
+            <div class="flex gap-2">
+              <button
+                :if={@resp_headers}
+                phx-click="toggle_resp_headers"
+                class="btn btn-ghost btn-xs"
+              >
+                Headers
+              </button>
+              <button
+                phx-click="toggle_raw_response"
+                class="btn btn-ghost btn-xs"
+              >
+                {if @show_raw_response, do: "Compact", else: "Raw JSON"}
+              </button>
+            </div>
+          </div>
+
+          <div
+            :if={@show_resp_headers && @resp_headers}
+            class="mb-3 p-2 bg-base-200 rounded-lg text-xs font-mono space-y-1"
+          >
+            <%= for {key, value} <- @resp_headers do %>
               <div class="flex gap-2">
-                <button
-                  :if={@resp_headers}
-                  phx-click="toggle_resp_headers"
-                  class="btn btn-ghost btn-xs"
-                >
-                  Headers
-                </button>
-                <button
-                  phx-click="toggle_raw_response"
-                  class="btn btn-ghost btn-xs"
-                >
-                  {if @show_raw_response, do: "Compact", else: "Raw JSON"}
-                </button>
+                <span class="text-base-content/60 shrink-0">{key}:</span>
+                <span class="break-all">{value}</span>
               </div>
-            </div>
+            <% end %>
+          </div>
 
-            <div
-              :if={@show_resp_headers && @resp_headers}
-              class="mb-3 p-2 bg-base-200 rounded-lg text-xs font-mono space-y-1"
-            >
-              <%= for {key, value} <- @resp_headers do %>
-                <div class="flex gap-2">
-                  <span class="text-base-content/60 shrink-0">{key}:</span>
-                  <span class="break-all">{value}</span>
-                </div>
-              <% end %>
+          <%= if @show_raw_response do %>
+            <div class="mockup-code text-xs max-h-64 overflow-auto">
+              <pre><code><%= format_json(@log.response_body) %></code></pre>
             </div>
-
-            <%= if @show_raw_response do %>
+          <% else %>
+            <%= if @resp_message do %>
+              <.compact_message
+                message={@resp_message}
+                index="resp"
+                expanded={MapSet.member?(@expanded_messages, "resp")}
+              />
+            <% else %>
               <div class="mockup-code text-xs max-h-64 overflow-auto">
                 <pre><code><%= format_json(@log.response_body) %></code></pre>
               </div>
-            <% else %>
-              <%= if @resp_message do %>
-                <.compact_message
-                  message={@resp_message}
-                  index="resp"
-                  expanded={MapSet.member?(@expanded_messages, "resp")}
-                />
-              <% else %>
-                <div class="mockup-code text-xs max-h-64 overflow-auto">
-                  <pre><code><%= format_json(@log.response_body) %></code></pre>
-                </div>
-              <% end %>
             <% end %>
-          </div>
+          <% end %>
         </div>
       </div>
     </div>
@@ -652,6 +685,17 @@ defmodule DodoRouterWeb.LogLive.Show do
     end
   end
 
+  defp format_headers(nil), do: ""
+
+  defp format_headers(headers) when is_list(headers) do
+    headers
+    |> Enum.map(fn
+      [k, v] -> "#{k}: #{v}"
+      other -> inspect(other)
+    end)
+    |> Enum.join("\n")
+  end
+
   defp provider_time(%{attempted_steps: steps}) when is_list(steps) do
     steps
     |> Enum.map(fn step -> step["latency_ms"] || 0 end)
@@ -673,4 +717,16 @@ defmodule DodoRouterWeb.LogLive.Show do
   end
 
   defp overhead_percent(_), do: "-"
+
+  defp wait_time(%{ttfb_ms: ttfb, upload_ms: upload})
+       when is_integer(ttfb) and is_integer(upload) do
+    ttfb - upload
+  end
+
+  defp wait_time(_), do: "-"
+
+  defp format_bytes(nil), do: "-"
+  defp format_bytes(bytes) when bytes < 1024, do: "#{bytes} B"
+  defp format_bytes(bytes) when bytes < 1024 * 1024, do: "#{Float.round(bytes / 1024, 1)} KB"
+  defp format_bytes(bytes), do: "#{Float.round(bytes / 1024 / 1024, 2)} MB"
 end
