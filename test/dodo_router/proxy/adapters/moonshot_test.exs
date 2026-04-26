@@ -438,4 +438,24 @@ defmodule DodoRouter.Proxy.Adapters.MoonshotTest do
       assert result[1]["function"]["name"] == "tool_b"
     end
   end
+
+  describe "parse_raw_error/1" do
+    test "returns nil for nil" do
+      assert Moonshot.parse_raw_error(nil) == nil
+    end
+
+    test "parses JSON error body from streaming error response" do
+      raw =
+        "{\"error\":{\"message\":\"You've reached your usage limit\",\"type\":\"access_terminated_error\"}}"
+
+      result = Moonshot.parse_raw_error(raw)
+      assert result["error"]["message"] =~ "usage limit"
+    end
+
+    test "returns raw string when not valid JSON" do
+      raw = "some plain text error"
+      result = Moonshot.parse_raw_error(raw)
+      assert result == "some plain text error"
+    end
+  end
 end

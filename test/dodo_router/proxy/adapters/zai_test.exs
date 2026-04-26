@@ -139,4 +139,22 @@ defmodule DodoRouter.Proxy.Adapters.ZaiTest do
       refute Map.has_key?(body, "stream_options")
     end
   end
+
+  describe "parse_raw_error/1" do
+    test "returns nil for nil" do
+      assert Zai.parse_raw_error(nil) == nil
+    end
+
+    test "parses JSON error body from streaming error response" do
+      raw = "{\"error\":{\"message\":\"Invalid API key\",\"type\":\"invalid_request_error\"}}"
+      result = Zai.parse_raw_error(raw)
+      assert result["error"]["message"] == "Invalid API key"
+    end
+
+    test "returns raw string when not valid JSON" do
+      raw = "some plain error"
+      result = Zai.parse_raw_error(raw)
+      assert result == "some plain error"
+    end
+  end
 end

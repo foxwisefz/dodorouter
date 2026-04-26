@@ -293,4 +293,28 @@ defmodule DodoRouter.Proxy.FallbackChainTest do
       assert result == "HTTP 403: auth_error"
     end
   end
+
+  describe "truncate_error" do
+    test "returns nil for nil" do
+      assert DodoRouter.Proxy.FallbackChain.truncate_error(nil) == nil
+    end
+
+    test "returns nil for empty string" do
+      assert DodoRouter.Proxy.FallbackChain.truncate_error("") == nil
+    end
+
+    test "truncates large map bodies" do
+      body = %{"error" => %{"message" => String.duplicate("x", 600)}}
+      result = DodoRouter.Proxy.FallbackChain.truncate_error(body)
+      assert String.ends_with?(result, "...")
+      assert byte_size(result) <= 503
+    end
+
+    test "preserves small map bodies as JSON" do
+      body = %{"error" => %{"message" => "rate limited"}}
+      result = DodoRouter.Proxy.FallbackChain.truncate_error(body)
+      assert result =~ "rate limited"
+      assert String.starts_with?(result, "{")
+    end
+  end
 end
