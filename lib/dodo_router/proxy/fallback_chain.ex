@@ -100,7 +100,9 @@ defmodule DodoRouter.Proxy.FallbackChain do
           status: "error",
           error: to_string(reason),
           http_status: details[:status],
-          error_body: truncate_error(details[:body]) || error_body_fallback(reason, details),
+          error_body:
+            truncate_error(details[:body]) ||
+              error_body_fallback(reason, details),
           latency_ms: details[:latency_ms] || latency(start_time),
           streamed_to_client: streamed_to_client,
           partial_content_length:
@@ -215,6 +217,7 @@ defmodule DodoRouter.Proxy.FallbackChain do
   end
 
   defp truncate_error(nil), do: nil
+  defp truncate_error(""), do: nil
 
   defp truncate_error(body) when is_map(body) do
     case Jason.encode(body) do
@@ -230,7 +233,9 @@ defmodule DodoRouter.Proxy.FallbackChain do
   def error_body_fallback(:auth_error, %{reason: reason}) when is_binary(reason), do: reason
 
   def error_body_fallback(reason, details) do
-    if is_binary(details[:reason]), do: details[:reason], else: to_string(reason)
+    status = details[:status]
+    base = if is_binary(details[:reason]), do: details[:reason], else: to_string(reason)
+    if status, do: "HTTP #{status}: #{base}", else: base
   end
 
   # Accumulate partial content from a failed streaming attempt
