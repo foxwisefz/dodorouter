@@ -156,5 +156,12 @@ defmodule DodoRouter.Proxy.Adapters.ZaiTest do
       result = Zai.parse_raw_error(raw)
       assert result == "some plain error"
     end
+
+    test "decompresses gzip data before parsing" do
+      json = "{\"error\":{\"message\":\"auth failed\"}}"
+      gzipped = :zlib.gzip(json)
+      result = Zai.parse_raw_error(gzipped)
+      assert result["error"]["message"] == "auth failed"
+    end
   end
 end

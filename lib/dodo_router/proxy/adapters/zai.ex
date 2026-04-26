@@ -349,9 +349,20 @@ defmodule DodoRouter.Proxy.Adapters.Zai do
 
   @doc false
   def parse_raw_error(data) when is_binary(data) do
+    data = maybe_gunzip(data)
+
     case Jason.decode(data) do
       {:ok, decoded} -> decoded
       _ -> data
     end
   end
+
+  defp maybe_gunzip(<<31, 139, 8, _::binary>> = data) do
+    case :zlib.gunzip(data) do
+      decompressed when is_binary(decompressed) -> decompressed
+      _ -> data
+    end
+  end
+
+  defp maybe_gunzip(data), do: data
 end
