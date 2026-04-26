@@ -457,5 +457,12 @@ defmodule DodoRouter.Proxy.Adapters.MoonshotTest do
       result = Moonshot.parse_raw_error(raw)
       assert result == "some plain text error"
     end
+
+    test "decompresses gzip data before parsing" do
+      json = "{\"error\":{\"message\":\"quota exceeded\"}}"
+      gzipped = :zlib.gzip(json)
+      result = Moonshot.parse_raw_error(gzipped)
+      assert result["error"]["message"] == "quota exceeded"
+    end
   end
 end
