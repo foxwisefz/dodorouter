@@ -11,6 +11,10 @@ defmodule DodoRouter.Proxy.Adapters.Zai do
     slug: "zai",
     display_name: "z.ai",
     key_slugs: ["zai_standard", "zai_coding"],
+    key_display_names: %{
+      "zai_standard" => "z.ai Standard",
+      "zai_coding" => "z.ai Coding"
+    },
     endpoints: %{
       "zai_standard" => "https://api.z.ai/api/paas/v4",
       "zai_coding" => "https://api.z.ai/api/coding/paas/v4"

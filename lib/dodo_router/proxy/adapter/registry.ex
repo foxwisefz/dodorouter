@@ -51,6 +51,7 @@ defmodule DodoRouter.Proxy.Adapter.Registry do
           display_name: unquote(opts[:display_name]),
           module: __MODULE__,
           key_slugs: unquote(opts[:key_slugs]),
+          key_display_names: unquote(opts[:key_display_names]),
           endpoints: unquote(opts[:endpoints]),
           models: unquote(opts[:models]),
           color: unquote(opts[:color]),
@@ -177,9 +178,10 @@ defmodule DodoRouter.Proxy.Adapter.Registry do
     all_adapters()
     |> Enum.flat_map(fn {_slug, config} ->
       for key_slug <- config.key_slugs do
+        name = Map.get(config.key_display_names || %{}, key_slug, config.display_name)
         {key_slug,
          %{
-           name: config.display_name,
+           name: name,
            short: config.short_description,
            endpoint: Map.get(config.endpoints, key_slug),
            color: config.color

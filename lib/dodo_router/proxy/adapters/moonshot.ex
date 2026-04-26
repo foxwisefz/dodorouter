@@ -9,6 +9,10 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
     slug: "moonshot",
     display_name: "Moonshot (Kimi)",
     key_slugs: ["moonshot", "moonshot_coding"],
+    key_display_names: %{
+      "moonshot" => "Moonshot (Kimi)",
+      "moonshot_coding" => "Kimi Coding"
+    },
     endpoints: %{
       "moonshot" => "https://api.moonshot.ai/v1",
       "moonshot_coding" => "https://api.kimi.com/coding/v1"

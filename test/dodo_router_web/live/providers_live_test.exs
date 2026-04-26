@@ -16,8 +16,10 @@ defmodule DodoRouterWeb.ProvidersLiveTest do
     test "shows all provider cards", %{conn: conn} do
       {:ok, _live, html} = live(conn, ~p"/providers")
 
-      assert html =~ "z.ai"
+      assert html =~ "z.ai Standard"
+      assert html =~ "z.ai Coding"
       assert html =~ "Moonshot (Kimi)"
+      assert html =~ "Kimi Coding"
       assert html =~ "OpenAI"
       assert html =~ "Anthropic"
       assert html =~ "Google"
