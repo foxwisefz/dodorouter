@@ -219,4 +219,73 @@ defmodule DodoRouter.Proxy.FallbackChainTest do
       end
     end
   end
+
+  describe "execute/4 error details" do
+    setup do
+      user = AccountsFixtures.user_fixture()
+      {router, _api_key} = RoutersFixtures.router_fixture(user)
+      %{user: user, router: router}
+    end
+
+    test "populates error_body when API key is missing", %{user: _user, router: router} do
+      {:ok, step} =
+        Routers.create_routing_step(router, %{
+          "provider" => "openai",
+          "model" => "gpt-4o"
+        })
+
+      step = Repo.preload(step, :provider_key)
+
+      result =
+        FallbackChain.execute(
+          %{"messages" => [%{"role" => "user", "content" => "hi"}], "model" => "test"},
+          [step],
+          router.id,
+          stream: false
+        )
+
+      attempt = hd(result.attempted_steps)
+      assert attempt.error == "auth_error"
+      assert attempt.error_body != nil
+      assert String.contains?(attempt.error_body, "Missing API key")
+    end
+
+    test "records error and error_body for failed attempts", %{user: user, router: router} do
+      step = create_step_with_key(router, user, "zai", "glm-5.1", "zai_standard", "test key")
+
+      result =
+        FallbackChain.execute(
+          %{"messages" => [%{"role" => "user", "content" => "hi"}], "model" => "test"},
+          [step],
+          router.id,
+          stream: false
+        )
+
+      attempt = hd(result.attempted_steps)
+      assert attempt.status == "error"
+      assert attempt.error != nil
+      assert attempt.error_body != nil
+      assert is_integer(attempt.latency_ms)
+    end
+  end
+
+  describe "error_body_fallback" do
+    test "returns timeout message for :timeout" do
+      chain_module = DodoRouter.Proxy.FallbackChain
+      result = chain_module.error_body_fallback(:timeout, %{})
+      assert result == "Request timed out"
+    end
+
+    test "returns reason string for auth_error" do
+      result =
+        DodoRouter.Proxy.FallbackChain.error_body_fallback(:auth_error, %{reason: "bad key"})
+
+      assert result == "bad key"
+    end
+
+    test "returns stringified reason as fallback" do
+      result = DodoRouter.Proxy.FallbackChain.error_body_fallback(:server_error, %{})
+      assert result == "server_error"
+    end
+  end
 end

@@ -157,9 +157,11 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
 
         {:ok, build_final_openai_response(acc, timing_meta), %{headers: resp.headers}}
 
-      {:ok, %Req.Response{status: status, body: body}} ->
+      {:ok, %Req.Response{status: status, body: body, headers: resp_headers}} ->
         reason = Adapter.categorize_error(status, body)
-        {:error, reason, %{status: status, body: body, latency_ms: latency(start_time)}}
+
+        {:error, reason,
+         %{status: status, body: body, latency_ms: latency(start_time), headers: resp_headers}}
 
       {:error, %Req.TransportError{reason: :timeout}} ->
         {:error, :timeout, %{latency_ms: latency(start_time)}}
