@@ -287,5 +287,10 @@ defmodule DodoRouter.Proxy.FallbackChainTest do
       result = DodoRouter.Proxy.FallbackChain.error_body_fallback(:server_error, %{})
       assert result == "server_error"
     end
+
+    test "includes HTTP status in fallback" do
+      result = DodoRouter.Proxy.FallbackChain.error_body_fallback(:auth_error, %{status: 403})
+      assert result == "HTTP 403: auth_error"
+    end
   end
 end
