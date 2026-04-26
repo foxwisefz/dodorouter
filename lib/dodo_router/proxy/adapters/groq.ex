@@ -59,8 +59,6 @@ defmodule DodoRouter.Proxy.Adapters.Groq do
   end
 
   @doc false
-  # Remove null function_call from assistant messages
-  @doc false
   def strip_null_function_calls(request) do
     messages = request["messages"] || []
 

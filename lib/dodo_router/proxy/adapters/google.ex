@@ -101,10 +101,6 @@ defmodule DodoRouter.Proxy.Adapters.Google do
           Process.put(:__google_stream_acc__, new_acc)
           {:cont, {req, Req.Response.put_private(resp, :stream_acc, new_acc)}}
 
-        :done ->
-          send_chunk.("data: [DONE]\n\n")
-          {:halt, {req, resp}}
-
         :skip ->
           {:cont, {req, resp}}
       end
