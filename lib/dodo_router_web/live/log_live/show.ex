@@ -267,13 +267,13 @@ defmodule DodoRouterWeb.LogLive.Show do
                     <span class="font-mono text-sm">{attempt["latency_ms"]}ms</span>
                   </div>
                 </div>
-                <div :if={attempt["endpoint"]} class="mt-2">
+                <div :if={attempt["endpoint"]} class="mt-1">
                   <code class="text-xs text-base-content/70 break-all">{attempt["endpoint"]}</code>
                 </div>
-                <div :if={attempt["error"]} class="mt-2 text-sm text-error">
-                  <strong>Error:</strong> {attempt["error"]}
+                <div :if={attempt["error"]} class="mt-2">
+                  <span class="text-sm text-error font-medium">Error: {attempt["error"]}</span>
                 </div>
-                <div :if={attempt["error_body"]} class="mt-2">
+                <div :if={attempt["error_body"] && attempt["error_body"] != ""} class="mt-2">
                   <details class="collapse collapse-arrow bg-base-200">
                     <summary class="collapse-title text-xs py-1 min-h-0">Error Response</summary>
                     <div class="collapse-content">

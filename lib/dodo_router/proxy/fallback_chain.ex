@@ -170,7 +170,7 @@ defmodule DodoRouter.Proxy.FallbackChain do
     api_key = get_api_key(step, state.router_id)
 
     if is_nil(api_key) do
-      {:error, :auth_error, %{reason: "Missing API key for #{step.provider}"}}
+      {:error, :auth_error, %{status: nil, body: "Missing API key for #{step.provider}"}}
     else
       if state.stream do
         adapter.stream(state.request, step, api_key, state.send_chunk, state.client_headers)
