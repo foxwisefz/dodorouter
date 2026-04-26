@@ -173,7 +173,10 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
     messages = request["messages"] || []
     {system_msg, other_messages} = extract_system_message(messages)
 
-    anthropic_messages = Enum.map(other_messages, &convert_message_to_anthropic/1)
+    anthropic_messages =
+      other_messages
+      |> Enum.map(&convert_message_to_anthropic/1)
+      |> merge_anthropic_content_blocks()
 
     body = %{
       "model" => step.model,
@@ -220,19 +223,30 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
        when is_list(tool_calls) do
     content =
       [
-        if(msg["content"], do: %{"type" => "text", "text" => msg["content"]}, else: nil)
+        if(msg["content"] not in [nil, ""],
+          do: %{"type" => "text", "text" => msg["content"]},
+          else: nil
+        )
         | Enum.map(tool_calls, fn tc ->
             %{
               "type" => "tool_use",
               "id" => tc["id"],
               "name" => get_in(tc, ["function", "name"]),
-              "input" => Jason.decode!(get_in(tc, ["function", "arguments"]) || "{}")
+              "input" =>
+                case Jason.decode(get_in(tc, ["function", "arguments"]) || "{}") do
+                  {:ok, decoded} -> decoded
+                  _ -> %{}
+                end
             }
           end)
       ]
       |> Enum.reject(&is_nil/1)
 
-    %{"role" => "assistant", "content" => content}
+    if content == [] do
+      %{"role" => "assistant", "content" => [%{"type" => "text", "text" => " "}]}
+    else
+      %{"role" => "assistant", "content" => content}
+    end
   end
 
   defp convert_message_to_anthropic(%{
@@ -256,6 +270,25 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
       "description" => func["description"] || "",
       "input_schema" => func["parameters"] || %{"type" => "object", "properties" => %{}}
     }
+  end
+
+  defp merge_anthropic_content_blocks(messages) when is_list(messages) do
+    messages
+    |> Enum.reduce([], fn msg, acc ->
+      case acc do
+        [] ->
+          [msg]
+
+        [prev | rest] ->
+          if prev["role"] == msg["role"] and is_list(prev["content"]) and is_list(msg["content"]) do
+            merged_content = prev["content"] ++ msg["content"]
+            [Map.put(prev, "content", merged_content) | rest]
+          else
+            [msg | acc]
+          end
+      end
+    end)
+    |> Enum.reverse()
   end
 
   @doc false

@@ -504,4 +504,101 @@ defmodule DodoRouter.Proxy.AdapterHelpersTest do
       assert :ok = Adapter.can_handle?(request, model)
     end
   end
+
+  describe "merge_consecutive_roles/1" do
+    test "merges consecutive tool messages" do
+      messages = [
+        %{"role" => "user", "content" => "use tool"},
+        %{"role" => "tool", "content" => "result1", "tool_call_id" => "c1"},
+        %{"role" => "tool", "content" => "result2", "tool_call_id" => "c2"}
+      ]
+
+      result = Adapter.merge_consecutive_roles(messages)
+      assert length(result) == 2
+      assert Enum.at(result, 0)["role"] == "user"
+      merged = Enum.at(result, 1)
+      assert merged["role"] == "tool"
+      assert merged["content"] == "result1\nresult2"
+    end
+
+    test "merges consecutive user messages" do
+      messages = [
+        %{"role" => "user", "content" => "hello"},
+        %{"role" => "user", "content" => "world"}
+      ]
+
+      result = Adapter.merge_consecutive_roles(messages)
+      assert length(result) == 1
+      assert Enum.at(result, 0)["content"] == "hello\nworld"
+    end
+
+    test "does not merge alternating roles" do
+      messages = [
+        %{"role" => "user", "content" => "hi"},
+        %{"role" => "assistant", "content" => "hello"},
+        %{"role" => "user", "content" => "bye"}
+      ]
+
+      result = Adapter.merge_consecutive_roles(messages)
+      assert length(result) == 3
+    end
+
+    test "treats tool and user as separate roles" do
+      messages = [
+        %{"role" => "user", "content" => "use tool"},
+        %{"role" => "tool", "content" => "result", "tool_call_id" => "c1"}
+      ]
+
+      result = Adapter.merge_consecutive_roles(messages)
+      assert length(result) == 2
+    end
+  end
+
+  describe "migrate_function_call/1" do
+    test "converts deprecated function_call to tool_calls" do
+      msg = %{
+        "role" => "assistant",
+        "function_call" => %{"name" => "read_file", "arguments" => "{\"path\": \"/tmp\"}"}
+      }
+
+      result = Adapter.migrate_function_call(msg)
+      refute Map.has_key?(result, "function_call")
+      assert length(result["tool_calls"]) == 1
+      tc = hd(result["tool_calls"])
+      assert tc["type"] == "function"
+      assert tc["function"]["name"] == "read_file"
+      assert tc["function"]["arguments"] == "{\"path\": \"/tmp\"}"
+    end
+
+    test "generates an id when none present" do
+      msg = %{"role" => "assistant", "function_call" => %{"name" => "test"}}
+      result = Adapter.migrate_function_call(msg)
+      assert String.starts_with?(hd(result["tool_calls"])["id"], "call_")
+    end
+
+    test "passes through messages without function_call" do
+      msg = %{"role" => "assistant", "content" => "hi"}
+      assert Adapter.migrate_function_call(msg) == msg
+    end
+  end
+
+  describe "sanitize_request/1 migrate_function_call integration" do
+    test "migrates function_call in messages during sanitization" do
+      request = %{
+        "messages" => [
+          %{"role" => "user", "content" => "hi"},
+          %{
+            "role" => "assistant",
+            "content" => "",
+            "function_call" => %{"name" => "test", "arguments" => "{}"}
+          }
+        ]
+      }
+
+      result = Adapter.sanitize_request(request)
+      assistant_msg = Enum.find(result["messages"], &(&1["role"] == "assistant"))
+      refute Map.has_key?(assistant_msg, "function_call")
+      assert is_list(assistant_msg["tool_calls"])
+    end
+  end
 end

@@ -48,6 +48,7 @@ defmodule DodoRouter.Proxy.Adapters.Groq do
     else
       OpenAICompatible.stream(request, step, api_key, send_chunk, @base_url,
         provider: "groq",
+        supports_stream_options: false,
         client_headers: client_headers
       )
     end
@@ -58,8 +59,6 @@ defmodule DodoRouter.Proxy.Adapters.Groq do
     strip_null_function_calls(request)
   end
 
-  @doc false
-  # Remove null function_call from assistant messages
   @doc false
   def strip_null_function_calls(request) do
     messages = request["messages"] || []

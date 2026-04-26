@@ -86,7 +86,7 @@ defmodule DodoRouter.Proxy.Adapters.Google do
       resp =
         if resp.private[:stream_acc] == nil do
           ttfb = System.monotonic_time(:millisecond) - start_time
-          initial_acc = %{content: "", usage: nil, first_chunk_time: ttfb}
+          initial_acc = %{content: "", usage: nil, finish_reason: nil, first_chunk_time: ttfb}
           Req.Response.put_private(resp, :stream_acc, initial_acc)
         else
           resp
@@ -100,10 +100,6 @@ defmodule DodoRouter.Proxy.Adapters.Google do
           Enum.each(openai_chunks, &send_chunk.(&1))
           Process.put(:__google_stream_acc__, new_acc)
           {:cont, {req, Req.Response.put_private(resp, :stream_acc, new_acc)}}
-
-        :done ->
-          send_chunk.("data: [DONE]\n\n")
-          {:halt, {req, resp}}
 
         :skip ->
           {:cont, {req, resp}}
@@ -154,7 +150,6 @@ defmodule DodoRouter.Proxy.Adapters.Google do
         do: Map.put(body, "systemInstruction", %{"parts" => [%{"text" => system_instruction}]}),
         else: body
 
-    # Generation config
     gen_config = %{}
 
     gen_config =
@@ -175,7 +170,18 @@ defmodule DodoRouter.Proxy.Adapters.Google do
         do: Map.put(gen_config, "stopSequences", List.wrap(request["stop"])),
         else: gen_config
 
-    if gen_config != %{}, do: Map.put(body, "generationConfig", gen_config), else: body
+    body =
+      if gen_config != %{}, do: Map.put(body, "generationConfig", gen_config), else: body
+
+    body =
+      if is_list(request["tools"]) and request["tools"] != [] do
+        gemini_tools = convert_tools_to_gemini(request["tools"])
+        Map.put(body, "tools", gemini_tools)
+      else
+        body
+      end
+
+    Map.put(body, "safetySettings", default_safety_settings())
   end
 
   defp extract_system_and_contents(messages) do
@@ -184,22 +190,139 @@ defmodule DodoRouter.Proxy.Adapters.Google do
     system = if system == "", do: nil, else: system
 
     contents =
-      Enum.map(other, fn msg ->
-        role = if msg["role"] == "assistant", do: "model", else: "user"
-        %{"role" => role, "parts" => [%{"text" => msg["content"] || ""}]}
-      end)
+      other
+      |> Enum.map(&convert_message_to_gemini/1)
+      |> Adapter.merge_consecutive_roles()
+      |> Enum.map(&normalize_gemini_role/1)
 
     {system, contents}
+  end
+
+  defp convert_message_to_gemini(%{"role" => "assistant", "tool_calls" => tool_calls} = msg)
+       when is_list(tool_calls) and tool_calls != [] do
+    parts =
+      [
+        if(msg["content"] not in [nil, ""],
+          do: %{"text" => msg["content"]},
+          else: nil
+        )
+        | Enum.map(tool_calls, fn tc ->
+            %{
+              "functionCall" => %{
+                "name" => get_in(tc, ["function", "name"]),
+                "args" =>
+                  case Jason.decode(get_in(tc, ["function", "arguments"]) || "{}") do
+                    {:ok, decoded} -> decoded
+                    _ -> %{}
+                  end
+              }
+            }
+          end)
+      ]
+      |> Enum.reject(&is_nil/1)
+
+    if parts == [] do
+      %{"role" => "model", "parts" => [%{"text" => " "}]}
+    else
+      %{"role" => "model", "parts" => parts}
+    end
+  end
+
+  defp convert_message_to_gemini(%{"role" => "tool", "tool_call_id" => _id, "content" => content}) do
+    %{"role" => "user", "parts" => [%{"text" => content || ""}]}
+  end
+
+  defp convert_message_to_gemini(%{"role" => role, "content" => content}) when is_list(content) do
+    gemini_role = if role == "assistant", do: "model", else: "user"
+    parts = convert_content_parts(content)
+    %{"role" => gemini_role, "parts" => parts}
+  end
+
+  defp convert_message_to_gemini(%{"role" => role, "content" => content}) do
+    gemini_role = if role == "assistant", do: "model", else: "user"
+    %{"role" => gemini_role, "parts" => [%{"text" => content || ""}]}
+  end
+
+  defp convert_content_parts(content) when is_list(content) do
+    content
+    |> Enum.map(fn
+      %{"type" => "text", "text" => text} ->
+        %{"text" => text}
+
+      %{"type" => "image_url", "image_url" => %{"url" => url}} ->
+        convert_image_url_to_gemini(url)
+
+      _ ->
+        nil
+    end)
+    |> Enum.reject(&is_nil/1)
+  end
+
+  defp convert_content_parts(content), do: [%{"text" => content}]
+
+  defp convert_image_url_to_gemini("data:" <> _ = data_url) do
+    case String.split(data_url, ";base64,", parts: 2) do
+      [mime, base64] ->
+        %{"inlineData" => %{"mimeType" => String.trim_leading(mime, "data:"), "data" => base64}}
+
+      _ ->
+        %{"text" => data_url}
+    end
+  end
+
+  defp convert_image_url_to_gemini(url), do: %{"text" => url}
+
+  defp normalize_gemini_role(%{"role" => "model"} = msg), do: msg
+  defp normalize_gemini_role(%{"role" => "user"} = msg), do: msg
+  defp normalize_gemini_role(msg), do: Map.put(msg, "role", "user")
+
+  defp convert_tools_to_gemini(tools) do
+    declarations =
+      Enum.map(tools, fn tool ->
+        func = tool["function"] || %{}
+
+        %{
+          "name" => func["name"],
+          "description" => func["description"] || "",
+          "parameters" => func["parameters"] || %{"type" => "object", "properties" => %{}}
+        }
+      end)
+
+    [%{"functionDeclarations" => declarations}]
+  end
+
+  defp default_safety_settings do
+    categories = [
+      "HARM_CATEGORY_HARASSMENT",
+      "HARM_CATEGORY_HATE_SPEECH",
+      "HARM_CATEGORY_SEXUALLY_EXPLICIT",
+      "HARM_CATEGORY_DANGEROUS_CONTENT"
+    ]
+
+    Enum.map(categories, fn cat ->
+      %{"category" => cat, "threshold" => "BLOCK_NONE"}
+    end)
   end
 
   @doc false
   def convert_to_openai_format(gemini_response) do
     candidate = get_in(gemini_response, ["candidates", Access.at(0)]) || %{}
-    content = get_in(candidate, ["content", "parts", Access.at(0), "text"]) || ""
+    parts = get_in(candidate, ["content", "parts"]) || []
+
+    {text_parts, function_calls} =
+      Enum.reduce(parts, {[], []}, fn part, {texts, fcs} ->
+        cond do
+          part["text"] -> {texts ++ [part["text"]], fcs}
+          part["functionCall"] -> {texts, fcs ++ [part["functionCall"]]}
+          true -> {texts, fcs}
+        end
+      end)
+
+    text_content = Enum.join(text_parts, "")
 
     finish_reason =
       case candidate["finishReason"] do
-        "STOP" -> "stop"
+        "STOP" -> if function_calls != [], do: "tool_calls", else: "stop"
         "MAX_TOKENS" -> "length"
         "SAFETY" -> "content_filter"
         other -> other
@@ -214,11 +337,33 @@ defmodule DodoRouter.Proxy.Adapters.Google do
         }
       end
 
+    message = %{"role" => "assistant", "content" => text_content}
+
+    message =
+      if function_calls != [] do
+        tool_calls =
+          Enum.with_index(function_calls)
+          |> Enum.map(fn {fc, idx} ->
+            %{
+              "id" => "call_#{idx}_#{:erlang.phash2(fc["name"])}",
+              "type" => "function",
+              "function" => %{
+                "name" => fc["name"],
+                "arguments" => Jason.encode!(fc["args"] || %{})
+              }
+            }
+          end)
+
+        Map.put(message, "tool_calls", tool_calls)
+      else
+        message
+      end
+
     response = %{
       "choices" => [
         %{
           "index" => 0,
-          "message" => %{"role" => "assistant", "content" => content},
+          "message" => message,
           "finish_reason" => finish_reason
         }
       ]
@@ -251,6 +396,17 @@ defmodule DodoRouter.Proxy.Adapters.Google do
           ""
 
       new_acc = %{acc | content: acc.content <> text}
+
+      finish_reason =
+        case get_in(chunk, ["candidates", Access.at(0), "finishReason"]) do
+          "STOP" -> "stop"
+          "MAX_TOKENS" -> "length"
+          "SAFETY" -> "content_filter"
+          other -> other
+        end
+
+      new_acc =
+        if finish_reason, do: %{new_acc | finish_reason: finish_reason}, else: new_acc
 
       usage = chunk["usageMetadata"]
 
@@ -290,7 +446,7 @@ defmodule DodoRouter.Proxy.Adapters.Google do
         %{
           "index" => 0,
           "message" => %{"role" => "assistant", "content" => acc.content},
-          "finish_reason" => "stop"
+          "finish_reason" => acc.finish_reason || "stop"
         }
       ],
       "_meta" => meta
