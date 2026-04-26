@@ -156,7 +156,7 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
     end
   end
 
-  defp build_anthropic_request(request, step) do
+  def build_anthropic_request(request, step) do
     messages = request["messages"] || []
     {system_msg, other_messages} = extract_system_message(messages)
 
@@ -228,7 +228,8 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
     }
   end
 
-  defp convert_to_openai_format(anthropic_response) do
+  @doc false
+  def convert_to_openai_format(anthropic_response) do
     content_blocks = anthropic_response["content"] || []
 
     {text_content, tool_calls} =

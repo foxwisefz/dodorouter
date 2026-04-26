@@ -128,7 +128,7 @@ defmodule DodoRouter.Proxy.Adapters.Google do
     end
   end
 
-  defp build_gemini_request(request) do
+  def build_gemini_request(request) do
     messages = request["messages"] || []
     {system_instruction, contents} = extract_system_and_contents(messages)
 
@@ -158,7 +158,8 @@ defmodule DodoRouter.Proxy.Adapters.Google do
     {system, contents}
   end
 
-  defp convert_to_openai_format(gemini_response) do
+  @doc false
+  def convert_to_openai_format(gemini_response) do
     candidate = get_in(gemini_response, ["candidates", Access.at(0)]) || %{}
     content = get_in(candidate, ["content", "parts", Access.at(0), "text"]) || ""
 

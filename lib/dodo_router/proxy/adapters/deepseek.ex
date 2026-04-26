@@ -41,14 +41,15 @@ defmodule DodoRouter.Proxy.Adapters.DeepSeek do
     |> OpenAICompatible.stream(step, api_key, send_chunk, @base_url, provider: "deepseek")
   end
 
-  defp transform_request(request) do
+  @doc false
+  def transform_request(request) do
     request
     |> Adapter.flatten_content_to_string()
     |> normalize_thinking_param()
   end
 
-  # DeepSeek only accepts {"type": "enabled"} for thinking, no budget_tokens
-  defp normalize_thinking_param(request) do
+  @doc false
+  def normalize_thinking_param(request) do
     thinking = request["thinking"]
     reasoning_effort = request["reasoning_effort"]
 

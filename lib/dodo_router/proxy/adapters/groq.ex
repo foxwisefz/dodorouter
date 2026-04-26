@@ -48,12 +48,15 @@ defmodule DodoRouter.Proxy.Adapters.Groq do
     end
   end
 
-  defp transform_request(request) do
+  @doc false
+  def transform_request(request) do
     strip_null_function_calls(request)
   end
 
+  @doc false
   # Remove null function_call from assistant messages
-  defp strip_null_function_calls(request) do
+  @doc false
+  def strip_null_function_calls(request) do
     messages = request["messages"] || []
 
     updated =
@@ -68,7 +71,7 @@ defmodule DodoRouter.Proxy.Adapters.Groq do
     Map.put(request, "messages", updated)
   end
 
-  defp needs_fake_stream?(request) do
+  def needs_fake_stream?(request) do
     request["response_format"] != nil
   end
 

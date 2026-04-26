@@ -138,7 +138,7 @@ defmodule DodoRouter.Proxy.Adapters.Cohere do
     end
   end
 
-  defp build_cohere_request(request, step) do
+  def build_cohere_request(request, step) do
     base =
       request
       |> Adapter.sanitize_request()
@@ -158,7 +158,8 @@ defmodule DodoRouter.Proxy.Adapters.Cohere do
     end
   end
 
-  defp convert_to_openai_format(cohere_response) do
+  @doc false
+  def convert_to_openai_format(cohere_response) do
     message = cohere_response["message"] || %{}
     content_parts = message["content"] || []
 

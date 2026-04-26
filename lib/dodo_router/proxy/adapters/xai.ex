@@ -44,7 +44,7 @@ defmodule DodoRouter.Proxy.Adapters.XAI do
     |> transform_response()
   end
 
-  defp transform_request(request, model) do
+  def transform_request(request, model) do
     request
     |> Adapter.strip_name_from_messages(:all)
     |> Adapter.remove_strict_from_tools()
@@ -69,9 +69,10 @@ defmodule DodoRouter.Proxy.Adapters.XAI do
 
   defp maybe_remove_frequency_penalty(request, _model), do: request
 
-  defp transform_response({:ok, response}) do
+  @doc false
+  def transform_response({:ok, response}) do
     {:ok, Adapter.fix_tool_call_finish_reason(response)}
   end
 
-  defp transform_response(error), do: error
+  def transform_response(error), do: error
 end

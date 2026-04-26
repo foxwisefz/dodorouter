@@ -166,7 +166,8 @@ defmodule DodoRouter.Proxy.Adapters.OpenAI do
     end
   end
 
-  defp build_request_body(request, step) do
+  @doc false
+  def build_request_body(request, step) do
     request
     |> Adapter.sanitize_request()
     |> Map.put("model", step.model)
