@@ -94,7 +94,7 @@ defmodule DodoRouter.Proxy.Adapters.Cohere do
       resp =
         if resp.private[:stream_acc] == nil do
           ttfb = System.monotonic_time(:millisecond) - start_time
-          initial_acc = %{content: "", usage: nil, first_chunk_time: ttfb}
+          initial_acc = %{content: "", usage: nil, first_chunk_time: ttfb, sse_buffer: ""}
           Req.Response.put_private(resp, :stream_acc, initial_acc)
         else
           resp
@@ -102,18 +102,20 @@ defmodule DodoRouter.Proxy.Adapters.Cohere do
 
       acc = resp.private.stream_acc
 
-      case parse_cohere_sse(data) do
-        {:events, events} ->
+      case parse_cohere_sse(data, acc.sse_buffer) do
+        {{:events, events}, buffer} ->
           {new_acc, openai_chunks} = process_cohere_events(acc, events)
           Enum.each(openai_chunks, &send_chunk.(&1))
+          new_acc = %{new_acc | sse_buffer: buffer}
           {:cont, {req, Req.Response.put_private(resp, :stream_acc, new_acc)}}
 
-        :done ->
+        {:done, _buffer} ->
           send_chunk.("data: [DONE]\n\n")
           {:halt, {req, resp}}
 
-        :skip ->
-          {:cont, {req, resp}}
+        {:skip, buffer} ->
+          acc = %{acc | sse_buffer: buffer}
+          {:cont, {req, Req.Response.put_private(resp, :stream_acc, acc)}}
       end
     end
 
@@ -217,11 +219,20 @@ defmodule DodoRouter.Proxy.Adapters.Cohere do
     if usage, do: Map.put(response, "usage", usage), else: response
   end
 
-  defp parse_cohere_sse(data) do
-    lines = data |> String.split("\n") |> Enum.map(&String.trim/1) |> Enum.reject(&(&1 == ""))
+  defp parse_cohere_sse(data, buffer) do
+    combined = buffer <> data
+    lines = String.split(combined, "\n")
+
+    {complete_lines, buffer} =
+      case List.last(lines) do
+        "" -> {Enum.drop(lines, -1), ""}
+        last when byte_size(last) > 0 -> {Enum.drop(lines, -1), last}
+      end
+
+    complete_lines = complete_lines |> Enum.map(&String.trim/1) |> Enum.reject(&(&1 == ""))
 
     events =
-      lines
+      complete_lines
       |> Enum.filter(&String.starts_with?(&1, "data: "))
       |> Enum.map(fn "data: " <> json ->
         case Jason.decode(json) do
@@ -232,9 +243,9 @@ defmodule DodoRouter.Proxy.Adapters.Cohere do
       |> Enum.reject(&is_nil/1)
 
     cond do
-      Enum.any?(events, &(&1["type"] == "message-end")) -> :done
-      events == [] -> :skip
-      true -> {:events, events}
+      Enum.any?(events, &(&1["type"] == "message-end")) -> {:done, ""}
+      events == [] -> {:skip, buffer}
+      true -> {{:events, events}, buffer}
     end
   end
 

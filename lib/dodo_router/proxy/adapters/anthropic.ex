@@ -104,7 +104,8 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
             tool_calls: [],
             usage: nil,
             stop_reason: nil,
-            first_chunk_time: ttfb
+            first_chunk_time: ttfb,
+            sse_buffer: ""
           }
 
           Req.Response.put_private(resp, :stream_acc, initial_acc)
@@ -114,20 +115,22 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
 
       acc = resp.private.stream_acc
 
-      case parse_anthropic_sse(data) do
-        {:events, events} ->
+      case parse_anthropic_sse(data, acc.sse_buffer) do
+        {{:events, events}, buffer} ->
           # Convert and forward as OpenAI format
           {acc, openai_chunks} = process_anthropic_events(acc, events)
           Enum.each(openai_chunks, &send_chunk.(&1))
+          acc = %{acc | sse_buffer: buffer}
           Process.put(:__anthropic_stream_acc__, acc)
           {:cont, {req, Req.Response.put_private(resp, :stream_acc, acc)}}
 
-        :done ->
+        {:done, _buffer} ->
           send_chunk.("data: [DONE]\n\n")
           {:halt, {req, resp}}
 
-        :skip ->
-          {:cont, {req, resp}}
+        {:skip, buffer} ->
+          acc = %{acc | sse_buffer: buffer}
+          {:cont, {req, Req.Response.put_private(resp, :stream_acc, acc)}}
       end
     end
 
@@ -349,11 +352,20 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
     if usage, do: Map.put(response, "usage", usage), else: response
   end
 
-  defp parse_anthropic_sse(data) do
-    lines = data |> String.split("\n") |> Enum.map(&String.trim/1) |> Enum.reject(&(&1 == ""))
+  defp parse_anthropic_sse(data, buffer) do
+    combined = buffer <> data
+    lines = String.split(combined, "\n")
+
+    {complete_lines, buffer} =
+      case List.last(lines) do
+        "" -> {Enum.drop(lines, -1), ""}
+        last when byte_size(last) > 0 -> {Enum.drop(lines, -1), last}
+      end
+
+    complete_lines = complete_lines |> Enum.map(&String.trim/1) |> Enum.reject(&(&1 == ""))
 
     events =
-      lines
+      complete_lines
       |> Enum.filter(&String.starts_with?(&1, "data: "))
       |> Enum.map(fn "data: " <> json ->
         case Jason.decode(json) do
@@ -364,9 +376,9 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
       |> Enum.reject(&is_nil/1)
 
     cond do
-      Enum.any?(events, &(&1["type"] == "message_stop")) -> :done
-      events == [] -> :skip
-      true -> {:events, events}
+      Enum.any?(events, &(&1["type"] == "message_stop")) -> {:done, ""}
+      events == [] -> {:skip, buffer}
+      true -> {{:events, events}, buffer}
     end
   end
 
