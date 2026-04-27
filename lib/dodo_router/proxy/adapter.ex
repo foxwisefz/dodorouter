@@ -310,16 +310,26 @@ defmodule DodoRouter.Proxy.Adapter do
   # SSE parsing utilities
 
   @doc """
-  Parses SSE data - may contain multiple events batched together.
-  Handles both "data:" (no space) and "data: " (with space) formats.
-  Returns :done, :skip, {:chunks, chunks}, or {:chunks_then_done, chunks}.
+  Parses SSE data with buffering to handle lines split across HTTP chunks.
+  Call with an empty buffer on the first chunk, then pass the returned buffer
+  on subsequent chunks.
+
+  Returns `{result, buffer}` where result is the parsed chunks or :done/:skip.
   """
-  def parse_sse_chunk(data) do
-    lines = String.split(data, "\n")
-    has_done = Enum.any?(lines, &is_done_line/1)
+  def parse_sse_chunk(data, buffer \\ "") do
+    combined = buffer <> data
+    lines = String.split(combined, "\n")
+
+    {complete_lines, buffer} =
+      case List.last(lines) do
+        "" -> {Enum.drop(lines, -1), ""}
+        last when byte_size(last) > 0 -> {Enum.drop(lines, -1), last}
+      end
+
+    has_done = Enum.any?(complete_lines, &is_done_line/1)
 
     chunks =
-      lines
+      complete_lines
       |> Enum.filter(&is_data_line/1)
       |> Enum.reject(&is_done_line/1)
       |> Enum.flat_map(fn line ->
@@ -331,12 +341,15 @@ defmodule DodoRouter.Proxy.Adapter do
         end
       end)
 
-    cond do
-      has_done and chunks == [] -> :done
-      has_done -> {:chunks_then_done, chunks}
-      chunks == [] -> :skip
-      true -> {:chunks, chunks}
-    end
+    result =
+      cond do
+        has_done and chunks == [] -> :done
+        has_done -> {:chunks_then_done, chunks}
+        chunks == [] -> :skip
+        true -> {:chunks, chunks}
+      end
+
+    {result, buffer}
   end
 
   defp is_data_line(line),
@@ -347,8 +360,8 @@ defmodule DodoRouter.Proxy.Adapter do
 
   defp extract_json(line) do
     line
-    |> String.trim_leading("data: ")
-    |> String.trim_leading("data:")
+    |> String.replace_prefix("data: ", "")
+    |> String.replace_prefix("data:", "")
   end
 
   # ===========================================================================

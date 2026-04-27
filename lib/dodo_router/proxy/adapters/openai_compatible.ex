@@ -97,7 +97,8 @@ defmodule DodoRouter.Proxy.Adapters.OpenAICompatible do
             tool_calls: %{},
             usage: nil,
             finish_reason: nil,
-            first_chunk_time: ttfb
+            first_chunk_time: ttfb,
+            sse_buffer: ""
           }
 
           Req.Response.put_private(resp, :stream_acc, initial_acc)
@@ -107,23 +108,26 @@ defmodule DodoRouter.Proxy.Adapters.OpenAICompatible do
 
       acc = resp.private.stream_acc
 
-      case parse_sse_chunk(data) do
-        {:chunks, chunks} ->
+      case parse_sse_chunk(data, acc.sse_buffer) do
+        {{:chunks, chunks}, buffer} ->
           send_chunk.(data)
           acc = Enum.reduce(chunks, acc, &accumulate_chunk(&2, &1))
+          acc = %{acc | sse_buffer: buffer}
           {:cont, {req, Req.Response.put_private(resp, :stream_acc, acc)}}
 
-        {:chunks_then_done, chunks} ->
+        {{:chunks_then_done, chunks}, _buffer} ->
           send_chunk.(data)
           acc = Enum.reduce(chunks, acc, &accumulate_chunk(&2, &1))
+          acc = %{acc | sse_buffer: ""}
           {:halt, {req, Req.Response.put_private(resp, :stream_acc, acc)}}
 
-        :done ->
+        {:done, _buffer} ->
           send_chunk.("data: [DONE]\n\n")
           {:halt, {req, resp}}
 
-        :skip ->
-          {:cont, {req, resp}}
+        {:skip, buffer} ->
+          acc = %{acc | sse_buffer: buffer}
+          {:cont, {req, Req.Response.put_private(resp, :stream_acc, acc)}}
       end
     end
 
@@ -191,32 +195,42 @@ defmodule DodoRouter.Proxy.Adapters.OpenAICompatible do
     FinchTelemetry.get_upload_ms(start_time)
   end
 
-  defp parse_sse_chunk(data) do
-    lines =
-      data
-      |> String.split("\n")
+  defp parse_sse_chunk(data, buffer) do
+    combined = buffer <> data
+    lines = String.split(combined, "\n")
+
+    {complete_lines, buffer} =
+      case List.last(lines) do
+        "" -> {Enum.drop(lines, -1), ""}
+        last when byte_size(last) > 0 -> {Enum.drop(lines, -1), last}
+      end
+
+    complete_lines =
+      complete_lines
       |> Enum.map(&String.trim/1)
       |> Enum.reject(&(&1 == ""))
 
     cond do
-      Enum.any?(lines, &(&1 == "data: [DONE]")) ->
+      Enum.any?(complete_lines, &(&1 == "data: [DONE]")) ->
         chunks =
-          lines
+          complete_lines
           |> Enum.filter(&String.starts_with?(&1, "data: "))
           |> Enum.reject(&(&1 == "data: [DONE]"))
           |> Enum.map(&parse_data_line/1)
           |> Enum.reject(&is_nil/1)
 
-        if chunks == [], do: :done, else: {:chunks_then_done, chunks}
+        result = if chunks == [], do: :done, else: {:chunks_then_done, chunks}
+        {result, ""}
 
       true ->
         chunks =
-          lines
+          complete_lines
           |> Enum.filter(&String.starts_with?(&1, "data: "))
           |> Enum.map(&parse_data_line/1)
           |> Enum.reject(&is_nil/1)
 
-        if chunks == [], do: :skip, else: {:chunks, chunks}
+        result = if chunks == [], do: :skip, else: {:chunks, chunks}
+        {result, buffer}
     end
   end
 

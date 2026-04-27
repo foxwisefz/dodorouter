@@ -129,7 +129,8 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
             tool_calls: %{},
             usage: nil,
             finish_reason: nil,
-            first_chunk_time: ttfb
+            first_chunk_time: ttfb,
+            sse_buffer: ""
           }
 
           Req.Response.put_private(resp, :stream_acc, initial_acc)
@@ -139,25 +140,28 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
 
       acc = resp.private.stream_acc
 
-      case Adapter.parse_sse_chunk(data) do
-        {:chunks, chunks} ->
+      case Adapter.parse_sse_chunk(data, acc.sse_buffer) do
+        {{:chunks, chunks}, buffer} ->
           reframe_and_send_chunks(send_chunk, chunks)
           acc = Enum.reduce(chunks, acc, &accumulate_chunk(&2, &1))
+          acc = %{acc | sse_buffer: buffer}
           Process.put(:__moonshot_stream_acc__, acc)
           {:cont, {req, Req.Response.put_private(resp, :stream_acc, acc)}}
 
-        {:chunks_then_done, chunks} ->
+        {{:chunks_then_done, chunks}, _buffer} ->
           reframe_and_send_chunks(send_chunk, chunks)
           acc = Enum.reduce(chunks, acc, &accumulate_chunk(&2, &1))
+          acc = %{acc | sse_buffer: ""}
           Process.put(:__moonshot_stream_acc__, acc)
           {:halt, {req, Req.Response.put_private(resp, :stream_acc, acc)}}
 
-        :done ->
+        {:done, _buffer} ->
           send_chunk.("data: [DONE]\n\n")
           {:halt, {req, resp}}
 
-        :skip ->
-          {:cont, {req, resp}}
+        {:skip, buffer} ->
+          acc = %{acc | sse_buffer: buffer}
+          {:cont, {req, Req.Response.put_private(resp, :stream_acc, acc)}}
       end
     end
 
@@ -514,8 +518,8 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
   def parse_raw_error(data) when is_binary(data) do
     data = maybe_gunzip(data)
 
-    case Adapter.parse_sse_chunk(data) do
-      {:chunks, chunks} ->
+    case Adapter.parse_sse_chunk(data, "") do
+      {{:chunks, chunks}, _buffer} ->
         text =
           chunks
           |> Enum.map(fn c -> get_in(c, ["choices", Access.at(0), "delta", "content"]) || "" end)

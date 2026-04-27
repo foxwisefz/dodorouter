@@ -86,7 +86,15 @@ defmodule DodoRouter.Proxy.Adapters.Google do
       resp =
         if resp.private[:stream_acc] == nil do
           ttfb = System.monotonic_time(:millisecond) - start_time
-          initial_acc = %{content: "", usage: nil, finish_reason: nil, first_chunk_time: ttfb}
+
+          initial_acc = %{
+            content: "",
+            usage: nil,
+            finish_reason: nil,
+            first_chunk_time: ttfb,
+            sse_buffer: ""
+          }
+
           Req.Response.put_private(resp, :stream_acc, initial_acc)
         else
           resp
@@ -94,15 +102,17 @@ defmodule DodoRouter.Proxy.Adapters.Google do
 
       acc = resp.private.stream_acc
 
-      case parse_gemini_sse(data) do
-        {:chunks, chunks} ->
+      case parse_gemini_sse(data, acc.sse_buffer) do
+        {{:chunks, chunks}, buffer} ->
           {new_acc, openai_chunks} = process_gemini_chunks(acc, chunks)
           Enum.each(openai_chunks, &send_chunk.(&1))
+          new_acc = %{new_acc | sse_buffer: buffer}
           Process.put(:__google_stream_acc__, new_acc)
           {:cont, {req, Req.Response.put_private(resp, :stream_acc, new_acc)}}
 
-        :skip ->
-          {:cont, {req, resp}}
+        {:skip, buffer} ->
+          acc = %{acc | sse_buffer: buffer}
+          {:cont, {req, Req.Response.put_private(resp, :stream_acc, acc)}}
       end
     end
 
@@ -372,11 +382,20 @@ defmodule DodoRouter.Proxy.Adapters.Google do
     if usage, do: Map.put(response, "usage", usage), else: response
   end
 
-  defp parse_gemini_sse(data) do
-    lines = data |> String.split("\n") |> Enum.map(&String.trim/1) |> Enum.reject(&(&1 == ""))
+  defp parse_gemini_sse(data, buffer) do
+    combined = buffer <> data
+    lines = String.split(combined, "\n")
+
+    {complete_lines, buffer} =
+      case List.last(lines) do
+        "" -> {Enum.drop(lines, -1), ""}
+        last when byte_size(last) > 0 -> {Enum.drop(lines, -1), last}
+      end
+
+    complete_lines = complete_lines |> Enum.map(&String.trim/1) |> Enum.reject(&(&1 == ""))
 
     chunks =
-      lines
+      complete_lines
       |> Enum.filter(&String.starts_with?(&1, "data: "))
       |> Enum.map(fn "data: " <> json ->
         case Jason.decode(json) do
@@ -386,7 +405,7 @@ defmodule DodoRouter.Proxy.Adapters.Google do
       end)
       |> Enum.reject(&is_nil/1)
 
-    if chunks == [], do: :skip, else: {:chunks, chunks}
+    if chunks == [], do: {:skip, buffer}, else: {{:chunks, chunks}, buffer}
   end
 
   defp process_gemini_chunks(acc, chunks) do
