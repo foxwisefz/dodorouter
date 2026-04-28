@@ -61,6 +61,8 @@ defmodule DodoRouter.Proxy.Adapter do
   def should_fallback?(:model_unavailable), do: true
   def should_fallback?(:auth_error), do: true
   def should_fallback?(:unknown), do: true
+  def should_fallback?(:bad_request), do: true
+  def should_fallback?(:content_policy), do: true
   def should_fallback?(_), do: false
 
   @doc """
