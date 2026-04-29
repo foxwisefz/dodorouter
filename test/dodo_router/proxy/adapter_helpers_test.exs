@@ -92,11 +92,12 @@ defmodule DodoRouter.Proxy.AdapterHelpersTest do
       assert Adapter.should_fallback?(:model_unavailable) == true
       assert Adapter.should_fallback?(:auth_error) == true
       assert Adapter.should_fallback?(:unknown) == true
+      assert Adapter.should_fallback?(:bad_request) == true
+      assert Adapter.should_fallback?(:content_policy) == true
     end
 
     test "returns false for non-fallback errors" do
-      assert Adapter.should_fallback?(:bad_request) == false
-      assert Adapter.should_fallback?(:content_policy) == false
+      assert Adapter.should_fallback?(:some_future_error) == false
     end
   end
 
