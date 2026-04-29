@@ -18,6 +18,7 @@ defmodule DodoRouter.Proxy do
     request_id = Keyword.get(opts, :request_id, Ecto.UUID.generate())
     session = Keyword.get(opts, :session, %{})
     recording_id = Keyword.get(opts, :recording_id)
+    parent_log_id = Keyword.get(opts, :parent_log_id)
     start_time = System.monotonic_time(:millisecond)
     streaming = Keyword.get(opts, :stream, false)
     client_headers = Keyword.get(opts, :client_headers, [])
@@ -49,7 +50,8 @@ defmodule DodoRouter.Proxy do
         start_time,
         session,
         recording_id,
-        client_headers
+        client_headers,
+        parent_log_id
       )
 
       broadcast_event(router, result, request_id)
@@ -82,7 +84,8 @@ defmodule DodoRouter.Proxy do
          start_time,
          session,
          recording_id,
-         client_headers
+         client_headers,
+         parent_log_id
        ) do
     latency_ms = System.monotonic_time(:millisecond) - start_time
 
@@ -135,7 +138,8 @@ defmodule DodoRouter.Proxy do
       recording_id: recording_id,
       truncation_flags: truncation_flags,
       request_headers: encode_redacted_headers(client_headers),
-      response_headers: encode_redacted_headers(result.response_headers)
+      response_headers: encode_redacted_headers(result.response_headers),
+      parent_log_id: parent_log_id
     }
 
     Logs.create_log_async(log_attrs)

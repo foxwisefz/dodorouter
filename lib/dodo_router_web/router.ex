@@ -59,6 +59,18 @@ defmodule DodoRouterWeb.Router do
     get "/terms", TermsController, :index
   end
 
+  # Public prompt sharing — no auth, anonymous viewers welcome
+  scope "/", DodoRouterWeb do
+    pipe_through :browser
+
+    live_session :public_prompts,
+      on_mount: [{DodoRouterWeb.UserAuth, :mount_current_user}] do
+      live "/p/session/:session_id", PublicSessionLive.Show, :show
+      live "/p/:slug", PublicLogLive.Show, :show
+      live "/u/:username", PublicProfileLive.Show, :show
+    end
+  end
+
   # Dashboard (requires auth)
   scope "/", DodoRouterWeb do
     pipe_through [:browser, :require_authenticated_user]

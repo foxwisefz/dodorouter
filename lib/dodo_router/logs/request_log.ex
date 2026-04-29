@@ -55,7 +55,15 @@ defmodule DodoRouter.Logs.RequestLog do
     # Cost
     field :estimated_cost_usd, :decimal
 
+    # Public sharing
+    field :public_slug, :string
+    field :published_at, :utc_datetime
+    field :public_title, :string
+    field :public_request_body, :string
+    field :public_response_body, :string
+
     belongs_to :router, DodoRouter.Routers.Router
+    belongs_to :parent_log, __MODULE__, foreign_key: :parent_log_id
 
     field :inserted_at, :utc_datetime_usec
   end
@@ -89,7 +97,8 @@ defmodule DodoRouter.Logs.RequestLog do
       :session_id,
       :session_name,
       :recording_id,
-      :truncation_flags
+      :truncation_flags,
+      :parent_log_id
     ])
     |> validate_required([:router_id, :request_id, :status, :inserted_at])
     |> validate_inclusion(:status, @statuses)
@@ -97,7 +106,38 @@ defmodule DodoRouter.Logs.RequestLog do
     |> validate_length(:session_id, max: 255)
     |> validate_length(:session_name, max: 255)
     |> foreign_key_constraint(:router_id)
+    |> foreign_key_constraint(:parent_log_id)
     |> unique_constraint(:request_id)
+  end
+
+  @doc """
+  Changeset used when a log is published to a public URL.
+  """
+  def publish_changeset(log, attrs) do
+    log
+    |> cast(attrs, [
+      :public_slug,
+      :published_at,
+      :public_title,
+      :public_request_body,
+      :public_response_body
+    ])
+    |> validate_required([:public_slug, :published_at])
+    |> validate_length(:public_title, max: 200)
+    |> unique_constraint(:public_slug)
+  end
+
+  @doc """
+  Changeset used to revert a published log back to private.
+  """
+  def unpublish_changeset(log) do
+    change(log, %{
+      public_slug: nil,
+      published_at: nil,
+      public_title: nil,
+      public_request_body: nil,
+      public_response_body: nil
+    })
   end
 
   def statuses, do: @statuses

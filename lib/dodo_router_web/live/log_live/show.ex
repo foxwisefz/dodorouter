@@ -2,6 +2,9 @@ defmodule DodoRouterWeb.LogLive.Show do
   use DodoRouterWeb, :live_view
 
   alias DodoRouter.Logs
+  alias DodoRouter.Logs.MessageNormalizer
+
+  import DodoRouterWeb.PromptComponents
 
   @impl true
   def mount(%{"id" => id}, _session, socket) do
@@ -12,8 +15,8 @@ defmodule DodoRouterWeb.LogLive.Show do
         log -> log
       end
 
-    {req_messages, req_params} = parse_request_body(log.request_body)
-    resp_message = parse_response_body(log.response_body)
+    {req_messages, req_params} = MessageNormalizer.parse_request_body(log.request_body)
+    resp_message = MessageNormalizer.parse_response_body(log.response_body)
     req_headers = parse_headers(log.request_headers)
     resp_headers = parse_headers(log.response_headers)
 
@@ -32,16 +35,52 @@ defmodule DodoRouterWeb.LogLive.Show do
       |> assign(:show_resp_headers, false)
       |> assign(:expanded_messages, MapSet.new())
       |> assign(:truncation_flags, log.truncation_flags || [])
+      |> assign(:active_tab, :conversation)
+      |> assign(:show_publish_modal, false)
 
     {:ok, socket}
   end
 
   @impl true
-  def handle_params(params, _uri, socket) do
-    {:noreply, assign(socket, :return_to, params["return_to"])}
+  def handle_event("switch_tab", %{"tab" => tab}, socket) do
+    {:noreply, assign(socket, :active_tab, String.to_existing_atom(tab))}
   end
 
-  @impl true
+  def handle_event("open_publish_modal", _params, socket) do
+    {:noreply, assign(socket, :show_publish_modal, true)}
+  end
+
+  def handle_event("cancel_publish", _params, socket) do
+    {:noreply, assign(socket, :show_publish_modal, false)}
+  end
+
+  def handle_event("confirm_publish", %{"title" => title}, socket) do
+    case Logs.publish_log(socket.assigns.current_user, socket.assigns.log.id, %{title: title}) do
+      {:ok, log} ->
+        {:noreply,
+         socket
+         |> assign(:log, log)
+         |> assign(:show_publish_modal, false)
+         |> put_flash(:info, "Published! Public URL: /p/#{log.public_slug}")}
+
+      {:error, _changeset} ->
+        {:noreply, put_flash(socket, :error, "Could not publish. Please try again.")}
+    end
+  end
+
+  def handle_event("unpublish", _params, socket) do
+    case Logs.unpublish_log(socket.assigns.current_user, socket.assigns.log.id) do
+      {:ok, log} ->
+        {:noreply,
+         socket
+         |> assign(:log, log)
+         |> put_flash(:info, "Unpublished — the public URL is no longer accessible.")}
+
+      {:error, _} ->
+        {:noreply, put_flash(socket, :error, "Could not unpublish.")}
+    end
+  end
+
   def handle_event("toggle_raw_request", _params, socket) do
     {:noreply, update(socket, :show_raw_request, &(!&1))}
   end
@@ -76,6 +115,11 @@ defmodule DodoRouterWeb.LogLive.Show do
   end
 
   @impl true
+  def handle_params(params, _uri, socket) do
+    {:noreply, assign(socket, :return_to, params["return_to"])}
+  end
+
+  @impl true
   def render(assigns) do
     ~H"""
     <div>
@@ -92,11 +136,79 @@ defmodule DodoRouterWeb.LogLive.Show do
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" />
           </svg>
         </.link>
-        <div>
+        <div class="flex-1">
           <h1 class="text-2xl font-bold">Request Details</h1>
           <code class="text-sm text-base-content/60">{@log.request_id}</code>
         </div>
+        <div class="flex items-center gap-2">
+          <%= if @log.published_at do %>
+            <.link
+              navigate={~p"/p/#{@log.public_slug}"}
+              class="btn btn-sm btn-ghost gap-1 font-mono text-xs"
+              target="_blank"
+            >
+              /p/{@log.public_slug}
+            </.link>
+            <button type="button" phx-click="unpublish" class="btn btn-sm btn-ghost text-error">
+              Unpublish
+            </button>
+          <% else %>
+            <button type="button" phx-click="open_publish_modal" class="btn btn-sm btn-primary">
+              Publish
+            </button>
+          <% end %>
+        </div>
       </div>
+
+      <!-- Tabs -->
+      <div role="tablist" class="tabs tabs-bordered mb-4">
+        <button
+          type="button"
+          role="tab"
+          phx-click="switch_tab"
+          phx-value-tab="conversation"
+          class={["tab", @active_tab == :conversation && "tab-active"]}
+        >
+          Conversation
+        </button>
+        <button
+          type="button"
+          role="tab"
+          phx-click="switch_tab"
+          phx-value-tab="performance"
+          class={["tab", @active_tab == :performance && "tab-active"]}
+        >
+          Performance
+        </button>
+        <button
+          type="button"
+          role="tab"
+          phx-click="switch_tab"
+          phx-value-tab="raw"
+          class={["tab", @active_tab == :raw && "tab-active"]}
+        >
+          Raw
+        </button>
+      </div>
+
+      <%= if @active_tab == :conversation do %>
+        <.conversation
+          messages={@req_messages}
+          response={@resp_message}
+          model={@log.final_model}
+          provider={@log.final_provider}
+          editable={false}
+        />
+      <% end %>
+
+      <.publish_modal
+        :if={@show_publish_modal}
+        show={@show_publish_modal}
+        log={@log}
+        preview_messages={@req_messages}
+      />
+
+      <div class={[@active_tab != :performance && @active_tab != :raw && "hidden"]}>
 
       <%= if length(@truncation_flags) > 0 do %>
         <div class="alert alert-warning mb-6">
@@ -446,6 +558,7 @@ defmodule DodoRouterWeb.LogLive.Show do
           <% end %>
         </div>
       </div>
+      </div>
     </div>
     """
   end
@@ -481,33 +594,6 @@ defmodule DodoRouterWeb.LogLive.Show do
     """
   end
 
-  defp parse_request_body(nil), do: {[], %{}}
-
-  defp parse_request_body(str) when is_binary(str) do
-    case Jason.decode(str) do
-      {:ok, %{"messages" => messages} = decoded} when is_list(messages) ->
-        {Enum.map(messages, &normalize_message/1), Map.drop(decoded, ["messages"])}
-
-      _ ->
-        {[], %{}}
-    end
-  end
-
-  defp parse_response_body(nil), do: nil
-
-  defp parse_response_body(str) when is_binary(str) do
-    case Jason.decode(str) do
-      {:ok, %{"choices" => [%{"message" => msg} | _]}} ->
-        normalize_message(msg)
-
-      {:ok, %{"choices" => [%{"delta" => delta} | _]}} ->
-        normalize_message(delta)
-
-      _ ->
-        nil
-    end
-  end
-
   defp parse_headers(nil), do: nil
 
   defp parse_headers(str) when is_binary(str) do
@@ -523,44 +609,6 @@ defmodule DodoRouterWeb.LogLive.Show do
         nil
     end
   end
-
-  defp normalize_message(%{"role" => role, "content" => content} = msg) do
-    %{
-      role: role,
-      content: normalize_content(content),
-      tool_calls: msg["tool_calls"],
-      tool_call_id: msg["tool_call_id"],
-      name: msg["name"]
-    }
-  end
-
-  defp normalize_message(%{"content" => content} = msg) do
-    %{
-      role: msg["role"] || "assistant",
-      content: normalize_content(content),
-      tool_calls: msg["tool_calls"],
-      tool_call_id: msg["tool_call_id"],
-      name: msg["name"]
-    }
-  end
-
-  defp normalize_message(msg),
-    do: %{role: "unknown", content: inspect(msg), tool_calls: nil, tool_call_id: nil, name: nil}
-
-  defp normalize_content(nil), do: ""
-  defp normalize_content(str) when is_binary(str), do: str
-
-  defp normalize_content(list) when is_list(list) do
-    list
-    |> Enum.map(fn
-      %{"type" => "text", "text" => text} -> text
-      %{"text" => text} -> text
-      other -> inspect(other)
-    end)
-    |> Enum.join("\n\n")
-  end
-
-  defp normalize_content(other), do: inspect(other)
 
   attr :message, :map, required: true
   attr :index, :any, required: true
