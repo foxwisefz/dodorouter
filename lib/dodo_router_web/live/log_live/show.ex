@@ -579,13 +579,13 @@ defmodule DodoRouterWeb.LogLive.Show do
       end
 
     content = assigns.message.content
-    is_truncated = String.length(content) > 120
+    is_truncated = String.length(content) > 200
 
     assigns =
       assigns
       |> assign(:badge_class, badge_class)
       |> assign(:label, label)
-      |> assign(:display_content, if(assigns.expanded, do: content, else: truncate(content, 120)))
+      |> assign(:display_content, if(assigns.expanded, do: content, else: truncate(content, 500)))
       |> assign(:is_truncated, is_truncated)
 
     ~H"""
@@ -600,7 +600,7 @@ defmodule DodoRouterWeb.LogLive.Show do
         </span>
         <div class="min-w-0 flex-1">
           <p class={[
-            "text-sm text-base-content/80 leading-snug whitespace-pre-wrap",
+            "text-sm text-base-content/80 leading-snug whitespace-pre-wrap break-all",
             !@expanded && "line-clamp-2"
           ]}>
             {@display_content}
@@ -629,10 +629,16 @@ defmodule DodoRouterWeb.LogLive.Show do
     name = assigns.tool["function"]["name"] || assigns.tool["name"] || "unknown"
     args = assigns.tool["function"]["arguments"] || assigns.tool["arguments"] || "{}"
 
+    formatted_args =
+      case Jason.decode(args) do
+        {:ok, decoded} -> Jason.encode!(decoded, pretty: true)
+        _ -> args
+      end
+
     assigns =
       assigns
       |> assign(:name, name)
-      |> assign(:args_preview, truncate(args, 60))
+      |> assign(:args_preview, truncate(formatted_args, 80))
 
     ~H"""
     <div class="inline-flex items-center gap-1 text-xs font-mono bg-primary/10 text-primary rounded px-1.5 py-0.5">
@@ -680,10 +686,31 @@ defmodule DodoRouterWeb.LogLive.Show do
 
   defp format_json(str) when is_binary(str) do
     case Jason.decode(str) do
-      {:ok, decoded} -> Jason.encode!(decoded, pretty: true)
+      {:ok, decoded} -> Jason.encode!(deep_parse_json_strings(decoded), pretty: true)
       _ -> str
     end
   end
+
+  defp deep_parse_json_strings(map) when is_map(map) do
+    Map.new(map, fn {k, v} -> {k, deep_parse_json_strings(v)} end)
+  end
+
+  defp deep_parse_json_strings(list) when is_list(list) do
+    Enum.map(list, &deep_parse_json_strings/1)
+  end
+
+  defp deep_parse_json_strings(str) when is_binary(str) do
+    if String.length(str) > 2 and String.starts_with?(str, ["{", "["]) do
+      case Jason.decode(str) do
+        {:ok, decoded} -> deep_parse_json_strings(decoded)
+        _ -> str
+      end
+    else
+      str
+    end
+  end
+
+  defp deep_parse_json_strings(other), do: other
 
   defp format_headers(nil), do: ""
 
