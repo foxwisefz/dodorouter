@@ -1,0 +1,553 @@
+defmodule DodoRouterWeb.MarkdownRenderer do
+  @moduledoc """
+  Light markdown renderer for LLM message content.
+
+  Goals:
+    * compact spacing — these are conversation logs, not blog posts
+    * collapsible XML-like tags (`<task>...</task>` etc. that LLMs love to use)
+    * collapsible heading sections (h2 and below)
+
+  We deliberately don't pull in a markdown library — the feature surface we
+  need (headings, bold/italic, code, lists, hr, blockquote, links) is small
+  and doing it ourselves keeps full control over the collapsibility hooks.
+  """
+  use Phoenix.Component
+
+  @doc """
+  Render content as a markdown tree with collapsible sections.
+  """
+  attr :content, :any, required: true
+
+  def render(assigns) do
+    nodes =
+      assigns.content
+      |> to_string()
+      |> parse()
+      |> sectionize()
+
+    assigns = assign(assigns, :nodes, nodes)
+
+    ~H"""
+    <div class="md-content text-sm leading-relaxed space-y-1">
+      <.md_nodes nodes={@nodes} />
+    </div>
+    """
+  end
+
+  # ---------------------------------------------------------------------------
+  # Parsing pipeline
+  # ---------------------------------------------------------------------------
+
+  @doc false
+  # Parse content into a flat list of blocks. XML tag bodies are recursively
+  # parsed, producing nested `:xml_block` nodes.
+  def parse(content) when is_binary(content) do
+    content
+    |> split_xml()
+    |> Enum.flat_map(fn
+      {:text, text} -> parse_blocks(text)
+      {:xml, name, body} -> [{:xml_block, name, parse(body)}]
+    end)
+  end
+
+  # Splits content on balanced XML-like tags (best-effort, no nesting of the
+  # same tag name). Returns a list of `{:text, str} | {:xml, name, body}`.
+  defp split_xml(""), do: []
+
+  defp split_xml(content) do
+    case Regex.run(~r/<([a-zA-Z][a-zA-Z0-9_:.-]*)\s*>(.*?)<\/\1>/s, content,
+           return: :index,
+           capture: :all
+         ) do
+      nil ->
+        [{:text, content}]
+
+      [{full_at, full_len}, {name_at, name_len}, {body_at, body_len}] ->
+        before = binary_part(content, 0, full_at)
+        name = binary_part(content, name_at, name_len)
+        body = binary_part(content, body_at, body_len)
+        tail_at = full_at + full_len
+        tail = binary_part(content, tail_at, byte_size(content) - tail_at)
+        maybe_text(before) ++ [{:xml, name, body}] ++ split_xml(tail)
+    end
+  end
+
+  defp maybe_text(""), do: []
+  defp maybe_text(s), do: [{:text, s}]
+
+  # ---------------------------------------------------------------------------
+  # Block parser
+  # ---------------------------------------------------------------------------
+
+  defp parse_blocks(text) do
+    text
+    |> String.split("\n")
+    |> consume_blocks([])
+    |> Enum.reverse()
+  end
+
+  defp consume_blocks([], acc), do: acc
+
+  defp consume_blocks([line | rest] = lines, acc) do
+    cond do
+      blank?(line) ->
+        consume_blocks(rest, acc)
+
+      fence = code_fence(line) ->
+        {code_lines, after_lines} = take_until_fence(rest, fence)
+        block = {:code_block, fence.lang, Enum.join(code_lines, "\n")}
+        consume_blocks(after_lines, [block | acc])
+
+      hr?(line) ->
+        consume_blocks(rest, [{:hr} | acc])
+
+      heading = heading(line) ->
+        consume_blocks(rest, [heading | acc])
+
+      list_marker(line) ->
+        {items, after_lines} = take_list(lines)
+        consume_blocks(after_lines, [items | acc])
+
+      String.starts_with?(line, ">") ->
+        {bq_lines, after_lines} = take_blockquote(lines)
+        body = bq_lines |> Enum.map(&String.replace_prefix(&1, ">", "")) |> Enum.map(&String.trim_leading/1) |> Enum.join("\n")
+        consume_blocks(after_lines, [{:blockquote, parse_blocks(body)} | acc])
+
+      true ->
+        {para_lines, after_lines} = take_paragraph(lines)
+        consume_blocks(after_lines, [{:paragraph, Enum.join(para_lines, "\n")} | acc])
+    end
+  end
+
+  defp blank?(line), do: String.trim(line) == ""
+
+  defp code_fence(line) do
+    case Regex.run(~r/^(\s*)(```+|~~~+)\s*([a-zA-Z0-9_+-]*)\s*$/, line) do
+      [_, _, fence, lang] -> %{fence: fence, lang: lang}
+      _ -> nil
+    end
+  end
+
+  defp take_until_fence(lines, fence_info) do
+    fence = fence_info.fence
+
+    Enum.split_while(lines, fn line ->
+      not String.match?(line, ~r/^\s*#{Regex.escape(fence)}\s*$/)
+    end)
+    |> case do
+      {body, [_closing | rest]} -> {body, rest}
+      {body, []} -> {body, []}
+    end
+  end
+
+  defp hr?(line) do
+    String.match?(String.trim(line), ~r/^(-{3,}|\*{3,}|_{3,})$/)
+  end
+
+  defp heading(line) do
+    case Regex.run(~r/^(\#{1,6})\s+(.*?)\s*\#*\s*$/, line) do
+      [_, hashes, text] -> {:heading, String.length(hashes), text}
+      _ -> nil
+    end
+  end
+
+  defp list_marker(line) do
+    String.match?(line, ~r/^(\s*)([-*+]|\d+\.)\s+/)
+  end
+
+  defp take_list(lines) do
+    {items_raw, rest} =
+      Enum.split_while(lines, fn line ->
+        list_marker(line) || (String.starts_with?(line, "  ") && String.trim(line) != "") ||
+          blank?(line)
+      end)
+
+    # Trim trailing blanks
+    items_raw = Enum.reverse(items_raw) |> Enum.drop_while(&blank?/1) |> Enum.reverse()
+
+    items = parse_list_items(items_raw)
+
+    type =
+      case List.first(items_raw) do
+        nil -> :unordered
+        line -> if String.match?(line, ~r/^\s*\d+\./), do: :ordered, else: :unordered
+      end
+
+    {{:list, type, items}, rest}
+  end
+
+  defp parse_list_items(lines) do
+    lines
+    |> chunk_items([], [])
+    |> Enum.map(&Enum.join(&1, "\n"))
+    |> Enum.map(fn item_text ->
+      case Regex.run(~r/^(\s*)(?:[-*+]|\d+\.)\s+(.*)/s, item_text) do
+        [_, _indent, body] -> body
+        _ -> item_text
+      end
+    end)
+  end
+
+  defp chunk_items([], current, acc) do
+    case current do
+      [] -> Enum.reverse(acc)
+      _ -> Enum.reverse([Enum.reverse(current) | acc])
+    end
+  end
+
+  defp chunk_items([line | rest], current, acc) do
+    if list_marker(line) and current != [] do
+      chunk_items(rest, [line], [Enum.reverse(current) | acc])
+    else
+      chunk_items(rest, [line | current], acc)
+    end
+  end
+
+  defp take_blockquote(lines) do
+    Enum.split_while(lines, fn line ->
+      String.starts_with?(line, ">") || (current_blockquote_continuation?(line))
+    end)
+  end
+
+  # blockquote continuation: a non-blank, non-blockquote-starter line just
+  # treated as a separate paragraph break, so we stop at the first non-`>` line.
+  defp current_blockquote_continuation?(_), do: false
+
+  defp take_paragraph(lines) do
+    Enum.split_while(lines, fn line ->
+      not blank?(line) and
+        is_nil(heading(line)) and
+        not hr?(line) and
+        not list_marker(line) and
+        is_nil(code_fence(line)) and
+        not String.starts_with?(line, ">")
+    end)
+  end
+
+  # ---------------------------------------------------------------------------
+  # Sectionize: group blocks under headings into collapsible sections
+  # ---------------------------------------------------------------------------
+
+  @doc false
+  def sectionize(blocks), do: sectionize(blocks, [])
+
+  defp sectionize([], acc), do: Enum.reverse(acc)
+
+  defp sectionize([{:heading, level, _text} = h | rest], acc) when level >= 2 do
+    {section_blocks, remaining} = take_section(rest, level)
+    section = {:section, h, sectionize(section_blocks)}
+    sectionize(remaining, [section | acc])
+  end
+
+  defp sectionize([{:xml_block, name, children} | rest], acc) do
+    sectionize(rest, [{:xml_block, name, sectionize(children)} | acc])
+  end
+
+  defp sectionize([block | rest], acc) do
+    sectionize(rest, [block | acc])
+  end
+
+  defp take_section(blocks, level) do
+    Enum.split_while(blocks, fn
+      {:heading, l, _} when l <= level -> false
+      _ -> true
+    end)
+  end
+
+  # ---------------------------------------------------------------------------
+  # Renderer
+  # ---------------------------------------------------------------------------
+
+  attr :nodes, :list, required: true
+
+  defp md_nodes(assigns) do
+    ~H"""
+    <%= for node <- @nodes do %>
+      <.md_node node={node} />
+    <% end %>
+    """
+  end
+
+  attr :node, :any, required: true
+
+  defp md_node(%{node: {:section, {:heading, level, text}, children}} = assigns) do
+    assigns =
+      assigns
+      |> assign(:level, level)
+      |> assign(:text, text)
+      |> assign(:children, children)
+
+    ~H"""
+    <details class="md-section group" open>
+      <summary class={[
+        "md-summary cursor-pointer select-none flex items-baseline gap-1.5",
+        "hover:text-primary transition-colors list-none"
+      ]}>
+        <span class="md-arrow text-base-content/40 text-[10px] flex-shrink-0">▸</span>
+        <span class={heading_class(@level)}><.inline text={@text} /></span>
+      </summary>
+      <div class="md-section-body pl-3 mt-1 border-l border-base-300/30 space-y-1">
+        <.md_nodes nodes={@children} />
+      </div>
+    </details>
+    """
+  end
+
+  defp md_node(%{node: {:xml_block, name, children}} = assigns) do
+    short? = xml_short?(children)
+    assigns = assigns |> assign(:name, name) |> assign(:children, children) |> assign(:short, short?)
+
+    ~H"""
+    <details class="md-xml group" open={@short}>
+      <summary class={[
+        "md-xml-summary cursor-pointer select-none flex items-center gap-1.5",
+        "text-[11px] font-mono text-base-content/50 hover:text-primary list-none"
+      ]}>
+        <span class="md-arrow text-[10px] flex-shrink-0">▸</span>
+        <span class="text-secondary/70">&lt;{@name}&gt;</span>
+      </summary>
+      <div class="md-xml-body pl-3 mt-1 border-l border-secondary/20 space-y-1">
+        <.md_nodes nodes={@children} />
+      </div>
+    </details>
+    """
+  end
+
+  defp md_node(%{node: {:heading, level, text}} = assigns) do
+    assigns = assigns |> assign(:level, level) |> assign(:text, text)
+
+    ~H"""
+    <div class={heading_class(@level)}><.inline text={@text} /></div>
+    """
+  end
+
+  defp md_node(%{node: {:paragraph, text}} = assigns) do
+    assigns = assign(assigns, :text, text)
+
+    ~H"""
+    <p class="whitespace-pre-wrap break-words"><.inline text={@text} /></p>
+    """
+  end
+
+  defp md_node(%{node: {:code_block, lang, code}} = assigns) do
+    assigns = assigns |> assign(:lang, lang) |> assign(:code, code)
+
+    ~H"""
+    <pre class="my-1 overflow-x-auto rounded bg-base-300/60 p-2 text-xs"><code phx-no-curly-interpolation><%= @code %></code></pre>
+    """
+  end
+
+  defp md_node(%{node: {:hr}} = assigns) do
+    ~H"""
+    <hr class="my-2 border-base-300/40" />
+    """
+  end
+
+  defp md_node(%{node: {:list, :unordered, items}} = assigns) do
+    assigns = assign(assigns, :items, items)
+
+    ~H"""
+    <ul class="list-disc pl-5 space-y-0.5 marker:text-base-content/30">
+      <%= for item <- @items do %>
+        <li><.inline text={item} /></li>
+      <% end %>
+    </ul>
+    """
+  end
+
+  defp md_node(%{node: {:list, :ordered, items}} = assigns) do
+    assigns = assign(assigns, :items, items)
+
+    ~H"""
+    <ol class="list-decimal pl-5 space-y-0.5 marker:text-base-content/30">
+      <%= for item <- @items do %>
+        <li><.inline text={item} /></li>
+      <% end %>
+    </ol>
+    """
+  end
+
+  defp md_node(%{node: {:blockquote, children}} = assigns) do
+    assigns = assign(assigns, :children, children)
+
+    ~H"""
+    <blockquote class="border-l-2 border-base-300/40 pl-2 text-base-content/70 italic">
+      <.md_nodes nodes={@children} />
+    </blockquote>
+    """
+  end
+
+  defp md_node(assigns) do
+    ~H""
+  end
+
+  defp heading_class(1), do: "text-base font-semibold"
+  defp heading_class(2), do: "text-sm font-semibold"
+  defp heading_class(3), do: "text-sm font-semibold text-base-content/80"
+  defp heading_class(_), do: "text-xs font-semibold uppercase tracking-wide text-base-content/60"
+
+  # XML tags with little content stay open; long ones collapse to save space.
+  defp xml_short?(children) do
+    children
+    |> Enum.map(&block_text_size/1)
+    |> Enum.sum()
+    |> Kernel.<(200)
+  end
+
+  defp block_text_size({:paragraph, t}), do: byte_size(t)
+  defp block_text_size({:code_block, _, t}), do: byte_size(t)
+  defp block_text_size({:heading, _, t}), do: byte_size(t)
+  defp block_text_size({:list, _, items}), do: items |> Enum.map(&byte_size/1) |> Enum.sum()
+  defp block_text_size({:blockquote, c}), do: c |> Enum.map(&block_text_size/1) |> Enum.sum()
+  defp block_text_size({:xml_block, _, c}), do: c |> Enum.map(&block_text_size/1) |> Enum.sum()
+  defp block_text_size({:section, _, c}), do: c |> Enum.map(&block_text_size/1) |> Enum.sum()
+  defp block_text_size(_), do: 0
+
+  # ---------------------------------------------------------------------------
+  # Inline renderer
+  # ---------------------------------------------------------------------------
+
+  attr :text, :string, required: true
+
+  defp inline(assigns) do
+    parts = inline_tokens(assigns.text)
+    assigns = assign(assigns, :parts, parts)
+
+    ~H"""
+    <%= for part <- @parts do %>
+      <.inline_part part={part} />
+    <% end %>
+    """
+  end
+
+  attr :part, :any, required: true
+
+  defp inline_part(%{part: {:text, t}} = assigns) do
+    assigns = assign(assigns, :t, t)
+    ~H"{@t}"
+  end
+
+  defp inline_part(%{part: {:strong, parts}} = assigns) do
+    assigns = assign(assigns, :parts, parts)
+
+    ~H"""
+    <strong class="font-semibold"><.inline_parts parts={@parts} /></strong>
+    """
+  end
+
+  defp inline_part(%{part: {:em, parts}} = assigns) do
+    assigns = assign(assigns, :parts, parts)
+
+    ~H"""
+    <em><.inline_parts parts={@parts} /></em>
+    """
+  end
+
+  defp inline_part(%{part: {:code, t}} = assigns) do
+    assigns = assign(assigns, :t, t)
+
+    ~H"""
+    <code class="px-1 py-0.5 rounded bg-base-300/60 text-[0.85em] font-mono">{@t}</code>
+    """
+  end
+
+  defp inline_part(%{part: {:link, parts, url}} = assigns) do
+    assigns = assigns |> assign(:parts, parts) |> assign(:url, url)
+
+    ~H"""
+    <a href={@url} target="_blank" rel="noopener" class="link link-primary">
+      <.inline_parts parts={@parts} />
+    </a>
+    """
+  end
+
+  attr :parts, :list, required: true
+
+  defp inline_parts(assigns) do
+    ~H"""
+    <%= for part <- @parts do %>
+      <.inline_part part={part} />
+    <% end %>
+    """
+  end
+
+  # Tokenize inline: scan for **strong**, *em*, _em_, `code`, [text](url).
+  # Anything else falls through as text.
+  defp inline_tokens(text) when is_binary(text) do
+    do_tokens(text, [])
+  end
+
+  defp do_tokens("", acc), do: Enum.reverse(acc)
+
+  defp do_tokens(text, acc) do
+    case next_token(text) do
+      {:none, rest} ->
+        Enum.reverse([{:text, rest} | acc])
+
+      {:match, before, token, rest} ->
+        new_acc =
+          if before == "" do
+            [token | acc]
+          else
+            [token, {:text, before} | acc]
+          end
+
+        do_tokens(rest, new_acc)
+    end
+  end
+
+  # Try each inline pattern; return the earliest match.
+  defp next_token(text) do
+    patterns = [
+      {~r/\*\*(.+?)\*\*/s, :strong},
+      {~r/(?<!\w)_([^_\n]+?)_(?!\w)/, :em},
+      {~r/(?<![*\w])\*([^*\n]+?)\*(?!\*)/, :em},
+      {~r/`([^`\n]+?)`/, :code},
+      {~r/\[([^\]]+)\]\(([^)\s]+)\)/, :link}
+    ]
+
+    candidates =
+      patterns
+      |> Enum.map(fn {re, kind} ->
+        case Regex.run(re, text, return: :index, capture: :all) do
+          nil -> nil
+          captures -> {kind, captures}
+        end
+      end)
+      |> Enum.reject(&is_nil/1)
+
+    case candidates do
+      [] ->
+        {:none, text}
+
+      _ ->
+        {kind, captures} =
+          Enum.min_by(candidates, fn {_, [{at, _} | _]} -> at end)
+
+        build_token(kind, captures, text)
+    end
+  end
+
+  defp build_token(kind, [{full_at, full_len} | rest_captures], text) do
+    before = binary_part(text, 0, full_at)
+    tail_at = full_at + full_len
+    rest = binary_part(text, tail_at, byte_size(text) - tail_at)
+
+    token =
+      case {kind, rest_captures} do
+        {:strong, [{at, len}]} ->
+          {:strong, inline_tokens(binary_part(text, at, len))}
+
+        {:em, [{at, len}]} ->
+          {:em, inline_tokens(binary_part(text, at, len))}
+
+        {:code, [{at, len}]} ->
+          {:code, binary_part(text, at, len)}
+
+        {:link, [{tat, tlen}, {uat, ulen}]} ->
+          {:link, inline_tokens(binary_part(text, tat, tlen)), binary_part(text, uat, ulen)}
+      end
+
+    {:match, before, token, rest}
+  end
+end

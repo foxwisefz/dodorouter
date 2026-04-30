@@ -6,6 +6,8 @@ defmodule DodoRouterWeb.PromptComponents do
   """
   use Phoenix.Component
 
+  alias DodoRouterWeb.MarkdownRenderer
+
   @doc """
   A chat-bubble style conversation view.
 
@@ -138,8 +140,8 @@ defmodule DodoRouterWeb.PromptComponents do
             rows={textarea_rows(@message.content)}
           >{@message.content}</textarea>
         <% else %>
-          <div class="prose prose-sm max-w-none">
-            {render_content(@message.content)}
+          <div class="max-w-none">
+            <MarkdownRenderer.render content={@message.content} />
           </div>
         <% end %>
 
@@ -181,33 +183,6 @@ defmodule DodoRouterWeb.PromptComponents do
 
   defp textarea_rows(_), do: 3
 
-  # Render content with simple fenced-code-block detection. We don't pull in a
-  # markdown lib — just split on triple backticks and render odd-indexed
-  # segments as <pre><code> blocks.
-  defp render_content(content) when is_binary(content) do
-    parts = Regex.split(~r/```(?:[a-zA-Z0-9_+-]*\n)?/, content, trim: false)
-
-    assigns = %{parts: parts}
-
-    ~H"""
-    <%= for {part, idx} <- Enum.with_index(@parts) do %>
-      <%= if rem(idx, 2) == 0 do %>
-        <p class="whitespace-pre-wrap break-words text-sm leading-relaxed">{part}</p>
-      <% else %>
-        <pre class="my-2 overflow-x-auto rounded bg-base-300/60 p-3 text-xs"><code phx-no-curly-interpolation>{part}</code></pre>
-      <% end %>
-    <% end %>
-    """
-  end
-
-  defp render_content(other) do
-    assigns = %{other: inspect(other)}
-
-    ~H"""
-    <p class="whitespace-pre-wrap break-words text-sm font-mono">{@other}</p>
-    """
-  end
-
   attr :call, :map, required: true
 
   defp tool_call_card(assigns) do
@@ -228,7 +203,7 @@ defmodule DodoRouterWeb.PromptComponents do
         <span class="text-secondary">⚙</span>
         <span class="font-semibold">{@name}</span>
       </div>
-      <pre class="px-3 py-2 text-[11px] overflow-x-auto"><code phx-no-curly-interpolation>{@args}</code></pre>
+      <pre class="px-3 py-2 text-[11px] overflow-x-auto"><code phx-no-curly-interpolation><%= @args %></code></pre>
     </div>
     """
   end
