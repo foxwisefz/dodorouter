@@ -1,6 +1,6 @@
 .DS_Store
 .env*
-logs/
+/logs/
 
 # The directory Mix will write compiled artifacts to.
 /_build/

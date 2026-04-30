@@ -73,7 +73,12 @@ defmodule DodoRouterWeb.LogLiveTest do
           status: "success"
         })
 
-      {:ok, _live, html} = live(conn, ~p"/logs/#{log.request_id}")
+      {:ok, live, _html} = live(conn, ~p"/logs/#{log.request_id}")
+
+      html =
+        live
+        |> element("button[phx-value-tab=performance]")
+        |> render_click()
 
       assert html =~ "Response Body"
       assert html =~ "hello"
@@ -101,7 +106,12 @@ defmodule DodoRouterWeb.LogLiveTest do
           status: "success"
         })
 
-      {:ok, _live, html} = live(conn, ~p"/logs/#{log.request_id}")
+      {:ok, live, _html} = live(conn, ~p"/logs/#{log.request_id}")
+
+      html =
+        live
+        |> element("button[phx-value-tab=performance]")
+        |> render_click()
 
       assert html =~ "Response Headers"
       assert html =~ "x-request-id"
@@ -136,7 +146,12 @@ defmodule DodoRouterWeb.LogLiveTest do
           status: "fallback"
         })
 
-      {:ok, _live, html} = live(conn, ~p"/logs/#{log.request_id}")
+      {:ok, live, _html} = live(conn, ~p"/logs/#{log.request_id}")
+
+      html =
+        live
+        |> element("button[phx-value-tab=performance]")
+        |> render_click()
 
       assert html =~ "Error Response"
       assert html =~ "rate limited"
@@ -194,7 +209,12 @@ defmodule DodoRouterWeb.LogLiveTest do
           status: "success"
         })
 
-      {:ok, _live, html} = live(conn, ~p"/logs/#{log.request_id}")
+      {:ok, live, _html} = live(conn, ~p"/logs/#{log.request_id}")
+
+      html =
+        live
+        |> element("button[phx-value-tab=performance]")
+        |> render_click()
 
       assert html =~ "coding"
       assert html =~ "standard"
