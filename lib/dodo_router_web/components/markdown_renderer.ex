@@ -28,7 +28,7 @@ defmodule DodoRouterWeb.MarkdownRenderer do
     assigns = assign(assigns, :nodes, nodes)
 
     ~H"""
-    <div class="md-content text-sm leading-relaxed space-y-1">
+    <div class="md-content text-sm leading-snug space-y-1.5">
       <.md_nodes nodes={@nodes} />
     </div>
     """
@@ -233,7 +233,7 @@ defmodule DodoRouterWeb.MarkdownRenderer do
 
   defp sectionize([], acc), do: Enum.reverse(acc)
 
-  defp sectionize([{:heading, level, _text} = h | rest], acc) when level >= 2 do
+  defp sectionize([{:heading, level, _text} = h | rest], acc) when level >= 1 do
     {section_blocks, remaining} = take_section(rest, level)
     section = {:section, h, sectionize(section_blocks)}
     sectionize(remaining, [section | acc])
@@ -278,15 +278,15 @@ defmodule DodoRouterWeb.MarkdownRenderer do
       |> assign(:children, children)
 
     ~H"""
-    <details class="md-section group" open>
+    <details class="md-section">
       <summary class={[
-        "md-summary cursor-pointer select-none flex items-baseline gap-1.5",
+        "md-summary cursor-pointer select-none flex items-center gap-1.5 py-0.5 -ml-3 pl-3",
         "hover:text-primary transition-colors list-none"
       ]}>
-        <span class="md-arrow text-base-content/40 text-[10px] flex-shrink-0">▸</span>
+        <.disclosure_arrow />
         <span class={heading_class(@level)}><.inline text={@text} /></span>
       </summary>
-      <div class="md-section-body pl-3 mt-1 border-l border-base-300/30 space-y-1">
+      <div class="md-section-body pl-3 border-l border-base-300/30 mt-1 space-y-1.5">
         <.md_nodes nodes={@children} />
       </div>
     </details>
@@ -294,19 +294,18 @@ defmodule DodoRouterWeb.MarkdownRenderer do
   end
 
   defp md_node(%{node: {:xml_block, name, children}} = assigns) do
-    short? = xml_short?(children)
-    assigns = assigns |> assign(:name, name) |> assign(:children, children) |> assign(:short, short?)
+    assigns = assigns |> assign(:name, name) |> assign(:children, children)
 
     ~H"""
-    <details class="md-xml group" open={@short}>
+    <details class="md-xml">
       <summary class={[
-        "md-xml-summary cursor-pointer select-none flex items-center gap-1.5",
+        "md-xml-summary cursor-pointer select-none flex items-center gap-1.5 py-0.5 -ml-3 pl-3",
         "text-[11px] font-mono text-base-content/50 hover:text-primary list-none"
       ]}>
-        <span class="md-arrow text-[10px] flex-shrink-0">▸</span>
+        <.disclosure_arrow />
         <span class="text-secondary/70">&lt;{@name}&gt;</span>
       </summary>
-      <div class="md-xml-body pl-3 mt-1 border-l border-secondary/20 space-y-1">
+      <div class="md-xml-body pl-3 border-l border-secondary/20 mt-1 space-y-1.5">
         <.md_nodes nodes={@children} />
       </div>
     </details>
@@ -322,10 +321,10 @@ defmodule DodoRouterWeb.MarkdownRenderer do
   end
 
   defp md_node(%{node: {:paragraph, text}} = assigns) do
-    assigns = assign(assigns, :text, text)
+    assigns = assign(assigns, :text, normalize_paragraph(text))
 
     ~H"""
-    <p class="whitespace-pre-wrap break-words"><.inline text={@text} /></p>
+    <p class="break-words"><.inline text={@text} /></p>
     """
   end
 
@@ -381,27 +380,32 @@ defmodule DodoRouterWeb.MarkdownRenderer do
     ~H""
   end
 
+  defp disclosure_arrow(assigns) do
+    ~H"""
+    <svg
+      class="md-arrow w-3 h-3 flex-shrink-0 text-base-content/40 transition-transform"
+      viewBox="0 0 12 12"
+      fill="currentColor"
+      aria-hidden="true"
+    ><path d="M4 2 L8 6 L4 10 Z" /></svg>
+    """
+  end
+
   defp heading_class(1), do: "text-base font-semibold"
   defp heading_class(2), do: "text-sm font-semibold"
   defp heading_class(3), do: "text-sm font-semibold text-base-content/80"
   defp heading_class(_), do: "text-xs font-semibold uppercase tracking-wide text-base-content/60"
 
-  # XML tags with little content stay open; long ones collapse to save space.
-  defp xml_short?(children) do
-    children
-    |> Enum.map(&block_text_size/1)
-    |> Enum.sum()
-    |> Kernel.<(200)
+  # Collapse internal newlines/indents in a paragraph the way markdown does:
+  # consecutive non-blank lines become one logical line separated by a space.
+  defp normalize_paragraph(text) do
+    text
+    |> String.split(~r/\r?\n/)
+    |> Enum.map(&String.trim/1)
+    |> Enum.reject(&(&1 == ""))
+    |> Enum.join(" ")
   end
 
-  defp block_text_size({:paragraph, t}), do: byte_size(t)
-  defp block_text_size({:code_block, _, t}), do: byte_size(t)
-  defp block_text_size({:heading, _, t}), do: byte_size(t)
-  defp block_text_size({:list, _, items}), do: items |> Enum.map(&byte_size/1) |> Enum.sum()
-  defp block_text_size({:blockquote, c}), do: c |> Enum.map(&block_text_size/1) |> Enum.sum()
-  defp block_text_size({:xml_block, _, c}), do: c |> Enum.map(&block_text_size/1) |> Enum.sum()
-  defp block_text_size({:section, _, c}), do: c |> Enum.map(&block_text_size/1) |> Enum.sum()
-  defp block_text_size(_), do: 0
 
   # ---------------------------------------------------------------------------
   # Inline renderer

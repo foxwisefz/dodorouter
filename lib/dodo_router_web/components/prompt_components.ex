@@ -117,6 +117,18 @@ defmodule DodoRouterWeb.PromptComponents do
         <span class={"text-[10px] uppercase tracking-wider font-semibold #{@label_class}"}>
           {@label}
         </span>
+        <%= if !@editable && is_binary(@message.content) && @message.content != "" do %>
+          <button
+            type="button"
+            id={"copy-#{@index}"}
+            phx-hook="CopyButton"
+            data-copy={@message.content}
+            class="text-[10px] text-base-content/30 hover:text-primary opacity-0 group-hover:opacity-100 transition"
+            title="Copy raw message"
+          >
+            copy raw
+          </button>
+        <% end %>
         <%= if @editable do %>
           <button
             type="button"
@@ -166,7 +178,7 @@ defmodule DodoRouterWeb.PromptComponents do
     do: {"bg-base-200/60 border border-base-300/30", "text-base-content/50", "assistant"}
 
   defp role_styles("system", _),
-    do: {"bg-base-300/40 text-base-content/70 italic", "text-base-content/40", "system"}
+    do: {"bg-base-300/40 text-base-content/70", "text-base-content/40", "system"}
 
   defp role_styles("tool", _),
     do: {"bg-warning/10 border border-warning/30", "text-warning", "tool result"}
