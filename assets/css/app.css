@@ -110,6 +110,14 @@
 
 /* This file is for your main application CSS */
 
+/* Markdown renderer disclosure arrow */
+.md-arrow {
+  transform-origin: center;
+}
+details[open] > summary .md-arrow {
+  transform: rotate(90deg);
+}
+
 /* ============================================
    DodoRouter Design System
    ============================================ */

@@ -124,6 +124,8 @@ defmodule DodoRouter.Logs do
 
   def get_log_by_request_id(request_id), do: Repo.get_by(RequestLog, request_id: request_id)
 
+  # Public sharing
+
   # Analytics
 
   def stats(%Router{} = router, opts \\ []) do
