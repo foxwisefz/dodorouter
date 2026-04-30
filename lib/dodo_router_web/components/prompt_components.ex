@@ -1,8 +1,6 @@
 defmodule DodoRouterWeb.PromptComponents do
   @moduledoc """
-  Components for rendering LLM conversations as a hero, share-worthy artifact
-  rather than a debug pane. Used by the public sharing pages and by the
-  Conversation tab on the private log detail.
+  Components for rendering LLM conversations on the private log detail page.
   """
   use Phoenix.Component
 
@@ -17,30 +15,13 @@ defmodule DodoRouterWeb.PromptComponents do
     * `:response` — the assistant response message (or nil)
     * `:model` — display string e.g. "gpt-4"
     * `:provider` — display string e.g. "openai"
-    * `:editable` — when true, renders messages as editable textareas and
-      surfaces "Run with my keys" controls. The parent LiveView is expected to
-      handle `edit_message`, `add_turn`, `remove_turn`, and `run_fork` events.
-    * `:edited_messages` — when editable, the working copy of the messages
-      (defaults to `:messages` if not provided).
   """
   attr :messages, :list, required: true
   attr :response, :any, default: nil
   attr :model, :string, default: nil
   attr :provider, :string, default: nil
-  attr :editable, :boolean, default: false
-  attr :edited_messages, :list, default: nil
-  attr :run_disabled, :boolean, default: false
-  attr :run_label, :string, default: "Run with my keys"
-
-  slot :run_controls,
-    doc: "Optional slot for additional controls (e.g. router/key picker) shown above the Run button."
 
   def conversation(assigns) do
-    assigns =
-      assign_new(assigns, :working_messages, fn ->
-        assigns.edited_messages || assigns.messages
-      end)
-
     ~H"""
     <div class="space-y-4">
       <%= if @model || @provider do %>
@@ -55,49 +36,20 @@ defmodule DodoRouterWeb.PromptComponents do
       <% end %>
 
       <div class="space-y-3">
-        <%= for {msg, idx} <- Enum.with_index(@working_messages) do %>
-          <.message_bubble message={msg} index={idx} editable={@editable} />
+        <%= for {msg, idx} <- Enum.with_index(@messages) do %>
+          <.message_bubble message={msg} index={idx} />
         <% end %>
 
         <%= if @response do %>
-          <.message_bubble message={@response} index="response" editable={false} response={true} />
+          <.message_bubble message={@response} index="response" response={true} />
         <% end %>
       </div>
-
-      <%= if @editable do %>
-        <div class="border-t border-base-300/50 pt-4 space-y-3">
-          <div class="flex items-center gap-2">
-            <button type="button" phx-click="add_turn" phx-value-role="user" class="btn btn-sm btn-ghost">
-              + Add user turn
-            </button>
-            <button type="button" phx-click="add_turn" phx-value-role="assistant" class="btn btn-sm btn-ghost">
-              + Add assistant turn
-            </button>
-            <button type="button" phx-click="reset_messages" class="btn btn-sm btn-ghost ml-auto">
-              ↻ Reset
-            </button>
-          </div>
-
-          {render_slot(@run_controls)}
-
-          <button
-            type="button"
-            phx-click="run_fork"
-            disabled={@run_disabled}
-            class="btn btn-primary btn-block"
-          >
-            <span class="text-base">▶</span>
-            {@run_label}
-          </button>
-        </div>
-      <% end %>
     </div>
     """
   end
 
   attr :message, :map, required: true
   attr :index, :any, required: true
-  attr :editable, :boolean, default: false
   attr :response, :boolean, default: false
 
   defp message_bubble(assigns) do
@@ -117,7 +69,7 @@ defmodule DodoRouterWeb.PromptComponents do
         <span class={"text-[10px] uppercase tracking-wider font-semibold #{@label_class}"}>
           {@label}
         </span>
-        <%= if !@editable && is_binary(@message.content) && @message.content != "" do %>
+        <%= if is_binary(@message.content) && @message.content != "" do %>
           <button
             type="button"
             id={"copy-#{@index}"}
@@ -129,33 +81,12 @@ defmodule DodoRouterWeb.PromptComponents do
             copy raw
           </button>
         <% end %>
-        <%= if @editable do %>
-          <button
-            type="button"
-            phx-click="remove_turn"
-            phx-value-index={@index}
-            class="text-[10px] text-base-content/30 hover:text-error opacity-0 group-hover:opacity-100 transition"
-            title="Remove this turn"
-          >
-            remove
-          </button>
-        <% end %>
       </div>
 
       <div class={"max-w-[85%] rounded-2xl px-4 py-3 shadow-sm #{@bubble_class}"}>
-        <%= if @editable do %>
-          <textarea
-            phx-blur="edit_message"
-            phx-value-index={@index}
-            name="content"
-            class="w-full bg-transparent border-0 outline-none resize-none text-sm leading-relaxed font-sans focus:ring-0"
-            rows={textarea_rows(@message.content)}
-          >{@message.content}</textarea>
-        <% else %>
-          <div class="max-w-none">
-            <MarkdownRenderer.render content={@message.content} />
-          </div>
-        <% end %>
+        <div class="max-w-none">
+          <MarkdownRenderer.render content={@message.content} />
+        </div>
 
         <%= if @message.tool_calls && @message.tool_calls != [] do %>
           <div class="mt-3 space-y-2">
@@ -188,18 +119,13 @@ defmodule DodoRouterWeb.PromptComponents do
   defp align_class("user"), do: "items-end"
   defp align_class(_), do: "items-start"
 
-  defp textarea_rows(content) when is_binary(content) do
-    lines = String.split(content, "\n") |> length()
-    max(2, min(20, lines + 1))
-  end
-
-  defp textarea_rows(_), do: 3
-
   attr :call, :map, required: true
 
   defp tool_call_card(assigns) do
     name = get_in(assigns.call, ["function", "name"]) || assigns.call["name"] || "tool"
-    raw_args = get_in(assigns.call, ["function", "arguments"]) || assigns.call["arguments"] || "{}"
+
+    raw_args =
+      get_in(assigns.call, ["function", "arguments"]) || assigns.call["arguments"] || "{}"
 
     args_pretty =
       case Jason.decode(to_string(raw_args)) do
@@ -291,7 +217,7 @@ defmodule DodoRouterWeb.PromptComponents do
         !@selected && "hover:bg-base-200 text-base-content/60"
       ]}
     >
-      📍 {@log.public_title || "log #{String.slice(@log.id, 0, 8)}"}
+      📍 log {String.slice(@log.id, 0, 8)}
     </.link>
     """
   end
@@ -301,64 +227,4 @@ defmodule DodoRouterWeb.PromptComponents do
   defp role_color("system"), do: "text-base-content/40"
   defp role_color("tool"), do: "text-warning"
   defp role_color(_), do: "text-base-content/40"
-
-  @doc """
-  Modal for the publish flow. Shows the redaction-snapshotted bodies and
-  takes a title.
-  """
-  attr :id, :string, default: "publish-modal"
-  attr :show, :boolean, default: false
-  attr :log, :map, required: true
-  attr :preview_messages, :list, required: true
-
-  def publish_modal(assigns) do
-    ~H"""
-    <div :if={@show} id={@id} class="modal modal-open">
-      <div class="modal-box max-w-3xl">
-        <h3 class="font-bold text-lg">Publish this prompt</h3>
-        <p class="text-sm text-base-content/60 mt-1">
-          A public, read-only URL anyone can visit. Logged-in viewers can fork it and run against their own keys.
-        </p>
-
-        <form phx-submit="confirm_publish" class="mt-4 space-y-4">
-          <div>
-            <label class="label" for="publish-title">
-              <span class="label-text">Title</span>
-            </label>
-            <input
-              id="publish-title"
-              name="title"
-              type="text"
-              maxlength="200"
-              placeholder="e.g. ELI5 explanation of monads"
-              class="input input-bordered w-full"
-            />
-          </div>
-
-          <details class="bg-base-200/40 rounded p-3">
-            <summary class="cursor-pointer text-sm font-medium">Preview redacted snapshot</summary>
-            <div class="mt-3 max-h-80 overflow-y-auto space-y-2 text-xs">
-              <%= for msg <- @preview_messages do %>
-                <div class="flex gap-2">
-                  <span class="font-mono text-base-content/40 uppercase text-[10px]">{msg.role}</span>
-                  <p class="whitespace-pre-wrap break-words flex-1">{msg.content}</p>
-                </div>
-              <% end %>
-            </div>
-            <p class="text-[11px] text-base-content/50 mt-2">
-              API keys, JWTs, AWS credentials, and similar secrets are redacted automatically.
-              Review carefully — you can unpublish at any time.
-            </p>
-          </details>
-
-          <div class="modal-action">
-            <button type="button" phx-click="cancel_publish" class="btn btn-ghost">Cancel</button>
-            <button type="submit" class="btn btn-primary">Publish</button>
-          </div>
-        </form>
-      </div>
-      <div class="modal-backdrop" phx-click="cancel_publish"></div>
-    </div>
-    """
-  end
 end

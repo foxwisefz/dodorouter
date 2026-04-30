@@ -12,23 +12,8 @@ defmodule DodoRouter.Accounts.User do
     field :tos_accepted_at, :utc_datetime
     field :authenticated_at, :utc_datetime, virtual: true
     field :tos_accepted, :boolean, virtual: true
-    field :username, :string
 
     timestamps(type: :utc_datetime)
-  end
-
-  @doc """
-  Changeset for setting or changing the public username.
-  """
-  def username_changeset(user, attrs) do
-    user
-    |> cast(attrs, [:username])
-    |> validate_format(:username, ~r/^[a-z0-9][a-z0-9_-]{1,38}[a-z0-9]$/i,
-      message: "may only contain letters, numbers, underscores, and dashes (3-40 chars)"
-    )
-    |> validate_length(:username, min: 3, max: 40)
-    |> unsafe_validate_unique(:username, DodoRouter.Repo)
-    |> unique_constraint(:username)
   end
 
   @doc """

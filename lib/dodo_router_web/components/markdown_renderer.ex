@@ -110,7 +110,13 @@ defmodule DodoRouterWeb.MarkdownRenderer do
 
       String.starts_with?(line, ">") ->
         {bq_lines, after_lines} = take_blockquote(lines)
-        body = bq_lines |> Enum.map(&String.replace_prefix(&1, ">", "")) |> Enum.map(&String.trim_leading/1) |> Enum.join("\n")
+
+        body =
+          bq_lines
+          |> Enum.map(&String.replace_prefix(&1, ">", ""))
+          |> Enum.map(&String.trim_leading/1)
+          |> Enum.join("\n")
+
         consume_blocks(after_lines, [{:blockquote, parse_blocks(body)} | acc])
 
       true ->
@@ -205,7 +211,7 @@ defmodule DodoRouterWeb.MarkdownRenderer do
 
   defp take_blockquote(lines) do
     Enum.split_while(lines, fn line ->
-      String.starts_with?(line, ">") || (current_blockquote_continuation?(line))
+      String.starts_with?(line, ">") || current_blockquote_continuation?(line)
     end)
   end
 
@@ -387,7 +393,9 @@ defmodule DodoRouterWeb.MarkdownRenderer do
       viewBox="0 0 12 12"
       fill="currentColor"
       aria-hidden="true"
-    ><path d="M4 2 L8 6 L4 10 Z" /></svg>
+    >
+      <path d="M4 2 L8 6 L4 10 Z" />
+    </svg>
     """
   end
 
@@ -405,7 +413,6 @@ defmodule DodoRouterWeb.MarkdownRenderer do
     |> Enum.reject(&(&1 == ""))
     |> Enum.join(" ")
   end
-
 
   # ---------------------------------------------------------------------------
   # Inline renderer
