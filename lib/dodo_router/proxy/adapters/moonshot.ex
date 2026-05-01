@@ -233,6 +233,7 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
       |> maybe_default("stop", nil)
       |> clamp_temperature()
       |> handle_tool_choice_required()
+      |> normalize_tool_call_arguments()
       |> maybe_put_thinking(step)
       |> maybe_transform_kimi_reasoning(step)
 
@@ -291,6 +292,32 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
   end
 
   defp handle_tool_choice_required(body), do: body
+
+  defp normalize_tool_call_arguments(%{"messages" => messages} = body) when is_list(messages) do
+    updated =
+      Enum.map(messages, fn
+        %{"tool_calls" => tool_calls} = msg when is_list(tool_calls) ->
+          normalized =
+            Enum.map(tool_calls, fn tc ->
+              case get_in(tc, ["function", "arguments"]) do
+                args when is_map(args) ->
+                  put_in(tc, ["function", "arguments"], Jason.encode!(args))
+
+                _ ->
+                  tc
+              end
+            end)
+
+          Map.put(msg, "tool_calls", normalized)
+
+        msg ->
+          msg
+      end)
+
+    Map.put(body, "messages", updated)
+  end
+
+  defp normalize_tool_call_arguments(body), do: body
 
   defguardp is_kimi_thinking_model(model)
             when is_binary(model) and
@@ -355,9 +382,8 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
 
   # kimi-k2.5 has thinking enabled by default, so ALL assistant messages
   # need reasoning_content, not just ones with tool_calls.
-  defp ensure_reasoning_content(msg) do
-    Map.put_new(msg, "reasoning_content", "")
-  end
+  defp ensure_reasoning_content(%{"reasoning_content" => rc} = msg) when is_binary(rc), do: msg
+  defp ensure_reasoning_content(msg), do: Map.put(msg, "reasoning_content", "")
 
   defp accumulate_chunk(acc, chunk_data) do
     choice = get_in(chunk_data, ["choices", Access.at(0)])
