@@ -237,11 +237,6 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
       |> maybe_put_thinking(step)
       |> maybe_transform_kimi_reasoning(step)
 
-    Logger.info(
-      "[Moonshot] Sending request model=#{body["model"]} msg_count=#{length(body["messages"] || [])} " <>
-        "thinking=#{inspect(body["thinking"])}"
-    )
-
     assistant_debug =
       (body["messages"] || [])
       |> Enum.with_index()
@@ -249,12 +244,13 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
       |> Enum.map(fn {msg, i} ->
         has_tc = Map.has_key?(msg, "tool_calls")
         has_rc = Map.has_key?(msg, "reasoning_content")
-        rc_val = inspect(msg["reasoning_content"])
-        "[idx=#{i}: tc=#{has_tc} rc=#{has_rc} rc_val=#{rc_val}]"
+        "[#{i}: tc=#{has_tc} rc=#{has_rc}]"
       end)
       |> Enum.join(", ")
 
-    Logger.info("[Moonshot:debug] assistant_msgs: #{assistant_debug}")
+    Logger.info(
+      "[Moonshot] Sending request model=#{body["model"]} msg_count=#{length(body["messages"] || [])} thinking=#{inspect(body["thinking"])} assistants=[#{assistant_debug}]"
+    )
 
     body
   end
