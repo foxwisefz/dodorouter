@@ -77,7 +77,7 @@ defmodule DodoRouterWeb.LogLiveTest do
 
       html =
         live
-        |> element("button[phx-value-tab=performance]")
+        |> element("button[phx-value-tab=\"performance\"]")
         |> render_click()
 
       assert html =~ "Response Body"
@@ -110,7 +110,7 @@ defmodule DodoRouterWeb.LogLiveTest do
 
       html =
         live
-        |> element("button[phx-value-tab=performance]")
+        |> element("button[phx-value-tab=\"performance\"]")
         |> render_click()
 
       assert html =~ "Response Headers"
@@ -150,7 +150,7 @@ defmodule DodoRouterWeb.LogLiveTest do
 
       html =
         live
-        |> element("button[phx-value-tab=performance]")
+        |> element("button[phx-value-tab=\"performance\"]")
         |> render_click()
 
       assert html =~ "Error Response"
@@ -213,7 +213,7 @@ defmodule DodoRouterWeb.LogLiveTest do
 
       html =
         live
-        |> element("button[phx-value-tab=performance]")
+        |> element("button[phx-value-tab=\"performance\"]")
         |> render_click()
 
       assert html =~ "coding"

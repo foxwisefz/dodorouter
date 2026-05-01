@@ -130,7 +130,7 @@ defmodule DodoRouter.Proxy.FallbackChain do
           end
 
           broadcast_step_completed(state.router_id, step, :error, latency(start_time))
-          %{state | status: :error}
+          %{state | status: :error, response_headers: details[:headers]}
         end
     end
   end
