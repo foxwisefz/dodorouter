@@ -73,7 +73,7 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
         {:ok, Map.put(response_body, "_meta", meta), %{headers: resp_headers}}
 
       {:ok, %{status: status, body: response_body, headers: resp_headers}} ->
-        Logger.error("[Moonshot] Non-200 response: status=#{status}")
+        Logger.error("[Moonshot] Non-200 response: status=#{status} body=#{inspect(response_body)}")
 
         reason = Adapter.categorize_error(status, response_body)
 
@@ -238,8 +238,23 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
       |> maybe_transform_kimi_reasoning(step)
 
     Logger.info(
-      "[Moonshot] Sending request model=#{body["model"]} msg_count=#{length(body["messages"] || [])}"
+      "[Moonshot] Sending request model=#{body["model"]} msg_count=#{length(body["messages"] || [])} " <>
+        "thinking=#{inspect(body["thinking"])}"
     )
+
+    assistant_debug =
+      (body["messages"] || [])
+      |> Enum.with_index()
+      |> Enum.filter(fn {msg, _i} -> msg["role"] == "assistant" end)
+      |> Enum.map(fn {msg, i} ->
+        has_tc = Map.has_key?(msg, "tool_calls")
+        has_rc = Map.has_key?(msg, "reasoning_content")
+        rc_val = inspect(msg["reasoning_content"])
+        "[idx=#{i}: tc=#{has_tc} rc=#{has_rc} rc_val=#{rc_val}]"
+      end)
+      |> Enum.join(", ")
+
+    Logger.info("[Moonshot:debug] assistant_msgs: #{assistant_debug}")
 
     body
   end
