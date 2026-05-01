@@ -539,7 +539,7 @@ defmodule DodoRouterWeb.RouterLive.Show do
                         style="background-image: url('data:image/svg+xml;charset=UTF-8,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 20 20%22 fill=%22%236b7280%22%3E%3Cpath fill-rule=%22evenodd%22 d=%22M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z%22 clip-rule=%22evenodd%22/%3E%3C/svg%3E');"
                       >
                         <option value="">-- Select API Key --</option>
-                        <%= for key <- matching_keys(@provider_keys, step.provider) do %>
+                        <%= for key <- matching_keys(@provider_keys, step) do %>
                           <option value={key.id} selected={step.provider_key_id == key.id}>
                             {key.label} ({key.key_hint})
                           </option>
@@ -921,9 +921,11 @@ defmodule DodoRouterWeb.RouterLive.Show do
     """
   end
 
-  defp matching_keys(provider_keys, step_provider) do
+  defp matching_keys(provider_keys, %{provider: provider, plan_type: plan_type}) do
+    expected_slug = Registry.to_key_slug(provider, plan_type || "standard")
+
     Enum.filter(provider_keys, fn key ->
-      Registry.adapter_provider(key.provider_slug) == step_provider
+      key.provider_slug == expected_slug
     end)
   end
 
