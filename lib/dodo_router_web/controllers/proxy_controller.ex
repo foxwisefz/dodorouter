@@ -91,9 +91,12 @@ defmodule DodoRouterWeb.ProxyController do
 
       {:error, :no_routing_configured} ->
         conn
-        |> put_status(500)
+        |> put_status(400)
         |> json(%{
-          error: %{message: "No routing configured for this router", type: "configuration_error"}
+          error: %{
+            message: "No routing configured for router '#{router.slug}'. Add a provider in the Dodo Router dashboard.",
+            type: "invalid_request_error"
+          }
         })
 
       {:error, :all_providers_failed, attempts} ->

@@ -66,10 +66,9 @@ defmodule DodoRouterWeb.ProxyControllerTest do
 
       assert %{
                "error" => %{
-                 "message" => "No routing configured for this router",
-                 "type" => "configuration_error"
+                 "type" => "invalid_request_error"
                }
-             } = json_response(conn, 500)
+             } = json_response(conn, 400)
     end
 
     test "returns 401 without auth", %{conn: conn, router: router} do
@@ -102,7 +101,7 @@ defmodule DodoRouterWeb.ProxyControllerTest do
           "messages" => [%{"role" => "user", "content" => "Hello"}]
         })
 
-      assert %{"error" => %{"type" => "configuration_error"}} = json_response(conn, 500)
+      assert %{"error" => %{"type" => "invalid_request_error"}} = json_response(conn, 400)
     end
   end
 end
