@@ -29,28 +29,18 @@ defmodule DodoRouterWeb.LogLive.Show do
       |> assign(:resp_message, resp_message)
       |> assign(:req_headers, req_headers)
       |> assign(:resp_headers, resp_headers)
-      |> assign(:show_raw_request, false)
-      |> assign(:show_raw_response, false)
+      |> assign(:active_tab, "conversation")
       |> assign(:show_req_headers, false)
       |> assign(:show_resp_headers, false)
       |> assign(:expanded_messages, MapSet.new())
       |> assign(:truncation_flags, log.truncation_flags || [])
-      |> assign(:show_performance, false)
 
     {:ok, socket}
   end
 
   @impl true
-  def handle_event("toggle_raw_request", _params, socket) do
-    {:noreply, update(socket, :show_raw_request, &(!&1))}
-  end
-
-  def handle_event("toggle_raw_response", _params, socket) do
-    {:noreply, update(socket, :show_raw_response, &(!&1))}
-  end
-
-  def handle_event("toggle_performance", _params, socket) do
-    {:noreply, update(socket, :show_performance, &(!&1))}
+  def handle_event("set_tab", %{"tab" => tab}, socket) do
+    {:noreply, assign(socket, :active_tab, tab)}
   end
 
   def handle_event("toggle_req_headers", _params, socket) do
@@ -199,81 +189,110 @@ defmodule DodoRouterWeb.LogLive.Show do
         </div>
 
         <!-- Right content -->
-        <div class="flex-1 overflow-y-auto">
-          <!-- Truncation warning -->
-          <%= if length(@truncation_flags) > 0 do %>
-            <div class="alert alert-warning m-4 mb-0">
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                class="h-5 w-5 shrink-0"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-              >
-                <path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  stroke-width="2"
-                  d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
-                />
-              </svg>
-              <div>
-                <span class="font-semibold">Content truncated</span>
-                <span class="text-sm block">
-                  This request had large payloads that were truncated before storage.
-                </span>
-              </div>
-            </div>
-          <% end %>
-
-          <!-- Conversation -->
-          <div class="p-4">
-            <.conversation
-              messages={@req_messages}
-              response={@resp_message}
-              model={@log.final_model}
-              provider={@log.final_provider}
-            />
-          </div>
-
-          <!-- Bottom drawers -->
-          <div class="border-t border-base-300/30 px-4 pb-4 space-y-3">
-            <!-- Raw Request -->
-            <div>
+        <div class="flex-1 overflow-hidden flex flex-col">
+          <!-- Tabs -->
+          <div class="border-b border-base-300/30 px-4 pt-2">
+            <div class="flex gap-1" role="tablist">
               <button
                 type="button"
-                phx-click="toggle_raw_request"
-                class="w-full flex items-center justify-between py-2 text-xs font-medium text-base-content/60 hover:text-base-content transition"
+                phx-click="set_tab"
+                phx-value-tab="conversation"
+                role="tab"
+                aria-selected={@active_tab == "conversation"}
+                class={[
+                  "px-3 py-1.5 text-xs font-medium rounded-t-lg transition",
+                  @active_tab == "conversation" && "bg-base-100 text-base-content border-t border-x border-base-300/30 -mb-px",
+                  @active_tab != "conversation" && "text-base-content/60 hover:text-base-content hover:bg-base-200/50"
+                ]}
               >
-                <span class="flex items-center gap-2">
-                  <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                      stroke-width="2"
-                      d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"
-                    />
-                  </svg>
-                  Raw Request
-                </span>
-                <svg
-                  class={["w-3 h-3 transition-transform", @show_raw_request && "rotate-180"]}
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    stroke-width="2"
-                    d="M19 9l-7 7-7-7"
-                  />
-                </svg>
+                Conversation
               </button>
+              <button
+                type="button"
+                phx-click="set_tab"
+                phx-value-tab="raw_request"
+                role="tab"
+                aria-selected={@active_tab == "raw_request"}
+                class={[
+                  "px-3 py-1.5 text-xs font-medium rounded-t-lg transition",
+                  @active_tab == "raw_request" && "bg-base-100 text-base-content border-t border-x border-base-300/30 -mb-px",
+                  @active_tab != "raw_request" && "text-base-content/60 hover:text-base-content hover:bg-base-200/50"
+                ]}
+              >
+                Raw Request
+              </button>
+              <button
+                type="button"
+                phx-click="set_tab"
+                phx-value-tab="raw_response"
+                role="tab"
+                aria-selected={@active_tab == "raw_response"}
+                class={[
+                  "px-3 py-1.5 text-xs font-medium rounded-t-lg transition",
+                  @active_tab == "raw_response" && "bg-base-100 text-base-content border-t border-x border-base-300/30 -mb-px",
+                  @active_tab != "raw_response" && "text-base-content/60 hover:text-base-content hover:bg-base-200/50"
+                ]}
+              >
+                Raw Response
+              </button>
+              <button
+                type="button"
+                phx-click="set_tab"
+                phx-value-tab="performance"
+                role="tab"
+                aria-selected={@active_tab == "performance"}
+                class={[
+                  "px-3 py-1.5 text-xs font-medium rounded-t-lg transition",
+                  @active_tab == "performance" && "bg-base-100 text-base-content border-t border-x border-base-300/30 -mb-px",
+                  @active_tab != "performance" && "text-base-content/60 hover:text-base-content hover:bg-base-200/50"
+                ]}
+              >
+                Performance
+              </button>
+            </div>
+          </div>
 
-              <%= if @show_raw_request do %>
-                <div class="mt-2 space-y-2">
-                  <%= if @req_headers do %>
+          <!-- Tab panels -->
+          <div class="flex-1 overflow-y-auto">
+            <%= if @active_tab == "conversation" do %>
+              <div class="p-4">
+                <%= if length(@truncation_flags) > 0 do %>
+                  <div class="alert alert-warning mb-4">
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      class="h-5 w-5 shrink-0"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                    >
+                      <path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="2"
+                        d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+                      />
+                    </svg>
+                    <div>
+                      <span class="font-semibold">Content truncated</span>
+                      <span class="text-sm block">
+                        This request had large payloads that were truncated before storage.
+                      </span>
+                    </div>
+                  </div>
+                <% end %>
+                <.conversation
+                  messages={@req_messages}
+                  response={@resp_message}
+                  model={@log.final_model}
+                  provider={@log.final_provider}
+                />
+              </div>
+            <% end %>
+
+            <%= if @active_tab == "raw_request" do %>
+              <div class="p-4 space-y-3">
+                <%= if @req_headers do %>
+                  <div>
                     <button
                       type="button"
                       phx-click="toggle_req_headers"
@@ -282,7 +301,7 @@ defmodule DodoRouterWeb.LogLive.Show do
                       {if @show_req_headers, do: "Hide headers", else: "Show headers"}
                     </button>
                     <%= if @show_req_headers do %>
-                      <div class="p-2 bg-base-200 rounded text-xs font-mono space-y-1">
+                      <div class="mt-2 p-2 bg-base-200 rounded text-xs font-mono space-y-1">
                         <%= for {key, value} <- @req_headers do %>
                           <div class="flex gap-2">
                             <span class="text-base-content/60 shrink-0">{key}:</span>
@@ -291,50 +310,18 @@ defmodule DodoRouterWeb.LogLive.Show do
                         <% end %>
                       </div>
                     <% end %>
-                  <% end %>
-                  <div class="mockup-code text-xs max-h-96 overflow-auto">
-                    <pre><code><%= format_json(@log.request_body) %></code></pre>
                   </div>
+                <% end %>
+                <div class="mockup-code text-xs max-h-[calc(100vh-240px)] overflow-auto">
+                  <pre><code><%= format_json(@log.request_body) %></code></pre>
                 </div>
-              <% end %>
-            </div>
+              </div>
+            <% end %>
 
-            <!-- Raw Response -->
-            <div>
-              <button
-                type="button"
-                phx-click="toggle_raw_response"
-                class="w-full flex items-center justify-between py-2 text-xs font-medium text-base-content/60 hover:text-base-content transition"
-              >
-                <span class="flex items-center gap-2">
-                  <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                      stroke-width="2"
-                      d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"
-                    />
-                  </svg>
-                  Raw Response
-                </span>
-                <svg
-                  class={["w-3 h-3 transition-transform", @show_raw_response && "rotate-180"]}
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    stroke-width="2"
-                    d="M19 9l-7 7-7-7"
-                  />
-                </svg>
-              </button>
-
-              <%= if @show_raw_response do %>
-                <div class="mt-2 space-y-2">
-                  <%= if @resp_headers do %>
+            <%= if @active_tab == "raw_response" do %>
+              <div class="p-4 space-y-3">
+                <%= if @resp_headers do %>
+                  <div>
                     <button
                       type="button"
                       phx-click="toggle_resp_headers"
@@ -343,7 +330,7 @@ defmodule DodoRouterWeb.LogLive.Show do
                       {if @show_resp_headers, do: "Hide headers", else: "Show headers"}
                     </button>
                     <%= if @show_resp_headers do %>
-                      <div class="p-2 bg-base-200 rounded text-xs font-mono space-y-1">
+                      <div class="mt-2 p-2 bg-base-200 rounded text-xs font-mono space-y-1">
                         <%= for {key, value} <- @resp_headers do %>
                           <div class="flex gap-2">
                             <span class="text-base-content/60 shrink-0">{key}:</span>
@@ -352,131 +339,135 @@ defmodule DodoRouterWeb.LogLive.Show do
                         <% end %>
                       </div>
                     <% end %>
-                  <% end %>
-                  <div class="mockup-code text-xs max-h-96 overflow-auto">
-                    <pre><code><%= format_json(@log.response_body) %></code></pre>
                   </div>
+                <% end %>
+                <div class="mockup-code text-xs max-h-[calc(100vh-240px)] overflow-auto">
+                  <pre><code><%= format_json(@log.response_body) %></code></pre>
                 </div>
-              <% end %>
-            </div>
+              </div>
+            <% end %>
 
-            <!-- Performance -->
-            <div>
-              <button
-                type="button"
-                phx-click="toggle_performance"
-                class="w-full flex items-center justify-between py-2 text-xs font-medium text-base-content/60 hover:text-base-content transition"
-              >
-                <span class="flex items-center gap-2">
-                  <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                      stroke-width="2"
-                      d="M13 10V3L4 14h7v7l9-11h-7z"
-                    />
-                  </svg>
-                  Performance Details
-                </span>
-                <svg
-                  class={["w-3 h-3 transition-transform", @show_performance && "rotate-180"]}
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    stroke-width="2"
-                    d="M19 9l-7 7-7-7"
-                  />
-                </svg>
-              </button>
+            <%= if @active_tab == "performance" do %>
+              <div class="p-4 space-y-4">
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                  <div class="card-bordered">
+                    <h3 class="section-title mb-2">Timing</h3>
+                    <table class="table table-sm">
+                      <tbody>
+                        <tr>
+                          <td class="text-base-content/60">Call Type</td>
+                          <td class="text-right"><.call_type_badge type={@log.call_type} /></td>
+                        </tr>
+                        <tr>
+                          <td class="text-base-content/60">Total</td>
+                          <td class="text-right font-mono">{@log.latency_ms || "-"} ms</td>
+                        </tr>
+                        <tr>
+                          <td class="text-base-content/60">Provider</td>
+                          <td class="text-right font-mono">{provider_time(@log)} ms</td>
+                        </tr>
+                        <tr>
+                          <td class="text-base-content/60">Overhead</td>
+                          <td class="text-right">
+                            <span class="font-mono">{overhead_time(@log)} ms</span>
+                            <span class="text-success text-xs">({overhead_percent(@log)})</span>
+                          </td>
+                        </tr>
+                        <tr>
+                          <td class="text-base-content/60">TTFB</td>
+                          <td class="text-right font-mono">{@log.ttfb_ms || "-"} ms</td>
+                        </tr>
+                        <tr>
+                          <td class="text-base-content/60">Upload</td>
+                          <td class="text-right font-mono">{@log.upload_ms || "-"} ms</td>
+                        </tr>
+                        <tr>
+                          <td class="text-base-content/60">Wait</td>
+                          <td class="text-right font-mono">{wait_time(@log)} ms</td>
+                        </tr>
+                        <tr :if={@log.provider_processing_ms}>
+                          <td class="text-base-content/60">Provider Proc</td>
+                          <td class="text-right font-mono">{@log.provider_processing_ms} ms</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
 
-              <%= if @show_performance do %>
-                <div class="mt-2 space-y-4">
-                  <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                    <div class="card-bordered">
-                      <h3 class="section-title mb-2">Timing</h3>
-                      <table class="table table-sm">
-                        <tbody>
-                          <tr>
-                            <td class="text-base-content/60">Call Type</td>
-                            <td class="text-right"><.call_type_badge type={@log.call_type} /></td>
-                          </tr>
-                          <tr>
-                            <td class="text-base-content/60">Total</td>
-                            <td class="text-right font-mono">{@log.latency_ms || "-"} ms</td>
-                          </tr>
-                          <tr>
-                            <td class="text-base-content/60">Provider</td>
-                            <td class="text-right font-mono">{provider_time(@log)} ms</td>
-                          </tr>
-                          <tr>
-                            <td class="text-base-content/60">Overhead</td>
-                            <td class="text-right">
-                              <span class="font-mono">{overhead_time(@log)} ms</span>
-                              <span class="text-success text-xs">({overhead_percent(@log)})</span>
-                            </td>
-                          </tr>
-                          <tr>
-                            <td class="text-base-content/60">TTFB</td>
-                            <td class="text-right font-mono">{@log.ttfb_ms || "-"} ms</td>
-                          </tr>
-                          <tr>
-                            <td class="text-base-content/60">Upload</td>
-                            <td class="text-right font-mono">{@log.upload_ms || "-"} ms</td>
-                          </tr>
-                          <tr>
-                            <td class="text-base-content/60">Wait</td>
-                            <td class="text-right font-mono">{wait_time(@log)} ms</td>
-                          </tr>
-                          <tr :if={@log.provider_processing_ms}>
-                            <td class="text-base-content/60">Provider Proc</td>
-                            <td class="text-right font-mono">{@log.provider_processing_ms} ms</td>
-                          </tr>
-                        </tbody>
-                      </table>
-                    </div>
-
-                    <div class="card-bordered">
-                      <h3 class="section-title mb-2">Routing Chain</h3>
-                      <div class="space-y-2">
-                        <%= for {attempt, _idx} <- Enum.with_index(@log.attempted_steps) do %>
-                          <div class={[
-                            "p-2 rounded border-l-2 text-xs",
-                            attempt["status"] == "success" && "bg-success/5 border-success",
-                            attempt["status"] != "success" && "bg-error/5 border-error"
-                          ]}>
-                            <div class="flex items-center justify-between">
-                              <span class="font-medium">{attempt["provider"]} / {attempt["model"]}</span>
-                              <span class="font-mono">{attempt["latency_ms"]}ms</span>
-                            </div>
-                            <%= if attempt["error"] do %>
-                              <div class="text-error mt-1">{attempt["error"]}</div>
-                            <% end %>
+                  <div class="card-bordered">
+                    <h3 class="section-title mb-2">Routing Chain</h3>
+                    <div class="space-y-2">
+                      <%= for {attempt, _idx} <- Enum.with_index(@log.attempted_steps) do %>
+                        <div class={[
+                          "p-2 rounded border-l-2 text-xs",
+                          attempt["status"] == "success" && "bg-success/5 border-success",
+                          attempt["status"] != "success" && "bg-error/5 border-error"
+                        ]}>
+                          <div class="flex items-center justify-between">
+                            <span class="font-medium">{attempt["provider"]} / {attempt["model"]}</span>
+                            <span class="font-mono">{attempt["latency_ms"]}ms</span>
                           </div>
-                        <% end %>
-                      </div>
+                          <%= if attempt["plan_type"] do %>
+                            <span class="badge badge-sm mt-1">{attempt["plan_type"]}</span>
+                          <% end %>
+                          <%= if attempt["error"] do %>
+                            <div class="text-error mt-1">{attempt["error"]}</div>
+                          <% end %>
+                          <%= if attempt["error_body"] do %>
+                            <div class="mt-2">
+                              <div class="text-[10px] uppercase tracking-wider text-base-content/40 font-semibold mb-1">
+                                Error Response
+                              </div>
+                              <div class="mockup-code text-xs">
+                                <pre><code><%= format_json(attempt["error_body"]) %></code></pre>
+                              </div>
+                            </div>
+                          <% end %>
+                          <%= if attempt["response_body"] do %>
+                            <div class="mt-2">
+                              <div class="text-[10px] uppercase tracking-wider text-base-content/40 font-semibold mb-1">
+                                Response Body
+                              </div>
+                              <div class="mockup-code text-xs">
+                                <pre><code><%= format_json(attempt["response_body"]) %></code></pre>
+                              </div>
+                            </div>
+                          <% end %>
+                          <%= if attempt["response_headers"] do %>
+                            <div class="mt-2">
+                              <div class="text-[10px] uppercase tracking-wider text-base-content/40 font-semibold mb-1">
+                                Response Headers
+                              </div>
+                              <div class="p-2 bg-base-200 rounded text-xs font-mono space-y-1">
+                                <%= for [key, value] <- attempt["response_headers"] do %>
+                                  <div class="flex gap-2">
+                                    <span class="text-base-content/60 shrink-0">{key}:</span>
+                                    <span class="break-all">{value}</span>
+                                  </div>
+                                <% end %>
+                              </div>
+                            </div>
+                          <% end %>
+                        </div>
+                      <% end %>
                     </div>
                   </div>
-
-                  <%= if length(@log.tools_invoked) > 0 do %>
-                    <div class="card-bordered">
-                      <h3 class="section-title mb-2">Tools</h3>
-                      <div class="flex flex-wrap gap-2">
-                        <span
-                          :for={tool <- @log.tools_invoked}
-                          class="badge badge-secondary badge-sm font-mono"
-                        >
-                          {tool}
-                        </span>
-                      </div>
-                    </div>
-                  <% end %>
                 </div>
-              <% end %>
-            </div>
+
+                <%= if length(@log.tools_invoked) > 0 do %>
+                  <div class="card-bordered">
+                    <h3 class="section-title mb-2">Tools</h3>
+                    <div class="flex flex-wrap gap-2">
+                      <span
+                        :for={tool <- @log.tools_invoked}
+                        class="badge badge-secondary badge-sm font-mono"
+                      >
+                        {tool}
+                      </span>
+                    </div>
+                  </div>
+                <% end %>
+              </div>
+            <% end %>
           </div>
         </div>
       </div>
