@@ -196,6 +196,32 @@ defmodule DodoRouter.Proxy.Adapters.MoonshotTest do
       end)
     end
 
+    test "replaces nil reasoning_content with empty string" do
+      request = %{
+        "messages" => [
+          %{"role" => "user", "content" => "Hello"},
+          %{
+            "role" => "assistant",
+            "content" => "",
+            "tool_calls" => [%{"id" => "call_1", "function" => %{"name" => "test"}}],
+            "reasoning_content" => nil
+          },
+          %{"role" => "tool", "content" => "result", "tool_call_id" => "call_1"}
+        ]
+      }
+
+      step = %RoutingStep{
+        provider: "moonshot",
+        model: "kimi-k2.5",
+        thinking_enabled: true
+      }
+
+      body = Moonshot.build_request_body(request, step)
+
+      assistant_msg = Enum.find(body["messages"], &(&1["role"] == "assistant"))
+      assert assistant_msg["reasoning_content"] == ""
+    end
+
     test "preserves existing reasoning_content" do
       IO.inspect("test 178")
 
@@ -319,6 +345,74 @@ defmodule DodoRouter.Proxy.Adapters.MoonshotTest do
       body = Moonshot.build_request_body(request, step)
 
       refute Map.has_key?(body, "thinking")
+    end
+
+    test "normalizes tool_call arguments from object to JSON string" do
+      request = %{
+        "messages" => [
+          %{"role" => "user", "content" => "Write a file"},
+          %{
+            "role" => "assistant",
+            "content" => "I'll write it",
+            "tool_calls" => [
+              %{
+                "id" => "Write:15",
+                "type" => "function",
+                "function" => %{
+                  "name" => "Write",
+                  "arguments" => %{"file_path" => "/tmp/test.txt", "content" => "hello"}
+                }
+              }
+            ]
+          },
+          %{"role" => "tool", "content" => "done", "tool_call_id" => "Write:15"}
+        ]
+      }
+
+      step = %RoutingStep{
+        provider: "moonshot",
+        model: "kimi-k2.6",
+        thinking_enabled: true
+      }
+
+      body = Moonshot.build_request_body(request, step)
+
+      assistant_msg = Enum.find(body["messages"], &(&1["role"] == "assistant"))
+      args = assistant_msg["tool_calls"] |> Enum.at(0) |> get_in(["function", "arguments"])
+      assert is_binary(args)
+      assert Jason.decode!(args) == %{"file_path" => "/tmp/test.txt", "content" => "hello"}
+    end
+
+    test "handles tool_calls with already-string arguments" do
+      request = %{
+        "messages" => [
+          %{"role" => "user", "content" => "Hello"},
+          %{
+            "role" => "assistant",
+            "content" => "",
+            "tool_calls" => [
+              %{
+                "id" => "call_1",
+                "type" => "function",
+                "function" => %{"name" => "test", "arguments" => "{\"key\":\"val\"}"}
+              }
+            ]
+          },
+          %{"role" => "tool", "content" => "ok", "tool_call_id" => "call_1"}
+        ]
+      }
+
+      step = %RoutingStep{
+        provider: "moonshot",
+        model: "kimi-k2.6",
+        thinking_enabled: true
+      }
+
+      body = Moonshot.build_request_body(request, step)
+
+      assistant_msg = Enum.find(body["messages"], &(&1["role"] == "assistant"))
+      args = assistant_msg["tool_calls"] |> Enum.at(0) |> get_in(["function", "arguments"])
+      assert args == "{\"key\":\"val\"}"
     end
   end
 
