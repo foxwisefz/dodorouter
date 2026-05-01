@@ -27,6 +27,7 @@ defmodule DodoRouterWeb.Router do
 
     get "/models", ProxyController, :models
     post "/chat/completions", ProxyController, :create
+    post "/messages", AnthropicProxyController, :create
   end
 
   # Recordings API - start/stop server-side request capture
