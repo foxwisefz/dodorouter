@@ -4,7 +4,9 @@ defmodule DodoRouterWeb.AnthropicFormat do
   """
 
   def to_openai_params(anthropic_params) do
-    messages = convert_messages_to_openai(anthropic_params["messages"] || [])
+    raw_messages = anthropic_params["messages"] || []
+    converted = convert_messages_to_openai(raw_messages)
+    messages = reorder_tool_messages(converted)
 
     messages =
       case anthropic_params["system"] do
@@ -91,72 +93,96 @@ defmodule DodoRouterWeb.AnthropicFormat do
     Enum.flat_map(messages, &convert_message_to_openai/1)
   end
 
-  defp convert_message_to_openai(%{"role" => "user", "content" => content} = msg) do
-    case content do
-      content when is_list(content) ->
-        converted = convert_anthropic_content_blocks(content)
-        if converted != [], do: [%{"role" => "user", "content" => converted}], else: []
+  defp reorder_tool_messages(messages) do
+    {result, pending_tools} =
+      Enum.reduce(messages, {[], []}, fn msg, {acc, pending} ->
+        case msg["role"] do
+          "tool" ->
+            {acc, pending ++ [msg]}
 
-      _ ->
-        [%{"role" => "user", "content" => content || ""}]
-    end
-    |> maybe_prepend_cache_control(msg)
-  end
-
-  defp convert_message_to_openai(%{"role" => "assistant", "content" => content} = msg) do
-    base_msg = %{"role" => "assistant", "content" => extract_text_from_content(content)}
-
-    tool_use_blocks = extract_tool_use_blocks(content)
-
-    if tool_use_blocks != [] do
-      tool_calls = Enum.map(tool_use_blocks, fn block ->
-        %{
-          "id" => block["id"],
-          "type" => "function",
-          "function" => %{
-            "name" => block["name"],
-            "arguments" => Jason.encode!(block["input"] || %{})
-          }
-        }
+          _ ->
+            {acc ++ pending ++ [msg], []}
+        end
       end)
 
-      [Map.put(base_msg, "tool_calls", tool_calls)]
-    else
-      [base_msg]
-    end
-    |> maybe_prepend_cache_control(msg)
+    result ++ pending_tools
   end
 
-  defp convert_message_to_openai(%{"role" => "tool_result", "content" => content, "tool_use_id" => id} = msg) do
-    text = case content do
-      content when is_list(content) ->
-        content
-        |> Enum.filter(&(&1["type"] == "text"))
-        |> Enum.map(& &1["text"])
-        |> Enum.join("\n")
+  defp convert_message_to_openai(msg) do
+    case msg do
+      %{"role" => "user", "content" => content} when is_list(content) ->
+        {tool_results, other_blocks} = Enum.split_with(content, &(&1["type"] == "tool_result"))
 
-      text when is_binary(text) -> text
-      _ -> ""
-    end
+        tool_messages =
+          Enum.map(tool_results, fn block ->
+            text = case block["content"] do
+              blocks when is_list(blocks) ->
+                blocks
+                |> Enum.filter(&(&1["type"] == "text"))
+                |> Enum.map(& &1["text"])
+                |> Enum.join("\n")
 
-    [%{"role" => "tool", "tool_call_id" => id, "content" => text}]
-    |> maybe_prepend_cache_control(msg)
-  end
+              text when is_binary(text) -> text
+              _ -> ""
+            end
 
-  defp convert_message_to_openai(%{"role" => role, "content" => content}) do
-    [%{"role" => role, "content" => content || ""}]
-  end
+            %{"role" => "tool", "tool_call_id" => block["tool_use_id"], "content" => text}
+          end)
 
-  defp convert_message_to_openai(_msg), do: []
+        text_parts = other_blocks
+          |> Enum.filter(&(&1["type"] == "text"))
+          |> Enum.map(& &1["text"])
 
-  defp convert_anthropic_content_blocks(blocks) do
-    text_parts = blocks
-      |> Enum.filter(&(&1["type"] == "text"))
-      |> Enum.map(& &1["text"])
+        user_messages = case text_parts do
+          [] -> []
+          parts -> [%{"role" => "user", "content" => Enum.join(parts, "\n")}]
+        end
 
-    case text_parts do
-      [] -> []
-      parts -> [%{"type" => "text", "text" => Enum.join(parts, "\n")}]
+        tool_messages ++ user_messages
+
+      %{"role" => "user", "content" => content} ->
+        [%{"role" => "user", "content" => content || ""}]
+
+      %{"role" => "assistant", "content" => content} ->
+        base_msg = %{"role" => "assistant", "content" => extract_text_from_content(content)}
+        tool_use_blocks = extract_tool_use_blocks(content)
+
+        if tool_use_blocks != [] do
+          tool_calls = Enum.map(tool_use_blocks, fn block ->
+            %{
+              "id" => block["id"],
+              "type" => "function",
+              "function" => %{
+                "name" => block["name"],
+                "arguments" => Jason.encode!(block["input"] || %{})
+              }
+            }
+          end)
+
+          [Map.put(base_msg, "tool_calls", tool_calls)]
+        else
+          [base_msg]
+        end
+
+      %{"role" => "tool_result", "content" => content, "tool_use_id" => id} ->
+        text = case content do
+          blocks when is_list(blocks) ->
+            blocks
+            |> Enum.filter(&(&1["type"] == "text"))
+            |> Enum.map(& &1["text"])
+            |> Enum.join("\n")
+
+          text when is_binary(text) -> text
+          _ -> ""
+        end
+
+        [%{"role" => "tool", "tool_call_id" => id, "content" => text}]
+
+      %{"role" => role, "content" => content} ->
+        [%{"role" => role, "content" => content || ""}]
+
+      _ ->
+        []
     end
   end
 
@@ -224,9 +250,4 @@ defmodule DodoRouterWeb.AnthropicFormat do
     end)
     Map.put(map, "tools", openai_tools)
   end
-
-  defp maybe_prepend_cache_control(messages, %{"cache_control" => _} = _msg) do
-    messages
-  end
-  defp maybe_prepend_cache_control(messages, _msg), do: messages
 end

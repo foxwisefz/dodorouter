@@ -38,7 +38,7 @@ defmodule DodoRouterWeb.AnthropicFormatTest do
              }
     end
 
-    test "converts tool_result messages to OpenAI tool role" do
+    test "converts tool_result messages nested in user content blocks" do
       anthropic = %{
         "model" => "claude-sonnet-4-20250514",
         "messages" => [
@@ -47,13 +47,14 @@ defmodule DodoRouterWeb.AnthropicFormatTest do
             "role" => "assistant",
             "content" => [
               %{"type" => "text", "text" => "Let me check."},
-              %{"type" => "tool_use", "id" => "tool_123", "name" => "get_weather", "input" => %{"city" => "SF"}}
+              %{"type" => "tool_use", "id" => "toolu_123", "name" => "get_weather", "input" => %{"city" => "SF"}}
             ]
           },
           %{
-            "role" => "tool_result",
-            "tool_use_id" => "tool_123",
-            "content" => "Sunny, 72F"
+            "role" => "user",
+            "content" => [
+              %{"type" => "tool_result", "tool_use_id" => "toolu_123", "content" => "Sunny, 72F"}
+            ]
           }
         ],
         "max_tokens" => 1024
@@ -63,8 +64,42 @@ defmodule DodoRouterWeb.AnthropicFormatTest do
       messages = result["messages"]
 
       tool_msg = Enum.find(messages, &(&1["role"] == "tool"))
-      assert tool_msg["tool_call_id"] == "tool_123"
+      assert tool_msg["tool_call_id"] == "toolu_123"
       assert tool_msg["content"] == "Sunny, 72F"
+    end
+
+    test "converts multiple tool_results in single user message to separate tool messages" do
+      anthropic = %{
+        "model" => "claude-sonnet-4-20250514",
+        "messages" => [
+          %{"role" => "user", "content" => "Do stuff"},
+          %{
+            "role" => "assistant",
+            "content" => [
+              %{"type" => "tool_use", "id" => "Bash:0", "name" => "bash", "input" => %{}},
+              %{"type" => "tool_use", "id" => "Bash:1", "name" => "bash", "input" => %{}}
+            ]
+          },
+          %{
+            "role" => "user",
+            "content" => [
+              %{"type" => "tool_result", "tool_use_id" => "Bash:0", "content" => "output1"},
+              %{"type" => "tool_result", "tool_use_id" => "Bash:1", "content" => "output2"}
+            ]
+          }
+        ],
+        "max_tokens" => 1024
+      }
+
+      result = AnthropicFormat.to_openai_params(anthropic)
+      messages = result["messages"]
+
+      tool_messages = Enum.filter(messages, &(&1["role"] == "tool"))
+      assert length(tool_messages) == 2
+
+      ids = Enum.map(tool_messages, & &1["tool_call_id"])
+      assert "Bash:0" in ids
+      assert "Bash:1" in ids
     end
 
     test "converts assistant tool_use blocks to OpenAI tool_calls" do
