@@ -42,7 +42,9 @@ defmodule DodoRouterWeb.Plugs.ApiAuth do
 
   defp extract_bearer_token(conn) do
     case get_req_header(conn, "authorization") do
-      ["Bearer " <> token] -> {:ok, String.trim(token)}
+      ["Bearer " <> token] ->
+        {:ok, String.trim(token)}
+
       _ ->
         case get_req_header(conn, "x-api-key") do
           [key] when is_binary(key) and byte_size(key) > 0 -> {:ok, String.trim(key)}

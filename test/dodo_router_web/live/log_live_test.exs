@@ -53,10 +53,17 @@ defmodule DodoRouterWeb.LogLiveTest do
   end
 
   describe "Show" do
-    test "renders per-step response body in routing chain", %{conn: conn, user: user} do
+    test "renders per-step response body in fallback trace", %{conn: conn, user: user} do
       {router, _api_key} = RoutersFixtures.router_fixture(user)
 
       attempted_steps = [
+        %{
+          "provider" => "anthropic",
+          "model" => "claude-sonnet-4-20250514",
+          "status" => "error",
+          "latency_ms" => 100,
+          "error" => "rate_limited"
+        },
         %{
           "provider" => "openai",
           "model" => "gpt-4o",
@@ -70,24 +77,31 @@ defmodule DodoRouterWeb.LogLiveTest do
       log =
         LogsFixtures.log_fixture(router, %{
           attempted_steps: attempted_steps,
-          status: "success"
+          status: "fallback"
         })
 
       {:ok, live, _html} = live(conn, ~p"/logs/#{log.request_id}")
 
       html =
         live
-        |> element("button[phx-value-tab=\"performance\"]")
+        |> element("button[phx-value-tab=\"fallback_trace\"]")
         |> render_click()
 
       assert html =~ "Response Body"
       assert html =~ "hello"
     end
 
-    test "renders per-step response headers in routing chain", %{conn: conn, user: user} do
+    test "renders per-step response headers in fallback trace", %{conn: conn, user: user} do
       {router, _api_key} = RoutersFixtures.router_fixture(user)
 
       attempted_steps = [
+        %{
+          "provider" => "anthropic",
+          "model" => "claude-sonnet-4-20250514",
+          "status" => "error",
+          "latency_ms" => 100,
+          "error" => "rate_limited"
+        },
         %{
           "provider" => "openai",
           "model" => "gpt-4o",
@@ -103,14 +117,14 @@ defmodule DodoRouterWeb.LogLiveTest do
       log =
         LogsFixtures.log_fixture(router, %{
           attempted_steps: attempted_steps,
-          status: "success"
+          status: "fallback"
         })
 
       {:ok, live, _html} = live(conn, ~p"/logs/#{log.request_id}")
 
       html =
         live
-        |> element("button[phx-value-tab=\"performance\"]")
+        |> element("button[phx-value-tab=\"fallback_trace\"]")
         |> render_click()
 
       assert html =~ "Response Headers"
@@ -150,7 +164,7 @@ defmodule DodoRouterWeb.LogLiveTest do
 
       html =
         live
-        |> element("button[phx-value-tab=\"performance\"]")
+        |> element("button[phx-value-tab=\"fallback_trace\"]")
         |> render_click()
 
       assert html =~ "Error Response"
@@ -213,7 +227,7 @@ defmodule DodoRouterWeb.LogLiveTest do
 
       html =
         live
-        |> element("button[phx-value-tab=\"performance\"]")
+        |> element("button[phx-value-tab=\"fallback_trace\"]")
         |> render_click()
 
       assert html =~ "coding"

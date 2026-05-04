@@ -47,7 +47,12 @@ defmodule DodoRouterWeb.AnthropicFormatTest do
             "role" => "assistant",
             "content" => [
               %{"type" => "text", "text" => "Let me check."},
-              %{"type" => "tool_use", "id" => "toolu_123", "name" => "get_weather", "input" => %{"city" => "SF"}}
+              %{
+                "type" => "tool_use",
+                "id" => "toolu_123",
+                "name" => "get_weather",
+                "input" => %{"city" => "SF"}
+              }
             ]
           },
           %{
@@ -143,7 +148,10 @@ defmodule DodoRouterWeb.AnthropicFormatTest do
           %{
             "name" => "get_weather",
             "description" => "Get weather",
-            "input_schema" => %{"type" => "object", "properties" => %{"city" => %{"type" => "string"}}}
+            "input_schema" => %{
+              "type" => "object",
+              "properties" => %{"city" => %{"type" => "string"}}
+            }
           }
         ]
       }

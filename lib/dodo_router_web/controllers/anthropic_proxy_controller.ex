@@ -21,13 +21,37 @@ defmodule DodoRouterWeb.AnthropicProxyController do
     )
 
     if params["stream"] == true do
-      stream_anthropic(conn, router, openai_params, request_id, session, client_headers, recording_id)
+      stream_anthropic(
+        conn,
+        router,
+        openai_params,
+        request_id,
+        session,
+        client_headers,
+        recording_id
+      )
     else
-      sync_anthropic(conn, router, openai_params, request_id, session, recording_id, client_headers)
+      sync_anthropic(
+        conn,
+        router,
+        openai_params,
+        request_id,
+        session,
+        recording_id,
+        client_headers
+      )
     end
   end
 
-  defp sync_anthropic(conn, router, openai_params, request_id, session, recording_id, client_headers) do
+  defp sync_anthropic(
+         conn,
+         router,
+         openai_params,
+         request_id,
+         session,
+         recording_id,
+         client_headers
+       ) do
     start_time = System.monotonic_time(:millisecond)
 
     case Proxy.dispatch(router, openai_params,
@@ -54,7 +78,8 @@ defmodule DodoRouterWeb.AnthropicProxyController do
           "type" => "error",
           "error" => %{
             "type" => "invalid_request_error",
-            "message" => "No routing configured for router '#{router.slug}'. Add a provider in the Dodo Router dashboard."
+            "message" =>
+              "No routing configured for router '#{router.slug}'. Add a provider in the Dodo Router dashboard."
           }
         })
 
@@ -76,7 +101,15 @@ defmodule DodoRouterWeb.AnthropicProxyController do
     end
   end
 
-  defp stream_anthropic(conn, router, openai_params, request_id, session, client_headers, recording_id) do
+  defp stream_anthropic(
+         conn,
+         router,
+         openai_params,
+         request_id,
+         session,
+         client_headers,
+         recording_id
+       ) do
     conn =
       conn
       |> put_resp_content_type("text/event-stream")
@@ -112,12 +145,24 @@ defmodule DodoRouterWeb.AnthropicProxyController do
         conn
 
       {:error, :no_routing_configured} ->
-        error_event = "event: error\ndata: " <> Jason.encode!(%{type: "error", error: %{type: "configuration_error", message: "No routing configured"}}) <> "\n\n"
+        error_event =
+          "event: error\ndata: " <>
+            Jason.encode!(%{
+              type: "error",
+              error: %{type: "configuration_error", message: "No routing configured"}
+            }) <> "\n\n"
+
         chunk(conn, error_event)
         conn
 
       {:error, :all_providers_failed, _attempts} ->
-        error_event = "event: error\ndata: " <> Jason.encode!(%{type: "error", error: %{type: "provider_error", message: "All providers failed"}}) <> "\n\n"
+        error_event =
+          "event: error\ndata: " <>
+            Jason.encode!(%{
+              type: "error",
+              error: %{type: "provider_error", message: "All providers failed"}
+            }) <> "\n\n"
+
         chunk(conn, error_event)
         conn
     end
