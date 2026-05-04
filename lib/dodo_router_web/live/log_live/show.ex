@@ -594,14 +594,6 @@ defmodule DodoRouterWeb.LogLive.Show do
 
   defp overhead_time(_), do: 0
 
-  defp overhead_percent(%{latency_ms: total} = log) when is_integer(total) and total > 0 do
-    overhead = overhead_time(log)
-    percent = Float.round(overhead / total * 100, 1)
-    "#{percent}%"
-  end
-
-  defp overhead_percent(_), do: "-"
-
   defp wait_time(%{ttfb_ms: ttfb, upload_ms: upload})
        when is_integer(ttfb) and is_integer(upload) do
     ttfb - upload
