@@ -393,10 +393,15 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
 
   defp convert_reasoning_details(msg), do: msg
 
-  # kimi-k2.5 has thinking enabled by default, so ALL assistant messages
-  # need reasoning_content, not just ones with tool_calls.
-  defp ensure_reasoning_content(%{"reasoning_content" => rc} = msg) when is_binary(rc), do: msg
-  defp ensure_reasoning_content(msg), do: Map.put(msg, "reasoning_content", "")
+  # Moonshot requires reasoning_content on assistant messages that have tool_calls.
+  # Use " " (space) as minimum placeholder — empty string "" is rejected by the API.
+  defp ensure_reasoning_content(%{"reasoning_content" => rc} = msg)
+       when is_binary(rc) and rc != "", do: msg
+
+  defp ensure_reasoning_content(%{"tool_calls" => _} = msg),
+    do: Map.put(msg, "reasoning_content", " ")
+
+  defp ensure_reasoning_content(msg), do: msg
 
   defp accumulate_chunk(acc, chunk_data) do
     choice = get_in(chunk_data, ["choices", Access.at(0)])

@@ -5,7 +5,7 @@ defmodule DodoRouter.Proxy.Adapters.MoonshotTest do
   alias DodoRouter.Routers.RoutingStep
 
   describe "build_request_body/2" do
-    test "adds reasoning_content to all assistant messages when thinking enabled" do
+    test "adds reasoning_content to assistant messages with tool_calls when thinking enabled" do
       request = %{
         "messages" => [
           %{"role" => "user", "content" => "Hello"},
@@ -29,15 +29,12 @@ defmodule DodoRouter.Proxy.Adapters.MoonshotTest do
 
       body = Moonshot.build_request_body(request, step)
 
-      # All assistant messages should have reasoning_content
       assistant_messages = Enum.filter(body["messages"], &(&1["role"] == "assistant"))
-
       assert length(assistant_messages) == 3
 
-      Enum.each(assistant_messages, fn msg ->
-        assert Map.has_key?(msg, "reasoning_content"),
-               "Assistant message missing reasoning_content: #{inspect(msg)}"
-      end)
+      # Only assistant messages with tool_calls get reasoning_content
+      tool_call_msg = Enum.find(assistant_messages, &Map.has_key?(&1, "tool_calls"))
+      assert tool_call_msg["reasoning_content"] == " "
     end
 
     test "adds reasoning_content to assistant messages with tool_calls" do
@@ -69,7 +66,7 @@ defmodule DodoRouter.Proxy.Adapters.MoonshotTest do
       body = Moonshot.build_request_body(request, step)
 
       assistant_msg = Enum.find(body["messages"], &(&1["role"] == "assistant"))
-      assert assistant_msg["reasoning_content"] == ""
+      assert assistant_msg["reasoning_content"] == " "
     end
 
     test "converts reasoning_details to reasoning_content" do
@@ -190,9 +187,12 @@ defmodule DodoRouter.Proxy.Adapters.MoonshotTest do
 
       assert length(assistant_messages) == 4
 
-      Enum.with_index(assistant_messages, fn msg, idx ->
+      # Assistant messages with tool_calls must have reasoning_content
+      tool_call_msgs = Enum.filter(assistant_messages, &Map.has_key?(&1, "tool_calls"))
+
+      Enum.each(tool_call_msgs, fn msg ->
         assert Map.has_key?(msg, "reasoning_content"),
-               "Assistant message at index #{idx} missing reasoning_content: #{inspect(msg)}"
+               "Tool-call assistant message missing reasoning_content: #{inspect(msg)}"
       end)
     end
 
@@ -219,7 +219,7 @@ defmodule DodoRouter.Proxy.Adapters.MoonshotTest do
       body = Moonshot.build_request_body(request, step)
 
       assistant_msg = Enum.find(body["messages"], &(&1["role"] == "assistant"))
-      assert assistant_msg["reasoning_content"] == ""
+      assert assistant_msg["reasoning_content"] == " "
     end
 
     test "preserves existing reasoning_content" do
@@ -291,11 +291,15 @@ defmodule DodoRouter.Proxy.Adapters.MoonshotTest do
       assert body["model"] == "kimi-for-coding"
     end
 
-    test "adds reasoning_content for kimi-k2.6 assistant messages" do
+    test "adds reasoning_content for kimi-k2.6 assistant messages with tool_calls" do
       request = %{
         "messages" => [
           %{"role" => "user", "content" => "Hello"},
-          %{"role" => "assistant", "content" => "Hi there"}
+          %{
+            "role" => "assistant",
+            "content" => "Hi there",
+            "tool_calls" => [%{"id" => "c1", "function" => %{"name" => "t1"}}]
+          }
         ]
       }
 
