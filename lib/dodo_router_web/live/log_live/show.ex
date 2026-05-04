@@ -95,8 +95,8 @@ defmodule DodoRouterWeb.LogLive.Show do
           <code class="text-sm text-base-content/60">{@log.request_id}</code>
         </div>
       </div>
-
-      <!-- Split pane -->
+      
+    <!-- Split pane -->
       <div class="flex-1 flex overflow-hidden">
         <!-- Left sidebar -->
         <div class="w-52 border-r border-base-300/30 overflow-y-auto p-3 space-y-4 bg-base-100/30">
@@ -107,8 +107,8 @@ defmodule DodoRouterWeb.LogLive.Show do
             </div>
             <div class="text-lg"><.status_badge status={@log.status} /></div>
           </div>
-
-          <!-- Timing -->
+          
+    <!-- Timing -->
           <div>
             <div class="text-[10px] uppercase tracking-wider text-base-content/40 font-semibold mb-1">
               Timing
@@ -130,10 +130,24 @@ defmodule DodoRouterWeb.LogLive.Show do
                 <span class="text-base-content/60">TTFB</span>
                 <span class="font-mono">{@log.ttfb_ms || "-"}ms</span>
               </div>
+              <div class="flex justify-between">
+                <span class="text-base-content/60">Upload</span>
+                <span class="font-mono">{@log.upload_ms || "-"}ms</span>
+              </div>
+              <div class="flex justify-between">
+                <span class="text-base-content/60">Wait</span>
+                <span class="font-mono">{wait_time(@log)}ms</span>
+              </div>
+              <%= if @log.provider_processing_ms do %>
+                <div class="flex justify-between">
+                  <span class="text-base-content/60">Proc</span>
+                  <span class="font-mono">{@log.provider_processing_ms}ms</span>
+                </div>
+              <% end %>
             </div>
           </div>
-
-          <!-- Model -->
+          
+    <!-- Model -->
           <div>
             <div class="text-[10px] uppercase tracking-wider text-base-content/40 font-semibold mb-1">
               Model
@@ -141,13 +155,17 @@ defmodule DodoRouterWeb.LogLive.Show do
             <div class="text-sm font-mono">{@log.final_model}</div>
             <div class="text-xs text-base-content/60">{@log.final_provider}</div>
           </div>
-
-          <!-- Usage -->
+          
+    <!-- Usage -->
           <div>
             <div class="text-[10px] uppercase tracking-wider text-base-content/40 font-semibold mb-1">
               Usage
             </div>
             <div class="space-y-1 text-xs">
+              <div class="flex justify-between">
+                <span class="text-base-content/60">Type</span>
+                <span class="text-right"><.call_type_badge type={@log.call_type} /></span>
+              </div>
               <div class="flex justify-between">
                 <span class="text-base-content/60">Tokens</span>
                 <span class="font-mono">{@log.total_tokens || "-"}</span>
@@ -167,7 +185,23 @@ defmodule DodoRouterWeb.LogLive.Show do
             </div>
           </div>
 
-          <!-- Routing Chain -->
+          <%= if length(@log.tools_invoked) > 0 do %>
+            <div>
+              <div class="text-[10px] uppercase tracking-wider text-base-content/40 font-semibold mb-1">
+                Tools
+              </div>
+              <div class="flex flex-wrap gap-1">
+                <span
+                  :for={tool <- @log.tools_invoked}
+                  class="badge badge-secondary badge-sm font-mono"
+                >
+                  {tool}
+                </span>
+              </div>
+            </div>
+          <% end %>
+          
+    <!-- Routing Chain -->
           <div>
             <div class="text-[10px] uppercase tracking-wider text-base-content/40 font-semibold mb-1">
               Routing
@@ -181,14 +215,16 @@ defmodule DodoRouterWeb.LogLive.Show do
                     <span class="text-error">✗</span>
                   <% end %>
                   <span class="font-medium truncate">{attempt["provider"]}</span>
-                  <span class="text-base-content/40 font-mono ml-auto">{attempt["latency_ms"]}ms</span>
+                  <span class="text-base-content/40 font-mono ml-auto">
+                    {attempt["latency_ms"]}ms
+                  </span>
                 </div>
               <% end %>
             </div>
           </div>
         </div>
-
-        <!-- Right content -->
+        
+    <!-- Right content -->
         <div class="flex-1 overflow-hidden flex flex-col">
           <!-- Tabs -->
           <div class="border-b border-base-300/30 px-4 pt-2">
@@ -201,8 +237,10 @@ defmodule DodoRouterWeb.LogLive.Show do
                 aria-selected={@active_tab == "conversation"}
                 class={[
                   "px-3 py-1.5 text-xs font-medium rounded-t-lg transition",
-                  @active_tab == "conversation" && "bg-base-100 text-base-content border-t border-x border-base-300/30 -mb-px",
-                  @active_tab != "conversation" && "text-base-content/60 hover:text-base-content hover:bg-base-200/50"
+                  @active_tab == "conversation" &&
+                    "bg-base-100 text-base-content border-t border-x border-base-300/30 -mb-px",
+                  @active_tab != "conversation" &&
+                    "text-base-content/60 hover:text-base-content hover:bg-base-200/50"
                 ]}
               >
                 Conversation
@@ -215,11 +253,13 @@ defmodule DodoRouterWeb.LogLive.Show do
                 aria-selected={@active_tab == "raw_request"}
                 class={[
                   "px-3 py-1.5 text-xs font-medium rounded-t-lg transition",
-                  @active_tab == "raw_request" && "bg-base-100 text-base-content border-t border-x border-base-300/30 -mb-px",
-                  @active_tab != "raw_request" && "text-base-content/60 hover:text-base-content hover:bg-base-200/50"
+                  @active_tab == "raw_request" &&
+                    "bg-base-100 text-base-content border-t border-x border-base-300/30 -mb-px",
+                  @active_tab != "raw_request" &&
+                    "text-base-content/60 hover:text-base-content hover:bg-base-200/50"
                 ]}
               >
-                Raw Request
+                Original Request
               </button>
               <button
                 type="button"
@@ -229,30 +269,36 @@ defmodule DodoRouterWeb.LogLive.Show do
                 aria-selected={@active_tab == "raw_response"}
                 class={[
                   "px-3 py-1.5 text-xs font-medium rounded-t-lg transition",
-                  @active_tab == "raw_response" && "bg-base-100 text-base-content border-t border-x border-base-300/30 -mb-px",
-                  @active_tab != "raw_response" && "text-base-content/60 hover:text-base-content hover:bg-base-200/50"
+                  @active_tab == "raw_response" &&
+                    "bg-base-100 text-base-content border-t border-x border-base-300/30 -mb-px",
+                  @active_tab != "raw_response" &&
+                    "text-base-content/60 hover:text-base-content hover:bg-base-200/50"
                 ]}
               >
-                Raw Response
+                Final Response
               </button>
-              <button
-                type="button"
-                phx-click="set_tab"
-                phx-value-tab="performance"
-                role="tab"
-                aria-selected={@active_tab == "performance"}
-                class={[
-                  "px-3 py-1.5 text-xs font-medium rounded-t-lg transition",
-                  @active_tab == "performance" && "bg-base-100 text-base-content border-t border-x border-base-300/30 -mb-px",
-                  @active_tab != "performance" && "text-base-content/60 hover:text-base-content hover:bg-base-200/50"
-                ]}
-              >
-                Performance
-              </button>
+              <%= if length(@log.attempted_steps) > 1 do %>
+                <button
+                  type="button"
+                  phx-click="set_tab"
+                  phx-value-tab="fallback_trace"
+                  role="tab"
+                  aria-selected={@active_tab == "fallback_trace"}
+                  class={[
+                    "px-3 py-1.5 text-xs font-medium rounded-t-lg transition",
+                    @active_tab == "fallback_trace" &&
+                      "bg-base-100 text-base-content border-t border-x border-base-300/30 -mb-px",
+                    @active_tab != "fallback_trace" &&
+                      "text-base-content/60 hover:text-base-content hover:bg-base-200/50"
+                  ]}
+                >
+                  Fallback Trace
+                </button>
+              <% end %>
             </div>
           </div>
-
-          <!-- Tab panels -->
+          
+    <!-- Tab panels -->
           <div class="flex-1 overflow-y-auto">
             <%= if @active_tab == "conversation" do %>
               <div class="p-4">
@@ -347,122 +393,104 @@ defmodule DodoRouterWeb.LogLive.Show do
               </div>
             <% end %>
 
-            <%= if @active_tab == "performance" do %>
-              <div class="p-4 space-y-4">
-                <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                  <div class="card-bordered">
-                    <h3 class="section-title mb-2">Timing</h3>
-                    <table class="table table-sm">
-                      <tbody>
-                        <tr>
-                          <td class="text-base-content/60">Call Type</td>
-                          <td class="text-right"><.call_type_badge type={@log.call_type} /></td>
-                        </tr>
-                        <tr>
-                          <td class="text-base-content/60">Total</td>
-                          <td class="text-right font-mono">{@log.latency_ms || "-"} ms</td>
-                        </tr>
-                        <tr>
-                          <td class="text-base-content/60">Provider</td>
-                          <td class="text-right font-mono">{provider_time(@log)} ms</td>
-                        </tr>
-                        <tr>
-                          <td class="text-base-content/60">Overhead</td>
-                          <td class="text-right">
-                            <span class="font-mono">{overhead_time(@log)} ms</span>
-                            <span class="text-success text-xs">({overhead_percent(@log)})</span>
-                          </td>
-                        </tr>
-                        <tr>
-                          <td class="text-base-content/60">TTFB</td>
-                          <td class="text-right font-mono">{@log.ttfb_ms || "-"} ms</td>
-                        </tr>
-                        <tr>
-                          <td class="text-base-content/60">Upload</td>
-                          <td class="text-right font-mono">{@log.upload_ms || "-"} ms</td>
-                        </tr>
-                        <tr>
-                          <td class="text-base-content/60">Wait</td>
-                          <td class="text-right font-mono">{wait_time(@log)} ms</td>
-                        </tr>
-                        <tr :if={@log.provider_processing_ms}>
-                          <td class="text-base-content/60">Provider Proc</td>
-                          <td class="text-right font-mono">{@log.provider_processing_ms} ms</td>
-                        </tr>
-                      </tbody>
-                    </table>
-                  </div>
+            <%= if @active_tab == "fallback_trace" do %>
+              <div class="p-4 space-y-3">
+                <div class="text-sm text-base-content/60 mb-2">
+                  Request was retried across {length(@log.attempted_steps)} providers before succeeding.
+                </div>
+                <%= for {attempt, idx} <- Enum.with_index(@log.attempted_steps) do %>
+                  <div class={[
+                    "border rounded-lg overflow-hidden",
+                    attempt["status"] == "success" && "border-success/30",
+                    attempt["status"] != "success" && "border-error/30"
+                  ]}>
+                    <div class={[
+                      "px-3 py-2 flex items-center justify-between text-xs",
+                      attempt["status"] == "success" && "bg-success/5",
+                      attempt["status"] != "success" && "bg-error/5"
+                    ]}>
+                      <div class="flex items-center gap-2">
+                        <span class="font-mono text-base-content/40">#{idx + 1}</span>
+                        <span class="font-medium">{attempt["provider"]} / {attempt["model"]}</span>
+                        <%= if attempt["plan_type"] do %>
+                          <span class="badge badge-sm">{attempt["plan_type"]}</span>
+                        <% end %>
+                        <%= if attempt["status"] == "success" do %>
+                          <span class="text-success font-medium">Success</span>
+                        <% else %>
+                          <span class="text-error font-medium">{attempt["error"]}</span>
+                        <% end %>
+                      </div>
+                      <span class="font-mono text-base-content/60">{attempt["latency_ms"]}ms</span>
+                    </div>
 
-                  <div class="card-bordered">
-                    <h3 class="section-title mb-2">Routing Chain</h3>
-                    <div class="space-y-2">
-                      <%= for {attempt, _idx} <- Enum.with_index(@log.attempted_steps) do %>
-                        <div class={[
-                          "p-2 rounded border-l-2 text-xs",
-                          attempt["status"] == "success" && "bg-success/5 border-success",
-                          attempt["status"] != "success" && "bg-error/5 border-error"
-                        ]}>
-                          <div class="flex items-center justify-between">
-                            <span class="font-medium">{attempt["provider"]} / {attempt["model"]}</span>
-                            <span class="font-mono">{attempt["latency_ms"]}ms</span>
+                    <div class="px-3 py-2 space-y-2 text-xs">
+                      <%= if attempt["error_body"] do %>
+                        <div>
+                          <div class="text-[10px] uppercase tracking-wider text-base-content/40 font-semibold mb-1">
+                            Error Response
                           </div>
-                          <%= if attempt["plan_type"] do %>
-                            <span class="badge badge-sm mt-1">{attempt["plan_type"]}</span>
-                          <% end %>
-                          <%= if attempt["error"] do %>
-                            <div class="text-error mt-1">{attempt["error"]}</div>
-                          <% end %>
-                          <%= if attempt["error_body"] do %>
-                            <div class="mt-2">
-                              <div class="text-[10px] uppercase tracking-wider text-base-content/40 font-semibold mb-1">
-                                Error Response
-                              </div>
-                              <div class="mockup-code text-xs">
-                                <pre><code><%= format_json(attempt["error_body"]) %></code></pre>
-                              </div>
-                            </div>
-                          <% end %>
-                          <%= if attempt["response_body"] do %>
-                            <div class="mt-2">
-                              <div class="text-[10px] uppercase tracking-wider text-base-content/40 font-semibold mb-1">
-                                Response Body
-                              </div>
-                              <div class="mockup-code text-xs">
-                                <pre><code><%= format_json(attempt["response_body"]) %></code></pre>
-                              </div>
-                            </div>
-                          <% end %>
-                          <%= if attempt["response_headers"] do %>
-                            <div class="mt-2">
-                              <div class="text-[10px] uppercase tracking-wider text-base-content/40 font-semibold mb-1">
-                                Response Headers
-                              </div>
-                              <div class="p-2 bg-base-200 rounded text-xs font-mono space-y-1">
-                                <%= for [key, value] <- attempt["response_headers"] do %>
-                                  <div class="flex gap-2">
-                                    <span class="text-base-content/60 shrink-0">{key}:</span>
-                                    <span class="break-all">{value}</span>
-                                  </div>
-                                <% end %>
-                              </div>
-                            </div>
-                          <% end %>
+                          <div class="mockup-code text-xs">
+                            <pre><code><%= format_json(attempt["error_body"]) %></code></pre>
+                          </div>
                         </div>
                       <% end %>
-                    </div>
-                  </div>
-                </div>
 
-                <%= if length(@log.tools_invoked) > 0 do %>
-                  <div class="card-bordered">
-                    <h3 class="section-title mb-2">Tools</h3>
-                    <div class="flex flex-wrap gap-2">
-                      <span
-                        :for={tool <- @log.tools_invoked}
-                        class="badge badge-secondary badge-sm font-mono"
-                      >
-                        {tool}
-                      </span>
+                      <%= if attempt["request_body"] do %>
+                        <div>
+                          <button
+                            type="button"
+                            phx-click={JS.toggle(to: "#step-request-#{idx}")}
+                            class="text-[10px] uppercase tracking-wider text-primary hover:underline font-semibold mb-1"
+                          >
+                            {if idx == 0, do: "Original Request", else: "Request Sent (transformed)"}
+                          </button>
+                          <div id={"step-request-#{idx}"} class="hidden">
+                            <div class="mockup-code text-xs max-h-64 overflow-auto">
+                              <pre><code><%= format_json(attempt["request_body"]) %></code></pre>
+                            </div>
+                          </div>
+                        </div>
+                      <% end %>
+
+                      <%= if attempt["response_body"] do %>
+                        <div>
+                          <button
+                            type="button"
+                            phx-click={JS.toggle(to: "#step-response-#{idx}")}
+                            class="text-[10px] uppercase tracking-wider text-primary hover:underline font-semibold mb-1"
+                          >
+                            Response Body
+                          </button>
+                          <div id={"step-response-#{idx}"} class="hidden">
+                            <div class="mockup-code text-xs max-h-64 overflow-auto">
+                              <pre><code><%= format_json(attempt["response_body"]) %></code></pre>
+                            </div>
+                          </div>
+                        </div>
+                      <% end %>
+
+                      <%= if attempt["response_headers"] do %>
+                        <div>
+                          <button
+                            type="button"
+                            phx-click={JS.toggle(to: "#step-headers-#{idx}")}
+                            class="text-[10px] uppercase tracking-wider text-primary hover:underline font-semibold mb-1"
+                          >
+                            Response Headers
+                          </button>
+                          <div id={"step-headers-#{idx}"} class="hidden">
+                            <div class="p-2 bg-base-200 rounded text-xs font-mono space-y-1">
+                              <%= for [key, value] <- attempt["response_headers"] do %>
+                                <div class="flex gap-2">
+                                  <span class="text-base-content/60 shrink-0">{key}:</span>
+                                  <span class="break-all">{value}</span>
+                                </div>
+                              <% end %>
+                            </div>
+                          </div>
+                        </div>
+                      <% end %>
                     </div>
                   </div>
                 <% end %>

@@ -271,6 +271,7 @@ defmodule DodoRouter.Proxy do
   defp truncate_step_response(step) do
     step
     |> maybe_truncate_step_field(:response_body)
+    |> maybe_truncate_step_field(:request_body)
     |> maybe_redact_step_headers()
   end
 
@@ -286,6 +287,20 @@ defmodule DodoRouter.Proxy do
           |> truncate_body()
 
         Map.put(step, :response_body, Jason.encode!(truncated))
+    end
+  end
+
+  defp maybe_truncate_step_field(step, :request_body) do
+    case Map.get(step, :request_body) do
+      nil ->
+        step
+
+      body when is_map(body) ->
+        {truncated, _flags} = truncate_body(body)
+        Map.put(step, :request_body, Jason.encode!(truncated))
+
+      body when is_binary(body) ->
+        step
     end
   end
 

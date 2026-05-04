@@ -73,7 +73,9 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
         {:ok, Map.put(response_body, "_meta", meta), %{headers: resp_headers}}
 
       {:ok, %{status: status, body: response_body, headers: resp_headers}} ->
-        Logger.error("[Moonshot] Non-200 response: status=#{status} body=#{inspect(response_body)}")
+        Logger.error(
+          "[Moonshot] Non-200 response: status=#{status} body=#{inspect(response_body)}"
+        )
 
         reason = Adapter.categorize_error(status, response_body)
 

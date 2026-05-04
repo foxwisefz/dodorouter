@@ -10,13 +10,19 @@ defmodule DodoRouterWeb.AnthropicFormat do
 
     messages =
       case anthropic_params["system"] do
-        nil -> messages
-        system when is_binary(system) -> [%{"role" => "system", "content" => system} | messages]
+        nil ->
+          messages
+
+        system when is_binary(system) ->
+          [%{"role" => "system", "content" => system} | messages]
+
         system when is_list(system) ->
-          text = system
+          text =
+            system
             |> Enum.filter(&(&1["type"] == "text"))
             |> Enum.map(& &1["text"])
             |> Enum.join("\n")
+
           if text != "", do: [%{"role" => "system", "content" => text} | messages], else: messages
       end
 
@@ -40,7 +46,8 @@ defmodule DodoRouterWeb.AnthropicFormat do
     usage = openai_response["usage"] || %{}
 
     %{
-      "id" => "msg_#{:crypto.strong_rand_bytes(16) |> Base.encode16(case: :lower) |> String.slice(0, 24)}",
+      "id" =>
+        "msg_#{:crypto.strong_rand_bytes(16) |> Base.encode16(case: :lower) |> String.slice(0, 24)}",
       "type" => "message",
       "role" => "assistant",
       "content" => content_blocks,
@@ -115,28 +122,34 @@ defmodule DodoRouterWeb.AnthropicFormat do
 
         tool_messages =
           Enum.map(tool_results, fn block ->
-            text = case block["content"] do
-              blocks when is_list(blocks) ->
-                blocks
-                |> Enum.filter(&(&1["type"] == "text"))
-                |> Enum.map(& &1["text"])
-                |> Enum.join("\n")
+            text =
+              case block["content"] do
+                blocks when is_list(blocks) ->
+                  blocks
+                  |> Enum.filter(&(&1["type"] == "text"))
+                  |> Enum.map(& &1["text"])
+                  |> Enum.join("\n")
 
-              text when is_binary(text) -> text
-              _ -> ""
-            end
+                text when is_binary(text) ->
+                  text
+
+                _ ->
+                  ""
+              end
 
             %{"role" => "tool", "tool_call_id" => block["tool_use_id"], "content" => text}
           end)
 
-        text_parts = other_blocks
+        text_parts =
+          other_blocks
           |> Enum.filter(&(&1["type"] == "text"))
           |> Enum.map(& &1["text"])
 
-        user_messages = case text_parts do
-          [] -> []
-          parts -> [%{"role" => "user", "content" => Enum.join(parts, "\n")}]
-        end
+        user_messages =
+          case text_parts do
+            [] -> []
+            parts -> [%{"role" => "user", "content" => Enum.join(parts, "\n")}]
+          end
 
         tool_messages ++ user_messages
 
@@ -148,16 +161,17 @@ defmodule DodoRouterWeb.AnthropicFormat do
         tool_use_blocks = extract_tool_use_blocks(content)
 
         if tool_use_blocks != [] do
-          tool_calls = Enum.map(tool_use_blocks, fn block ->
-            %{
-              "id" => block["id"],
-              "type" => "function",
-              "function" => %{
-                "name" => block["name"],
-                "arguments" => Jason.encode!(block["input"] || %{})
+          tool_calls =
+            Enum.map(tool_use_blocks, fn block ->
+              %{
+                "id" => block["id"],
+                "type" => "function",
+                "function" => %{
+                  "name" => block["name"],
+                  "arguments" => Jason.encode!(block["input"] || %{})
+                }
               }
-            }
-          end)
+            end)
 
           [Map.put(base_msg, "tool_calls", tool_calls)]
         else
@@ -165,16 +179,20 @@ defmodule DodoRouterWeb.AnthropicFormat do
         end
 
       %{"role" => "tool_result", "content" => content, "tool_use_id" => id} ->
-        text = case content do
-          blocks when is_list(blocks) ->
-            blocks
-            |> Enum.filter(&(&1["type"] == "text"))
-            |> Enum.map(& &1["text"])
-            |> Enum.join("\n")
+        text =
+          case content do
+            blocks when is_list(blocks) ->
+              blocks
+              |> Enum.filter(&(&1["type"] == "text"))
+              |> Enum.map(& &1["text"])
+              |> Enum.join("\n")
 
-          text when is_binary(text) -> text
-          _ -> ""
-        end
+            text when is_binary(text) ->
+              text
+
+            _ ->
+              ""
+          end
 
         [%{"role" => "tool", "tool_call_id" => id, "content" => text}]
 
@@ -202,21 +220,24 @@ defmodule DodoRouterWeb.AnthropicFormat do
   defp extract_tool_use_blocks(_), do: []
 
   defp build_content_blocks(%{"tool_calls" => tool_calls, "content" => content}) do
-    text_block = if content not in [nil, ""], do: [%{"type" => "text", "text" => content}], else: []
+    text_block =
+      if content not in [nil, ""], do: [%{"type" => "text", "text" => content}], else: []
 
-    tool_blocks = Enum.map(tool_calls, fn tc ->
-      input = case Jason.decode(get_in(tc, ["function", "arguments"]) || "{}") do
-        {:ok, decoded} -> decoded
-        _ -> %{}
-      end
+    tool_blocks =
+      Enum.map(tool_calls, fn tc ->
+        input =
+          case Jason.decode(get_in(tc, ["function", "arguments"]) || "{}") do
+            {:ok, decoded} -> decoded
+            _ -> %{}
+          end
 
-      %{
-        "type" => "tool_use",
-        "id" => tc["id"],
-        "name" => get_in(tc, ["function", "name"]),
-        "input" => input
-      }
-    end)
+        %{
+          "type" => "tool_use",
+          "id" => tc["id"],
+          "name" => get_in(tc, ["function", "name"]),
+          "input" => input
+        }
+      end)
 
     text_block ++ tool_blocks
   end
@@ -237,17 +258,20 @@ defmodule DodoRouterWeb.AnthropicFormat do
   defp maybe_put(map, key, value), do: Map.put(map, key, value)
 
   defp maybe_put_tools(map, nil), do: map
+
   defp maybe_put_tools(map, tools) do
-    openai_tools = Enum.map(tools, fn tool ->
-      %{
-        "type" => "function",
-        "function" => %{
-          "name" => tool["name"],
-          "description" => tool["description"] || "",
-          "parameters" => tool["input_schema"] || %{"type" => "object", "properties" => %{}}
+    openai_tools =
+      Enum.map(tools, fn tool ->
+        %{
+          "type" => "function",
+          "function" => %{
+            "name" => tool["name"],
+            "description" => tool["description"] || "",
+            "parameters" => tool["input_schema"] || %{"type" => "object", "properties" => %{}}
+          }
         }
-      }
-    end)
+      end)
+
     Map.put(map, "tools", openai_tools)
   end
 end
