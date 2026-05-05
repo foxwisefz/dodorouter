@@ -47,17 +47,27 @@ defmodule DodoRouter.Proxy.Adapters.Zai do
 
     case Req.post(url, headers: headers, json: body, receive_timeout: @timeout_ms) do
       {:ok, %{status: 200, body: response_body, headers: resp_headers}} ->
-        total_ms = latency(start_time)
-        upload_ms = FinchTelemetry.get_upload_ms(start_time)
+        if Adapter.context_overflow?(response_body) do
+          {:error, :context_overflow,
+           %{
+             status: 200,
+             body: response_body,
+             latency_ms: latency(start_time),
+             headers: resp_headers
+           }}
+        else
+          total_ms = latency(start_time)
+          upload_ms = FinchTelemetry.get_upload_ms(start_time)
 
-        meta = %{
-          "ttfb_ms" => total_ms,
-          "upload_ms" => upload_ms,
-          "payload_size_bytes" => payload_size_bytes,
-          "provider_processing_ms" => nil
-        }
+          meta = %{
+            "ttfb_ms" => total_ms,
+            "upload_ms" => upload_ms,
+            "payload_size_bytes" => payload_size_bytes,
+            "provider_processing_ms" => nil
+          }
 
-        {:ok, Map.put(response_body, "_meta", meta), %{headers: resp_headers}}
+          {:ok, Map.put(response_body, "_meta", meta), %{headers: resp_headers}}
+        end
 
       {:ok, %{status: status, body: response_body, headers: resp_headers}} ->
         reason = Adapter.categorize_error(status, response_body)
@@ -163,15 +173,26 @@ defmodule DodoRouter.Proxy.Adapters.Zai do
           resp.private[:stream_acc] ||
             %{content: "", tool_calls: %{}, usage: nil, finish_reason: nil, first_chunk_time: nil}
 
-        upload_ms = calculate_upload_ms(start_time)
+        # Check for context overflow signaled via finish_reason in streaming
+        if acc.finish_reason == "model_context_window_exceeded" do
+          {:error, :context_overflow,
+           %{
+             status: 200,
+             body: build_final_response(acc, %{}),
+             latency_ms: latency(start_time),
+             headers: resp_headers
+           }}
+        else
+          upload_ms = calculate_upload_ms(start_time)
 
-        timing_meta = %{
-          payload_size_bytes: payload_size_bytes,
-          upload_ms: upload_ms,
-          provider_processing_ms: nil
-        }
+          timing_meta = %{
+            payload_size_bytes: payload_size_bytes,
+            upload_ms: upload_ms,
+            provider_processing_ms: nil
+          }
 
-        {:ok, build_final_response(acc, timing_meta), %{headers: resp_headers}}
+          {:ok, build_final_response(acc, timing_meta), %{headers: resp_headers}}
+        end
 
       {:ok, %Req.Response{status: status, body: body, headers: resp_headers}} ->
         error_body = if body in ["", nil], do: parse_raw_error(raw_error), else: body

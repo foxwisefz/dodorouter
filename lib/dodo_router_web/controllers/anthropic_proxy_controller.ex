@@ -87,17 +87,32 @@ defmodule DodoRouterWeb.AnthropicProxyController do
         total_ms = System.monotonic_time(:millisecond) - start_time
         last_attempt = List.last(attempts)
 
+        {status, error_response} =
+          if last_attempt && last_attempt[:error] == "context_overflow" do
+            {400,
+             %{
+               "type" => "error",
+               "error" => %{
+                 "type" => "invalid_request_error",
+                 "message" => "Input exceeds context window of this model"
+               }
+             }}
+          else
+            {502,
+             %{
+               type: "error",
+               error: %{
+                 type: "provider_error",
+                 message: "All providers failed: #{last_attempt[:error]}"
+               }
+             }}
+          end
+
         conn
-        |> put_status(502)
+        |> put_status(status)
         |> put_resp_header("x-request-id", request_id)
         |> put_resp_header("x-timing-total-ms", to_string(total_ms))
-        |> json(%{
-          type: "error",
-          error: %{
-            type: "provider_error",
-            message: "All providers failed: #{last_attempt[:error]}"
-          }
-        })
+        |> json(error_response)
     end
   end
 
@@ -155,13 +170,27 @@ defmodule DodoRouterWeb.AnthropicProxyController do
         chunk(conn, error_event)
         conn
 
-      {:error, :all_providers_failed, _attempts} ->
-        error_event =
-          "event: error\ndata: " <>
-            Jason.encode!(%{
+      {:error, :all_providers_failed, attempts} ->
+        last_attempt = List.last(attempts)
+
+        error_payload =
+          if last_attempt && last_attempt[:error] == "context_overflow" do
+            %{
+              type: "error",
+              error: %{
+                type: "invalid_request_error",
+                message: "Input exceeds context window of this model"
+              }
+            }
+          else
+            %{
               type: "error",
               error: %{type: "provider_error", message: "All providers failed"}
-            }) <> "\n\n"
+            }
+          end
+
+        error_event =
+          "event: error\ndata: " <> Jason.encode!(error_payload) <> "\n\n"
 
         chunk(conn, error_event)
         conn

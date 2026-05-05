@@ -105,19 +105,35 @@ defmodule DodoRouterWeb.ProxyController do
         provider_ms = attempts |> Enum.map(& &1[:latency_ms]) |> Enum.sum()
         last_attempt = List.last(attempts)
 
+        {status, error_response} =
+          if last_attempt && last_attempt[:error] == "context_overflow" do
+            {400,
+             %{
+               error: %{
+                 message: "Input exceeds context window of this model",
+                 type: "invalid_request_error",
+                 code: "context_length_exceeded",
+                 attempts: length(attempts)
+               }
+             }}
+          else
+            {502,
+             %{
+               error: %{
+                 message: "All providers failed",
+                 type: "provider_error",
+                 last_error: last_attempt[:error],
+                 attempts: length(attempts)
+               }
+             }}
+          end
+
         conn
-        |> put_status(502)
+        |> put_status(status)
         |> put_resp_header("x-request-id", request_id)
         |> put_resp_header("x-timing-total-ms", to_string(total_ms))
         |> put_resp_header("x-timing-provider-ms", to_string(provider_ms))
-        |> json(%{
-          error: %{
-            message: "All providers failed",
-            type: "provider_error",
-            last_error: last_attempt[:error],
-            attempts: length(attempts)
-          }
-        })
+        |> json(error_response)
     end
   end
 
@@ -150,9 +166,22 @@ defmodule DodoRouterWeb.ProxyController do
         chunk(conn, "data: [DONE]\n\n")
         conn
 
-      {:error, :all_providers_failed, _attempts} ->
-        error_event =
-          "data: " <> Jason.encode!(%{error: %{message: "All providers failed"}}) <> "\n\n"
+      {:error, :all_providers_failed, attempts} ->
+        last_attempt = List.last(attempts)
+
+        error_payload =
+          if last_attempt && last_attempt[:error] == "context_overflow" do
+            %{
+              error: %{
+                message: "Input exceeds context window of this model",
+                type: "context_overflow"
+              }
+            }
+          else
+            %{error: %{message: "All providers failed"}}
+          end
+
+        error_event = "data: " <> Jason.encode!(error_payload) <> "\n\n"
 
         chunk(conn, error_event)
         chunk(conn, "data: [DONE]\n\n")

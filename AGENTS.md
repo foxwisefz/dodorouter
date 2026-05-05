@@ -362,4 +362,83 @@ And **never** do this:
 - **Never** use `<.form let={f} ...>` in the template, instead **always use `<.form for={@form} ...>`**, then drive all form references from the form assign as in `@form[:field]`. The UI should **always** be driven by a `to_form/2` assigned in the LiveView module that is derived from a changeset
 <!-- phoenix:liveview-end -->
 
+## LLM Provider Context Limit Handling
+
+Context limit / context window overflow errors are **not standardized** across LLM providers. Each provider returns a different error format, status code, and message. When adding a new model, you must implement handling for its specific overflow behavior.
+
+### Known Provider Patterns
+
+**z.ai** — Returns HTTP 200 with `finish_reason: "model_context_window_exceeded"`:
+```json
+{
+  "choices": [{
+    "finish_reason": "model_context_window_exceeded",
+    "message": { "content": "", "role": "assistant" }
+  }],
+  "usage": null
+}
+```
+
+**Kimi (Moonshot)** — Returns HTTP 400/bad_request with error message:
+```json
+{
+  "error": {
+    "message": "Invalid request: Your request exceeded model token limit: 262144 (requested: 265359)",
+    "type": "invalid_request_error"
+  }
+}
+```
+
+**OpenAI** — Returns error code `context_length_exceeded`.
+
+**Anthropic** — Returns message: `"prompt is too long"`.
+
+**Other common patterns** — `"exceeds the context window"`, `"maximum context length is N tokens"`, `"reduce the length of the messages"`, HTTP 413, or generic 400 with no body.
+
+### Adding a New Model
+
+When integrating a new LLM provider or model:
+
+1. **Test with oversized context in development** — send a request with more tokens than the model's documented limit to observe the actual error response (status code, body shape, finish_reason, error codes).
+2. **Document the pattern** — add the observed error format to this section.
+3. **Implement detection** — add the provider-specific pattern to the context overflow detection logic (status codes, finish_reason values, error message regexes, or error codes).
+4. **Standardize the error** — always return a unified error to callers, e.g. `{"error": "context_overflow", "message": "Input exceeds context window of this model"}`.
+
+### Standardized Error Responses
+
+When all providers fail due to context overflow, the proxy returns a standardized error in the format appropriate for the endpoint:
+
+**OpenAI-compatible endpoint** — HTTP 400:
+```json
+{
+  "error": {
+    "message": "Input exceeds context window of this model",
+    "type": "invalid_request_error",
+    "code": "context_length_exceeded"
+  }
+}
+```
+
+**Anthropic-compatible endpoint** — HTTP 400:
+```json
+{
+  "type": "error",
+  "error": {
+    "type": "invalid_request_error",
+    "message": "Input exceeds context window of this model"
+  }
+}
+```
+
+This matches each provider's native error format so clients (Claude Code, OpenCode, etc.) understand it immediately.
+
+### Reactive vs Proactive Handling
+
+**Reactive handling is preferred.** Each provider uses different tokenizers (OpenAI tiktoken, Anthropic's own, Google SentencePiece, etc.), so accurate preflight token counting is unreliable. Instead:
+
+- Detect overflow from provider responses
+- Trigger fallback to next provider (which may have larger context)
+- Only standardize the error when all providers fail
+
+
 <!-- usage-rules-end -->

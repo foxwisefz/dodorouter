@@ -15,6 +15,7 @@ defmodule DodoRouter.Proxy.Adapter do
           | :bad_request
           | :auth_error
           | :content_policy
+          | :context_overflow
           | :unknown
 
   @callback call(request(), RoutingStep.t(), api_key :: String.t(), client_headers :: list()) ::
@@ -43,14 +44,22 @@ defmodule DodoRouter.Proxy.Adapter do
     message = get_error_message(body)
 
     cond do
+      context_overflow?(body, message) -> :context_overflow
       String.contains?(message, "content") -> :content_policy
       String.contains?(message, "policy") -> :content_policy
       true -> :bad_request
     end
   end
 
+  def categorize_error(413, _body) do
+    :context_overflow
+  end
+
   def categorize_error(status, _body) when status >= 500, do: :server_error
-  def categorize_error(_status, _body), do: :unknown
+
+  def categorize_error(_status, body) do
+    if context_overflow?(body), do: :context_overflow, else: :unknown
+  end
 
   @doc """
   Determines if an error should trigger fallback to next provider.
@@ -63,6 +72,7 @@ defmodule DodoRouter.Proxy.Adapter do
   def should_fallback?(:unknown), do: true
   def should_fallback?(:bad_request), do: true
   def should_fallback?(:content_policy), do: true
+  def should_fallback?(:context_overflow), do: true
   def should_fallback?(_), do: false
 
   @doc """
@@ -71,6 +81,85 @@ defmodule DodoRouter.Proxy.Adapter do
   def get_error_message(%{"error" => %{"message" => msg}}), do: String.downcase(msg)
   def get_error_message(%{"message" => msg}), do: String.downcase(msg)
   def get_error_message(_), do: ""
+
+  @doc """
+  Detects context window overflow from provider response.
+
+  Providers return this in different formats — status codes, finish_reasons,
+  error codes, or message text. Each new model must be tested to discover
+  its specific overflow signal.
+  """
+  def context_overflow?(body, message \\ nil)
+
+  # z.ai returns HTTP 200 with finish_reason: "model_context_window_exceeded"
+  def context_overflow?(
+        %{"choices" => [%{"finish_reason" => "model_context_window_exceeded"} | _]},
+        _
+      ) do
+    true
+  end
+
+  # OpenAI returns error.code: "context_length_exceeded"
+  def context_overflow?(%{"error" => %{"code" => "context_length_exceeded"}}, _) do
+    true
+  end
+
+  # Stream errors from OpenAI with type: "error"
+  def context_overflow?(
+        %{"type" => "error", "error" => %{"code" => "context_length_exceeded"}},
+        _
+      ) do
+    true
+  end
+
+  def context_overflow?(body, nil) do
+    context_overflow?(body, get_error_message(body))
+  end
+
+  def context_overflow?(_body, message) when is_binary(message) do
+    patterns = [
+      # Anthropic
+      ~r/prompt is too long/i,
+      # Amazon Bedrock
+      ~r/input is too long for requested model/i,
+      # OpenAI (message text)
+      ~r/exceeds the context window/i,
+      # Google (Gemini)
+      ~r/input token count.*exceeds the maximum/i,
+      # xAI (Grok)
+      ~r/maximum prompt length is \d+/i,
+      # Groq
+      ~r/reduce the length of the messages/i,
+      # OpenRouter, DeepSeek, vLLM
+      ~r/maximum context length is \d+ tokens/i,
+      # GitHub Copilot
+      ~r/exceeds the limit of \d+/i,
+      # llama.cpp
+      ~r/exceeds the available context size/i,
+      # LM Studio
+      ~r/greater than the context length/i,
+      # MiniMax
+      ~r/context window exceeds limit/i,
+      # Kimi / Moonshot
+      ~r/exceeded model token limit/i,
+      # Generic fallback
+      ~r/context[_ ]length[_ ]exceeded/i,
+      # vLLM
+      ~r/context length is only \d+ tokens/i,
+      # vLLM
+      ~r/input length.*exceeds.*context length/i,
+      # Ollama
+      ~r/prompt too long; exceeded (?:max )?context length/i,
+      # Mistral
+      ~r/too large for model with \d+ maximum context length/i,
+      # z.ai (in error text)
+      ~r/model_context_window_exceeded/i
+    ]
+
+    Enum.any?(patterns, &Regex.match?(&1, message))
+  end
+
+  def context_overflow?(_, _), do: false
 
   @doc """
   Extracts usage from response.
