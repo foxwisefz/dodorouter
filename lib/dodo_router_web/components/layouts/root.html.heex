@@ -22,133 +22,235 @@
   </head>
   <body class="min-h-screen bg-base-200 font-body antialiased">
     <%= if @current_scope && @current_scope.user do %>
-      <div class="drawer lg:drawer-open">
-        <input id="sidebar-drawer" type="checkbox" class="drawer-toggle" />
+      <%!-- Mobile sidebar toggle checkbox (hidden) --%>
+      <input type="checkbox" id="mobile-sidebar" class="hidden peer" />
 
-        <div class="drawer-content flex flex-col">
-          <div class="flex-none bg-base-100 border-b border-base-300/50">
-            <div class="flex items-center justify-between px-4 py-2.5">
-              <div class="flex items-center gap-2">
-                <label for="sidebar-drawer" class="btn btn-ghost btn-sm btn-square lg:hidden">
-                  <.icon name="hero-bars-3" class="size-5" />
-                </label>
-                <div class="flex h-7 w-7 items-center justify-center rounded-md bg-accent text-xs font-bold text-accent-foreground">
-                  D
-                </div>
-                <span class="text-sm font-semibold text-base-content">DodoRouter</span>
-              </div>
-              <div class="hidden md:flex items-center gap-1.5 rounded-lg border border-base-300 bg-secondary/50 px-3 py-1.5 text-sm text-base-content/40 w-64">
-                <.icon name="hero-magnifying-glass" class="size-3.5" />
-                <span>Search requests...</span>
-                <span class="ml-auto rounded border border-base-300 bg-base-100 px-1.5 py-0.5 text-xs text-base-content/30">
-                  &#8984;K
-                </span>
-              </div>
-              <div class="flex items-center gap-3">
-                <div class="relative">
-                  <.icon name="hero-bell" class="size-4 text-base-content/50" />
-                  <span class="absolute -top-0.5 -right-0.5 h-1.5 w-1.5 rounded-full bg-accent">
-                  </span>
-                </div>
-                <div class="flex h-7 w-7 items-center justify-center rounded-full bg-accent/10 text-xs font-bold text-accent">
-                  {String.first(@current_scope.user.email) |> String.upcase()}
-                </div>
-              </div>
+      <%!-- Top Navbar (full width, always visible) --%>
+      <header class="sticky top-0 z-50 bg-base-100 border-b border-base-300/50">
+        <div class="flex items-center justify-between px-4 py-2.5">
+          <%!-- Left: hamburger + logo --%>
+          <div class="flex items-center gap-3">
+            <label
+              for="mobile-sidebar"
+              class="lg:hidden btn btn-ghost btn-sm btn-square"
+            >
+              <.icon name="hero-bars-3" class="size-5" />
+            </label>
+            <div class="flex h-7 w-7 items-center justify-center rounded-md bg-accent text-xs font-bold text-accent-foreground">
+              D
+            </div>
+            <span class="text-sm font-semibold text-base-content">DodoRouter</span>
+          </div>
+
+          <%!-- Center: Search --%>
+          <div class="hidden md:flex items-center gap-1.5 rounded-lg border border-base-300 bg-secondary/50 px-3 py-1.5 text-sm text-base-content/40 w-64">
+            <.icon name="hero-magnifying-glass" class="size-3.5" />
+            <span>Search requests...</span>
+            <span class="ml-auto rounded border border-base-300 bg-base-100 px-1.5 py-0.5 text-xs text-base-content/30">
+              &#8984;K
+            </span>
+          </div>
+
+          <%!-- Right: Notifications + Avatar --%>
+          <div class="flex items-center gap-3">
+            <div class="relative">
+              <.icon name="hero-bell" class="size-4 text-base-content/50" />
+              <span class="absolute -top-0.5 -right-0.5 h-1.5 w-1.5 rounded-full bg-accent">
+              </span>
+            </div>
+            <div class="flex h-7 w-7 items-center justify-center rounded-full bg-accent/10 text-xs font-bold text-accent">
+              {String.first(@current_scope.user.email) |> String.upcase()}
             </div>
           </div>
-
-          <div class="flex-1 p-6 bg-secondary/30">
-            {@inner_content}
-          </div>
         </div>
+      </header>
 
-        <div class="drawer-side z-40">
-          <label for="sidebar-drawer" class="drawer-overlay"></label>
-          <aside class="bg-base-100 h-screen w-56 border-r border-base-300/50 flex flex-col">
-            <div class="flex-1 overflow-y-auto p-3 space-y-0.5">
+      <%!-- Main Layout: Sidebar + Content --%>
+      <div class="flex flex-1 min-h-[calc(100vh-49px)]">
+        <%!-- Desktop Sidebar (always visible) --%>
+        <aside class="hidden lg:flex w-56 flex-col bg-base-100 border-r border-base-300/50 flex-shrink-0">
+          <div class="flex-1 overflow-y-auto p-3 space-y-0.5">
+            <a
+              href={~p"/dashboard"}
+              class="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium text-accent bg-accent/10"
+            >
+              <.icon name="hero-home" class="size-4" /> Dashboard
+            </a>
+            <a
+              href={~p"/logs"}
+              class="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-base-content/60 hover:bg-secondary transition-colors"
+            >
+              <.icon name="hero-clock" class="size-4" /> Requests
+            </a>
+            <a
+              href={~p"/routers"}
+              class="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-base-content/60 hover:bg-secondary transition-colors"
+            >
+              <.icon name="hero-adjustments-horizontal" class="size-4" /> Routers
+            </a>
+            <a
+              href={~p"/providers"}
+              class="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-base-content/60 hover:bg-secondary transition-colors"
+            >
+              <.icon name="hero-key" class="size-4" /> API Keys
+            </a>
+
+            <div class="mt-5">
+              <p class="mb-1.5 px-3 text-xs font-semibold uppercase tracking-wider text-base-content/40">
+                Providers
+              </p>
               <a
-                href={~p"/dashboard"}
-                class="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium text-accent bg-accent/10"
-              >
-                <.icon name="hero-home" class="size-4" /> Dashboard
-              </a>
-              <a
-                href={~p"/logs"}
+                href={~p"/providers"}
                 class="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-base-content/60 hover:bg-secondary transition-colors"
               >
-                <.icon name="hero-clock" class="size-4" /> Requests
-              </a>
-              <a
-                href={~p"/routers"}
-                class="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-base-content/60 hover:bg-secondary transition-colors"
-              >
-                <.icon name="hero-adjustments-horizontal" class="size-4" /> Routers
+                <span class="flex h-5 w-5 items-center justify-center rounded bg-amber-100 text-xs font-bold text-amber-700">
+                  Z
+                </span>
+                z.ai
               </a>
               <a
                 href={~p"/providers"}
                 class="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-base-content/60 hover:bg-secondary transition-colors"
               >
-                <.icon name="hero-key" class="size-4" /> API Keys
+                <span class="flex h-5 w-5 items-center justify-center rounded bg-sky-100 text-xs font-bold text-sky-700">
+                  M
+                </span>
+                Moonshot
               </a>
-
-              <div class="mt-5">
-                <p class="mb-1.5 px-3 text-xs font-semibold uppercase tracking-wider text-base-content/40">
-                  Providers
-                </p>
-                <a
-                  href={~p"/providers"}
-                  class="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-base-content/60 hover:bg-secondary transition-colors"
-                >
-                  <span class="flex h-5 w-5 items-center justify-center rounded bg-amber-100 text-xs font-bold text-amber-700">
-                    Z
-                  </span>
-                  z.ai
-                </a>
-                <a
-                  href={~p"/providers"}
-                  class="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-base-content/60 hover:bg-secondary transition-colors"
-                >
-                  <span class="flex h-5 w-5 items-center justify-center rounded bg-sky-100 text-xs font-bold text-sky-700">
-                    M
-                  </span>
-                  Moonshot
-                </a>
-              </div>
-
-              <div class="mt-5">
-                <p class="mb-1.5 px-3 text-xs font-semibold uppercase tracking-wider text-base-content/40">
-                  Settings
-                </p>
-                <a
-                  href={~p"/users/settings"}
-                  class="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-base-content/60 hover:bg-secondary transition-colors"
-                >
-                  <.icon name="hero-cog-6-tooth" class="size-4" /> Settings
-                </a>
-              </div>
             </div>
 
-            <div class="flex-shrink-0 border-t border-base-300/50 p-3">
-              <div class="flex items-center justify-between mb-2">
-                <.theme_toggle />
-                <.link
-                  href={~p"/users/log-out"}
-                  method="delete"
-                  class="p-2 rounded-lg hover:bg-secondary text-base-content/40 hover:text-base-content transition-colors"
-                  title="Log out"
-                >
-                  <.icon name="hero-arrow-right-on-rectangle" class="size-4" />
-                </.link>
-              </div>
-              <div class="flex items-center gap-2 px-1 pt-2 border-t border-base-300/30">
-                <div class="w-6 h-6 rounded-full bg-accent/10 text-accent flex items-center justify-center text-xs font-bold flex-shrink-0">
-                  {String.first(@current_scope.user.email) |> String.upcase()}
-                </div>
-                <p class="text-xs text-base-content/50 truncate">{@current_scope.user.email}</p>
-              </div>
+            <div class="mt-5">
+              <p class="mb-1.5 px-3 text-xs font-semibold uppercase tracking-wider text-base-content/40">
+                Settings
+              </p>
+              <a
+                href={~p"/users/settings"}
+                class="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-base-content/60 hover:bg-secondary transition-colors"
+              >
+                <.icon name="hero-cog-6-tooth" class="size-4" /> Settings
+              </a>
             </div>
-          </aside>
-        </div>
+          </div>
+
+          <div class="flex-shrink-0 border-t border-base-300/50 p-3">
+            <div class="flex items-center justify-between mb-2">
+              <.theme_toggle />
+              <.link
+                href={~p"/users/log-out"}
+                method="delete"
+                class="p-2 rounded-lg hover:bg-secondary text-base-content/40 hover:text-base-content transition-colors"
+                title="Log out"
+              >
+                <.icon name="hero-arrow-right-on-rectangle" class="size-4" />
+              </.link>
+            </div>
+            <div class="flex items-center gap-2 px-1 pt-2 border-t border-base-300/30">
+              <div class="w-6 h-6 rounded-full bg-accent/10 text-accent flex items-center justify-center text-xs font-bold flex-shrink-0">
+                {String.first(@current_scope.user.email) |> String.upcase()}
+              </div>
+              <p class="text-xs text-base-content/50 truncate">{@current_scope.user.email}</p>
+            </div>
+          </div>
+        </aside>
+
+        <%!-- Main Content --%>
+        <main class="flex-1 p-6 bg-secondary/30 overflow-auto">
+          {@inner_content}
+        </main>
+      </div>
+
+      <%!-- Mobile Sidebar Drawer (overlay) --%>
+      <div class="lg:hidden fixed inset-0 z-40 pointer-events-none peer-checked:pointer-events-auto">
+        <%!-- Backdrop --%>
+        <label
+          for="mobile-sidebar"
+          class="absolute inset-0 bg-black/50 opacity-0 peer-checked:opacity-100 transition-opacity duration-200"
+        ></label>
+        <%!-- Sidebar panel --%>
+        <aside class="absolute left-0 top-0 bottom-0 w-56 bg-base-100 border-r border-base-300/50 -translate-x-full peer-checked:translate-x-0 transition-transform duration-200 flex flex-col">
+          <div class="flex-1 overflow-y-auto p-3 space-y-0.5">
+            <a
+              href={~p"/dashboard"}
+              class="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium text-accent bg-accent/10"
+            >
+              <.icon name="hero-home" class="size-4" /> Dashboard
+            </a>
+            <a
+              href={~p"/logs"}
+              class="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-base-content/60 hover:bg-secondary transition-colors"
+            >
+              <.icon name="hero-clock" class="size-4" /> Requests
+            </a>
+            <a
+              href={~p"/routers"}
+              class="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-base-content/60 hover:bg-secondary transition-colors"
+            >
+              <.icon name="hero-adjustments-horizontal" class="size-4" /> Routers
+            </a>
+            <a
+              href={~p"/providers"}
+              class="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-base-content/60 hover:bg-secondary transition-colors"
+            >
+              <.icon name="hero-key" class="size-4" /> API Keys
+            </a>
+
+            <div class="mt-5">
+              <p class="mb-1.5 px-3 text-xs font-semibold uppercase tracking-wider text-base-content/40">
+                Providers
+              </p>
+              <a
+                href={~p"/providers"}
+                class="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-base-content/60 hover:bg-secondary transition-colors"
+              >
+                <span class="flex h-5 w-5 items-center justify-center rounded bg-amber-100 text-xs font-bold text-amber-700">
+                  Z
+                </span>
+                z.ai
+              </a>
+              <a
+                href={~p"/providers"}
+                class="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-base-content/60 hover:bg-secondary transition-colors"
+              >
+                <span class="flex h-5 w-5 items-center justify-center rounded bg-sky-100 text-xs font-bold text-sky-700">
+                  M
+                </span>
+                Moonshot
+              </a>
+            </div>
+
+            <div class="mt-5">
+              <p class="mb-1.5 px-3 text-xs font-semibold uppercase tracking-wider text-base-content/40">
+                Settings
+              </p>
+              <a
+                href={~p"/users/settings"}
+                class="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-base-content/60 hover:bg-secondary transition-colors"
+              >
+                <.icon name="hero-cog-6-tooth" class="size-4" /> Settings
+              </a>
+            </div>
+          </div>
+
+          <div class="flex-shrink-0 border-t border-base-300/50 p-3">
+            <div class="flex items-center justify-between mb-2">
+              <.theme_toggle />
+              <.link
+                href={~p"/users/log-out"}
+                method="delete"
+                class="p-2 rounded-lg hover:bg-secondary text-base-content/40 hover:text-base-content transition-colors"
+                title="Log out"
+              >
+                <.icon name="hero-arrow-right-on-rectangle" class="size-4" />
+              </.link>
+            </div>
+            <div class="flex items-center gap-2 px-1 pt-2 border-t border-base-300/30">
+              <div class="w-6 h-6 rounded-full bg-accent/10 text-accent flex items-center justify-center text-xs font-bold flex-shrink-0">
+                {String.first(@current_scope.user.email) |> String.upcase()}
+              </div>
+              <p class="text-xs text-base-content/50 truncate">{@current_scope.user.email}</p>
+            </div>
+          </div>
+        </aside>
       </div>
     <% else %>
       <div class="min-h-screen flex flex-col">

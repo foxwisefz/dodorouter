@@ -131,10 +131,12 @@ defmodule DodoRouterWeb.LogLive.Index do
     ~H"""
     <div>
       <!-- Header -->
-      <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-8">
+      <div class="flex items-center justify-between mb-6">
         <div>
-          <h1 class="text-2xl font-bold">Request Logs</h1>
-          <p class="text-base-content/50 text-sm">API request history</p>
+          <h1 class="text-lg font-semibold text-base-content">Request Logs</h1>
+          <p :if={@selected_router} class="text-sm text-base-content/50 mt-0.5">
+            {@selected_router.name}
+          </p>
         </div>
         <form phx-change="select_router">
           <select
@@ -154,33 +156,42 @@ defmodule DodoRouterWeb.LogLive.Index do
       </div>
       
     <!-- Logs Table -->
-      <div class="table-container">
-        <table class="table">
+      <div class="rounded-lg border border-base-300/50 bg-base-100 overflow-hidden">
+        <table class="w-full text-left">
           <thead>
-            <tr>
-              <th>Time</th>
-              <th :if={!@selected_router}>Router</th>
-              <th>Status</th>
-              <th>Provider/Model</th>
-              <th>Type</th>
-              <th>Tokens</th>
-              <th>Latency</th>
-              <th>Attempts</th>
+            <tr class="border-b border-base-300/50 bg-secondary/30">
+              <th class="px-4 py-2.5 text-xs font-medium text-base-content/50">Time</th>
+              <th :if={!@selected_router} class="px-4 py-2.5 text-xs font-medium text-base-content/50">
+                Router
+              </th>
+              <th class="px-4 py-2.5 text-xs font-medium text-base-content/50">Status</th>
+              <th class="px-4 py-2.5 text-xs font-medium text-base-content/50 hidden sm:table-cell">
+                Provider / Model
+              </th>
+              <th class="px-4 py-2.5 text-xs font-medium text-base-content/50 hidden md:table-cell">
+                Type
+              </th>
+              <th class="px-4 py-2.5 text-xs font-medium text-base-content/50 hidden md:table-cell">
+                Tokens
+              </th>
+              <th class="px-4 py-2.5 text-xs font-medium text-base-content/50">Latency</th>
             </tr>
           </thead>
-          <tbody id="logs" phx-update="stream">
+          <tbody id="logs" phx-update="stream" class="divide-y divide-base-300/30">
             <tr
               :for={{dom_id, log} <- @streams.logs}
               id={dom_id}
               phx-click={log.status != "pending" && JS.navigate(~p"/logs/#{log}")}
               class={[
-                "hover:bg-base-200/30 transition-colors",
+                "hover:bg-secondary/20 transition-colors",
                 log.status == "pending" && "animate-pulse",
                 log.status != "pending" && "cursor-pointer"
               ]}
             >
-              <td class="font-mono text-xs text-base-content/70">{format_time(log.inserted_at)}</td>
-              <td :if={!@selected_router} class="text-sm">
+              <td class="px-4 py-2.5 text-sm font-mono text-base-content/50">
+                {format_time(log.inserted_at)}
+              </td>
+              <td :if={!@selected_router} class="px-4 py-2.5 text-sm">
                 <.link
                   :if={is_struct(Map.get(log, :router), DodoRouter.Routers.Router)}
                   navigate={~p"/routers/#{log.router}"}
@@ -189,15 +200,17 @@ defmodule DodoRouterWeb.LogLive.Index do
                   {log.router.name}
                 </.link>
               </td>
-              <td><.status_badge status={log.status} /></td>
-              <td>
+              <td class="px-4 py-2.5">
+                <.status_badge status={log.status} />
+              </td>
+              <td class="px-4 py-2.5 text-sm hidden sm:table-cell">
                 <%= if is_list(Map.get(log, :attempted_steps)) and length(log.attempted_steps) > 1 do %>
                   <div class="flex items-center gap-1">
                     <%= for {step, idx} <- Enum.with_index(log.attempted_steps) do %>
                       <span class={[
-                        "text-xs px-1.5 py-0.5 rounded",
-                        step["status"] == "success" && "bg-success/20 text-success",
-                        step["status"] != "success" && "bg-error/20 text-error line-through"
+                        "text-xs px-1.5 py-0.5 rounded-full",
+                        step["status"] == "success" && "bg-green-50 text-success",
+                        step["status"] != "success" && "bg-red-50 text-error line-through"
                       ]}>
                         {step["provider"]}
                       </span>
@@ -208,28 +221,19 @@ defmodule DodoRouterWeb.LogLive.Index do
                   </div>
                   <div class="text-xs text-base-content/50 mt-0.5">{log.final_model}</div>
                 <% else %>
-                  <span class="text-base-content/80">{log.final_provider}</span>
+                  <span class="font-medium text-base-content">{log.final_provider}</span>
                   <span class="text-base-content/40"> / </span>
                   <span class="text-base-content/60">{log.final_model}</span>
                 <% end %>
               </td>
-              <td><.call_type_badge type={Map.get(log, :call_type)} /></td>
-              <td class="font-mono text-sm text-base-content/70">
+              <td class="px-4 py-2.5 hidden md:table-cell">
+                <.call_type_badge type={Map.get(log, :call_type)} />
+              </td>
+              <td class="px-4 py-2.5 text-sm font-mono text-base-content/50 hidden md:table-cell">
                 {Map.get(log, :total_tokens) || "-"}
               </td>
-              <td class="font-mono text-sm text-base-content/70">
+              <td class="px-4 py-2.5 text-sm font-mono text-base-content/50">
                 {if Map.get(log, :latency_ms), do: "#{log.latency_ms}ms", else: "-"}
-              </td>
-              <td class="text-center">
-                <%= if is_list(Map.get(log, :attempted_steps)) and length(log.attempted_steps) > 1 do %>
-                  <span class="px-1.5 py-0.5 bg-warning/20 text-warning rounded text-xs">
-                    {length(log.attempted_steps)}
-                  </span>
-                <% else %>
-                  <span class="text-base-content/40">
-                    {if log.status == "pending", do: "-", else: "1"}
-                  </span>
-                <% end %>
               </td>
             </tr>
           </tbody>
