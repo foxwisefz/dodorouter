@@ -29,9 +29,9 @@ defmodule DodoRouterWeb.AnthropicFormat do
     %{
       "model" => anthropic_params["model"],
       "messages" => messages,
-      "max_tokens" => anthropic_params["max_tokens"],
-      "stream" => anthropic_params["stream"]
+      "max_tokens" => anthropic_params["max_tokens"]
     }
+    |> maybe_put("stream", anthropic_params["stream"])
     |> maybe_put("temperature", anthropic_params["temperature"])
     |> maybe_put("top_p", anthropic_params["top_p"])
     |> maybe_put("stop", anthropic_params["stop_sequences"])

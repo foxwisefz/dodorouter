@@ -126,13 +126,10 @@ defmodule DodoRouter.Proxy.Adapter do
   recognized fields are forwarded, preventing 400 Bad Request errors.
   """
   def sanitize_request(request) when is_map(request) do
-    sanitized =
-      request
-      |> Map.take(@allowed_request_fields)
-      |> normalize_max_completion_tokens()
-      |> sanitize_messages()
-
-    sanitized
+    request
+    |> Map.take(@allowed_request_fields)
+    |> normalize_max_completion_tokens()
+    |> sanitize_messages()
   end
 
   def sanitize_request(request), do: request
