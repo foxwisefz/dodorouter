@@ -173,24 +173,24 @@ defmodule DodoRouter.Proxy.Adapters.Zai do
           resp.private[:stream_acc] ||
             %{content: "", tool_calls: %{}, usage: nil, finish_reason: nil, first_chunk_time: nil}
 
+        upload_ms = calculate_upload_ms(start_time)
+
+        timing_meta = %{
+          payload_size_bytes: payload_size_bytes,
+          upload_ms: upload_ms,
+          provider_processing_ms: nil
+        }
+
         # Check for context overflow signaled via finish_reason in streaming
         if acc.finish_reason == "model_context_window_exceeded" do
           {:error, :context_overflow,
            %{
              status: 200,
-             body: build_final_response(acc, %{}),
+             body: build_final_response(acc, timing_meta),
              latency_ms: latency(start_time),
              headers: resp_headers
            }}
         else
-          upload_ms = calculate_upload_ms(start_time)
-
-          timing_meta = %{
-            payload_size_bytes: payload_size_bytes,
-            upload_ms: upload_ms,
-            provider_processing_ms: nil
-          }
-
           {:ok, build_final_response(acc, timing_meta), %{headers: resp_headers}}
         end
 
@@ -300,7 +300,8 @@ defmodule DodoRouter.Proxy.Adapters.Zai do
     end
   end
 
-  defp build_final_response(acc, timing_meta) do
+  @doc false
+  def build_final_response(acc, timing_meta) do
     message = build_final_message(acc)
 
     meta = %{
