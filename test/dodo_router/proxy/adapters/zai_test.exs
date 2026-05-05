@@ -140,6 +140,58 @@ defmodule DodoRouter.Proxy.Adapters.ZaiTest do
     end
   end
 
+  describe "build_final_response/2" do
+    test "builds response with timing metadata" do
+      acc = %{
+        content: "Hello",
+        tool_calls: %{},
+        usage: %{"prompt_tokens" => 10, "completion_tokens" => 5},
+        finish_reason: "stop",
+        first_chunk_time: 100
+      }
+
+      timing_meta = %{
+        payload_size_bytes: 1024,
+        upload_ms: 50,
+        provider_processing_ms: 200
+      }
+
+      response = Zai.build_final_response(acc, timing_meta)
+
+      assert get_in(response, ["choices", Access.at(0), "message", "content"]) == "Hello"
+      assert get_in(response, ["choices", Access.at(0), "finish_reason"]) == "stop"
+      assert response["usage"]["prompt_tokens"] == 10
+      assert response["_meta"]["ttfb_ms"] == 100
+      assert response["_meta"]["upload_ms"] == 50
+      assert response["_meta"]["payload_size_bytes"] == 1024
+      assert response["_meta"]["provider_processing_ms"] == 200
+    end
+
+    test "builds response with context_overflow finish_reason without crashing" do
+      acc = %{
+        content: "",
+        tool_calls: %{},
+        usage: nil,
+        finish_reason: "model_context_window_exceeded",
+        first_chunk_time: 50
+      }
+
+      timing_meta = %{
+        payload_size_bytes: 2048,
+        upload_ms: 25,
+        provider_processing_ms: nil
+      }
+
+      response = Zai.build_final_response(acc, timing_meta)
+
+      assert get_in(response, ["choices", Access.at(0), "finish_reason"]) ==
+               "model_context_window_exceeded"
+      assert get_in(response, ["choices", Access.at(0), "message", "content"]) == ""
+      assert response["_meta"]["upload_ms"] == 25
+      assert response["_meta"]["payload_size_bytes"] == 2048
+    end
+  end
+
   describe "parse_raw_error/1" do
     test "returns nil for nil" do
       assert Zai.parse_raw_error(nil) == nil
