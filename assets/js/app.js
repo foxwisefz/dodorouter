@@ -59,6 +59,16 @@ liveSocket.connect()
 // >> liveSocket.disableLatencySim()
 window.liveSocket = liveSocket
 
+window.addEventListener("phx:set-theme", (e) => {
+  const theme = e.target.dataset.phxTheme
+  if (theme === "system") {
+    const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches
+    document.documentElement.setAttribute("data-theme", prefersDark ? "dark" : "light")
+  } else {
+    document.documentElement.setAttribute("data-theme", theme)
+  }
+})
+
 // The lines below enable quality of life phoenix_live_reload
 // development features:
 //

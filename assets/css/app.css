@@ -64,36 +64,33 @@
   default: true;
   prefersdark: false;
   color-scheme: "light";
-  --color-base-100: oklch(99% 0.005 250);
-  --color-base-200: oklch(96% 0.008 250);
-  --color-base-300: oklch(92% 0.010 250);
-  --color-base-content: oklch(25% 0.015 250);
-  /* Green primary - matches logo */
-  --color-primary: oklch(55% 0.18 145);
-  --color-primary-content: oklch(98% 0.01 145);
-  /* Teal secondary */
-  --color-secondary: oklch(50% 0.12 175);
-  --color-secondary-content: oklch(98% 0.01 175);
-  /* Orange accent - matches logo beak */
-  --color-accent: oklch(70% 0.18 55);
-  --color-accent-content: oklch(20% 0.02 55);
-  --color-neutral: oklch(40% 0.02 250);
-  --color-neutral-content: oklch(98% 0.01 250);
-  --color-info: oklch(55% 0.15 230);
-  --color-info-content: oklch(98% 0.01 230);
-  --color-success: oklch(55% 0.18 145);
-  --color-success-content: oklch(98% 0.01 145);
-  --color-warning: oklch(70% 0.18 55);
-  --color-warning-content: oklch(20% 0.02 55);
-  --color-error: oklch(55% 0.22 25);
-  --color-error-content: oklch(98% 0.01 25);
-  --radius-selector: 0.25rem;
-  --radius-field: 0.25rem;
+  --color-base-100: hsl(0, 0%, 100%);
+  --color-base-200: hsl(0, 0%, 97%);
+  --color-base-300: hsl(0, 0%, 92%);
+  --color-base-content: hsl(210, 14%, 17%);
+  --color-primary: hsl(239, 84%, 67%);
+  --color-primary-content: hsl(0, 0%, 100%);
+  --color-secondary: hsl(0, 0%, 96%);
+  --color-secondary-content: hsl(210, 14%, 17%);
+  --color-accent: hsl(239, 84%, 67%);
+  --color-accent-content: hsl(0, 0%, 100%);
+  --color-neutral: hsl(210, 14%, 17%);
+  --color-neutral-content: hsl(0, 0%, 100%);
+  --color-info: hsl(239, 84%, 67%);
+  --color-info-content: hsl(0, 0%, 100%);
+  --color-success: hsl(142, 71%, 45%);
+  --color-success-content: hsl(0, 0%, 100%);
+  --color-warning: hsl(38, 92%, 50%);
+  --color-warning-content: hsl(0, 0%, 9%);
+  --color-error: hsl(0, 84%, 60%);
+  --color-error-content: hsl(0, 0%, 100%);
+  --radius-selector: 0.5rem;
+  --radius-field: 0.5rem;
   --radius-box: 0.5rem;
   --size-selector: 0.21875rem;
   --size-field: 0.21875rem;
-  --border: 1.5px;
-  --depth: 1;
+  --border: 1px;
+  --depth: 0;
   --noise: 0;
 }
 
@@ -764,11 +761,6 @@ input.input,
    Glassmorphism Cards - 3D Tilt Parallax
    ============================================ */
 
-/* Light theme glass cards */
-[data-theme="light"] .card-bordered,
-[data-theme="light"] .stat-card,
-[data-theme="light"] .chart-container,
-[data-theme="light"] .table-container,
-[data-theme="light"] .provider-card {
-  background: oklch(97% 0.003 250 / 0.7);
+[data-theme="dark"] .code-block {
+  background: hsl(240, 10%, 12%);
 }
