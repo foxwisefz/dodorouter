@@ -3,6 +3,125 @@ defmodule DodoRouter.Proxy.AdapterTest do
 
   alias DodoRouter.Proxy.Adapter
 
+  describe "context_overflow?/2" do
+    test "detects z.ai 200-OK overflow via finish_reason" do
+      body = %{
+        "choices" => [
+          %{
+            "finish_reason" => "model_context_window_exceeded",
+            "message" => %{"content" => "", "role" => "assistant"}
+          }
+        ],
+        "usage" => nil
+      }
+
+      assert Adapter.context_overflow?(body)
+    end
+
+    test "detects OpenAI error code" do
+      body = %{
+        "error" => %{
+          "code" => "context_length_exceeded",
+          "message" => "This model's maximum context length is 8192 tokens"
+        }
+      }
+
+      assert Adapter.context_overflow?(body)
+    end
+
+    test "detects OpenAI stream error" do
+      body = %{
+        "type" => "error",
+        "error" => %{
+          "code" => "context_length_exceeded",
+          "message" => "Input exceeds context window"
+        }
+      }
+
+      assert Adapter.context_overflow?(body)
+    end
+
+    test "detects Anthropic message" do
+      body = %{"error" => %{"message" => "prompt is too long"}}
+      assert Adapter.context_overflow?(body)
+    end
+
+    test "detects Moonshot/Kimi message" do
+      body = %{
+        "error" => %{
+          "message" =>
+            "Invalid request: Your request exceeded model token limit: 262144 (requested: 265359)",
+          "type" => "invalid_request_error"
+        }
+      }
+
+      assert Adapter.context_overflow?(body)
+    end
+
+    test "detects Gemini message" do
+      body = %{"error" => %{"message" => "input token count (5000) exceeds the maximum (4000)"}}
+      assert Adapter.context_overflow?(body)
+    end
+
+    test "detects generic context length exceeded" do
+      body = %{"error" => %{"message" => "context length exceeded"}}
+      assert Adapter.context_overflow?(body)
+    end
+
+    test "returns false for non-overflow errors" do
+      body = %{"error" => %{"message" => "invalid api key"}}
+      refute Adapter.context_overflow?(body)
+    end
+
+    test "returns false for successful responses" do
+      body = %{
+        "choices" => [
+          %{
+            "finish_reason" => "stop",
+            "message" => %{"content" => "Hello!", "role" => "assistant"}
+          }
+        ]
+      }
+
+      refute Adapter.context_overflow?(body)
+    end
+  end
+
+  describe "categorize_error/2" do
+    test "categorizes context_overflow from finish_reason" do
+      body = %{
+        "choices" => [
+          %{
+            "finish_reason" => "model_context_window_exceeded",
+            "message" => %{"content" => ""}
+          }
+        ]
+      }
+
+      assert Adapter.categorize_error(200, body) == :context_overflow
+    end
+
+    test "categorizes context_overflow from error code" do
+      body = %{"error" => %{"code" => "context_length_exceeded", "message" => "too long"}}
+      assert Adapter.categorize_error(400, body) == :context_overflow
+    end
+
+    test "categorizes context_overflow from HTTP 413" do
+      body = %{"error" => %{"message" => "request too large"}}
+      assert Adapter.categorize_error(413, body) == :context_overflow
+    end
+
+    test "categorizes context_overflow from error message" do
+      body = %{"error" => %{"message" => "prompt is too long"}}
+      assert Adapter.categorize_error(400, body) == :context_overflow
+    end
+
+    test "categorizes regular 400 as bad_request" do
+      body = %{"error" => %{"message" => "invalid parameter"}}
+      assert Adapter.categorize_error(400, body) == :bad_request
+    end
+  end
+
   describe "parse_sse_chunk/2" do
     test "parses single SSE event" do
       data = ~s|data: {"id":"123","choices":[{"delta":{"content":"hello"}}]}\n\n|
