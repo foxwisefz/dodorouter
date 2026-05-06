@@ -186,6 +186,7 @@ defmodule DodoRouter.Proxy.Adapters.ZaiTest do
 
       assert get_in(response, ["choices", Access.at(0), "finish_reason"]) ==
                "model_context_window_exceeded"
+
       assert get_in(response, ["choices", Access.at(0), "message", "content"]) == ""
       assert response["_meta"]["upload_ms"] == 25
       assert response["_meta"]["payload_size_bytes"] == 2048

@@ -6,6 +6,7 @@ defmodule DodoRouterWeb.RouterLive.Show do
   alias DodoRouter.Routers
   alias DodoRouter.Routers.RoutingStep
   alias DodoRouter.Logs
+  alias DodoRouter.Logs.MessageNormalizer
   alias DodoRouter.Providers
   alias DodoRouter.Proxy.Adapter.Registry
 
@@ -643,32 +644,49 @@ defmodule DodoRouterWeb.RouterLive.Show do
                   else: nil
               }
               class={[
-                "flex items-center justify-between p-3 rounded-lg text-sm transition-colors",
+                "block p-3 rounded-lg text-sm transition-colors",
                 log.status == "pending" && "bg-info/10 animate-pulse",
                 log.status == "success" && "bg-success/10 hover:bg-success/20",
                 log.status == "fallback" && "bg-warning/10 hover:bg-warning/20",
                 log.status == "error" && "bg-error/10 hover:bg-error/20"
               ]}
             >
-              <div class="flex items-center gap-3">
-                <span class={[
-                  "w-2 h-2 rounded-full",
-                  log.status == "pending" && "bg-info",
-                  log.status == "success" && "bg-success",
-                  log.status == "fallback" && "bg-warning",
-                  log.status == "error" && "bg-error"
-                ]}>
-                </span>
-                <span class="font-mono text-base-content/80">
-                  {log.final_provider}/{log.final_model}
-                </span>
-                <span class={"px-1.5 py-0.5 rounded text-xs font-medium #{status_badge_class(log.status)}"}>
-                  {log.status}
-                </span>
+              <div class="flex items-center justify-between">
+                <div class="flex items-center gap-3">
+                  <span class={[
+                    "w-2 h-2 rounded-full shrink-0",
+                    log.status == "pending" && "bg-info",
+                    log.status == "success" && "bg-success",
+                    log.status == "fallback" && "bg-warning",
+                    log.status == "error" && "bg-error"
+                  ]}>
+                  </span>
+                  <span class="font-mono text-base-content/80">
+                    {log.final_provider}/{log.final_model}
+                  </span>
+                  <span
+                    :if={log.call_type}
+                    class="px-1.5 py-0.5 rounded text-xs font-medium bg-base-300/50 text-base-content/70"
+                  >
+                    {call_type_label(log.call_type)}
+                  </span>
+                  <span class={[
+                    "px-1.5 py-0.5 rounded text-xs font-medium",
+                    status_badge_class(log.status)
+                  ]}>
+                    {log.status}
+                  </span>
+                </div>
+                <div class="flex items-center gap-4 text-base-content/50 text-sm shrink-0">
+                  <span :if={Map.get(log, :latency_ms)} class="font-mono">{log.latency_ms}ms</span>
+                  <span class="font-mono text-xs">{format_time(log.inserted_at)}</span>
+                </div>
               </div>
-              <div class="flex items-center gap-4 text-base-content/50 text-sm">
-                <span :if={Map.get(log, :latency_ms)} class="font-mono">{log.latency_ms}ms</span>
-                <span class="font-mono text-xs">{format_time(log.inserted_at)}</span>
+              <div
+                :if={last_message_preview(log)}
+                class="mt-2 text-xs text-base-content/60 truncate pl-5"
+              >
+                {last_message_preview(log)}
               </div>
             </.link>
           </div>
@@ -866,6 +884,33 @@ defmodule DodoRouterWeb.RouterLive.Show do
   defp status_badge_class("error"), do: "bg-error/20 text-error"
   defp status_badge_class("pending"), do: "bg-info/20 text-info"
   defp status_badge_class(_), do: "bg-base-300 text-base-content/60"
+
+  defp call_type_label("completion"), do: "chat"
+  defp call_type_label("tool_call"), do: "tools"
+  defp call_type_label("tool_enabled_completion"), do: "chat+tools"
+  defp call_type_label(other), do: other
+
+  defp last_message_preview(log) do
+    {messages, _} = MessageNormalizer.parse_request_body(log.request_body)
+
+    messages
+    |> Enum.reverse()
+    |> Enum.find(fn msg -> msg.role == "user" end)
+    |> case do
+      nil -> nil
+      %{content: ""} -> nil
+      %{content: content} when is_binary(content) -> truncate_preview(content)
+      _ -> nil
+    end
+  end
+
+  defp truncate_preview(content) do
+    if String.length(content) > 120 do
+      String.slice(content, 0, 120) <> "..."
+    else
+      content
+    end
+  end
 
   defp format_time(dt), do: Calendar.strftime(dt, "%H:%M:%S")
 
