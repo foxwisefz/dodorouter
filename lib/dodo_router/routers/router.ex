@@ -19,13 +19,36 @@ defmodule DodoRouter.Routers.Router do
   def changeset(router, attrs) do
     router
     |> cast(attrs, [:name, :slug])
-    |> validate_required([:name, :slug])
+    |> validate_required([:name])
+    |> maybe_derive_slug()
+    |> validate_required(:slug)
     |> validate_format(:slug, ~r/^[a-z0-9-]+$/,
       message: "must be lowercase alphanumeric with dashes"
     )
     |> validate_length(:slug, min: 3, max: 50)
     |> unique_constraint(:slug)
     |> unique_constraint(:api_key_hash)
+  end
+
+  defp maybe_derive_slug(changeset) do
+    if get_field(changeset, :slug) in ["", nil] do
+      name = get_field(changeset, :name) || ""
+
+      slug =
+        name
+        |> String.downcase()
+        |> String.replace(~r/[^a-z0-9\s-]/, "")
+        |> String.replace(~r/[\s_]+/, "-")
+        |> String.trim("-")
+
+      if slug != "" do
+        put_change(changeset, :slug, slug)
+      else
+        changeset
+      end
+    else
+      changeset
+    end
   end
 
   def create_changeset(router, attrs) do

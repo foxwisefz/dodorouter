@@ -35,7 +35,7 @@ defmodule DodoRouterWeb.RouterLiveTest do
       {:ok, live, _html} = live(conn, ~p"/routers/new")
 
       live
-      |> form("#router-form", router: %{name: "Test Router", slug: "test-router"})
+      |> form("#router-form", router: %{name: "Test Router"})
       |> render_submit()
 
       assert render(live) =~ "Save your API key!"
