@@ -5,7 +5,13 @@ defmodule DodoRouterWeb.ApiKeysLive.Index do
 
   @impl true
   def mount(_params, _session, socket) do
-    routers = Routers.list_routers(socket.assigns.current_user)
+    routers =
+      socket.assigns.current_user
+      |> Routers.list_routers()
+      |> Enum.map(fn router ->
+        steps = Routers.list_routing_steps(router)
+        {router, steps}
+      end)
 
     socket =
       socket
@@ -23,7 +29,13 @@ defmodule DodoRouterWeb.ApiKeysLive.Index do
 
     case Routers.regenerate_api_key(router) do
       {:ok, _router, api_key} ->
-        routers = Routers.list_routers(socket.assigns.current_user)
+        routers =
+          socket.assigns.current_user
+          |> Routers.list_routers()
+          |> Enum.map(fn router ->
+            steps = Routers.list_routing_steps(router)
+            {router, steps}
+          end)
 
         {:noreply,
          socket
@@ -97,7 +109,7 @@ defmodule DodoRouterWeb.ApiKeysLive.Index do
 
       <%!-- Router Keys List --%>
       <div class="space-y-3">
-        <%= for router <- @routers do %>
+        <%= for {router, steps} <- @routers do %>
           <div class="rounded-xl border border-base-300/50 bg-base-100 p-4">
             <div class="flex items-center justify-between">
               <div class="flex items-center gap-3">
@@ -140,6 +152,19 @@ defmodule DodoRouterWeb.ApiKeysLive.Index do
                 </button>
               <% end %>
             </div>
+            <%= if length(steps) > 0 do %>
+              <div class="mt-3 pt-3 border-t border-base-300/30">
+                <div class="flex flex-wrap gap-1.5">
+                  <%= for step <- steps do %>
+                    <span class="inline-flex items-center gap-1 rounded-md bg-secondary/60 px-2 py-1 text-xs text-base-content/60">
+                      <span class="font-medium">{step.provider}</span>
+                      <span class="text-base-content/30">/</span>
+                      <span>{step.model}</span>
+                    </span>
+                  <% end %>
+                </div>
+              </div>
+            <% end %>
           </div>
         <% end %>
 

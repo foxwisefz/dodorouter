@@ -265,7 +265,17 @@
                         "text-base-content/60 hover:bg-secondary"
                     ]}
                   >
-                    <span class="flex h-5 w-5 items-center justify-center rounded bg-accent/10 text-accent text-xs font-bold shrink-0">
+                    <span class={[
+                      "flex h-5 w-5 items-center justify-center rounded text-xs font-bold shrink-0",
+                      router.color == "blue" && "bg-blue-100 text-blue-700",
+                      router.color == "purple" && "bg-purple-100 text-purple-700",
+                      router.color == "amber" && "bg-amber-100 text-amber-700",
+                      router.color == "rose" && "bg-rose-100 text-rose-700",
+                      router.color == "emerald" && "bg-emerald-100 text-emerald-700",
+                      router.color == "sky" && "bg-sky-100 text-sky-700",
+                      router.color == "orange" && "bg-orange-100 text-orange-700",
+                      router.color == "indigo" && "bg-indigo-100 text-indigo-700"
+                    ]}>
                       {String.upcase(String.first(router.name))}
                     </span>
                     <span class="sidebar-label truncate">{router.name}</span>
@@ -410,7 +420,17 @@
                         "text-base-content/60 hover:bg-secondary"
                     ]}
                   >
-                    <span class="flex h-5 w-5 items-center justify-center rounded bg-accent/10 text-accent text-xs font-bold">
+                    <span class={[
+                      "flex h-5 w-5 items-center justify-center rounded text-xs font-bold",
+                      router.color == "blue" && "bg-blue-100 text-blue-700",
+                      router.color == "purple" && "bg-purple-100 text-purple-700",
+                      router.color == "amber" && "bg-amber-100 text-amber-700",
+                      router.color == "rose" && "bg-rose-100 text-rose-700",
+                      router.color == "emerald" && "bg-emerald-100 text-emerald-700",
+                      router.color == "sky" && "bg-sky-100 text-sky-700",
+                      router.color == "orange" && "bg-orange-100 text-orange-700",
+                      router.color == "indigo" && "bg-indigo-100 text-indigo-700"
+                    ]}>
                       {String.upcase(String.first(router.name))}
                     </span>
                     <span class="truncate">{router.name}</span>

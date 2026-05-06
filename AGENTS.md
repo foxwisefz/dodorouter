@@ -1,4 +1,18 @@
-This is a web application written using the Phoenix web framework.
+This is a web application written using the Phoenix web framework. It is an LLM proxy/router that accepts requests from OpenAI-compatible and Anthropic-compatible clients and routes them to configured providers with automatic fallbacks.
+
+## Proxy API Endpoints
+
+The proxy supports both **OpenAI** and **Anthropic** API formats. Both endpoints are per-router (scoped under `/r/:router_slug/v1/`):
+
+- `POST /r/:router_slug/v1/chat/completions` — OpenAI-compatible chat completions (streaming and sync)
+- `POST /r/:router_slug/v1/messages` — Anthropic-compatible messages (streaming and sync)
+- `GET /r/:router_slug/v1/models` — OpenAI-compatible models list
+
+The Anthropic endpoint converts incoming Anthropic-format requests to OpenAI format internally, dispatches through the same proxy pipeline, then converts the response back to Anthropic format. This is handled by `AnthropicFormat` and `AnthropicProxyController`. Streaming uses SSE events in Anthropic's format.
+
+Authentication is via the router's API key passed as `Bearer` token (handled by `Plugs.ApiAuth`).
+
+There is also a legacy endpoint at `POST /v1/chat/completions` for backwards compatibility.
 
 ## Project guidelines
 
