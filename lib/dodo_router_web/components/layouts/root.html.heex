@@ -63,15 +63,54 @@
             </span>
           </div>
 
-          <%!-- Right: Notifications + Avatar --%>
+          <%!-- Right: Notifications + Profile Dropdown --%>
           <div class="flex items-center gap-3">
             <div class="relative">
               <.icon name="hero-bell" class="size-4 text-base-content/50" />
               <span class="absolute -top-0.5 -right-0.5 h-1.5 w-1.5 rounded-full bg-accent">
               </span>
             </div>
-            <div class="flex h-7 w-7 items-center justify-center rounded-full bg-accent/10 text-xs font-bold text-accent">
-              {String.first(@current_scope.user.email) |> String.upcase()}
+
+            <%!-- Profile Dropdown --%>
+            <div class="relative">
+              <input type="checkbox" id="profile-dropdown" class="hidden peer" />
+              <label
+                for="profile-dropdown"
+                class="flex h-8 w-8 items-center justify-center rounded-full bg-accent/10 text-xs font-bold text-accent cursor-pointer hover:bg-accent/20 transition-colors"
+              >
+                {String.first(@current_scope.user.email) |> String.upcase()}
+              </label>
+              <%!-- Dropdown menu --%>
+              <div class="absolute right-0 top-10 w-56 rounded-xl border border-base-300/50 bg-base-100 shadow-lg opacity-0 invisible peer-checked:opacity-100 peer-checked:visible transition-all duration-150 z-50 py-1">
+                <div class="px-3 py-2 border-b border-base-300/30">
+                  <p class="text-xs text-base-content/40">Signed in as</p>
+                  <p class="text-sm font-medium text-base-content truncate">{@current_scope.user.email}</p>
+                </div>
+                <div class="px-3 py-2 border-b border-base-300/30">
+                  <p class="text-xs text-base-content/40 mb-1.5">Theme</p>
+                  <.theme_toggle />
+                </div>
+                <div class="p-1">
+                  <.link
+                    href={~p"/users/settings"}
+                    class="flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm text-base-content/70 hover:bg-secondary transition-colors"
+                  >
+                    <.icon name="hero-cog-6-tooth" class="size-4" /> Settings
+                  </.link>
+                  <.link
+                    href={~p"/users/log-out"}
+                    method="delete"
+                    class="flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm text-error/80 hover:bg-error/5 transition-colors"
+                  >
+                    <.icon name="hero-arrow-right-on-rectangle" class="size-4" /> Log out
+                  </.link>
+                </div>
+              </div>
+              <%!-- Click-away backdrop --%>
+              <label
+                for="profile-dropdown"
+                class="fixed inset-0 z-40 hidden peer-checked:block"
+              ></label>
             </div>
           </div>
         </div>
@@ -101,7 +140,7 @@
               <.icon name="hero-adjustments-horizontal" class="size-4" /> Routers
             </a>
             <a
-              href={~p"/providers"}
+              href={~p"/api-keys"}
               class="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-base-content/60 hover:bg-secondary transition-colors"
             >
               <.icon name="hero-key" class="size-4" /> API Keys
@@ -111,24 +150,39 @@
               <p class="mb-1.5 px-3 text-xs font-semibold uppercase tracking-wider text-base-content/40">
                 Providers
               </p>
-              <a
-                href={~p"/providers"}
-                class="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-base-content/60 hover:bg-secondary transition-colors"
-              >
-                <span class="flex h-5 w-5 items-center justify-center rounded bg-amber-100 text-xs font-bold text-amber-700">
-                  Z
-                </span>
-                z.ai
-              </a>
-              <a
-                href={~p"/providers"}
-                class="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-base-content/60 hover:bg-secondary transition-colors"
-              >
-                <span class="flex h-5 w-5 items-center justify-center rounded bg-sky-100 text-xs font-bold text-sky-700">
-                  M
-                </span>
-                Moonshot
-              </a>
+              <%= if assigns[:nav_providers] && length(@nav_providers) > 0 do %>
+                <%= for provider <- @nav_providers do %>
+                  <a
+                    href={~p"/providers"}
+                    class="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-base-content/60 hover:bg-secondary transition-colors"
+                  >
+                    <span class={[
+                      "flex h-5 w-5 items-center justify-center rounded text-xs font-bold",
+                      provider.color == "emerald" && "bg-emerald-100 text-emerald-700",
+                      provider.color == "amber" && "bg-amber-100 text-amber-700",
+                      provider.color == "sky" && "bg-sky-100 text-sky-700",
+                      provider.color == "blue" && "bg-blue-100 text-blue-700",
+                      provider.color == "purple" && "bg-purple-100 text-purple-700",
+                      provider.color == "orange" && "bg-orange-100 text-orange-700",
+                      provider.color == "indigo" && "bg-indigo-100 text-indigo-700",
+                      provider.color == "rose" && "bg-rose-100 text-rose-700",
+                      provider.color not in ["emerald", "amber", "sky", "blue", "purple", "orange", "indigo", "rose"] && "bg-secondary text-base-content/60"
+                    ]}>
+                      {String.upcase(String.first(provider.name))}
+                    </span>
+                    <span class="truncate">{provider.name}</span>
+                    <span class={[
+                      "ml-auto text-[10px] font-semibold rounded-full px-1.5 py-0.5",
+                      provider.count > 0 && "bg-accent/10 text-accent",
+                      provider.count == 0 && "bg-secondary text-base-content/40"
+                    ]}>
+                      {provider.count}
+                    </span>
+                  </a>
+                <% end %>
+              <% else %>
+                <p class="px-3 py-2 text-xs text-base-content/40">No providers configured</p>
+              <% end %>
             </div>
 
             <div class="mt-5">
@@ -145,23 +199,13 @@
           </div>
 
           <div class="flex-shrink-0 border-t border-base-300/50 p-3">
-            <div class="flex items-center justify-between mb-2">
-              <.theme_toggle />
-              <.link
-                href={~p"/users/log-out"}
-                method="delete"
-                class="p-2 rounded-lg hover:bg-secondary text-base-content/40 hover:text-base-content transition-colors"
-                title="Log out"
-              >
-                <.icon name="hero-arrow-right-on-rectangle" class="size-4" />
-              </.link>
-            </div>
-            <div class="flex items-center gap-2 px-1 pt-2 border-t border-base-300/30">
-              <div class="w-6 h-6 rounded-full bg-accent/10 text-accent flex items-center justify-center text-xs font-bold flex-shrink-0">
-                {String.first(@current_scope.user.email) |> String.upcase()}
-              </div>
-              <p class="text-xs text-base-content/50 truncate">{@current_scope.user.email}</p>
-            </div>
+            <.link
+              href={~p"/users/log-out"}
+              method="delete"
+              class="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-base-content/40 hover:text-error/80 hover:bg-error/5 transition-colors"
+            >
+              <.icon name="hero-arrow-right-on-rectangle" class="size-4" /> Log out
+            </.link>
           </div>
         </aside>
 
@@ -200,7 +244,7 @@
               <.icon name="hero-adjustments-horizontal" class="size-4" /> Routers
             </a>
             <a
-              href={~p"/providers"}
+              href={~p"/api-keys"}
               class="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-base-content/60 hover:bg-secondary transition-colors"
             >
               <.icon name="hero-key" class="size-4" /> API Keys
@@ -210,24 +254,39 @@
               <p class="mb-1.5 px-3 text-xs font-semibold uppercase tracking-wider text-base-content/40">
                 Providers
               </p>
-              <a
-                href={~p"/providers"}
-                class="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-base-content/60 hover:bg-secondary transition-colors"
-              >
-                <span class="flex h-5 w-5 items-center justify-center rounded bg-amber-100 text-xs font-bold text-amber-700">
-                  Z
-                </span>
-                z.ai
-              </a>
-              <a
-                href={~p"/providers"}
-                class="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-base-content/60 hover:bg-secondary transition-colors"
-              >
-                <span class="flex h-5 w-5 items-center justify-center rounded bg-sky-100 text-xs font-bold text-sky-700">
-                  M
-                </span>
-                Moonshot
-              </a>
+              <%= if assigns[:nav_providers] && length(@nav_providers) > 0 do %>
+                <%= for provider <- @nav_providers do %>
+                  <a
+                    href={~p"/providers"}
+                    class="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-base-content/60 hover:bg-secondary transition-colors"
+                  >
+                    <span class={[
+                      "flex h-5 w-5 items-center justify-center rounded text-xs font-bold",
+                      provider.color == "emerald" && "bg-emerald-100 text-emerald-700",
+                      provider.color == "amber" && "bg-amber-100 text-amber-700",
+                      provider.color == "sky" && "bg-sky-100 text-sky-700",
+                      provider.color == "blue" && "bg-blue-100 text-blue-700",
+                      provider.color == "purple" && "bg-purple-100 text-purple-700",
+                      provider.color == "orange" && "bg-orange-100 text-orange-700",
+                      provider.color == "indigo" && "bg-indigo-100 text-indigo-700",
+                      provider.color == "rose" && "bg-rose-100 text-rose-700",
+                      provider.color not in ["emerald", "amber", "sky", "blue", "purple", "orange", "indigo", "rose"] && "bg-secondary text-base-content/60"
+                    ]}>
+                      {String.upcase(String.first(provider.name))}
+                    </span>
+                    <span class="truncate">{provider.name}</span>
+                    <span class={[
+                      "ml-auto text-[10px] font-semibold rounded-full px-1.5 py-0.5",
+                      provider.count > 0 && "bg-accent/10 text-accent",
+                      provider.count == 0 && "bg-secondary text-base-content/40"
+                    ]}>
+                      {provider.count}
+                    </span>
+                  </a>
+                <% end %>
+              <% else %>
+                <p class="px-3 py-2 text-xs text-base-content/40">No providers configured</p>
+              <% end %>
             </div>
 
             <div class="mt-5">
@@ -244,23 +303,13 @@
           </div>
 
           <div class="flex-shrink-0 border-t border-base-300/50 p-3">
-            <div class="flex items-center justify-between mb-2">
-              <.theme_toggle />
-              <.link
-                href={~p"/users/log-out"}
-                method="delete"
-                class="p-2 rounded-lg hover:bg-secondary text-base-content/40 hover:text-base-content transition-colors"
-                title="Log out"
-              >
-                <.icon name="hero-arrow-right-on-rectangle" class="size-4" />
-              </.link>
-            </div>
-            <div class="flex items-center gap-2 px-1 pt-2 border-t border-base-300/30">
-              <div class="w-6 h-6 rounded-full bg-accent/10 text-accent flex items-center justify-center text-xs font-bold flex-shrink-0">
-                {String.first(@current_scope.user.email) |> String.upcase()}
-              </div>
-              <p class="text-xs text-base-content/50 truncate">{@current_scope.user.email}</p>
-            </div>
+            <.link
+              href={~p"/users/log-out"}
+              method="delete"
+              class="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-base-content/40 hover:text-error/80 hover:bg-error/5 transition-colors"
+            >
+              <.icon name="hero-arrow-right-on-rectangle" class="size-4" /> Log out
+            </.link>
           </div>
         </aside>
       </div>
