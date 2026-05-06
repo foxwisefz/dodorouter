@@ -174,6 +174,12 @@ defmodule DodoRouter.Accounts do
     |> update_user_and_delete_all_tokens()
   end
 
+  def update_user_preferences(user, attrs) do
+    user
+    |> User.preferences_changeset(attrs)
+    |> Repo.update()
+  end
+
   ## Session
 
   @doc """

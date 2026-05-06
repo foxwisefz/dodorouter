@@ -1,5 +1,10 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="light">
+<html
+  lang="en"
+  data-theme={
+    (assigns[:current_scope] && @current_scope.user && @current_scope.user.theme) || "light"
+  }
+>
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -155,8 +160,12 @@
         <%!-- Desktop Sidebar (fixed, full height) --%>
         <aside
           id="desktop-sidebar"
-          class="hidden lg:flex w-56 flex-col bg-base-100 border-r border-base-300/50 fixed top-[49px] left-0 bottom-0 z-30 transition-all duration-200"
-          data-collapsed="false"
+          class={[
+            "hidden lg:flex flex-col bg-base-100 border-r border-base-300/50 fixed top-[49px] left-0 bottom-0 z-30 transition-all duration-200",
+            @current_scope.user.sidebar_collapsed && "w-16",
+            !@current_scope.user.sidebar_collapsed && "w-56"
+          ]}
+          data-collapsed={to_string(@current_scope.user.sidebar_collapsed)}
         >
           <div class="flex-1 overflow-y-auto p-3 space-y-0.5">
             <a
@@ -289,7 +298,11 @@
         <%!-- Main Content --%>
         <main
           id="main-content"
-          class="flex-1 lg:ml-56 p-6 bg-secondary/30 overflow-auto transition-all duration-200"
+          class={[
+            "flex-1 p-6 bg-secondary/30 overflow-auto transition-all duration-200",
+            @current_scope.user.sidebar_collapsed && "lg:ml-16",
+            !@current_scope.user.sidebar_collapsed && "lg:ml-56"
+          ]}
         >
           {@inner_content}
         </main>

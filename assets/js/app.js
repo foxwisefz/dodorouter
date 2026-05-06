@@ -40,8 +40,6 @@ const liveSocket = new LiveSocket("/live", Socket, {
 topbar.config({barColors: {0: "#29d"}, shadowColor: "rgba(0, 0, 0, .3)"})
 let pendingRequests = 0
 
-const SIDEBAR_COLLAPSED_KEY = "sidebar-collapsed"
-
 function applySidebarState(collapsed) {
   const sidebar = document.getElementById("desktop-sidebar")
   const main = document.getElementById("main-content")
@@ -70,6 +68,17 @@ function applySidebarState(collapsed) {
   }
 }
 
+function savePreference(payload) {
+  fetch("/preferences", {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json",
+      "x-csrf-token": document.querySelector("meta[name='csrf-token']")?.getAttribute("content"),
+    },
+    body: JSON.stringify(payload),
+  }).catch(() => {})
+}
+
 window.addEventListener("phx:page-loading-start", _info => {
   pendingRequests++
   topbar.show(300)
@@ -79,8 +88,10 @@ window.addEventListener("phx:page-loading-stop", _info => {
   if (pendingRequests === 0) {
     topbar.hide()
   }
-  const saved = localStorage.getItem(SIDEBAR_COLLAPSED_KEY)
-  if (saved === "true") applySidebarState(true)
+  const sidebar = document.getElementById("desktop-sidebar")
+  if (sidebar?.getAttribute("data-collapsed") === "true") {
+    applySidebarState(true)
+  }
 })
 
 // connect if there are any LiveViews on the page
@@ -94,17 +105,18 @@ window.liveSocket = liveSocket
 
 window.addEventListener("phx:set-theme", (e) => {
   const theme = e.target.dataset.phxTheme
-  if (theme === "system") {
-    const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches
-    document.documentElement.setAttribute("data-theme", prefersDark ? "dark" : "light")
-  } else {
-    document.documentElement.setAttribute("data-theme", theme)
-  }
+  const resolved = theme === "system"
+    ? (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light")
+    : theme
+  document.documentElement.setAttribute("data-theme", resolved)
+  savePreference({theme})
 })
 
 document.addEventListener("DOMContentLoaded", () => {
-  const saved = localStorage.getItem(SIDEBAR_COLLAPSED_KEY)
-  if (saved === "true") applySidebarState(true)
+  const sidebar = document.getElementById("desktop-sidebar")
+  if (sidebar?.getAttribute("data-collapsed") === "true") {
+    applySidebarState(true)
+  }
 
   document.addEventListener("click", (e) => {
     const toggle = e.target.closest("#sidebar-toggle")
@@ -114,7 +126,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const isCollapsed = sidebar?.getAttribute("data-collapsed") === "true"
     const newState = !isCollapsed
     applySidebarState(newState)
-    localStorage.setItem(SIDEBAR_COLLAPSED_KEY, String(newState))
+    savePreference({sidebar_collapsed: newState})
   })
 })
 
