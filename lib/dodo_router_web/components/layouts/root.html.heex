@@ -468,7 +468,27 @@
       </div>
 
       <%!-- Go-To Command Palette --%>
-      <div id="go-to-modal" class="hidden fixed inset-0 z-[60]">
+      <div
+        id="go-to-modal"
+        class="hidden fixed inset-0 z-[60]"
+        data-routers={
+          assigns[:nav_routers] &&
+            Jason.encode!(
+              Enum.map(@nav_routers, fn r ->
+                %{
+                  label: r.name,
+                  path: "/routers/#{r.id}",
+                  color: r.color,
+                  letter: String.upcase(String.first(r.name)),
+                  keywords: [String.downcase(r.name), String.downcase(r.slug)]
+                }
+              end)
+            )
+        }
+        end)
+        )
+        }
+      >
         <div id="go-to-backdrop" class="absolute inset-0 bg-black/50"></div>
         <div class="relative mx-auto mt-[15vh] w-full max-w-md">
           <div class="bg-base-100 rounded-xl border border-base-300/50 shadow-2xl overflow-hidden">
