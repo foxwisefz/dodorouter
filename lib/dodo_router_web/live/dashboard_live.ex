@@ -2,6 +2,7 @@ defmodule DodoRouterWeb.DashboardLive do
   use DodoRouterWeb, :live_view
 
   alias DodoRouter.{Routers, Logs}
+  alias DodoRouter.Proxy.Adapter.Registry
 
   @refresh_interval_ms 5_000
 
@@ -199,15 +200,12 @@ defmodule DodoRouterWeb.DashboardLive do
                   idx > 0 && "bg-secondary/50"
                 ]}>
                   <div class="flex items-center gap-2">
-                    <span class={[
-                      "flex h-5 w-5 items-center justify-center rounded text-xs font-bold",
-                      step.provider == "zai" && "bg-amber-100 text-amber-700",
-                      step.provider == "moonshot" && "bg-sky-100 text-sky-700",
-                      step.provider != "zai" && step.provider != "moonshot" &&
-                        "bg-secondary text-base-content/60"
-                    ]}>
-                      {String.upcase(String.first(step.provider || ""))}
-                    </span>
+                    <div class="w-5 h-5 rounded flex items-center justify-center shrink-0 bg-base-200">
+                      <.provider_logo
+                        slug={Registry.to_key_slug(step.provider, step.plan_type || "standard")}
+                        class="w-3.5 h-3.5"
+                      />
+                    </div>
                     <span class="text-sm font-medium text-base-content">
                       {step.provider} / {step.model}
                     </span>
@@ -284,17 +282,35 @@ defmodule DodoRouterWeb.DashboardLive do
                   </td>
                   <td class="px-4 py-2 text-sm hidden sm:table-cell">
                     <%= if is_list(Map.get(log, :attempted_steps)) and length(log.attempted_steps) > 1 do %>
-                      <span class="line-through text-base-content/30">
-                        {List.first(log.attempted_steps)["provider"]}
-                      </span>
-                      <span class="text-base-content/30 mx-1">&rarr;</span>
-                      <span class="font-medium text-base-content">
-                        {log.final_provider} / {log.final_model}
-                      </span>
+                      <div class="flex items-center gap-1">
+                        <span class="line-through text-base-content/30">
+                          {List.first(log.attempted_steps)["provider"]}
+                        </span>
+                        <span class="text-base-content/30 mx-1">&rarr;</span>
+                        <div class="flex items-center gap-1.5">
+                          <div class="w-3.5 h-3.5 rounded flex items-center justify-center shrink-0 bg-base-200">
+                            <.provider_logo
+                              slug={normalize_slug(log.final_provider)}
+                              class="w-2.5 h-2.5"
+                            />
+                          </div>
+                          <span class="font-medium text-base-content">
+                            {log.final_provider} / {log.final_model}
+                          </span>
+                        </div>
+                      </div>
                     <% else %>
-                      <span class="font-medium text-base-content">{log.final_provider}</span>
-                      <span class="text-base-content/40"> / </span>
-                      <span class="text-base-content/60">{log.final_model}</span>
+                      <div class="flex items-center gap-1.5">
+                        <div class="w-3.5 h-3.5 rounded flex items-center justify-center shrink-0 bg-base-200">
+                          <.provider_logo
+                            slug={normalize_slug(log.final_provider)}
+                            class="w-2.5 h-2.5"
+                          />
+                        </div>
+                        <span class="font-medium text-base-content">{log.final_provider}</span>
+                        <span class="text-base-content/40"> / </span>
+                        <span class="text-base-content/60">{log.final_model}</span>
+                      </div>
                     <% end %>
                   </td>
                   <td class="px-4 py-2 text-sm font-mono text-base-content/50 hidden md:table-cell">

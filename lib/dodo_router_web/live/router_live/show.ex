@@ -443,6 +443,12 @@ defmodule DodoRouterWeb.RouterLive.Show do
                 </div>
                 <div class="flex-1 min-w-0">
                   <div class="flex items-center gap-2 flex-wrap">
+                    <div class="w-5 h-5 rounded flex items-center justify-center shrink-0 bg-base-200">
+                      <.provider_logo
+                        slug={Registry.to_key_slug(step.provider, step.plan_type)}
+                        class="w-3.5 h-3.5"
+                      />
+                    </div>
                     <span class="font-medium text-base-content/90">{step.provider}</span>
                     <span class="text-base-content/40">/</span>
                     <span class="font-mono text-sm text-base-content/70">{step.model}</span>
@@ -589,9 +595,14 @@ defmodule DodoRouterWeb.RouterLive.Show do
                     log.status == "error" && "bg-error"
                   ]}>
                   </span>
-                  <span class="font-mono text-base-content/80">
-                    {log.final_provider}/{log.final_model}
-                  </span>
+                  <div class="flex items-center gap-2">
+                    <div class="w-4 h-4 rounded flex items-center justify-center shrink-0 bg-base-200">
+                      <.provider_logo slug={normalize_slug(log.final_provider)} class="w-3 h-3" />
+                    </div>
+                    <span class="font-mono text-base-content/80">
+                      {log.final_provider}/{log.final_model}
+                    </span>
+                  </div>
                   <span
                     :if={log.call_type}
                     class="px-1.5 py-0.5 rounded text-xs font-medium bg-base-300/50 text-base-content/70"
@@ -638,7 +649,12 @@ defmodule DodoRouterWeb.RouterLive.Show do
             >
               <div class="flex items-center gap-3">
                 <span class={"w-2 h-2 rounded-full #{event_dot_class(event)}"}></span>
-                <span class="font-mono text-base-content/80">{event.provider}/{event.model}</span>
+                <div class="flex items-center gap-2">
+                  <div class="w-4 h-4 rounded flex items-center justify-center shrink-0 bg-base-200">
+                    <.provider_logo slug={normalize_slug(event.provider)} class="w-3 h-3" />
+                  </div>
+                  <span class="font-mono text-base-content/80">{event.provider}/{event.model}</span>
+                </div>
                 <span
                   :if={event.had_fallback}
                   class="px-1.5 py-0.5 bg-warning/20 text-warning rounded text-xs"
