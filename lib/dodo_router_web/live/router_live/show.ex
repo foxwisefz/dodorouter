@@ -289,26 +289,20 @@ defmodule DodoRouterWeb.RouterLive.Show do
               </div>
             </div>
           </div>
-          <.link
-            patch={~p"/routers/#{@router}/routing"}
-            class="btn btn-sm bg-base-200 border-base-300/50 hover:bg-base-300 gap-2"
-          >
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              class="h-4 w-4"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
+          <div class="flex items-center gap-2">
+            <.link
+              navigate={~p"/routers/#{@router}/recordings"}
+              class="btn btn-sm bg-base-200 border-base-300/50 hover:bg-base-300 gap-2"
             >
-              <path
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                stroke-width="2"
-                d="M4 6h16M4 12h16M4 18h7"
-              />
-            </svg>
-            Routing
-          </.link>
+              <.icon name="hero-stop-circle" class="size-4" /> Recordings
+            </.link>
+            <.link
+              navigate={~p"/routers/#{@router}/sessions"}
+              class="btn btn-sm bg-base-200 border-base-300/50 hover:bg-base-300 gap-2"
+            >
+              <.icon name="hero-video-camera" class="size-4" /> Sessions
+            </.link>
+          </div>
         </div>
         
     <!-- New API Key Alert -->
@@ -338,75 +332,6 @@ defmodule DodoRouterWeb.RouterLive.Show do
               </code>
             </div>
           </div>
-        </div>
-
-        <div class="flex items-center gap-2">
-          <.link
-            navigate={~p"/routers/#{@router}/recordings"}
-            class="btn btn-sm bg-base-200 border-base-300/50 hover:bg-base-300 gap-2"
-          >
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              class="h-4 w-4"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-            >
-              <path
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                stroke-width="2"
-                d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-              />
-              <path
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                stroke-width="2"
-                d="M9 12a3 3 0 106 0 3 3 0 00-6 0z"
-              />
-            </svg>
-            Recordings
-          </.link>
-          <.link
-            navigate={~p"/routers/#{@router}/sessions"}
-            class="btn btn-sm bg-base-200 border-base-300/50 hover:bg-base-300 gap-2"
-          >
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              class="h-4 w-4"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-            >
-              <path
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                stroke-width="2"
-                d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"
-              />
-            </svg>
-            Sessions
-          </.link>
-          <.link
-            patch={~p"/routers/#{@router}/routing"}
-            class="btn btn-sm bg-base-200 border-base-300/50 hover:bg-base-300 gap-2"
-          >
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              class="h-4 w-4"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-            >
-              <path
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                stroke-width="2"
-                d="M4 6h16M4 12h16M4 18h7"
-              />
-            </svg>
-            Routing
-          </.link>
         </div>
         
     <!-- Stats -->
@@ -466,6 +391,9 @@ defmodule DodoRouterWeb.RouterLive.Show do
             Replace <code class="text-primary font-medium">YOUR_API_KEY</code>
             with your router API key:
             <code class="font-mono text-base-content/70">{@router.api_key_prefix}...</code>
+            <.link navigate={~p"/api-keys"} class="text-accent hover:underline ml-1">
+              Manage keys
+            </.link>
           </p>
         </div>
         

@@ -5,18 +5,14 @@ defmodule DodoRouterWeb.ApiKeysLive.Index do
 
   @impl true
   def mount(_params, _session, socket) do
-    routers =
-      socket.assigns.current_user
-      |> Routers.list_routers()
-      |> Enum.map(fn router ->
-        steps = Routers.list_routing_steps(router)
-        {router, steps}
-      end)
+    routers = Routers.list_routers(socket.assigns.current_user)
+    base_url = DodoRouterWeb.Endpoint.url()
 
     socket =
       socket
       |> assign(:page_title, "API Keys")
       |> assign(:routers, routers)
+      |> assign(:base_url, base_url)
       |> assign(:regenerating_id, nil)
       |> assign(:new_key, nil)
 
@@ -32,10 +28,6 @@ defmodule DodoRouterWeb.ApiKeysLive.Index do
         routers =
           socket.assigns.current_user
           |> Routers.list_routers()
-          |> Enum.map(fn router ->
-            steps = Routers.list_routing_steps(router)
-            {router, steps}
-          end)
 
         {:noreply,
          socket
@@ -68,7 +60,7 @@ defmodule DodoRouterWeb.ApiKeysLive.Index do
       <div class="mb-8">
         <h1 class="text-2xl font-bold text-base-content">API Keys</h1>
         <p class="text-base-content/50 text-sm mt-1">
-          Manage your router API keys. These are the keys you use in your OpenAI SDK.
+          Manage your router API keys. Use these keys to authenticate with the proxy.
         </p>
       </div>
 
@@ -109,7 +101,7 @@ defmodule DodoRouterWeb.ApiKeysLive.Index do
 
       <%!-- Router Keys List --%>
       <div class="space-y-3">
-        <%= for {router, steps} <- @routers do %>
+        <%= for router <- @routers do %>
           <div class="rounded-xl border border-base-300/50 bg-base-100 p-4">
             <div class="flex items-center justify-between">
               <div class="flex items-center gap-3">
@@ -117,10 +109,34 @@ defmodule DodoRouterWeb.ApiKeysLive.Index do
                   <.icon name="hero-adjustments-horizontal" class="size-4" />
                 </div>
                 <div>
-                  <h3 class="text-sm font-semibold text-base-content">{router.name}</h3>
+                  <div class="flex items-center gap-2">
+                    <h3 class="text-sm font-semibold text-base-content">{router.name}</h3>
+                    <.link
+                      navigate={~p"/routers/#{router.id}"}
+                      class="text-xs text-accent hover:underline"
+                    >
+                      View router
+                    </.link>
+                  </div>
+                  <div class="flex items-center gap-1.5 mt-0.5">
+                    <p class="text-xs text-base-content/40 shrink-0">Endpoint:</p>
+                    <code
+                      id={"endpoint-#{router.id}"}
+                      class="font-mono text-xs text-base-content/60 truncate"
+                    >
+                      {@base_url}/r/{router.slug}/v1/chat/completions
+                    </code>
+                    <button
+                      phx-click={JS.dispatch("phx:copy", to: "#endpoint-#{router.id}")}
+                      class="p-1 rounded hover:bg-base-200 text-base-content/40 hover:text-base-content/60 transition-colors shrink-0"
+                      title="Copy endpoint"
+                    >
+                      <.icon name="hero-clipboard" class="size-3" />
+                    </button>
+                  </div>
                   <p class="text-xs text-base-content/40 mt-0.5">
-                    Prefix:
-                    <code class="font-mono text-base-content/60">{router.api_key_prefix}</code>
+                    Existing key:
+                    <code class="font-mono text-base-content/60">{router.api_key_prefix}•••••••</code>
                   </p>
                 </div>
               </div>
@@ -152,19 +168,6 @@ defmodule DodoRouterWeb.ApiKeysLive.Index do
                 </button>
               <% end %>
             </div>
-            <%= if length(steps) > 0 do %>
-              <div class="mt-3 pt-3 border-t border-base-300/30">
-                <div class="flex flex-wrap gap-1.5">
-                  <%= for step <- steps do %>
-                    <span class="inline-flex items-center gap-1 rounded-md bg-secondary/60 px-2 py-1 text-xs text-base-content/60">
-                      <span class="font-medium">{step.provider}</span>
-                      <span class="text-base-content/30">/</span>
-                      <span>{step.model}</span>
-                    </span>
-                  <% end %>
-                </div>
-              </div>
-            <% end %>
           </div>
         <% end %>
 
