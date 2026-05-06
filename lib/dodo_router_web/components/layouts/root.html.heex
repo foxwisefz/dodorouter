@@ -99,14 +99,17 @@
             </a>
           </div>
 
-          <%!-- Center: Search --%>
-          <div class="hidden md:flex items-center gap-1.5 rounded-lg border border-base-300 bg-secondary/50 px-3 py-1.5 text-sm text-base-content/40 w-64">
+          <%!-- Center: Go To --%>
+          <button
+            id="go-to-trigger"
+            class="hidden md:flex items-center gap-1.5 rounded-lg border border-base-300 bg-secondary/50 px-3 py-1.5 text-sm text-base-content/40 w-64 hover:bg-secondary transition-colors"
+          >
             <.icon name="hero-magnifying-glass" class="size-3.5" />
-            <span>Search requests...</span>
+            <span>Go to...</span>
             <span class="ml-auto rounded border border-base-300 bg-base-100 px-1.5 py-0.5 text-xs text-base-content/30">
               &#8984;K
             </span>
-          </div>
+          </button>
 
           <%!-- Right: Profile Dropdown --%>
           <div class="relative">
@@ -156,12 +159,12 @@
       </header>
 
       <%!-- Main Layout: Sidebar + Content --%>
-      <div class="flex flex-1 pt-[49px]">
+      <div class="flex flex-1">
         <%!-- Desktop Sidebar (fixed, full height) --%>
         <aside
           id="desktop-sidebar"
           class={[
-            "hidden lg:flex flex-col bg-base-100 border-r border-base-300/50 fixed top-[49px] left-0 bottom-0 z-30 transition-all duration-200",
+            "hidden lg:flex flex-col bg-base-100 border-r border-base-300/50 fixed top-[59px] left-0 bottom-0 z-30 transition-all duration-200",
             @current_scope.user.sidebar_collapsed && "w-16",
             !@current_scope.user.sidebar_collapsed && "w-56"
           ]}
@@ -299,7 +302,7 @@
         <main
           id="main-content"
           class={[
-            "flex-1 p-6 bg-secondary/30 overflow-auto transition-all duration-200",
+            "flex-1 pt-[75px] px-6 pb-6 bg-secondary/30 overflow-auto transition-all duration-200",
             @current_scope.user.sidebar_collapsed && "lg:ml-16",
             !@current_scope.user.sidebar_collapsed && "lg:ml-56"
           ]}
@@ -432,6 +435,26 @@
             </a>
           </div>
         </aside>
+      </div>
+
+      <%!-- Go-To Command Palette --%>
+      <div id="go-to-modal" class="hidden fixed inset-0 z-[60]">
+        <div id="go-to-backdrop" class="absolute inset-0 bg-black/50"></div>
+        <div class="relative mx-auto mt-[15vh] w-full max-w-md">
+          <div class="bg-base-100 rounded-xl border border-base-300/50 shadow-2xl overflow-hidden">
+            <div class="flex items-center gap-2 px-4 py-3 border-b border-base-300/50">
+              <.icon name="hero-magnifying-glass" class="size-4 text-base-content/40" />
+              <input
+                id="go-to-input"
+                type="text"
+                placeholder="Go to..."
+                class="flex-1 bg-transparent text-sm text-base-content placeholder:text-base-content/40 outline-none"
+                autocomplete="off"
+              />
+            </div>
+            <ul id="go-to-results" class="max-h-72 overflow-y-auto p-1.5" role="listbox"></ul>
+          </div>
+        </div>
       </div>
     <% else %>
       <div class="min-h-screen flex flex-col">

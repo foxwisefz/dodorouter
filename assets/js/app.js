@@ -128,6 +128,108 @@ document.addEventListener("DOMContentLoaded", () => {
     applySidebarState(newState)
     savePreference({sidebar_collapsed: newState})
   })
+
+  const goToItems = [
+    {label: "Dashboard", path: "/dashboard", icon: "home", keywords: ["home", "dashboard"]},
+    {label: "Requests", path: "/logs", icon: "clock", keywords: ["logs", "requests", "log", "request"]},
+    {label: "Routers", path: "/routers", icon: "adjustments-horizontal", keywords: ["routers", "router"]},
+    {label: "API Keys", path: "/api-keys", icon: "key", keywords: ["api", "keys", "key", "tokens"]},
+    {label: "Providers", path: "/providers", icon: "server", keywords: ["providers", "provider"]},
+    {label: "Settings", path: "/users/settings", icon: "cog-6-tooth", keywords: ["settings", "config", "preferences"]},
+  ]
+
+  const modal = document.getElementById("go-to-modal")
+  const input = document.getElementById("go-to-input")
+  const results = document.getElementById("go-to-results")
+  const backdrop = document.getElementById("go-to-backdrop")
+  const trigger = document.getElementById("go-to-trigger")
+  let activeIndex = -1
+
+  function openModal() {
+    modal.classList.remove("hidden")
+    input.value = ""
+    renderItems(goToItems)
+    activeIndex = -1
+    setTimeout(() => input.focus(), 0)
+  }
+
+  function closeModal() {
+    modal.classList.add("hidden")
+    input.value = ""
+    activeIndex = -1
+  }
+
+  function renderItems(items) {
+    results.innerHTML = items.map((item, i) => `
+      <li>
+        <a href="${item.path}" data-index="${i}"
+           class="go-to-item flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-base-content/70 hover:bg-accent/10 hover:text-accent transition-colors">
+          <span class="flex items-center justify-center size-5 text-base-content/40">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-4">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
+            </svg>
+          </span>
+          ${item.label}
+        </a>
+      </li>
+    `).join("")
+    activeIndex = -1
+  }
+
+  function updateActive(items) {
+    const els = results.querySelectorAll(".go-to-item")
+    els.forEach((el, i) => {
+      el.classList.toggle("bg-accent/10", i === activeIndex)
+      el.classList.toggle("text-accent", i === activeIndex)
+    })
+    if (els[activeIndex]) els[activeIndex].scrollIntoView({block: "nearest"})
+  }
+
+  trigger?.addEventListener("click", openModal)
+  backdrop?.addEventListener("click", closeModal)
+
+  input?.addEventListener("input", () => {
+    const q = input.value.toLowerCase().trim()
+    if (!q) { renderItems(goToItems); return }
+    const filtered = goToItems.filter(item =>
+      item.label.toLowerCase().includes(q) ||
+      item.keywords.some(k => k.includes(q))
+    )
+    renderItems(filtered)
+    activeIndex = -1
+  })
+
+  input?.addEventListener("keydown", (e) => {
+    const items = results.querySelectorAll(".go-to-item")
+    if (e.key === "ArrowDown") {
+      e.preventDefault()
+      activeIndex = Math.min(activeIndex + 1, items.length - 1)
+      updateActive(items)
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault()
+      activeIndex = Math.max(activeIndex - 1, 0)
+      updateActive(items)
+    } else if (e.key === "Enter" && activeIndex >= 0 && items[activeIndex]) {
+      e.preventDefault()
+      items[activeIndex].click()
+    } else if (e.key === "Escape") {
+      closeModal()
+    }
+  })
+
+  document.addEventListener("keydown", (e) => {
+    if ((e.metaKey || e.ctrlKey) && e.key === "k") {
+      e.preventDefault()
+      if (modal.classList.contains("hidden")) {
+        openModal()
+      } else {
+        closeModal()
+      }
+    }
+    if (e.key === "Escape" && !modal.classList.contains("hidden")) {
+      closeModal()
+    }
+  })
 })
 
 // The lines below enable quality of life phoenix_live_reload
