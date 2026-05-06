@@ -31,7 +31,7 @@
       <input type="checkbox" id="mobile-sidebar" class="hidden peer" />
 
       <%!-- Top Navbar (full width, always visible) --%>
-      <header class="sticky top-0 z-50 bg-base-100 border-b border-base-300/50">
+      <header class="fixed top-0 left-0 right-0 z-50 bg-base-100 border-b border-base-300/50">
         <div class="flex items-center justify-between px-6 py-3.5">
           <%!-- Left: hamburger + logo --%>
           <div class="flex items-center gap-3">
@@ -41,6 +41,13 @@
             >
               <.icon name="hero-bars-3" class="size-5" />
             </label>
+            <button
+              id="sidebar-toggle"
+              class="hidden lg:flex btn btn-ghost btn-sm btn-square"
+              title="Toggle sidebar"
+            >
+              <.icon name="hero-bars-3" class="size-5" />
+            </button>
             <a href={~p"/dashboard"} class="logo-svg flex items-center gap-2">
               <svg
                 class="h-8 w-auto"
@@ -96,101 +103,132 @@
             </span>
           </div>
 
-          <%!-- Right: Notifications + Profile Dropdown --%>
-          <div class="flex items-center gap-3">
-            <div class="relative">
-              <.icon name="hero-bell" class="size-4 text-base-content/50" />
-              <span class="absolute -top-0.5 -right-0.5 h-1.5 w-1.5 rounded-full bg-accent">
-              </span>
-            </div>
-
-            <%!-- Profile Dropdown --%>
-            <div class="relative">
-              <input type="checkbox" id="profile-dropdown" class="hidden peer" />
-              <label
-                for="profile-dropdown"
-                class="flex h-8 w-8 items-center justify-center rounded-full bg-accent/10 text-xs font-bold text-accent cursor-pointer hover:bg-accent/20 transition-colors"
-              >
-                {String.first(@current_scope.user.email) |> String.upcase()}
-              </label>
-              <%!-- Dropdown menu --%>
-              <div class="absolute right-0 top-10 w-56 rounded-xl border border-base-300/50 bg-base-100 shadow-lg opacity-0 invisible peer-checked:opacity-100 peer-checked:visible transition-all duration-150 z-50 py-1">
-                <div class="px-3 py-2 border-b border-base-300/30">
-                  <p class="text-xs text-base-content/40">Signed in as</p>
-                  <p class="text-sm font-medium text-base-content truncate">{@current_scope.user.email}</p>
-                </div>
-                <div class="px-3 py-2 border-b border-base-300/30">
-                  <p class="text-xs text-base-content/40 mb-1.5">Theme</p>
-                  <.theme_toggle />
-                </div>
-                <div class="p-1">
-                  <.link
-                    href={~p"/users/settings"}
-                    class="flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm text-base-content/70 hover:bg-secondary transition-colors"
-                  >
-                    <.icon name="hero-cog-6-tooth" class="size-4" /> Settings
-                  </.link>
-                  <.link
-                    href={~p"/users/log-out"}
-                    method="delete"
-                    class="flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm text-error/80 hover:bg-error/5 transition-colors"
-                  >
-                    <.icon name="hero-arrow-right-on-rectangle" class="size-4" /> Log out
-                  </.link>
-                </div>
+          <%!-- Right: Profile Dropdown --%>
+          <div class="relative">
+            <input type="checkbox" id="profile-dropdown" class="hidden peer" />
+            <label
+              for="profile-dropdown"
+              class="flex h-8 w-8 items-center justify-center rounded-full bg-accent/10 text-xs font-bold text-accent cursor-pointer hover:bg-accent/20 transition-colors"
+            >
+              {String.first(@current_scope.user.email) |> String.upcase()}
+            </label>
+            <%!-- Dropdown menu --%>
+            <div class="absolute right-0 top-10 w-56 rounded-xl border border-base-300/50 bg-base-100 shadow-lg opacity-0 invisible peer-checked:opacity-100 peer-checked:visible transition-all duration-150 z-50 py-1">
+              <div class="px-3 py-2 border-b border-base-300/30">
+                <p class="text-xs text-base-content/40">Signed in as</p>
+                <p class="text-sm font-medium text-base-content truncate">
+                  {@current_scope.user.email}
+                </p>
               </div>
-              <%!-- Click-away backdrop --%>
-              <label
-                for="profile-dropdown"
-                class="fixed inset-0 z-40 hidden peer-checked:block"
-              ></label>
+              <div class="px-3 py-2 border-b border-base-300/30">
+                <p class="text-xs text-base-content/40 mb-1.5">Theme</p>
+                <.theme_toggle />
+              </div>
+              <div class="p-1">
+                <.link
+                  href={~p"/users/settings"}
+                  class="flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm text-base-content/70 hover:bg-secondary transition-colors"
+                >
+                  <.icon name="hero-cog-6-tooth" class="size-4" /> Settings
+                </.link>
+                <.link
+                  href={~p"/users/log-out"}
+                  method="delete"
+                  class="flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm text-error/80 hover:bg-error/5 transition-colors"
+                >
+                  <.icon name="hero-arrow-right-on-rectangle" class="size-4" /> Log out
+                </.link>
+              </div>
             </div>
+            <%!-- Click-away backdrop --%>
+            <label
+              for="profile-dropdown"
+              class="fixed inset-0 z-40 hidden peer-checked:block"
+            >
+            </label>
           </div>
         </div>
       </header>
 
       <%!-- Main Layout: Sidebar + Content --%>
-      <div class="flex flex-1 min-h-[calc(100vh-49px)]">
-        <%!-- Desktop Sidebar (always visible) --%>
-        <aside class="hidden lg:flex w-56 flex-col bg-base-100 border-r border-base-300/50 flex-shrink-0">
+      <div class="flex flex-1 pt-[49px]">
+        <%!-- Desktop Sidebar (fixed, full height) --%>
+        <aside
+          id="desktop-sidebar"
+          class="hidden lg:flex w-56 flex-col bg-base-100 border-r border-base-300/50 fixed top-[49px] left-0 bottom-0 z-30 transition-all duration-200"
+          data-collapsed="false"
+        >
           <div class="flex-1 overflow-y-auto p-3 space-y-0.5">
             <a
               href={~p"/dashboard"}
-              class="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium text-accent bg-accent/10"
+              title="Dashboard"
+              class={[
+                "sidebar-item flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm transition-colors",
+                String.starts_with?(@conn.request_path, "/dashboard") &&
+                  "font-medium text-accent bg-accent/10",
+                !String.starts_with?(@conn.request_path, "/dashboard") &&
+                  "text-base-content/60 hover:bg-secondary"
+              ]}
             >
-              <.icon name="hero-home" class="size-4" /> Dashboard
+              <.icon name="hero-home" class="size-4 shrink-0" />
+              <span class="sidebar-label truncate">Dashboard</span>
             </a>
             <a
               href={~p"/logs"}
-              class="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-base-content/60 hover:bg-secondary transition-colors"
+              title="Requests"
+              class={[
+                "sidebar-item flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm transition-colors",
+                String.starts_with?(@conn.request_path, "/logs") &&
+                  "font-medium text-accent bg-accent/10",
+                !String.starts_with?(@conn.request_path, "/logs") &&
+                  "text-base-content/60 hover:bg-secondary"
+              ]}
             >
-              <.icon name="hero-clock" class="size-4" /> Requests
+              <.icon name="hero-clock" class="size-4 shrink-0" />
+              <span class="sidebar-label truncate">Requests</span>
             </a>
             <a
               href={~p"/routers"}
-              class="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-base-content/60 hover:bg-secondary transition-colors"
+              title="Routers"
+              class={[
+                "sidebar-item flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm transition-colors",
+                String.starts_with?(@conn.request_path, "/routers") &&
+                  "font-medium text-accent bg-accent/10",
+                !String.starts_with?(@conn.request_path, "/routers") &&
+                  "text-base-content/60 hover:bg-secondary"
+              ]}
             >
-              <.icon name="hero-adjustments-horizontal" class="size-4" /> Routers
+              <.icon name="hero-adjustments-horizontal" class="size-4 shrink-0" />
+              <span class="sidebar-label truncate">Routers</span>
             </a>
             <a
               href={~p"/api-keys"}
-              class="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-base-content/60 hover:bg-secondary transition-colors"
+              title="API Keys"
+              class={[
+                "sidebar-item flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm transition-colors",
+                String.starts_with?(@conn.request_path, "/api-keys") &&
+                  "font-medium text-accent bg-accent/10",
+                !String.starts_with?(@conn.request_path, "/api-keys") &&
+                  "text-base-content/60 hover:bg-secondary"
+              ]}
             >
-              <.icon name="hero-key" class="size-4" /> API Keys
+              <.icon name="hero-key" class="size-4 shrink-0" />
+              <span class="sidebar-label truncate">API Keys</span>
             </a>
 
-            <div class="mt-5">
-              <p class="mb-1.5 px-3 text-xs font-semibold uppercase tracking-wider text-base-content/40">
+            <div class="mt-5 sidebar-section">
+              <p class="sidebar-label mb-1.5 px-3 text-xs font-semibold uppercase tracking-wider text-base-content/40">
                 Providers
               </p>
               <%= if assigns[:nav_providers] && length(@nav_providers) > 0 do %>
                 <%= for provider <- @nav_providers do %>
                   <a
                     href={~p"/providers"}
-                    class="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-base-content/60 hover:bg-secondary transition-colors"
+                    title={provider.name}
+                    class="sidebar-item flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-base-content/60 hover:bg-secondary transition-colors"
                   >
                     <span class={[
-                      "flex h-5 w-5 items-center justify-center rounded text-xs font-bold",
+                      "flex h-5 w-5 items-center justify-center rounded text-xs font-bold shrink-0",
                       provider.color == "emerald" && "bg-emerald-100 text-emerald-700",
                       provider.color == "amber" && "bg-amber-100 text-amber-700",
                       provider.color == "sky" && "bg-sky-100 text-sky-700",
@@ -199,13 +237,22 @@
                       provider.color == "orange" && "bg-orange-100 text-orange-700",
                       provider.color == "indigo" && "bg-indigo-100 text-indigo-700",
                       provider.color == "rose" && "bg-rose-100 text-rose-700",
-                      provider.color not in ["emerald", "amber", "sky", "blue", "purple", "orange", "indigo", "rose"] && "bg-secondary text-base-content/60"
+                      provider.color not in [
+                        "emerald",
+                        "amber",
+                        "sky",
+                        "blue",
+                        "purple",
+                        "orange",
+                        "indigo",
+                        "rose"
+                      ] && "bg-secondary text-base-content/60"
                     ]}>
                       {String.upcase(String.first(provider.name))}
                     </span>
-                    <span class="truncate">{provider.name}</span>
+                    <span class="sidebar-label truncate">{provider.name}</span>
                     <span class={[
-                      "ml-auto text-[10px] font-semibold rounded-full px-1.5 py-0.5",
+                      "sidebar-label ml-auto text-[10px] font-semibold rounded-full px-1.5 py-0.5",
                       provider.count > 0 && "bg-accent/10 text-accent",
                       provider.count == 0 && "bg-secondary text-base-content/40"
                     ]}>
@@ -214,27 +261,36 @@
                   </a>
                 <% end %>
               <% else %>
-                <p class="px-3 py-2 text-xs text-base-content/40">No providers configured</p>
+                <p class="sidebar-label px-3 py-2 text-xs text-base-content/40">
+                  No providers configured
+                </p>
               <% end %>
-            </div>
-
-            <div class="mt-5">
-              <p class="mb-1.5 px-3 text-xs font-semibold uppercase tracking-wider text-base-content/40">
-                Settings
-              </p>
-              <a
-                href={~p"/users/settings"}
-                class="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-base-content/60 hover:bg-secondary transition-colors"
-              >
-                <.icon name="hero-cog-6-tooth" class="size-4" /> Settings
-              </a>
             </div>
           </div>
 
+          <div class="border-t border-base-300/50 p-3">
+            <a
+              href={~p"/users/settings"}
+              title="Settings"
+              class={[
+                "sidebar-item flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm transition-colors",
+                String.starts_with?(@conn.request_path, "/users/settings") &&
+                  "font-medium text-accent bg-accent/10",
+                !String.starts_with?(@conn.request_path, "/users/settings") &&
+                  "text-base-content/60 hover:bg-secondary"
+              ]}
+            >
+              <.icon name="hero-cog-6-tooth" class="size-4 shrink-0" />
+              <span class="sidebar-label truncate">Settings</span>
+            </a>
+          </div>
         </aside>
 
         <%!-- Main Content --%>
-        <main class="flex-1 p-6 bg-secondary/30 overflow-auto">
+        <main
+          id="main-content"
+          class="flex-1 lg:ml-56 p-6 bg-secondary/30 overflow-auto transition-all duration-200"
+        >
           {@inner_content}
         </main>
       </div>
@@ -252,25 +308,49 @@
           <div class="flex-1 overflow-y-auto p-3 space-y-0.5">
             <a
               href={~p"/dashboard"}
-              class="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium text-accent bg-accent/10"
+              class={[
+                "flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm transition-colors",
+                String.starts_with?(@conn.request_path, "/dashboard") &&
+                  "font-medium text-accent bg-accent/10",
+                !String.starts_with?(@conn.request_path, "/dashboard") &&
+                  "text-base-content/60 hover:bg-secondary"
+              ]}
             >
               <.icon name="hero-home" class="size-4" /> Dashboard
             </a>
             <a
               href={~p"/logs"}
-              class="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-base-content/60 hover:bg-secondary transition-colors"
+              class={[
+                "flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm transition-colors",
+                String.starts_with?(@conn.request_path, "/logs") &&
+                  "font-medium text-accent bg-accent/10",
+                !String.starts_with?(@conn.request_path, "/logs") &&
+                  "text-base-content/60 hover:bg-secondary"
+              ]}
             >
               <.icon name="hero-clock" class="size-4" /> Requests
             </a>
             <a
               href={~p"/routers"}
-              class="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-base-content/60 hover:bg-secondary transition-colors"
+              class={[
+                "flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm transition-colors",
+                String.starts_with?(@conn.request_path, "/routers") &&
+                  "font-medium text-accent bg-accent/10",
+                !String.starts_with?(@conn.request_path, "/routers") &&
+                  "text-base-content/60 hover:bg-secondary"
+              ]}
             >
               <.icon name="hero-adjustments-horizontal" class="size-4" /> Routers
             </a>
             <a
               href={~p"/api-keys"}
-              class="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-base-content/60 hover:bg-secondary transition-colors"
+              class={[
+                "flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm transition-colors",
+                String.starts_with?(@conn.request_path, "/api-keys") &&
+                  "font-medium text-accent bg-accent/10",
+                !String.starts_with?(@conn.request_path, "/api-keys") &&
+                  "text-base-content/60 hover:bg-secondary"
+              ]}
             >
               <.icon name="hero-key" class="size-4" /> API Keys
             </a>
@@ -295,7 +375,16 @@
                       provider.color == "orange" && "bg-orange-100 text-orange-700",
                       provider.color == "indigo" && "bg-indigo-100 text-indigo-700",
                       provider.color == "rose" && "bg-rose-100 text-rose-700",
-                      provider.color not in ["emerald", "amber", "sky", "blue", "purple", "orange", "indigo", "rose"] && "bg-secondary text-base-content/60"
+                      provider.color not in [
+                        "emerald",
+                        "amber",
+                        "sky",
+                        "blue",
+                        "purple",
+                        "orange",
+                        "indigo",
+                        "rose"
+                      ] && "bg-secondary text-base-content/60"
                     ]}>
                       {String.upcase(String.first(provider.name))}
                     </span>
@@ -313,18 +402,21 @@
                 <p class="px-3 py-2 text-xs text-base-content/40">No providers configured</p>
               <% end %>
             </div>
+          </div>
 
-            <div class="mt-5">
-              <p class="mb-1.5 px-3 text-xs font-semibold uppercase tracking-wider text-base-content/40">
-                Settings
-              </p>
-              <a
-                href={~p"/users/settings"}
-                class="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-base-content/60 hover:bg-secondary transition-colors"
-              >
-                <.icon name="hero-cog-6-tooth" class="size-4" /> Settings
-              </a>
-            </div>
+          <div class="border-t border-base-300/50 p-3">
+            <a
+              href={~p"/users/settings"}
+              class={[
+                "flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm transition-colors",
+                String.starts_with?(@conn.request_path, "/users/settings") &&
+                  "font-medium text-accent bg-accent/10",
+                !String.starts_with?(@conn.request_path, "/users/settings") &&
+                  "text-base-content/60 hover:bg-secondary"
+              ]}
+            >
+              <.icon name="hero-cog-6-tooth" class="size-4" /> Settings
+            </a>
           </div>
         </aside>
       </div>

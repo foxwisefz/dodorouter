@@ -39,6 +39,37 @@ const liveSocket = new LiveSocket("/live", Socket, {
 // Show progress bar on live navigation and form submits
 topbar.config({barColors: {0: "#29d"}, shadowColor: "rgba(0, 0, 0, .3)"})
 let pendingRequests = 0
+
+const SIDEBAR_COLLAPSED_KEY = "sidebar-collapsed"
+
+function applySidebarState(collapsed) {
+  const sidebar = document.getElementById("desktop-sidebar")
+  const main = document.getElementById("main-content")
+  if (!sidebar || !main) return
+
+  if (collapsed) {
+    sidebar.classList.remove("w-56")
+    sidebar.classList.add("w-16")
+    sidebar.setAttribute("data-collapsed", "true")
+    main.classList.remove("lg:ml-56")
+    main.classList.add("lg:ml-16")
+    sidebar.querySelectorAll(".sidebar-label").forEach(el => el.classList.add("hidden"))
+    sidebar.querySelectorAll(".sidebar-section").forEach(el => el.classList.add("hidden"))
+    sidebar.querySelectorAll(".sidebar-item").forEach(el => el.classList.add("justify-center", "px-0"))
+    sidebar.querySelectorAll(".sidebar-item").forEach(el => el.classList.remove("px-3"))
+  } else {
+    sidebar.classList.remove("w-16")
+    sidebar.classList.add("w-56")
+    sidebar.setAttribute("data-collapsed", "false")
+    main.classList.remove("lg:ml-16")
+    main.classList.add("lg:ml-56")
+    sidebar.querySelectorAll(".sidebar-label").forEach(el => el.classList.remove("hidden"))
+    sidebar.querySelectorAll(".sidebar-section").forEach(el => el.classList.remove("hidden"))
+    sidebar.querySelectorAll(".sidebar-item").forEach(el => el.classList.remove("justify-center", "px-0"))
+    sidebar.querySelectorAll(".sidebar-item").forEach(el => el.classList.add("px-3"))
+  }
+}
+
 window.addEventListener("phx:page-loading-start", _info => {
   pendingRequests++
   topbar.show(300)
@@ -48,6 +79,8 @@ window.addEventListener("phx:page-loading-stop", _info => {
   if (pendingRequests === 0) {
     topbar.hide()
   }
+  const saved = localStorage.getItem(SIDEBAR_COLLAPSED_KEY)
+  if (saved === "true") applySidebarState(true)
 })
 
 // connect if there are any LiveViews on the page
@@ -67,6 +100,22 @@ window.addEventListener("phx:set-theme", (e) => {
   } else {
     document.documentElement.setAttribute("data-theme", theme)
   }
+})
+
+document.addEventListener("DOMContentLoaded", () => {
+  const saved = localStorage.getItem(SIDEBAR_COLLAPSED_KEY)
+  if (saved === "true") applySidebarState(true)
+
+  document.addEventListener("click", (e) => {
+    const toggle = e.target.closest("#sidebar-toggle")
+    if (!toggle) return
+
+    const sidebar = document.getElementById("desktop-sidebar")
+    const isCollapsed = sidebar?.getAttribute("data-collapsed") === "true"
+    const newState = !isCollapsed
+    applySidebarState(newState)
+    localStorage.setItem(SIDEBAR_COLLAPSED_KEY, String(newState))
+  })
 })
 
 // The lines below enable quality of life phoenix_live_reload

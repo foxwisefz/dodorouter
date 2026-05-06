@@ -107,7 +107,8 @@ defmodule DodoRouterWeb.ApiKeysLive.Index do
                 <div>
                   <h3 class="text-sm font-semibold text-base-content">{router.name}</h3>
                   <p class="text-xs text-base-content/40 mt-0.5">
-                    Prefix: <code class="font-mono text-base-content/60">{router.api_key_prefix}</code>
+                    Prefix:
+                    <code class="font-mono text-base-content/60">{router.api_key_prefix}</code>
                   </p>
                 </div>
               </div>
@@ -135,8 +136,7 @@ defmodule DodoRouterWeb.ApiKeysLive.Index do
                   phx-value-id={router.id}
                   class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-base-300/50 text-xs font-medium text-base-content/60 hover:text-error hover:border-error/30 hover:bg-error/5 transition-colors"
                 >
-                  <.icon name="hero-arrow-path" class="size-3.5" />
-                  Regenerate
+                  <.icon name="hero-arrow-path" class="size-3.5" /> Regenerate
                 </button>
               <% end %>
             </div>
