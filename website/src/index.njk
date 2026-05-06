@@ -4,15 +4,16 @@ title: Dodo Router - OpenAI-Compatible LLM Proxy with Automatic Fallback
 description: Drop-in LLM proxy that routes requests across providers with automatic fallback. OpenAI-compatible API, streaming support, and real-time analytics.
 ---
 
-<section class="relative h-screen flex flex-col bg-background overflow-hidden">
+<section class="relative h-[70vh] min-h-[550px] flex flex-col bg-background overflow-hidden">
 
   {# Background Video #}
   <video class="absolute inset-0 w-full h-full object-cover z-0" autoplay muted loop playsinline>
     <source src="https://assets.dodorouter.com/dallendyshe.mp4" type="video/mp4" />
   </video>
 
-  {# White overlay so content is readable #}
-  <div class="absolute inset-0 z-[1] video-overlay"></div>
+  {# Gradient overlay: solid white at top, fades to transparent at bottom #}
+  <div class="absolute inset-0 z-[1] bg-gradient-to-b from-white via-white/90 via-[55%] to-transparent"></div>
+  <div class="absolute bottom-0 left-0 w-full h-[30%] z-[1] bg-gradient-to-t from-white/90 to-transparent"></div>
 
   {# All content above video #}
   <div class="relative z-10 flex flex-col items-center w-full flex-1">
@@ -27,12 +28,12 @@ description: Drop-in LLM proxy that routes requests across providers with automa
     </div>
 
     {# 2. Headline #}
-    <h1 class="animate-fade-up mt-6 text-center font-display text-5xl md:text-6xl lg:text-[5rem] leading-[0.95] tracking-tight text-foreground max-w-xl" style="--fade-y: 16px; --fade-duration: 0.6s; --fade-delay: 0.1s;">
+    <h1 class="animate-fade-up mt-6 text-center font-display text-5xl md:text-6xl lg:text-[5.5rem] leading-[0.95] tracking-tight text-foreground max-w-xl drop-shadow-sm" style="--fade-y: 16px; --fade-duration: 0.6s; --fade-delay: 0.1s;">
       The LLM proxy with <em>automatic</em> fallback
     </h1>
 
     {# 3. Subheadline #}
-    <p class="animate-fade-up mt-4 text-center text-base md:text-lg text-muted-foreground max-w-[650px] leading-relaxed font-body" style="--fade-y: 16px; --fade-duration: 0.6s; --fade-delay: 0.2s;">
+    <p class="animate-fade-up mt-4 text-center text-base md:text-lg text-foreground/90 max-w-[650px] leading-relaxed font-body drop-shadow-sm" style="--fade-y: 16px; --fade-duration: 0.6s; --fade-delay: 0.2s;">
       Drop-in OpenAI-compatible proxy that routes requests across providers. Change your base URL once &mdash; then swap providers, reorder chains, and adjust models on the fly from the dashboard.
     </p>
 
