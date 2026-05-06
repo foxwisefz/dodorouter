@@ -227,55 +227,60 @@
               <.icon name="hero-key" class="size-4 shrink-0" />
               <span class="sidebar-label truncate">API Keys</span>
             </a>
+            <a
+              href={~p"/providers"}
+              title="Providers"
+              class={[
+                "sidebar-item flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm transition-colors",
+                String.starts_with?(@conn.request_path, "/providers") &&
+                  "font-medium text-accent bg-accent/10",
+                !String.starts_with?(@conn.request_path, "/providers") &&
+                  "text-base-content/60 hover:bg-secondary"
+              ]}
+            >
+              <.icon name="hero-server" class="size-4 shrink-0" />
+              <span class="sidebar-label truncate">Providers</span>
+              <span
+                :if={assigns[:nav_provider_count] && @nav_provider_count > 0}
+                class="sidebar-label ml-auto text-[10px] font-semibold rounded-full bg-accent/10 text-accent px-1.5 py-0.5"
+              >
+                {@nav_provider_count}
+              </span>
+            </a>
 
             <div class="mt-5 sidebar-section">
               <p class="sidebar-label mb-1.5 px-3 text-xs font-semibold uppercase tracking-wider text-base-content/40">
-                Providers
+                Routers
               </p>
-              <%= if assigns[:nav_providers] && length(@nav_providers) > 0 do %>
-                <%= for provider <- @nav_providers do %>
+              <%= if assigns[:nav_routers] && length(@nav_routers) > 0 do %>
+                <%= for router <- @nav_routers do %>
                   <a
-                    href={~p"/providers"}
-                    title={provider.name}
-                    class="sidebar-item flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-base-content/60 hover:bg-secondary transition-colors"
+                    href={~p"/routers/#{router.id}"}
+                    title={router.name}
+                    class={[
+                      "sidebar-item flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm transition-colors",
+                      @conn.request_path == "/routers/#{router.id}" &&
+                        "font-medium text-accent bg-accent/10",
+                      @conn.request_path != "/routers/#{router.id}" &&
+                        "text-base-content/60 hover:bg-secondary"
+                    ]}
                   >
-                    <span class={[
-                      "flex h-5 w-5 items-center justify-center rounded text-xs font-bold shrink-0",
-                      provider.color == "emerald" && "bg-emerald-100 text-emerald-700",
-                      provider.color == "amber" && "bg-amber-100 text-amber-700",
-                      provider.color == "sky" && "bg-sky-100 text-sky-700",
-                      provider.color == "blue" && "bg-blue-100 text-blue-700",
-                      provider.color == "purple" && "bg-purple-100 text-purple-700",
-                      provider.color == "orange" && "bg-orange-100 text-orange-700",
-                      provider.color == "indigo" && "bg-indigo-100 text-indigo-700",
-                      provider.color == "rose" && "bg-rose-100 text-rose-700",
-                      provider.color not in [
-                        "emerald",
-                        "amber",
-                        "sky",
-                        "blue",
-                        "purple",
-                        "orange",
-                        "indigo",
-                        "rose"
-                      ] && "bg-secondary text-base-content/60"
-                    ]}>
-                      {String.upcase(String.first(provider.name))}
+                    <span class="flex h-5 w-5 items-center justify-center rounded bg-accent/10 text-accent text-xs font-bold shrink-0">
+                      {String.upcase(String.first(router.name))}
                     </span>
-                    <span class="sidebar-label truncate">{provider.name}</span>
+                    <span class="sidebar-label truncate">{router.name}</span>
                     <span class={[
                       "sidebar-label ml-auto text-[10px] font-semibold rounded-full px-1.5 py-0.5",
-                      provider.count > 0 && "bg-accent/10 text-accent",
-                      provider.count == 0 && "bg-secondary text-base-content/40"
+                      router.step_count > 1 && "bg-emerald-100 text-emerald-700",
+                      router.step_count == 1 && "bg-accent/10 text-accent",
+                      router.step_count == 0 && "bg-secondary text-base-content/40"
                     ]}>
-                      {provider.count}
+                      {router.step_count}
                     </span>
                   </a>
                 <% end %>
               <% else %>
-                <p class="sidebar-label px-3 py-2 text-xs text-base-content/40">
-                  No providers configured
-                </p>
+                <p class="sidebar-label px-3 py-2 text-xs text-base-content/40">No routers yet</p>
               <% end %>
             </div>
           </div>
@@ -370,52 +375,57 @@
             >
               <.icon name="hero-key" class="size-4" /> API Keys
             </a>
+            <a
+              href={~p"/providers"}
+              class={[
+                "flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm transition-colors",
+                String.starts_with?(@conn.request_path, "/providers") &&
+                  "font-medium text-accent bg-accent/10",
+                !String.starts_with?(@conn.request_path, "/providers") &&
+                  "text-base-content/60 hover:bg-secondary"
+              ]}
+            >
+              <.icon name="hero-server" class="size-4" /> Providers
+              <span
+                :if={assigns[:nav_provider_count] && @nav_provider_count > 0}
+                class="ml-auto text-[10px] font-semibold rounded-full bg-accent/10 text-accent px-1.5 py-0.5"
+              >
+                {@nav_provider_count}
+              </span>
+            </a>
 
             <div class="mt-5">
               <p class="mb-1.5 px-3 text-xs font-semibold uppercase tracking-wider text-base-content/40">
-                Providers
+                Routers
               </p>
-              <%= if assigns[:nav_providers] && length(@nav_providers) > 0 do %>
-                <%= for provider <- @nav_providers do %>
+              <%= if assigns[:nav_routers] && length(@nav_routers) > 0 do %>
+                <%= for router <- @nav_routers do %>
                   <a
-                    href={~p"/providers"}
-                    class="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-base-content/60 hover:bg-secondary transition-colors"
+                    href={~p"/routers/#{router.id}"}
+                    class={[
+                      "flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm transition-colors",
+                      @conn.request_path == "/routers/#{router.id}" &&
+                        "font-medium text-accent bg-accent/10",
+                      @conn.request_path != "/routers/#{router.id}" &&
+                        "text-base-content/60 hover:bg-secondary"
+                    ]}
                   >
-                    <span class={[
-                      "flex h-5 w-5 items-center justify-center rounded text-xs font-bold",
-                      provider.color == "emerald" && "bg-emerald-100 text-emerald-700",
-                      provider.color == "amber" && "bg-amber-100 text-amber-700",
-                      provider.color == "sky" && "bg-sky-100 text-sky-700",
-                      provider.color == "blue" && "bg-blue-100 text-blue-700",
-                      provider.color == "purple" && "bg-purple-100 text-purple-700",
-                      provider.color == "orange" && "bg-orange-100 text-orange-700",
-                      provider.color == "indigo" && "bg-indigo-100 text-indigo-700",
-                      provider.color == "rose" && "bg-rose-100 text-rose-700",
-                      provider.color not in [
-                        "emerald",
-                        "amber",
-                        "sky",
-                        "blue",
-                        "purple",
-                        "orange",
-                        "indigo",
-                        "rose"
-                      ] && "bg-secondary text-base-content/60"
-                    ]}>
-                      {String.upcase(String.first(provider.name))}
+                    <span class="flex h-5 w-5 items-center justify-center rounded bg-accent/10 text-accent text-xs font-bold">
+                      {String.upcase(String.first(router.name))}
                     </span>
-                    <span class="truncate">{provider.name}</span>
+                    <span class="truncate">{router.name}</span>
                     <span class={[
                       "ml-auto text-[10px] font-semibold rounded-full px-1.5 py-0.5",
-                      provider.count > 0 && "bg-accent/10 text-accent",
-                      provider.count == 0 && "bg-secondary text-base-content/40"
+                      router.step_count > 1 && "bg-emerald-100 text-emerald-700",
+                      router.step_count == 1 && "bg-accent/10 text-accent",
+                      router.step_count == 0 && "bg-secondary text-base-content/40"
                     ]}>
-                      {provider.count}
+                      {router.step_count}
                     </span>
                   </a>
                 <% end %>
               <% else %>
-                <p class="px-3 py-2 text-xs text-base-content/40">No providers configured</p>
+                <p class="px-3 py-2 text-xs text-base-content/40">No routers yet</p>
               <% end %>
             </div>
           </div>

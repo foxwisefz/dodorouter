@@ -7,11 +7,10 @@ defmodule DodoRouterWeb.NavHooks do
 
   alias DodoRouter.Routers
   alias DodoRouter.Providers
-  alias DodoRouter.Proxy.Adapter.Registry
 
   def on_mount(:load_routers, _params, _session, socket) do
     if socket.assigns[:current_user] do
-      routers = Routers.list_routers(socket.assigns.current_user)
+      routers = Routers.list_routers_with_step_count(socket.assigns.current_user)
       {:cont, assign(socket, :nav_routers, routers)}
     else
       {:cont, assign(socket, :nav_routers, [])}
@@ -20,20 +19,14 @@ defmodule DodoRouterWeb.NavHooks do
 
   def on_mount(:load_providers, _params, _session, socket) do
     if socket.assigns[:current_user] do
-      provider_info = Registry.provider_info()
-
-      nav_providers =
+      provider_count =
         socket.assigns.current_user
-        |> Providers.list_provider_keys_grouped()
-        |> Enum.map(fn {slug, keys} ->
-          info = Map.get(provider_info, slug, %{name: slug, color: "base-content/50"})
-          %{slug: slug, name: info.name, color: info.color, count: length(keys)}
-        end)
-        |> Enum.sort_by(& &1.name)
+        |> Providers.list_provider_keys()
+        |> length()
 
-      {:cont, assign(socket, :nav_providers, nav_providers)}
+      {:cont, assign(socket, :nav_provider_count, provider_count)}
     else
-      {:cont, assign(socket, :nav_providers, [])}
+      {:cont, assign(socket, :nav_provider_count, 0)}
     end
   end
 end
