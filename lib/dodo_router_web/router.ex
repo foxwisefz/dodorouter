@@ -67,7 +67,8 @@ defmodule DodoRouterWeb.Router do
     live_session :authenticated,
       on_mount: [
         {DodoRouterWeb.UserAuth, :ensure_authenticated},
-        {DodoRouterWeb.NavHooks, :load_routers}
+        {DodoRouterWeb.NavHooks, :load_routers},
+        {DodoRouterWeb.NavHooks, :load_providers}
       ] do
       live "/routers", RouterLive.Index, :index
       live "/routers/new", RouterLive.Index, :new
@@ -76,6 +77,7 @@ defmodule DodoRouterWeb.Router do
       live "/routers/:id/routing", RouterLive.Show, :routing
 
       live "/providers", ProvidersLive.Index, :index
+      live "/api-keys", ApiKeysLive.Index, :index
 
       live "/logs", LogLive.Index, :index
       live "/logs/:id", LogLive.Show, :show
@@ -118,6 +120,8 @@ defmodule DodoRouterWeb.Router do
 
   scope "/", DodoRouterWeb do
     pipe_through [:browser, :require_authenticated_user]
+
+    put "/preferences", PreferencesController, :update
 
     get "/users/settings", UserSettingsController, :edit
     put "/users/settings", UserSettingsController, :update

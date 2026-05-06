@@ -31,7 +31,7 @@ defmodule DodoRouterWeb.DashboardLiveTest do
 
       {:ok, _live, html} = live(conn, ~p"/dashboard")
 
-      assert html =~ "Requests (24h)"
+      assert html =~ "Total Requests"
       assert html =~ "Success Rate"
     end
 

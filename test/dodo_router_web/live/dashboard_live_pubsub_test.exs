@@ -24,13 +24,13 @@ defmodule DodoRouterWeb.DashboardLivePubSubTest do
         })
 
       {:ok, live, html} = live(conn, ~p"/dashboard")
-      assert html =~ "Requests (24h)"
+      assert html =~ "Total Requests"
 
       # Send refresh message (simulating the timer)
       send(live.pid, :refresh)
 
       # Should still render without error
-      assert render(live) =~ "Dashboard"
+      assert render(live) =~ "Router Overview"
     end
   end
 end

@@ -160,10 +160,11 @@ defmodule DodoRouterWeb.ProvidersLive.Index do
             <!-- Provider Header -->
             <div class="p-4 flex items-center justify-between">
               <div class="flex items-center gap-3">
-                <div
-                  class={"w-3 h-3 rounded-full #{provider_color(info.color)}"}
-                  title={info.endpoint}
-                >
+                <div class={[
+                  "w-8 h-8 rounded-lg flex items-center justify-center shrink-0",
+                  provider_bg(info.color)
+                ]}>
+                  <.provider_logo slug={provider_slug} />
                 </div>
                 <div>
                   <h2 class="font-semibold">{info.name}</h2>
@@ -330,10 +331,6 @@ defmodule DodoRouterWeb.ProvidersLive.Index do
     </div>
     """
   end
-
-  defp provider_color("emerald"), do: "bg-emerald-500"
-  defp provider_color("amber"), do: "bg-amber-500"
-  defp provider_color(_), do: "bg-base-content/50"
 
   defp next_label(existing_keys) do
     count = length(existing_keys) + 1

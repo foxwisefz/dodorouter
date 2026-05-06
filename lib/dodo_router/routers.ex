@@ -14,6 +14,23 @@ defmodule DodoRouter.Routers do
     Repo.all(from r in Router, where: r.user_id == ^user.id, order_by: [desc: r.inserted_at])
   end
 
+  @router_colors ~w(blue purple amber rose emerald sky orange indigo)
+
+  def list_routers_with_step_count(%User{} = user) do
+    from(r in Router,
+      left_join: s in assoc(r, :routing_steps),
+      where: r.user_id == ^user.id,
+      group_by: r.id,
+      order_by: [desc: r.inserted_at],
+      select: %{id: r.id, name: r.name, slug: r.slug, step_count: count(s.id)}
+    )
+    |> Repo.all()
+    |> Enum.with_index()
+    |> Enum.map(fn {router, idx} ->
+      Map.put(router, :color, Enum.at(@router_colors, rem(idx, length(@router_colors))))
+    end)
+  end
+
   def get_router!(%User{} = user, id) do
     Repo.get_by!(Router, id: id, user_id: user.id)
   end

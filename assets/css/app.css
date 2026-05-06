@@ -26,36 +26,33 @@
   default: false;
   prefersdark: true;
   color-scheme: "dark";
-  --color-base-100: oklch(24% 0.012 250);
-  --color-base-200: oklch(20% 0.010 250);
-  --color-base-300: oklch(16% 0.008 250);
-  --color-base-content: oklch(95% 0.01 250);
-  /* Green primary - matches logo */
-  --color-primary: oklch(65% 0.18 145);
-  --color-primary-content: oklch(98% 0.01 145);
-  /* Teal secondary */
-  --color-secondary: oklch(55% 0.12 175);
-  --color-secondary-content: oklch(98% 0.01 175);
-  /* Orange accent - matches logo beak */
-  --color-accent: oklch(75% 0.18 55);
-  --color-accent-content: oklch(20% 0.02 55);
-  --color-neutral: oklch(35% 0.02 250);
-  --color-neutral-content: oklch(95% 0.01 250);
-  --color-info: oklch(65% 0.15 230);
-  --color-info-content: oklch(98% 0.01 230);
-  --color-success: oklch(65% 0.18 145);
-  --color-success-content: oklch(98% 0.01 145);
-  --color-warning: oklch(75% 0.18 55);
-  --color-warning-content: oklch(20% 0.02 55);
-  --color-error: oklch(60% 0.22 25);
-  --color-error-content: oklch(98% 0.01 25);
-  --radius-selector: 0.25rem;
-  --radius-field: 0.25rem;
+  --color-base-100: hsl(240, 10%, 8%);
+  --color-base-200: hsl(240, 10%, 12%);
+  --color-base-300: hsl(240, 10%, 18%);
+  --color-base-content: hsl(0, 0%, 95%);
+  --color-primary: hsl(239, 84%, 67%);
+  --color-primary-content: hsl(0, 0%, 100%);
+  --color-secondary: hsl(240, 10%, 14%);
+  --color-secondary-content: hsl(0, 0%, 90%);
+  --color-accent: hsl(239, 84%, 67%);
+  --color-accent-content: hsl(0, 0%, 100%);
+  --color-neutral: hsl(240, 10%, 20%);
+  --color-neutral-content: hsl(0, 0%, 90%);
+  --color-info: hsl(239, 84%, 67%);
+  --color-info-content: hsl(0, 0%, 100%);
+  --color-success: hsl(142, 71%, 45%);
+  --color-success-content: hsl(0, 0%, 100%);
+  --color-warning: hsl(38, 92%, 50%);
+  --color-warning-content: hsl(0, 0%, 9%);
+  --color-error: hsl(0, 84%, 60%);
+  --color-error-content: hsl(0, 0%, 100%);
+  --radius-selector: 0.5rem;
+  --radius-field: 0.5rem;
   --radius-box: 0.5rem;
   --size-selector: 0.21875rem;
   --size-field: 0.21875rem;
-  --border: 1.5px;
-  --depth: 1;
+  --border: 1px;
+  --depth: 0;
   --noise: 0;
 }
 
@@ -64,36 +61,33 @@
   default: true;
   prefersdark: false;
   color-scheme: "light";
-  --color-base-100: oklch(99% 0.005 250);
-  --color-base-200: oklch(96% 0.008 250);
-  --color-base-300: oklch(92% 0.010 250);
-  --color-base-content: oklch(25% 0.015 250);
-  /* Green primary - matches logo */
-  --color-primary: oklch(55% 0.18 145);
-  --color-primary-content: oklch(98% 0.01 145);
-  /* Teal secondary */
-  --color-secondary: oklch(50% 0.12 175);
-  --color-secondary-content: oklch(98% 0.01 175);
-  /* Orange accent - matches logo beak */
-  --color-accent: oklch(70% 0.18 55);
-  --color-accent-content: oklch(20% 0.02 55);
-  --color-neutral: oklch(40% 0.02 250);
-  --color-neutral-content: oklch(98% 0.01 250);
-  --color-info: oklch(55% 0.15 230);
-  --color-info-content: oklch(98% 0.01 230);
-  --color-success: oklch(55% 0.18 145);
-  --color-success-content: oklch(98% 0.01 145);
-  --color-warning: oklch(70% 0.18 55);
-  --color-warning-content: oklch(20% 0.02 55);
-  --color-error: oklch(55% 0.22 25);
-  --color-error-content: oklch(98% 0.01 25);
-  --radius-selector: 0.25rem;
-  --radius-field: 0.25rem;
+  --color-base-100: hsl(0, 0%, 100%);
+  --color-base-200: hsl(0, 0%, 97%);
+  --color-base-300: hsl(0, 0%, 92%);
+  --color-base-content: hsl(210, 14%, 17%);
+  --color-primary: hsl(239, 84%, 67%);
+  --color-primary-content: hsl(0, 0%, 100%);
+  --color-secondary: hsl(0, 0%, 96%);
+  --color-secondary-content: hsl(210, 14%, 17%);
+  --color-accent: hsl(239, 84%, 67%);
+  --color-accent-content: hsl(0, 0%, 100%);
+  --color-neutral: hsl(210, 14%, 17%);
+  --color-neutral-content: hsl(0, 0%, 100%);
+  --color-info: hsl(239, 84%, 67%);
+  --color-info-content: hsl(0, 0%, 100%);
+  --color-success: hsl(142, 71%, 45%);
+  --color-success-content: hsl(0, 0%, 100%);
+  --color-warning: hsl(38, 92%, 50%);
+  --color-warning-content: hsl(0, 0%, 9%);
+  --color-error: hsl(0, 84%, 60%);
+  --color-error-content: hsl(0, 0%, 100%);
+  --radius-selector: 0.5rem;
+  --radius-field: 0.5rem;
   --radius-box: 0.5rem;
   --size-selector: 0.21875rem;
   --size-field: 0.21875rem;
-  --border: 1.5px;
-  --depth: 1;
+  --border: 1px;
+  --depth: 0;
   --noise: 0;
 }
 
@@ -104,6 +98,16 @@
 
 /* Use the data attribute for dark mode  */
 @custom-variant dark (&:where([data-theme=dark], [data-theme=dark] *));
+
+@theme {
+  --color-go: hsl(142, 71%, 45%);
+  --color-go-foreground: hsl(0, 0%, 100%);
+  --color-warn: hsl(38, 92%, 50%);
+  --color-warn-foreground: hsl(0, 0%, 9%);
+  --font-display: 'Poppins', ui-sans-serif, system-ui, sans-serif;
+  --font-body: 'Inter', ui-sans-serif, system-ui, sans-serif;
+  --shadow-dashboard: 0 25px 80px -12px rgba(0, 0, 0, 0.08), 0 0 0 1px rgba(0, 0, 0, 0.06);
+}
 
 /* Make LiveView wrapper divs transparent for layout */
 [data-phx-session], [data-phx-teleported-src] { display: contents }
@@ -124,26 +128,24 @@ details[open] > summary .md-arrow {
 
 /* Card - minimal, for content sections that need containment */
 .card-bordered {
-  @apply rounded-xl p-5;
-  background: oklch(22% 0.010 250 / 0.35);
+  @apply rounded-xl p-5 bg-base-100 border border-base-300/50;
 }
 
 /* Stat card - clean, minimal metric display */
 .stat-card {
-  @apply rounded-xl p-4;
-  background: oklch(22% 0.010 250 / 0.25);
+  @apply rounded-lg p-4 bg-base-100 border border-base-300/50;
 }
 
 .stat-card .stat-label {
-  @apply text-sm text-base-content/60 mb-1;
+  @apply text-xs font-medium text-base-content/50 mb-1;
 }
 
 .stat-card .stat-value {
-  @apply text-2xl font-bold text-base-content;
+  @apply text-lg font-semibold text-base-content;
 }
 
 .stat-card .stat-desc {
-  @apply text-xs text-base-content/50 mt-1;
+  @apply text-xs text-base-content/40 mt-1;
 }
 
 /* Muted value colors - less rainbow, more cohesive */
@@ -153,11 +155,11 @@ details[open] > summary .md-arrow {
 
 /* Section headers - lighter weight */
 .section-title {
-  @apply text-base font-semibold text-base-content/80 mb-1;
+  @apply text-sm font-semibold text-base-content mb-1;
 }
 
 .section-desc {
-  @apply text-sm text-base-content/60;
+  @apply text-xs text-base-content/50;
 }
 
 /* Form elements - less jarring selects */
@@ -179,14 +181,12 @@ input.input,
 
 /* Routing step cards - minimal */
 .step-card {
-  @apply rounded-lg p-3;
-  background: oklch(20% 0.008 250 / 0.3);
+  @apply rounded-lg p-3 bg-base-100 border border-base-300/30;
 }
 
 /* Provider cards */
 .provider-card {
-  @apply rounded-xl p-5;
-  background: oklch(22% 0.010 250 / 0.35);
+  @apply rounded-xl p-5 bg-base-100 border border-base-300/50;
 }
 
 /* Sidebar refinements */
@@ -210,14 +210,12 @@ input.input,
 
 /* Chart container */
 .chart-container {
-  @apply rounded-xl p-5;
-  background: oklch(22% 0.010 250 / 0.35);
+  @apply rounded-lg p-4 bg-base-100 border border-base-300/50;
 }
 
 /* Table refinements */
 .table-container {
-  @apply rounded-xl overflow-hidden;
-  background: oklch(22% 0.010 250 / 0.35);
+  @apply rounded-lg overflow-hidden bg-base-100 border border-base-300/50;
 }
 
 .table-container .table {
@@ -225,7 +223,7 @@ input.input,
 }
 
 .table-container .table th {
-  @apply bg-base-200/50 text-base-content/70 font-medium text-xs uppercase tracking-wider;
+  @apply bg-secondary/30 text-base-content/50 font-medium text-xs uppercase tracking-wider;
 }
 
 /* Empty states */
@@ -236,6 +234,95 @@ input.input,
 /* Live indicator */
 .live-dot {
   @apply w-2 h-2 rounded-full bg-success animate-pulse;
+}
+
+/* Logo SVG — black parts use currentColor so they adapt to theme */
+.logo-svg path[fill="#181919"],
+.logo-svg path[fill="#171819"] {
+  fill: currentColor;
+}
+
+.logo-svg {
+  color: hsl(210, 14%, 17%);
+}
+
+[data-theme="dark"] .logo-svg {
+  color: hsl(0, 0%, 95%);
+}
+
+/* ============================================
+   Custom Utilities
+   ============================================ */
+
+@utility animate-fade-up {
+  animation: fade-up var(--fade-duration, 0.6s) var(--fade-delay, 0s) cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  opacity: 0;
+}
+
+@utility animate-soft-pulse {
+  animation: soft-pulse 2s ease-in-out infinite;
+}
+
+@utility frosted-glass {
+  background: rgba(255, 255, 255, 0.4);
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  box-shadow: var(--shadow-dashboard);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+@utility feature-card {
+  background: hsl(0, 0%, 100%);
+  border: 1px solid hsl(0, 0%, 90%);
+  border-radius: 1rem;
+  padding: 2rem;
+  transition: box-shadow 0.3s ease, transform 0.3s ease;
+  &:hover {
+    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.06);
+    transform: translateY(-2px);
+  }
+}
+
+@utility provider-chip {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.625rem 1rem;
+  border-radius: 0.75rem;
+  border: 1px solid hsl(0, 0%, 90%);
+  background: hsl(0, 0%, 100%);
+  font-size: 0.8125rem;
+  font-weight: 500;
+  transition: box-shadow 0.2s ease, transform 0.2s ease;
+  &:hover {
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+    transform: translateY(-1px);
+  }
+}
+
+[data-theme="dark"] .frosted-glass {
+  background: rgba(0, 0, 0, 0.4);
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+[data-theme="dark"] .feature-card {
+  background: hsl(240, 10%, 12%);
+  border-color: hsl(240, 10%, 18%);
+}
+
+[data-theme="dark"] .provider-chip {
+  background: hsl(240, 10%, 12%);
+  border-color: hsl(240, 10%, 18%);
+}
+
+@keyframes fade-up {
+  from { opacity: 0; transform: translateY(var(--fade-y, 16px)); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes soft-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
 }
 
 /* ============================================
@@ -764,11 +851,6 @@ input.input,
    Glassmorphism Cards - 3D Tilt Parallax
    ============================================ */
 
-/* Light theme glass cards */
-[data-theme="light"] .card-bordered,
-[data-theme="light"] .stat-card,
-[data-theme="light"] .chart-container,
-[data-theme="light"] .table-container,
-[data-theme="light"] .provider-card {
-  background: oklch(97% 0.003 250 / 0.7);
+[data-theme="dark"] .code-block {
+  background: hsl(240, 10%, 12%);
 }

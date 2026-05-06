@@ -3,6 +3,7 @@ defmodule DodoRouterWeb.LogLive.Show do
 
   alias DodoRouter.Logs
   alias DodoRouter.Logs.MessageNormalizer
+  alias DodoRouter.Proxy.Adapter.Registry
 
   import DodoRouterWeb.PromptComponents
 
@@ -153,7 +154,12 @@ defmodule DodoRouterWeb.LogLive.Show do
               Model
             </div>
             <div class="text-sm font-mono">{@log.final_model}</div>
-            <div class="text-xs text-base-content/60">{@log.final_provider}</div>
+            <div class="flex items-center gap-1.5 mt-1">
+              <div class="w-3.5 h-3.5 rounded flex items-center justify-center shrink-0 bg-base-200">
+                <.provider_logo slug={normalize_slug(@log.final_provider)} class="w-2.5 h-2.5" />
+              </div>
+              <div class="text-xs text-base-content/60">{@log.final_provider}</div>
+            </div>
           </div>
           
     <!-- Usage -->
@@ -411,6 +417,19 @@ defmodule DodoRouterWeb.LogLive.Show do
                     ]}>
                       <div class="flex items-center gap-2">
                         <span class="font-mono text-base-content/40">#{idx + 1}</span>
+                        <div class="w-4 h-4 rounded flex items-center justify-center shrink-0 bg-base-200">
+                          <.provider_logo
+                            slug={
+                              normalize_slug(
+                                Registry.to_key_slug(
+                                  attempt["provider"],
+                                  attempt["plan_type"] || "standard"
+                                )
+                              )
+                            }
+                            class="w-3 h-3"
+                          />
+                        </div>
                         <span class="font-medium">{attempt["provider"]} / {attempt["model"]}</span>
                         <%= if attempt["plan_type"] do %>
                           <span class="badge badge-sm">{attempt["plan_type"]}</span>

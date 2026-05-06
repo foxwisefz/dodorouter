@@ -20,8 +20,8 @@ defmodule DodoRouterWeb.ProvidersLiveTest do
 
       assert html =~ "z.ai Standard"
       assert html =~ "z.ai Coding"
-      assert html =~ "Moonshot (Kimi)"
-      assert html =~ "Kimi Coding"
+      assert html =~ "Moonshot"
+      assert html =~ "Moonshot Coding"
       assert html =~ "OpenAI"
       assert html =~ "Anthropic"
       assert html =~ "Google"

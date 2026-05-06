@@ -12,6 +12,8 @@ defmodule DodoRouter.Accounts.User do
     field :tos_accepted_at, :utc_datetime
     field :authenticated_at, :utc_datetime, virtual: true
     field :tos_accepted, :boolean, virtual: true
+    field :sidebar_collapsed, :boolean, default: false
+    field :theme, :string, default: "light"
 
     timestamps(type: :utc_datetime)
   end
@@ -136,6 +138,12 @@ defmodule DodoRouter.Accounts.User do
   def confirm_changeset(user) do
     now = DateTime.utc_now(:second)
     change(user, confirmed_at: now)
+  end
+
+  def preferences_changeset(user, attrs) do
+    user
+    |> cast(attrs, [:sidebar_collapsed, :theme])
+    |> validate_inclusion(:theme, ["light", "dark", "system"])
   end
 
   @doc """

@@ -6,6 +6,7 @@ defmodule DodoRouterWeb.RouterLive.Show do
   alias DodoRouter.Routers
   alias DodoRouter.Routers.RoutingStep
   alias DodoRouter.Logs
+  alias DodoRouter.Logs.MessageNormalizer
   alias DodoRouter.Providers
   alias DodoRouter.Proxy.Adapter.Registry
 
@@ -288,26 +289,20 @@ defmodule DodoRouterWeb.RouterLive.Show do
               </div>
             </div>
           </div>
-          <.link
-            patch={~p"/routers/#{@router}/routing"}
-            class="btn btn-sm bg-base-200 border-base-300/50 hover:bg-base-300 gap-2"
-          >
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              class="h-4 w-4"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
+          <div class="flex items-center gap-2">
+            <.link
+              navigate={~p"/routers/#{@router}/recordings"}
+              class="btn btn-sm bg-base-200 border-base-300/50 hover:bg-base-300 gap-2"
             >
-              <path
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                stroke-width="2"
-                d="M4 6h16M4 12h16M4 18h7"
-              />
-            </svg>
-            Routing
-          </.link>
+              <.icon name="hero-stop-circle" class="size-4" /> Recordings
+            </.link>
+            <.link
+              navigate={~p"/routers/#{@router}/sessions"}
+              class="btn btn-sm bg-base-200 border-base-300/50 hover:bg-base-300 gap-2"
+            >
+              <.icon name="hero-video-camera" class="size-4" /> Sessions
+            </.link>
+          </div>
         </div>
         
     <!-- New API Key Alert -->
@@ -337,75 +332,6 @@ defmodule DodoRouterWeb.RouterLive.Show do
               </code>
             </div>
           </div>
-        </div>
-
-        <div class="flex items-center gap-2">
-          <.link
-            navigate={~p"/routers/#{@router}/recordings"}
-            class="btn btn-sm bg-base-200 border-base-300/50 hover:bg-base-300 gap-2"
-          >
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              class="h-4 w-4"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-            >
-              <path
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                stroke-width="2"
-                d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-              />
-              <path
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                stroke-width="2"
-                d="M9 12a3 3 0 106 0 3 3 0 00-6 0z"
-              />
-            </svg>
-            Recordings
-          </.link>
-          <.link
-            navigate={~p"/routers/#{@router}/sessions"}
-            class="btn btn-sm bg-base-200 border-base-300/50 hover:bg-base-300 gap-2"
-          >
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              class="h-4 w-4"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-            >
-              <path
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                stroke-width="2"
-                d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"
-              />
-            </svg>
-            Sessions
-          </.link>
-          <.link
-            patch={~p"/routers/#{@router}/routing"}
-            class="btn btn-sm bg-base-200 border-base-300/50 hover:bg-base-300 gap-2"
-          >
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              class="h-4 w-4"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-            >
-              <path
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                stroke-width="2"
-                d="M4 6h16M4 12h16M4 18h7"
-              />
-            </svg>
-            Routing
-          </.link>
         </div>
         
     <!-- Stats -->
@@ -465,6 +391,9 @@ defmodule DodoRouterWeb.RouterLive.Show do
             Replace <code class="text-primary font-medium">YOUR_API_KEY</code>
             with your router API key:
             <code class="font-mono text-base-content/70">{@router.api_key_prefix}...</code>
+            <.link navigate={~p"/api-keys"} class="text-accent hover:underline ml-1">
+              Manage keys
+            </.link>
           </p>
         </div>
         
@@ -514,6 +443,12 @@ defmodule DodoRouterWeb.RouterLive.Show do
                 </div>
                 <div class="flex-1 min-w-0">
                   <div class="flex items-center gap-2 flex-wrap">
+                    <div class="w-5 h-5 rounded flex items-center justify-center shrink-0 bg-base-200">
+                      <.provider_logo
+                        slug={Registry.to_key_slug(step.provider, step.plan_type)}
+                        class="w-3.5 h-3.5"
+                      />
+                    </div>
                     <span class="font-medium text-base-content/90">{step.provider}</span>
                     <span class="text-base-content/40">/</span>
                     <span class="font-mono text-sm text-base-content/70">{step.model}</span>
@@ -643,32 +578,54 @@ defmodule DodoRouterWeb.RouterLive.Show do
                   else: nil
               }
               class={[
-                "flex items-center justify-between p-3 rounded-lg text-sm transition-colors",
+                "block p-3 rounded-lg text-sm transition-colors",
                 log.status == "pending" && "bg-info/10 animate-pulse",
                 log.status == "success" && "bg-success/10 hover:bg-success/20",
                 log.status == "fallback" && "bg-warning/10 hover:bg-warning/20",
                 log.status == "error" && "bg-error/10 hover:bg-error/20"
               ]}
             >
-              <div class="flex items-center gap-3">
-                <span class={[
-                  "w-2 h-2 rounded-full",
-                  log.status == "pending" && "bg-info",
-                  log.status == "success" && "bg-success",
-                  log.status == "fallback" && "bg-warning",
-                  log.status == "error" && "bg-error"
-                ]}>
-                </span>
-                <span class="font-mono text-base-content/80">
-                  {log.final_provider}/{log.final_model}
-                </span>
-                <span class={"px-1.5 py-0.5 rounded text-xs font-medium #{status_badge_class(log.status)}"}>
-                  {log.status}
-                </span>
+              <div class="flex items-center justify-between">
+                <div class="flex items-center gap-3">
+                  <span class={[
+                    "w-2 h-2 rounded-full shrink-0",
+                    log.status == "pending" && "bg-info",
+                    log.status == "success" && "bg-success",
+                    log.status == "fallback" && "bg-warning",
+                    log.status == "error" && "bg-error"
+                  ]}>
+                  </span>
+                  <div class="flex items-center gap-2">
+                    <div class="w-4 h-4 rounded flex items-center justify-center shrink-0 bg-base-200">
+                      <.provider_logo slug={normalize_slug(log.final_provider)} class="w-3 h-3" />
+                    </div>
+                    <span class="font-mono text-base-content/80">
+                      {log.final_provider}/{log.final_model}
+                    </span>
+                  </div>
+                  <span
+                    :if={log.call_type}
+                    class="px-1.5 py-0.5 rounded text-xs font-medium bg-base-300/50 text-base-content/70"
+                  >
+                    {call_type_label(log.call_type)}
+                  </span>
+                  <span class={[
+                    "px-1.5 py-0.5 rounded text-xs font-medium",
+                    status_badge_class(log.status)
+                  ]}>
+                    {log.status}
+                  </span>
+                </div>
+                <div class="flex items-center gap-4 text-base-content/50 text-sm shrink-0">
+                  <span :if={Map.get(log, :latency_ms)} class="font-mono">{log.latency_ms}ms</span>
+                  <span class="font-mono text-xs">{format_time(log.inserted_at)}</span>
+                </div>
               </div>
-              <div class="flex items-center gap-4 text-base-content/50 text-sm">
-                <span :if={Map.get(log, :latency_ms)} class="font-mono">{log.latency_ms}ms</span>
-                <span class="font-mono text-xs">{format_time(log.inserted_at)}</span>
+              <div
+                :if={last_message_preview(log)}
+                class="mt-2 text-xs text-base-content/60 truncate pl-5"
+              >
+                {last_message_preview(log)}
               </div>
             </.link>
           </div>
@@ -692,7 +649,12 @@ defmodule DodoRouterWeb.RouterLive.Show do
             >
               <div class="flex items-center gap-3">
                 <span class={"w-2 h-2 rounded-full #{event_dot_class(event)}"}></span>
-                <span class="font-mono text-base-content/80">{event.provider}/{event.model}</span>
+                <div class="flex items-center gap-2">
+                  <div class="w-4 h-4 rounded flex items-center justify-center shrink-0 bg-base-200">
+                    <.provider_logo slug={normalize_slug(event.provider)} class="w-3 h-3" />
+                  </div>
+                  <span class="font-mono text-base-content/80">{event.provider}/{event.model}</span>
+                </div>
                 <span
                   :if={event.had_fallback}
                   class="px-1.5 py-0.5 bg-warning/20 text-warning rounded text-xs"
@@ -866,6 +828,33 @@ defmodule DodoRouterWeb.RouterLive.Show do
   defp status_badge_class("error"), do: "bg-error/20 text-error"
   defp status_badge_class("pending"), do: "bg-info/20 text-info"
   defp status_badge_class(_), do: "bg-base-300 text-base-content/60"
+
+  defp call_type_label("completion"), do: "chat"
+  defp call_type_label("tool_call"), do: "tools"
+  defp call_type_label("tool_enabled_completion"), do: "chat+tools"
+  defp call_type_label(other), do: other
+
+  defp last_message_preview(log) do
+    {messages, _} = MessageNormalizer.parse_request_body(log.request_body)
+
+    messages
+    |> Enum.reverse()
+    |> Enum.find(fn msg -> msg.role == "user" end)
+    |> case do
+      nil -> nil
+      %{content: ""} -> nil
+      %{content: content} when is_binary(content) -> truncate_preview(content)
+      _ -> nil
+    end
+  end
+
+  defp truncate_preview(content) do
+    if String.length(content) > 120 do
+      String.slice(content, 0, 120) <> "..."
+    else
+      content
+    end
+  end
 
   defp format_time(dt), do: Calendar.strftime(dt, "%H:%M:%S")
 

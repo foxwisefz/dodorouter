@@ -7,11 +7,11 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
 
   use DodoRouter.Proxy.Adapter.Registry,
     slug: "moonshot",
-    display_name: "Moonshot (Kimi)",
+    display_name: "Moonshot",
     key_slugs: ["moonshot", "moonshot_coding"],
     key_display_names: %{
-      "moonshot" => "Moonshot (Kimi)",
-      "moonshot_coding" => "Kimi Coding"
+      "moonshot" => "Moonshot",
+      "moonshot_coding" => "Moonshot Coding"
     },
     endpoints: %{
       "moonshot" => "https://api.moonshot.ai/v1",

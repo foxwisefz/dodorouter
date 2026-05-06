@@ -2,6 +2,7 @@ defmodule DodoRouterWeb.DashboardLive do
   use DodoRouterWeb, :live_view
 
   alias DodoRouter.{Routers, Logs}
+  alias DodoRouter.Proxy.Adapter.Registry
 
   @refresh_interval_ms 5_000
 
@@ -19,6 +20,8 @@ defmodule DodoRouterWeb.DashboardLive do
       |> assign(:latency_percentiles, %{})
       |> assign(:failure_breakdown, [])
       |> assign(:requests_per_minute, [])
+      |> assign(:selected_router_steps, [])
+      |> assign(:recent_logs, [])
 
     socket =
       if socket.assigns.selected_router do
@@ -79,26 +82,37 @@ defmodule DodoRouterWeb.DashboardLive do
     socket
     |> assign(:stats, Logs.stats(router, hours: 24))
     |> assign(:stats_by_provider, Logs.stats_by_provider(router, hours: 24))
-    |> assign(:stats_by_model, Logs.stats_by_model(router, hours: 24))
     |> assign(:latency_percentiles, Logs.latency_percentiles(router, hours: 24))
     |> assign(:failure_breakdown, Logs.failure_breakdown(router, hours: 24))
     |> assign(:requests_per_minute, Logs.requests_per_minute(router, minutes: 60))
+    |> assign(:selected_router_steps, Routers.list_routing_steps(router))
+    |> assign(:recent_logs, Logs.list_logs(router, limit: 8))
   end
 
   @impl true
   def render(assigns) do
     ~H"""
     <div>
-      <!-- Header -->
-      <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-8">
+      <div class="flex items-center justify-between mb-6">
         <div>
-          <h1 class="text-2xl font-bold">Dashboard</h1>
-          <p class="text-base-content/50 text-sm">Monitor your LLM proxy in real-time</p>
+          <div class="flex items-center gap-3">
+            <h1 class="text-lg font-semibold text-base-content">Router Overview</h1>
+            <div
+              :if={@selected_router}
+              class="flex items-center gap-1.5 rounded-full bg-green-50 px-2.5 py-0.5"
+            >
+              <span class="h-1.5 w-1.5 rounded-full bg-success"></span>
+              <span class="text-xs font-semibold text-success">Live</span>
+            </div>
+          </div>
+          <p :if={@selected_router} class="text-sm text-base-content/50 mt-0.5">
+            {@selected_router.name}
+          </p>
         </div>
         <select
           phx-change="select_router"
           name="router_id"
-          class="select bg-base-200 border-base-300/50 w-full sm:w-48"
+          class="select bg-base-100 border border-base-300/50 text-sm w-full sm:w-48"
         >
           <option
             :for={r <- @routers}
@@ -111,256 +125,217 @@ defmodule DodoRouterWeb.DashboardLive do
       </div>
 
       <%= if @selected_router && @stats do %>
-        <!-- Stats Grid -->
-        <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
-          <div class="stat-card">
-            <div class="stat-label">Requests (24h)</div>
-            <div class="stat-value">{@stats.total_requests}</div>
-            <div class="stat-desc">Total API calls</div>
+        <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
+          <div class="rounded-lg border border-base-300/50 bg-base-100 p-3">
+            <p class="text-xs font-medium text-base-content/50">Total Requests</p>
+            <p class="mt-0.5 text-lg font-semibold text-base-content">
+              {format_number(@stats.total_requests)}
+            </p>
+            <p class="mt-0.5 text-xs text-base-content/40">Last 24 hours</p>
           </div>
-
-          <div class="stat-card">
-            <div class="stat-label">Success Rate</div>
-            <div class={"stat-value #{success_color(@stats)}"}>{success_rate(@stats)}</div>
-            <div class="stat-desc">{@stats.successful_requests} successful</div>
+          <div class="rounded-lg border border-base-300/50 bg-base-100 p-3">
+            <p class="text-xs font-medium text-base-content/50">Success Rate</p>
+            <p class={["mt-0.5 text-lg font-semibold", success_color(@stats)]}>
+              {success_rate(@stats)}
+            </p>
+            <p class="mt-0.5 text-xs text-base-content/40">
+              {if @stats.fallback_requests > 0,
+                do: "#{@stats.fallback_requests} fallbacks recovered",
+                else: "All requests successful"}
+            </p>
           </div>
-
-          <div class="stat-card">
-            <div class="stat-label">Fallback Rate</div>
-            <div class="stat-value">{fallback_rate(@stats)}</div>
-            <div class="stat-desc">{@stats.fallback_requests} fallbacks</div>
+          <div class="rounded-lg border border-base-300/50 bg-base-100 p-3">
+            <p class="text-xs font-medium text-base-content/50">p95 Latency</p>
+            <p class="mt-0.5 text-lg font-semibold text-base-content">
+              {format_latency(@latency_percentiles.p95)}
+            </p>
+            <p class="mt-0.5 text-xs text-base-content/40">95th percentile</p>
           </div>
-
-          <div class="stat-card">
-            <div class="stat-label">Tokens Used</div>
-            <div class="stat-value">{format_number(@stats.total_tokens)}</div>
-            <div class="stat-desc">
+          <div class="rounded-lg border border-base-300/50 bg-base-100 p-3">
+            <p class="text-xs font-medium text-base-content/50">Total Tokens</p>
+            <p class="mt-0.5 text-lg font-semibold text-base-content">
+              {format_number(@stats.total_tokens)}
+            </p>
+            <p class="mt-0.5 text-xs text-base-content/40">
               {format_number(@stats.prompt_tokens)} in / {format_number(@stats.completion_tokens)} out
-            </div>
+            </p>
           </div>
         </div>
-        
-    <!-- Latency Stats -->
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-6">
-          <div class="stat-card flex items-center gap-4">
-            <div class="stat-icon">
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                class="h-5 w-5"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-              >
+
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-3 mb-4">
+          <div class="rounded-lg border border-base-300/50 bg-base-100 p-3">
+            <div class="flex items-center justify-between mb-2">
+              <p class="text-sm font-semibold text-base-content">Request Volume</p>
+              <p class="text-xs text-base-content/40">Last 60 min</p>
+            </div>
+            <div class="h-20">
+              <svg viewBox="0 0 200 60" class="h-full w-full" preserveAspectRatio="none">
+                <defs>
+                  <linearGradient id="chartFill" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stop-color="hsl(239, 84%, 67%)" stop-opacity="0.15" />
+                    <stop offset="100%" stop-color="hsl(239, 84%, 67%)" stop-opacity="0" />
+                  </linearGradient>
+                </defs>
+                <path d={chart_fill_path(pad_rpm(@requests_per_minute, 60))} fill="url(#chartFill)" />
                 <path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  stroke-width="2"
-                  d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
+                  d={chart_line_path(pad_rpm(@requests_per_minute, 60))}
+                  fill="none"
+                  stroke="hsl(239, 84%, 67%)"
+                  stroke-width="1.5"
                 />
               </svg>
-            </div>
-            <div>
-              <div class="stat-label">p50 Latency</div>
-              <div class="stat-value">{format_latency(@latency_percentiles.p50)}</div>
-              <div class="stat-desc">Median response time</div>
             </div>
           </div>
 
-          <div class="stat-card flex items-center gap-4">
-            <div class="stat-icon">
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                class="h-5 w-5"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-              >
-                <path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  stroke-width="2"
-                  d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
-                />
-              </svg>
+          <div class="rounded-lg border border-base-300/50 bg-base-100 p-3">
+            <div class="flex items-center justify-between mb-2">
+              <p class="text-sm font-semibold text-base-content">Routing Chain</p>
+              <p class="text-xs text-base-content/40">{length(@selected_router_steps)} steps</p>
             </div>
-            <div>
-              <div class="stat-label">p95 Latency</div>
-              <div class="stat-value">{format_latency(@latency_percentiles.p95)}</div>
-              <div class="stat-desc">95th percentile</div>
-            </div>
-          </div>
-
-          <div class="stat-card flex items-center gap-4">
-            <div class="stat-icon">
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                class="h-5 w-5"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-              >
-                <path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  stroke-width="2"
-                  d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
-                />
-              </svg>
-            </div>
-            <div>
-              <div class="stat-label">p99 Latency</div>
-              <div class="stat-value">{format_latency(@latency_percentiles.p99)}</div>
-              <div class="stat-desc">99th percentile</div>
-            </div>
-          </div>
-        </div>
-        
-    <!-- Model Leaderboard -->
-        <div :if={length(@stats_by_model) > 0} class="card-bordered mb-6">
-          <h2 class="section-title">Model Leaderboard</h2>
-          <p class="section-desc mb-4">Performance ranking (24h)</p>
-          <div class="space-y-2">
-            <%= for {stat, idx} <- @stats_by_model |> rank_by_success_rate() |> Enum.with_index() do %>
-              <div class={[
-                "flex items-center gap-4 p-3 rounded-lg",
-                success_rate_value(stat) >= 95 && "bg-success/10",
-                success_rate_value(stat) >= 80 && success_rate_value(stat) < 95 && "bg-warning/10",
-                success_rate_value(stat) < 80 && "bg-error/10"
-              ]}>
-                <span class={[
-                  "w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold",
-                  idx == 0 && "bg-yellow-500/20 text-yellow-600",
-                  idx == 1 && "bg-gray-300/30 text-gray-500",
-                  idx == 2 && "bg-amber-600/20 text-amber-700",
-                  idx > 2 && "bg-base-200 text-base-content/50"
+            <div class="space-y-1.5">
+              <%= for {step, idx} <- Enum.with_index(@selected_router_steps) do %>
+                <div class={[
+                  "flex items-center justify-between rounded-lg px-2.5 py-2",
+                  idx == 0 && "bg-accent/5 border-l-2 border-accent",
+                  idx > 0 && "bg-secondary/50"
                 ]}>
-                  {idx + 1}
-                </span>
-                <div class="flex-1 min-w-0">
                   <div class="flex items-center gap-2">
-                    <span class="font-medium text-base-content/90">{stat.provider}</span>
-                    <span class="text-base-content/40">/</span>
-                    <span class="font-mono text-sm text-base-content/70 truncate">{stat.model}</span>
-                  </div>
-                  <div class="text-xs text-base-content/50 mt-0.5">
-                    {stat.total_requests} requests · {format_latency(stat.avg_latency_ms)} avg
-                  </div>
-                </div>
-                <div class="text-right">
-                  <div class={[
-                    "text-lg font-bold",
-                    success_rate_value(stat) >= 95 && "text-success",
-                    success_rate_value(stat) >= 80 && success_rate_value(stat) < 95 && "text-warning",
-                    success_rate_value(stat) < 80 && "text-error"
-                  ]}>
-                    {success_rate(stat)}
-                  </div>
-                  <div class="text-xs text-base-content/50">success rate</div>
-                </div>
-              </div>
-            <% end %>
-          </div>
-        </div>
-        
-    <!-- Charts Row -->
-        <div class="grid grid-cols-1 lg:grid-cols-2 gap-3 mb-6">
-          <!-- Requests per Minute -->
-          <div class="chart-container">
-            <h2 class="section-title">Requests per Minute</h2>
-            <p class="section-desc mb-4">Last 60 minutes</p>
-            <div class="h-32 flex items-end gap-0.5">
-              <%= for bucket <- pad_rpm(@requests_per_minute, 60) do %>
-                <div
-                  class="flex-1 bg-primary/60 hover:bg-primary rounded-t transition-all"
-                  style={"height: #{bucket_height(bucket, @requests_per_minute)}%"}
-                  title={"#{bucket.count} requests"}
-                >
-                </div>
-              <% end %>
-            </div>
-          </div>
-          
-    <!-- Provider Breakdown -->
-          <div class="chart-container">
-            <h2 class="section-title">By Provider</h2>
-            <p class="section-desc mb-4">Request distribution (24h)</p>
-            <div class="space-y-3">
-              <%= for stat <- @stats_by_provider do %>
-                <div class="flex items-center gap-4">
-                  <span class="w-24 text-sm text-base-content/80">{stat.provider}</span>
-                  <div class="flex-1 h-2 bg-base-200 rounded-full overflow-hidden">
-                    <div
-                      class="h-full bg-primary/70 rounded-full"
-                      style={"width: #{if @stats.total_requests > 0, do: round(stat.total_requests / @stats.total_requests * 100), else: 0}%"}
-                    >
+                    <div class="w-5 h-5 rounded flex items-center justify-center shrink-0 bg-base-200">
+                      <.provider_logo
+                        slug={Registry.to_key_slug(step.provider, step.plan_type || "standard")}
+                        class="w-3.5 h-3.5"
+                      />
                     </div>
+                    <span class="text-sm font-medium text-base-content">
+                      {step.provider} / {step.model}
+                    </span>
                   </div>
-                  <span class="w-12 text-right text-sm font-mono text-base-content/70">
-                    {stat.total_requests}
+                  <span class={[
+                    "rounded-full px-2 py-0.5 text-xs font-semibold",
+                    idx == 0 && "bg-green-50 text-success",
+                    idx == 1 && "bg-amber-50 text-warning",
+                    idx >= 2 && "bg-red-50 text-error"
+                  ]}>
+                    <%= cond do %>
+                      <% idx == 0 -> %>
+                        Primary
+                      <% idx == 1 -> %>
+                        Fallback
+                      <% true -> %>
+                        Last Resort
+                    <% end %>
                   </span>
                 </div>
               <% end %>
-              <p :if={Enum.empty?(@stats_by_provider)} class="empty-state text-sm py-4">
-                No data yet
+              <p :if={Enum.empty?(@selected_router_steps)} class="text-sm text-base-content/40 py-2">
+                No routing steps configured
               </p>
             </div>
           </div>
         </div>
-        
-    <!-- Failures & Live Events -->
-        <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          <!-- Failures -->
-          <div :if={length(@failure_breakdown) > 0} class="table-container">
-            <div class="p-5">
-              <h2 class="section-title">Failures (24h)</h2>
+
+        <div class="rounded-lg border border-base-300/50 bg-base-100 overflow-hidden">
+          <div class="flex items-center justify-between border-b border-base-300/50 px-4 py-2.5">
+            <p class="text-sm font-semibold text-base-content">Recent Requests</p>
+            <div class="flex items-center gap-3">
+              <span class="flex items-center gap-1.5 text-xs text-base-content/40">
+                <span class="h-1.5 w-1.5 rounded-full bg-accent animate-soft-pulse"></span> Streaming
+              </span>
+              <.link
+                navigate={~p"/logs?router_id=#{@selected_router.id}"}
+                class="text-xs text-primary hover:underline"
+              >
+                View all
+              </.link>
             </div>
-            <table class="table table-sm">
-              <thead>
-                <tr>
-                  <th>Provider</th>
-                  <th>Model</th>
-                  <th>Status</th>
-                  <th class="text-right">Count</th>
-                </tr>
-              </thead>
-              <tbody>
-                <%= for f <- @failure_breakdown do %>
-                  <tr class="hover:bg-base-200/30">
-                    <td class="text-base-content/80">{f.provider}</td>
-                    <td class="font-mono text-xs text-base-content/70">{f.model}</td>
-                    <td>
-                      <span class={"px-2 py-0.5 rounded text-xs font-medium #{if f.status == "error", do: "bg-error/20 text-error", else: "bg-warning/20 text-warning"}"}>
-                        {f.status}
-                      </span>
-                    </td>
-                    <td class="font-mono text-right text-base-content/70">{f.count}</td>
-                  </tr>
-                <% end %>
-              </tbody>
-            </table>
           </div>
+          <table class="w-full text-left">
+            <thead>
+              <tr class="border-b border-base-300/50 bg-secondary/30">
+                <th class="px-4 py-2 text-xs font-medium text-base-content/50">Time</th>
+                <th class="px-4 py-2 text-xs font-medium text-base-content/50">Status</th>
+                <th class="px-4 py-2 text-xs font-medium text-base-content/50 hidden sm:table-cell">
+                  Provider / Model
+                </th>
+                <th class="px-4 py-2 text-xs font-medium text-base-content/50 hidden md:table-cell">
+                  Tokens
+                </th>
+                <th class="px-4 py-2 text-xs font-medium text-base-content/50">Latency</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-base-300/30">
+              <%= for log <- @recent_logs do %>
+                <tr class="hover:bg-secondary/20 transition-colors">
+                  <td class="px-4 py-2 text-sm font-mono text-base-content/50">
+                    {format_time(log.inserted_at)}
+                  </td>
+                  <td class="px-4 py-2">
+                    <span class={[
+                      "rounded-full px-2 py-0.5 text-xs font-semibold",
+                      log.status == "success" && "bg-green-50 text-success",
+                      log.status == "fallback" && "bg-amber-50 text-warning",
+                      log.status == "error" && "bg-red-50 text-error",
+                      log.status == "pending" && "bg-secondary text-base-content/50"
+                    ]}>
+                      {log.status}
+                    </span>
+                  </td>
+                  <td class="px-4 py-2 text-sm hidden sm:table-cell">
+                    <%= if is_list(Map.get(log, :attempted_steps)) and length(log.attempted_steps) > 1 do %>
+                      <div class="flex items-center gap-1">
+                        <span class="line-through text-base-content/30">
+                          {List.first(log.attempted_steps)["provider"]}
+                        </span>
+                        <span class="text-base-content/30 mx-1">&rarr;</span>
+                        <div class="flex items-center gap-1.5">
+                          <div class="w-3.5 h-3.5 rounded flex items-center justify-center shrink-0 bg-base-200">
+                            <.provider_logo
+                              slug={normalize_slug(log.final_provider)}
+                              class="w-2.5 h-2.5"
+                            />
+                          </div>
+                          <span class="font-medium text-base-content">
+                            {log.final_provider} / {log.final_model}
+                          </span>
+                        </div>
+                      </div>
+                    <% else %>
+                      <div class="flex items-center gap-1.5">
+                        <div class="w-3.5 h-3.5 rounded flex items-center justify-center shrink-0 bg-base-200">
+                          <.provider_logo
+                            slug={normalize_slug(log.final_provider)}
+                            class="w-2.5 h-2.5"
+                          />
+                        </div>
+                        <span class="font-medium text-base-content">{log.final_provider}</span>
+                        <span class="text-base-content/40"> / </span>
+                        <span class="text-base-content/60">{log.final_model}</span>
+                      </div>
+                    <% end %>
+                  </td>
+                  <td class="px-4 py-2 text-sm font-mono text-base-content/50 hidden md:table-cell">
+                    {Map.get(log, :total_tokens) || "-"}
+                  </td>
+                  <td class="px-4 py-2 text-sm font-mono text-base-content/50">
+                    {if Map.get(log, :latency_ms), do: "#{log.latency_ms}ms", else: "-"}
+                  </td>
+                </tr>
+              <% end %>
+              <tr :if={Enum.empty?(@recent_logs)}>
+                <td colspan="5" class="px-4 py-8 text-center text-sm text-base-content/40">
+                  No requests yet
+                </td>
+              </tr>
+            </tbody>
+          </table>
         </div>
       <% else %>
-        <!-- Empty State -->
-        <div class="card-bordered text-center">
+        <div class="rounded-lg border border-base-300/50 bg-base-100 p-8 text-center">
           <div class="max-w-md mx-auto">
-            <div class="stat-icon w-16 h-16 mx-auto mb-6">
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                class="h-8 w-8"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-              >
-                <path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  stroke-width="1.5"
-                  d="M13 10V3L4 14h7v7l9-11h-7z"
-                />
-              </svg>
+            <div class="w-16 h-16 mx-auto mb-6 rounded-lg bg-secondary flex items-center justify-center">
+              <.icon name="hero-bolt" class="size-8 text-accent" />
             </div>
-            <h2 class="text-xl font-semibold mb-2">Welcome to DodoRouter</h2>
+            <h2 class="text-xl font-semibold mb-2 font-display">Welcome to DodoRouter</h2>
             <p class="text-base-content/50 mb-6">
               Create your first router to start routing LLM requests with automatic fallbacks.
             </p>
@@ -384,26 +359,10 @@ defmodule DodoRouterWeb.DashboardLive do
     rate = success / total * 100
 
     cond do
-      rate >= 95 -> ""
+      rate >= 95 -> "text-success"
       rate >= 80 -> "text-warning"
       true -> "text-error"
     end
-  end
-
-  defp fallback_rate(%{total_requests: 0}), do: "-"
-
-  defp fallback_rate(%{total_requests: total, fallback_requests: fallback}) do
-    "#{round(fallback / total * 100)}%"
-  end
-
-  defp success_rate_value(%{total_requests: 0}), do: 0
-
-  defp success_rate_value(%{total_requests: total, successful_requests: success}) do
-    success / total * 100
-  end
-
-  defp rank_by_success_rate(stats) do
-    Enum.sort_by(stats, &success_rate_value/1, :desc)
   end
 
   defp format_number(nil), do: "0"
@@ -421,11 +380,24 @@ defmodule DodoRouterWeb.DashboardLive do
     List.duplicate(%{count: 0}, padding) ++ buckets
   end
 
-  defp bucket_height(_bucket, []), do: 0
-  defp bucket_height(%{count: 0}, _all), do: 2
+  defp chart_fill_path([]), do: "M0,60 L200,60 L0,60 Z"
+  defp chart_fill_path(buckets), do: "#{chart_line_path(buckets)} L200,60 L0,60 Z"
 
-  defp bucket_height(%{count: count}, all) do
-    max_count = Enum.map(all, & &1.count) |> Enum.max(fn -> 1 end)
-    max(2, round(count / max_count * 100))
+  defp chart_line_path([]), do: "M0,60 L200,60"
+
+  defp chart_line_path(buckets) do
+    max_count = buckets |> Enum.map(& &1.count) |> Enum.max(fn -> 1 end) |> max(1)
+    count = length(buckets)
+
+    buckets
+    |> Enum.with_index()
+    |> Enum.map(fn {bucket, idx} ->
+      x = if count > 1, do: idx / (count - 1) * 200.0, else: 100.0
+      y = 60.0 - max(3.0, bucket.count / max_count * 55.0 + 2.0)
+      "#{if idx == 0, do: "M", else: "L"}#{Float.round(x, 1)},#{Float.round(y, 1)}"
+    end)
+    |> Enum.join(" ")
   end
+
+  defp format_time(dt), do: Calendar.strftime(dt, "%H:%M:%S")
 end

@@ -18,9 +18,13 @@ defmodule DodoRouterWeb.RouterLive.FormComponent do
         phx-change="validate"
         phx-submit="save"
       >
-        <.input field={@form[:name]} type="text" label="Name" />
-        <.input field={@form[:slug]} type="text" label="Slug" placeholder="my-router" />
-        <p class="text-sm text-base-content/60 -mt-1">Lowercase letters, numbers, and dashes only</p>
+        <.input
+          field={@form[:name]}
+          type="text"
+          label="Name"
+          phx-mounted={JS.focus()}
+          autocomplete="router-name"
+        />
         <:actions>
           <.button phx-disable-with="Saving...">Save Router</.button>
         </:actions>

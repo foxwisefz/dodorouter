@@ -88,6 +88,7 @@ defmodule DodoRouterWeb do
       import Phoenix.HTML
       # Core UI components
       import DodoRouterWeb.CoreComponents
+      import DodoRouterWeb.ProviderIcons
 
       # Common modules used in templates
       alias Phoenix.LiveView.JS
