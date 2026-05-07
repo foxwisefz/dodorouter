@@ -103,30 +103,7 @@ defmodule DodoRouterWeb.ProxyController do
       {:error, :all_providers_failed, attempts} ->
         total_ms = System.monotonic_time(:millisecond) - start_time
         provider_ms = attempts |> Enum.map(& &1[:latency_ms]) |> Enum.sum()
-        last_attempt = List.last(attempts)
-
-        {status, error_response} =
-          if last_attempt && last_attempt[:error] == "context_overflow" do
-            {400,
-             %{
-               error: %{
-                 message: "Input exceeds context window of this model",
-                 type: "invalid_request_error",
-                 code: "context_length_exceeded",
-                 attempts: length(attempts)
-               }
-             }}
-          else
-            {502,
-             %{
-               error: %{
-                 message: "All providers failed",
-                 type: "provider_error",
-                 last_error: last_attempt[:error],
-                 attempts: length(attempts)
-               }
-             }}
-          end
+        {status, error_response} = Proxy.error_response(attempts)
 
         conn
         |> put_status(status)
@@ -167,20 +144,7 @@ defmodule DodoRouterWeb.ProxyController do
         conn
 
       {:error, :all_providers_failed, attempts} ->
-        last_attempt = List.last(attempts)
-
-        error_payload =
-          if last_attempt && last_attempt[:error] == "context_overflow" do
-            %{
-              error: %{
-                message: "Input exceeds context window of this model",
-                type: "context_overflow"
-              }
-            }
-          else
-            %{error: %{message: "All providers failed"}}
-          end
-
+        error_payload = Proxy.streaming_error_payload(attempts)
         error_event = "data: " <> Jason.encode!(error_payload) <> "\n\n"
 
         chunk(conn, error_event)

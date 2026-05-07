@@ -48,5 +48,15 @@ defmodule DodoRouter.Routers.RouterTest do
       changeset = Router.changeset(%Router{}, %{name: "Test", slug: "ab"})
       assert %{slug: ["should be at least 3 character(s)"]} = errors_on(changeset)
     end
+
+    test "defaults fail_on_context_overflow to false" do
+      changeset = Router.changeset(%Router{}, %{name: "Test"})
+      assert Ecto.Changeset.get_field(changeset, :fail_on_context_overflow) == false
+    end
+
+    test "allows setting fail_on_context_overflow to true" do
+      changeset = Router.changeset(%Router{}, %{name: "Test", fail_on_context_overflow: true})
+      assert Ecto.Changeset.get_field(changeset, :fail_on_context_overflow) == true
+    end
   end
 end

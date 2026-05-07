@@ -454,7 +454,9 @@ defmodule DodoRouterWeb.RouterLive.Show do
                   />
                   <div class="w-9 h-5 bg-base-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-primary">
                   </div>
-                  <span class="ml-2 text-sm text-base-content/70">Fail on context overflow</span>
+                  <span class="ml-2 text-sm text-base-content/70">
+                    Skip fallback on context overflow
+                  </span>
                 </label>
                 <div class="relative group">
                   <.icon
@@ -462,7 +464,7 @@ defmodule DodoRouterWeb.RouterLive.Show do
                     class="size-4 text-base-content/40 cursor-help"
                   />
                   <div class="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden group-hover:block w-64 p-2 text-xs bg-base-100 border border-base-300 rounded-lg shadow-lg text-base-content/80 z-50">
-                    When enabled, requests that exceed a model's context window will fail immediately instead of falling back to the next provider in the chain.
+                    When enabled, requests that exceed a model's context window will skip the fallback chain and fail immediately.
                   </div>
                 </div>
               </form>

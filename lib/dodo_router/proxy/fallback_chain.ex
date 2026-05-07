@@ -118,9 +118,7 @@ defmodule DodoRouter.Proxy.FallbackChain do
 
         state = %{state | attempted_steps: state.attempted_steps ++ [attempt]}
 
-        should_fallback =
-          Adapter.should_fallback?(reason) and length(rest) > 0 and
-            not (reason == :context_overflow and state.fail_on_context_overflow)
+        should_fallback = should_fallback?(reason, length(rest), state.fail_on_context_overflow)
 
         if should_fallback do
           broadcast_step_completed(state.router_id, step, :fallback, latency(start_time))
@@ -291,6 +289,12 @@ defmodule DodoRouter.Proxy.FallbackChain do
       _ ->
         response
     end
+  end
+
+  @doc false
+  def should_fallback?(reason, remaining_count, fail_on_context_overflow) do
+    Adapter.should_fallback?(reason) and remaining_count > 0 and
+      not (reason == :context_overflow and fail_on_context_overflow)
   end
 
   defp latency(start_time), do: System.monotonic_time(:millisecond) - start_time
