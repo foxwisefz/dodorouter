@@ -36,16 +36,88 @@ defmodule DodoRouterWeb.PromptComponents do
       <% end %>
 
       <div class="space-y-3">
-        <%= for {msg, idx} <- Enum.with_index(@messages) do %>
-          <.message_bubble message={msg} index={idx} />
-        <% end %>
-
-        <%= if @response do %>
-          <.message_bubble message={@response} index="response" response={true} />
-        <% end %>
+        <.collapsed_message_list messages={@messages} response={@response} />
       </div>
     </div>
     """
+  end
+
+  attr :messages, :list, required: true
+  attr :response, :any, default: nil
+
+  defp collapsed_message_list(assigns) do
+    segments = build_segments(assigns.messages, assigns.response)
+    assigns = assign(assigns, :segments, segments)
+
+    ~H"""
+    <%= for seg <- @segments do %>
+      <div :if={seg.collapsed} class="flex items-center gap-2 px-4 py-2">
+        <div class="flex-1 border-t border-dashed border-base-300/40"></div>
+        <span class="text-xs text-base-content/40 font-medium">
+          {seg.count} repeated message{seg.count > 1 && "s"} collapsed
+        </span>
+        <div class="flex-1 border-t border-dashed border-base-300/40"></div>
+      </div>
+      <.message_bubble message={seg.message} index={seg.index} response={seg.response} />
+    <% end %>
+    """
+  end
+
+  defp build_segments(messages, response) do
+    items =
+      Enum.with_index(messages)
+      |> Enum.map(fn {msg, idx} -> %{message: msg, index: idx, response: false} end)
+
+    items =
+      if response,
+        do: items ++ [%{message: response, index: "response", response: true}],
+        else: items
+
+    items
+    |> Enum.reduce([], fn item, acc ->
+      case acc do
+        [%{collapsed: true, message: prev, count: count} | rest] ->
+          if same_message?(prev, item) do
+            [
+              %{
+                collapsed: true,
+                message: prev,
+                index: item.index,
+                response: item.response,
+                count: count + 1
+              }
+              | rest
+            ]
+          else
+            [%{item | collapsed: false} | acc]
+          end
+
+        [%{collapsed: false, message: prev} | _] ->
+          if same_message?(prev, item) do
+            [
+              %{
+                collapsed: true,
+                message: prev,
+                index: item.index,
+                response: item.response,
+                count: 2
+              }
+              | tl(acc)
+            ]
+          else
+            [%{item | collapsed: false} | acc]
+          end
+
+        [] ->
+          [%{item | collapsed: false}]
+      end
+    end)
+    |> Enum.reverse()
+  end
+
+  defp same_message?(%{message: a, response: ra}, %{message: b, response: rb}) do
+    ra == rb and a.role == b.role and a.content == b.content and
+      a.tool_calls == b.tool_calls and a.name == b.name
   end
 
   attr :message, :map, required: true

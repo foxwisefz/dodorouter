@@ -4,6 +4,7 @@ defmodule DodoRouterWeb.LogLive.Index do
   require Logger
 
   alias DodoRouter.{Logs, Routers}
+  alias DodoRouter.Logs.MessageNormalizer
   alias DodoRouter.Proxy.Adapter.Registry
 
   @impl true
@@ -176,6 +177,9 @@ defmodule DodoRouterWeb.LogLive.Index do
                 Tokens
               </th>
               <th class="px-4 py-2.5 text-xs font-medium text-base-content/50">Latency</th>
+              <th class="px-4 py-2.5 text-xs font-medium text-base-content/50 hidden md:table-cell">
+                Message
+              </th>
             </tr>
           </thead>
           <tbody id="logs" phx-update="stream" class="divide-y divide-base-300/30">
@@ -256,6 +260,9 @@ defmodule DodoRouterWeb.LogLive.Index do
               <td class="px-4 py-2.5 text-sm font-mono text-base-content/50">
                 {if Map.get(log, :latency_ms), do: "#{log.latency_ms}ms", else: "-"}
               </td>
+              <td class="px-4 py-2.5 text-xs text-base-content/50 hidden md:table-cell max-w-xs truncate">
+                {message_preview(log)}
+              </td>
             </tr>
           </tbody>
         </table>
@@ -298,5 +305,35 @@ defmodule DodoRouterWeb.LogLive.Index do
 
   defp format_time(dt) do
     Calendar.strftime(dt, "%H:%M:%S")
+  end
+
+  defp message_preview(log) do
+    if is_nil(Map.get(log, :request_body)) do
+      nil
+    else
+      {messages, _} = MessageNormalizer.parse_request_body(log.request_body)
+
+      messages
+      |> Enum.reverse()
+      |> Enum.find(fn msg ->
+        msg.role in ~w(user assistant)
+      end)
+      |> case do
+        nil -> nil
+        %{content: content} when is_binary(content) and content != "" -> truncate_preview(content)
+        %{reasoning_content: rc} when is_binary(rc) and rc != "" -> truncate_preview(rc)
+        _ -> nil
+      end
+    end
+  end
+
+  defp truncate_preview(nil), do: ""
+
+  defp truncate_preview(content) do
+    if String.length(content) > 80 do
+      String.slice(content, 0, 80) <> "..."
+    else
+      content
+    end
   end
 end
