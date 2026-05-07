@@ -47,6 +47,22 @@ defmodule DodoRouterWeb.RouterShowLiveTest do
       assert html =~ "openai" or html =~ "python"
     end
 
+    test "can toggle fail_on_context_overflow setting", %{conn: conn, router: router, user: user} do
+      {:ok, live, _html} = live(conn, ~p"/routers/#{router.id}")
+
+      assert router.fail_on_context_overflow == false
+
+      html =
+        live
+        |> element("form[phx-change=\"toggle_fail_on_context_overflow\"]")
+        |> render_change(%{"fail_on_context_overflow" => "true"})
+
+      assert html =~ "Skip fallback on context overflow"
+
+      updated_router = DodoRouter.Routers.get_router!(user, router.id)
+      assert updated_router.fail_on_context_overflow == true
+    end
+
     test "raises when router doesn't belong to user", %{conn: conn} do
       {other_router, _} = RoutersFixtures.router_fixture()
 

@@ -20,6 +20,7 @@ defmodule DodoRouter.Proxy.FallbackChain do
     :stream,
     :send_chunk,
     :client_headers,
+    :fail_on_context_overflow,
     attempted_steps: [],
     final_response: nil,
     response_headers: nil,
@@ -32,6 +33,7 @@ defmodule DodoRouter.Proxy.FallbackChain do
     send_chunk = Keyword.get(opts, :send_chunk, fn _ -> :ok end)
     client_headers = Keyword.get(opts, :client_headers, [])
     request_id = Keyword.get(opts, :request_id)
+    fail_on_context_overflow = Keyword.get(opts, :fail_on_context_overflow, false)
 
     state = %__MODULE__{
       request: request,
@@ -40,7 +42,8 @@ defmodule DodoRouter.Proxy.FallbackChain do
       request_id: request_id,
       stream: stream,
       send_chunk: send_chunk,
-      client_headers: client_headers
+      client_headers: client_headers,
+      fail_on_context_overflow: fail_on_context_overflow
     }
 
     run_chain(state)
@@ -115,7 +118,9 @@ defmodule DodoRouter.Proxy.FallbackChain do
 
         state = %{state | attempted_steps: state.attempted_steps ++ [attempt]}
 
-        if Adapter.should_fallback?(reason) and length(rest) > 0 do
+        should_fallback = should_fallback?(reason, length(rest), state.fail_on_context_overflow)
+
+        if should_fallback do
           broadcast_step_completed(state.router_id, step, :fallback, latency(start_time))
           state = accumulate_partial_content(state, details)
           # Reconstruct request with partial assistant message so next provider continues
@@ -284,6 +289,12 @@ defmodule DodoRouter.Proxy.FallbackChain do
       _ ->
         response
     end
+  end
+
+  @doc false
+  def should_fallback?(reason, remaining_count, fail_on_context_overflow) do
+    Adapter.should_fallback?(reason) and remaining_count > 0 and
+      not (reason == :context_overflow and fail_on_context_overflow)
   end
 
   defp latency(start_time), do: System.monotonic_time(:millisecond) - start_time

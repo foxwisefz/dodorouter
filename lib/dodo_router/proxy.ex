@@ -39,6 +39,7 @@ defmodule DodoRouter.Proxy do
           opts
           |> Keyword.put(:client_headers, client_headers)
           |> Keyword.put(:request_id, request_id)
+          |> Keyword.put(:fail_on_context_overflow, router.fail_on_context_overflow)
         )
 
       log_request(
@@ -203,6 +204,56 @@ defmodule DodoRouter.Proxy do
   defp clean_response(response) do
     # Remove internal metadata
     Map.delete(response, "_meta")
+  end
+
+  @doc """
+  Builds the HTTP status and error response body for a failed sync request.
+  Returns a standardized context-overflow error when the last attempt indicates one.
+  """
+  @spec error_response([map()]) :: {integer(), map()}
+  def error_response(attempts) do
+    last_attempt = List.last(attempts)
+
+    if last_attempt && last_attempt[:error] == "context_overflow" do
+      {400,
+       %{
+         error: %{
+           message: "Input exceeds context window of this model",
+           type: "invalid_request_error",
+           code: "context_length_exceeded",
+           attempts: length(attempts)
+         }
+       }}
+    else
+      {502,
+       %{
+         error: %{
+           message: "All providers failed",
+           type: "provider_error",
+           last_error: last_attempt[:error],
+           attempts: length(attempts)
+         }
+       }}
+    end
+  end
+
+  @doc """
+  Builds the error payload for a failed streaming request.
+  """
+  @spec streaming_error_payload([map()]) :: map()
+  def streaming_error_payload(attempts) do
+    last_attempt = List.last(attempts)
+
+    if last_attempt && last_attempt[:error] == "context_overflow" do
+      %{
+        error: %{
+          message: "Input exceeds context window of this model",
+          type: "context_overflow"
+        }
+      }
+    else
+      %{error: %{message: "All providers failed"}}
+    end
   end
 
   # Convert atom keys to string keys for JSON storage

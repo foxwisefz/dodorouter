@@ -65,6 +65,38 @@ defmodule DodoRouterWeb.RouterLive.Show do
     {:noreply, assign(socket, :snippet_tab, tab)}
   end
 
+  def handle_event(
+        "toggle_fail_on_context_overflow",
+        %{
+          "fail_on_context_overflow" => value
+        },
+        socket
+      ) do
+    enabled = value == "true"
+
+    case Routers.update_router(socket.assigns.router, %{
+           "fail_on_context_overflow" => enabled
+         }) do
+      {:ok, router} ->
+        {:noreply, assign(socket, :router, router)}
+
+      {:error, _} ->
+        {:noreply, put_flash(socket, :error, "Failed to update setting")}
+    end
+  end
+
+  def handle_event("toggle_fail_on_context_overflow", _params, socket) do
+    case Routers.update_router(socket.assigns.router, %{
+           "fail_on_context_overflow" => false
+         }) do
+      {:ok, router} ->
+        {:noreply, assign(socket, :router, router)}
+
+      {:error, _} ->
+        {:noreply, put_flash(socket, :error, "Failed to update setting")}
+    end
+  end
+
   def handle_event("update_step_form", %{"step" => %{"provider" => provider}}, socket) do
     {:noreply, assign(socket, :step_provider, provider)}
   end
@@ -410,9 +442,36 @@ defmodule DodoRouterWeb.RouterLive.Show do
                 Processing...
               </div>
             </div>
-            <.link patch={~p"/routers/#{@router}/routing"} class="btn btn-primary btn-sm">
-              Add Step
-            </.link>
+            <div class="flex items-center gap-4">
+              <form phx-change="toggle_fail_on_context_overflow" class="flex items-center gap-2">
+                <label class="relative inline-flex items-center cursor-pointer">
+                  <input
+                    type="checkbox"
+                    name="fail_on_context_overflow"
+                    value="true"
+                    checked={@router.fail_on_context_overflow}
+                    class="sr-only peer"
+                  />
+                  <div class="w-9 h-5 bg-base-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-primary">
+                  </div>
+                  <span class="ml-2 text-sm text-base-content/70">
+                    Skip fallback on context overflow
+                  </span>
+                </label>
+                <div class="relative group">
+                  <.icon
+                    name="hero-question-mark-circle"
+                    class="size-4 text-base-content/40 cursor-help"
+                  />
+                  <div class="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden group-hover:block w-64 p-2 text-xs bg-base-100 border border-base-300 rounded-lg shadow-lg text-base-content/80 z-50">
+                    When enabled, requests that exceed a model's context window will skip the fallback chain and fail immediately.
+                  </div>
+                </div>
+              </form>
+              <.link patch={~p"/routers/#{@router}/routing"} class="btn btn-primary btn-sm">
+                Add Step
+              </.link>
+            </div>
           </div>
           <div id="routing-steps" phx-update="stream" class="relative">
             <div

@@ -151,7 +151,7 @@ defmodule DodoRouter.Proxy.Adapter do
       # Ollama
       ~r/prompt too long; exceeded (?:max )?context length/i,
       # Mistral
-      ~r/too large for model with \d+ maximum context length/i,
+      ~r/too large for model(?: with \d+ maximum context length)?/i,
       # z.ai (in error text)
       ~r/model_context_window_exceeded/i
     ]

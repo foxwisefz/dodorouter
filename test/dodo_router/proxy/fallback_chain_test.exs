@@ -294,6 +294,32 @@ defmodule DodoRouter.Proxy.FallbackChainTest do
     end
   end
 
+  describe "should_fallback?/3" do
+    test "returns true for context_overflow when fail_on_context_overflow is false" do
+      assert FallbackChain.should_fallback?(:context_overflow, 2, false) == true
+    end
+
+    test "returns false for context_overflow when fail_on_context_overflow is true" do
+      assert FallbackChain.should_fallback?(:context_overflow, 2, true) == false
+    end
+
+    test "returns false for context_overflow when no remaining steps" do
+      assert FallbackChain.should_fallback?(:context_overflow, 0, false) == false
+      assert FallbackChain.should_fallback?(:context_overflow, 0, true) == false
+    end
+
+    test "still allows fallback for other errors when fail_on_context_overflow is true" do
+      assert FallbackChain.should_fallback?(:rate_limited, 2, true) == true
+      assert FallbackChain.should_fallback?(:server_error, 2, true) == true
+      assert FallbackChain.should_fallback?(:timeout, 2, true) == true
+    end
+
+    test "returns false for non-fallback errors regardless of setting" do
+      assert FallbackChain.should_fallback?(:success, 2, false) == false
+      assert FallbackChain.should_fallback?(:success, 2, true) == false
+    end
+  end
+
   describe "truncate_error" do
     test "returns nil for nil" do
       assert DodoRouter.Proxy.FallbackChain.truncate_error(nil) == nil
