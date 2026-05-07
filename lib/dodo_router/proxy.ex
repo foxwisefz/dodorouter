@@ -39,6 +39,7 @@ defmodule DodoRouter.Proxy do
           opts
           |> Keyword.put(:client_headers, client_headers)
           |> Keyword.put(:request_id, request_id)
+          |> Keyword.put(:fail_on_context_overflow, router.fail_on_context_overflow)
         )
 
       log_request(
