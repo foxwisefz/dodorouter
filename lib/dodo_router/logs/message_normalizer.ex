@@ -44,7 +44,7 @@ defmodule DodoRouter.Logs.MessageNormalizer do
   def parse_response_body(_), do: nil
 
   @doc """
-  Normalize a single message map into `%{role, content, tool_calls, tool_call_id, name}`.
+  Normalize a single message map into `%{role, content, tool_calls, tool_call_id, name, reasoning_content}`.
   """
   def normalize_message(%{"role" => role, "content" => content} = msg) do
     %{
@@ -52,7 +52,8 @@ defmodule DodoRouter.Logs.MessageNormalizer do
       content: normalize_content(content),
       tool_calls: msg["tool_calls"],
       tool_call_id: msg["tool_call_id"],
-      name: msg["name"]
+      name: msg["name"],
+      reasoning_content: msg["reasoning_content"]
     }
   end
 
@@ -62,12 +63,20 @@ defmodule DodoRouter.Logs.MessageNormalizer do
       content: normalize_content(content),
       tool_calls: msg["tool_calls"],
       tool_call_id: msg["tool_call_id"],
-      name: msg["name"]
+      name: msg["name"],
+      reasoning_content: msg["reasoning_content"]
     }
   end
 
   def normalize_message(msg) do
-    %{role: "unknown", content: inspect(msg), tool_calls: nil, tool_call_id: nil, name: nil}
+    %{
+      role: "unknown",
+      content: inspect(msg),
+      tool_calls: nil,
+      tool_call_id: nil,
+      name: nil,
+      reasoning_content: nil
+    }
   end
 
   @doc """

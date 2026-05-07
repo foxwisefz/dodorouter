@@ -835,16 +835,22 @@ defmodule DodoRouterWeb.RouterLive.Show do
   defp call_type_label(other), do: other
 
   defp last_message_preview(log) do
-    {messages, _} = MessageNormalizer.parse_request_body(log.request_body)
+    if is_nil(Map.get(log, :request_body)) do
+      nil
+    else
+      {messages, _} = MessageNormalizer.parse_request_body(log.request_body)
 
-    messages
-    |> Enum.reverse()
-    |> Enum.find(fn msg -> msg.role == "user" end)
-    |> case do
-      nil -> nil
-      %{content: ""} -> nil
-      %{content: content} when is_binary(content) -> truncate_preview(content)
-      _ -> nil
+      messages
+      |> Enum.reverse()
+      |> Enum.find(fn msg ->
+        msg.role in ~w(user assistant)
+      end)
+      |> case do
+        nil -> nil
+        %{content: content} when is_binary(content) and content != "" -> truncate_preview(content)
+        %{reasoning_content: rc} when is_binary(rc) and rc != "" -> truncate_preview(rc)
+        _ -> nil
+      end
     end
   end
 
