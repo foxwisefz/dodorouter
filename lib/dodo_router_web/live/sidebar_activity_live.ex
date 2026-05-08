@@ -78,7 +78,6 @@ defmodule DodoRouterWeb.SidebarActivityLive do
       <%= if length(@routers) > 0 do %>
         <%= for router <- @routers do %>
           <% {primary, fallback} = Map.get(@activity, router.id, {0, 0}) %>
-          <% has_activity = primary > 0 or fallback > 0 %>
 
           <.link
             navigate={~p"/routers/#{router.id}"}
@@ -86,8 +85,7 @@ defmodule DodoRouterWeb.SidebarActivityLive do
             class="sidebar-item flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm transition-colors group text-base-content/60 hover:bg-secondary"
           >
             <span class={[
-              "flex h-5 w-5 items-center justify-center rounded text-xs font-bold shrink-0 transition-transform",
-              has_activity && "scale-110",
+              "flex h-5 w-5 items-center justify-center rounded text-xs font-bold shrink-0",
               router.color == "blue" && "bg-blue-100 text-blue-700",
               router.color == "purple" && "bg-purple-100 text-purple-700",
               router.color == "amber" && "bg-amber-100 text-amber-700",
@@ -103,18 +101,12 @@ defmodule DodoRouterWeb.SidebarActivityLive do
 
             <div class="sidebar-label ml-auto flex items-center gap-1 transition-all duration-300">
               <%= if primary > 0 do %>
-                <span class={[
-                  "activity-badge bg-success text-success-content",
-                  has_activity && "activity-badge-pulse"
-                ]}>
+                <span class="activity-badge bg-success text-success-content">
                   {primary}
                 </span>
               <% end %>
               <%= if fallback > 0 do %>
-                <span class={[
-                  "activity-badge bg-warning text-warning-content",
-                  has_activity && "activity-badge-pulse"
-                ]}>
+                <span class="activity-badge bg-warning text-warning-content">
                   {fallback}
                 </span>
               <% end %>

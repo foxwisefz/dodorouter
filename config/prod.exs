@@ -16,6 +16,7 @@ config :swoosh, local: false
 
 # Do not print debug messages in production
 config :logger, level: :info
+config :dodo_router, :env, :prod
 
 config :logger, :info_log, path: "/app/logs/info.log"
 config :logger, :error_log, path: "/app/logs/error.log"

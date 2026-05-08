@@ -25,7 +25,6 @@ import {LiveSocket} from "phoenix_live_view"
 import {hooks as colocatedHooks} from "phoenix-colocated/dodo_router"
 import {RequestFlowAnimation} from "./request_flow_animation"
 import {LogEntryAnimations} from "./log_entry_animations"
-import {PulseRing} from "./pulse_ring"
 import {CopyButton} from "./copy_button"
 import topbar from "../vendor/topbar"
 
@@ -33,7 +32,7 @@ const csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute
 const liveSocket = new LiveSocket("/live", Socket, {
   longPollFallbackMs: 2500,
   params: {_csrf_token: csrfToken},
-  hooks: {...colocatedHooks, RequestFlowAnimation, LogEntryAnimations, PulseRing, CopyButton},
+  hooks: {...colocatedHooks, RequestFlowAnimation, LogEntryAnimations, CopyButton},
 })
 
 // Show progress bar on live navigation and form submits
