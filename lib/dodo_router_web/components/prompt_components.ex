@@ -76,12 +76,12 @@ defmodule DodoRouterWeb.PromptComponents do
     items
     |> Enum.reduce([], fn item, acc ->
       case acc do
-        [%{collapsed: true, message: prev, count: count} | rest] ->
-          if same_message?(prev, item) do
+        [%{collapsed: true, message: prev_msg, count: count} = prev_item | rest] ->
+          if same_message?(prev_item, item) do
             [
               %{
                 collapsed: true,
-                message: prev,
+                message: prev_msg,
                 index: item.index,
                 response: item.response,
                 count: count + 1
@@ -89,15 +89,15 @@ defmodule DodoRouterWeb.PromptComponents do
               | rest
             ]
           else
-            [%{item | collapsed: false} | acc]
+            [Map.put(item, :collapsed, false) | acc]
           end
 
-        [%{collapsed: false, message: prev} | _] ->
-          if same_message?(prev, item) do
+        [%{collapsed: false, message: prev_msg} = prev_item | _] ->
+          if same_message?(prev_item, item) do
             [
               %{
                 collapsed: true,
-                message: prev,
+                message: prev_msg,
                 index: item.index,
                 response: item.response,
                 count: 2
@@ -105,11 +105,11 @@ defmodule DodoRouterWeb.PromptComponents do
               | tl(acc)
             ]
           else
-            [%{item | collapsed: false} | acc]
+            [Map.put(item, :collapsed, false) | acc]
           end
 
         [] ->
-          [%{item | collapsed: false}]
+          [Map.put(item, :collapsed, false)]
       end
     end)
     |> Enum.reverse()

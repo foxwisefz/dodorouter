@@ -248,51 +248,22 @@
               </span>
             </a>
 
-            <div class="mt-5 sidebar-section">
-              <p class="sidebar-label mb-1.5 px-3 text-xs font-semibold uppercase tracking-wider text-base-content/40">
-                Routers
-              </p>
-              <%= if assigns[:nav_routers] && length(@nav_routers) > 0 do %>
-                <%= for router <- @nav_routers do %>
-                  <a
-                    href={~p"/routers/#{router.id}"}
-                    title={router.name}
-                    class={[
-                      "sidebar-item flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm transition-colors",
-                      @conn.request_path == "/routers/#{router.id}" &&
-                        "font-medium text-accent bg-accent/10",
-                      @conn.request_path != "/routers/#{router.id}" &&
-                        "text-base-content/60 hover:bg-secondary"
-                    ]}
-                  >
-                    <span class={[
-                      "flex h-5 w-5 items-center justify-center rounded text-xs font-bold shrink-0",
-                      router.color == "blue" && "bg-blue-100 text-blue-700",
-                      router.color == "purple" && "bg-purple-100 text-purple-700",
-                      router.color == "amber" && "bg-amber-100 text-amber-700",
-                      router.color == "rose" && "bg-rose-100 text-rose-700",
-                      router.color == "emerald" && "bg-emerald-100 text-emerald-700",
-                      router.color == "sky" && "bg-sky-100 text-sky-700",
-                      router.color == "orange" && "bg-orange-100 text-orange-700",
-                      router.color == "indigo" && "bg-indigo-100 text-indigo-700"
-                    ]}>
-                      {String.upcase(String.first(router.name))}
-                    </span>
-                    <span class="sidebar-label truncate">{router.name}</span>
-                    <span class={[
-                      "sidebar-label ml-auto text-[10px] font-semibold rounded-full px-1.5 py-0.5",
-                      router.step_count > 1 && "bg-emerald-100 text-emerald-700",
-                      router.step_count == 1 && "bg-accent/10 text-accent",
-                      router.step_count == 0 && "bg-secondary text-base-content/40"
-                    ]}>
-                      {router.step_count}
-                    </span>
-                  </a>
-                <% end %>
-              <% else %>
+            <%= if @current_scope && @current_scope.user do %>
+              {live_render(@conn, DodoRouterWeb.SidebarActivityLive,
+                id: "sidebar-activity-desktop",
+                session: %{
+                  "user_id" => @current_scope.user.id,
+                  "current_path" => @conn.request_path
+                }
+              )}
+            <% else %>
+              <div class="mt-5 sidebar-section">
+                <p class="sidebar-label mb-1.5 px-3 text-xs font-semibold uppercase tracking-wider text-base-content/40">
+                  Routers
+                </p>
                 <p class="sidebar-label px-3 py-2 text-xs text-base-content/40">No routers yet</p>
-              <% end %>
-            </div>
+              </div>
+            <% end %>
           </div>
 
           <div class="border-t border-base-300/50 p-3">
@@ -404,50 +375,22 @@
               </span>
             </a>
 
-            <div class="mt-5">
-              <p class="mb-1.5 px-3 text-xs font-semibold uppercase tracking-wider text-base-content/40">
-                Routers
-              </p>
-              <%= if assigns[:nav_routers] && length(@nav_routers) > 0 do %>
-                <%= for router <- @nav_routers do %>
-                  <a
-                    href={~p"/routers/#{router.id}"}
-                    class={[
-                      "flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm transition-colors",
-                      @conn.request_path == "/routers/#{router.id}" &&
-                        "font-medium text-accent bg-accent/10",
-                      @conn.request_path != "/routers/#{router.id}" &&
-                        "text-base-content/60 hover:bg-secondary"
-                    ]}
-                  >
-                    <span class={[
-                      "flex h-5 w-5 items-center justify-center rounded text-xs font-bold",
-                      router.color == "blue" && "bg-blue-100 text-blue-700",
-                      router.color == "purple" && "bg-purple-100 text-purple-700",
-                      router.color == "amber" && "bg-amber-100 text-amber-700",
-                      router.color == "rose" && "bg-rose-100 text-rose-700",
-                      router.color == "emerald" && "bg-emerald-100 text-emerald-700",
-                      router.color == "sky" && "bg-sky-100 text-sky-700",
-                      router.color == "orange" && "bg-orange-100 text-orange-700",
-                      router.color == "indigo" && "bg-indigo-100 text-indigo-700"
-                    ]}>
-                      {String.upcase(String.first(router.name))}
-                    </span>
-                    <span class="truncate">{router.name}</span>
-                    <span class={[
-                      "ml-auto text-[10px] font-semibold rounded-full px-1.5 py-0.5",
-                      router.step_count > 1 && "bg-emerald-100 text-emerald-700",
-                      router.step_count == 1 && "bg-accent/10 text-accent",
-                      router.step_count == 0 && "bg-secondary text-base-content/40"
-                    ]}>
-                      {router.step_count}
-                    </span>
-                  </a>
-                <% end %>
-              <% else %>
+            <%= if @current_scope && @current_scope.user do %>
+              {live_render(@conn, DodoRouterWeb.SidebarActivityLive,
+                id: "sidebar-activity-mobile",
+                session: %{
+                  "user_id" => @current_scope.user.id,
+                  "current_path" => @conn.request_path
+                }
+              )}
+            <% else %>
+              <div class="mt-5">
+                <p class="mb-1.5 px-3 text-xs font-semibold uppercase tracking-wider text-base-content/40">
+                  Routers
+                </p>
                 <p class="px-3 py-2 text-xs text-base-content/40">No routers yet</p>
-              <% end %>
-            </div>
+              </div>
+            <% end %>
           </div>
 
           <div class="border-t border-base-300/50 p-3">

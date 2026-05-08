@@ -266,11 +266,16 @@ defmodule DodoRouter.Proxy do
   end
 
   defp broadcast_request_started(router, request_id, first_step, streaming) do
+    DodoRouter.Activity.request_started(router.id, request_id)
+
     pending_log = %{
       id: nil,
       request_id: request_id,
+      router_id: router.id,
+      user_id: router.user_id,
       router: router,
       status: "pending",
+      call_type: nil,
       final_provider: first_step.provider,
       final_model: first_step.model,
       streaming: streaming,
@@ -287,10 +292,14 @@ defmodule DodoRouter.Proxy do
   end
 
   defp broadcast_event(router, result, request_id) do
+    DodoRouter.Activity.request_completed(router.id, request_id)
+
     last_step = List.last(result.attempted_steps)
 
     event = %{
       request_id: request_id,
+      router_id: router.id,
+      user_id: router.user_id,
       status: result.status,
       provider: last_step[:provider],
       model: last_step[:model],

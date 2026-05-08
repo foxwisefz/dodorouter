@@ -143,11 +143,16 @@ defmodule DodoRouter.Proxy.FallbackChain do
   end
 
   defp broadcast_step_started(router_id, request_id, step, step_index) do
+    if step_index > 0 do
+      DodoRouter.Activity.step_started(router_id, request_id, step_index)
+    end
+
     Phoenix.PubSub.broadcast(
       DodoRouter.PubSub,
       "router:#{router_id}:events",
       {:step_started,
        %{
+         router_id: router_id,
          request_id: request_id,
          step_id: step.id,
          provider: step.provider,
@@ -164,6 +169,7 @@ defmodule DodoRouter.Proxy.FallbackChain do
       "router:#{router_id}:events",
       {:step_completed,
        %{
+         router_id: router_id,
          step_id: if(step, do: step.id),
          provider: if(step, do: step.provider),
          model: if(step, do: step.model),
