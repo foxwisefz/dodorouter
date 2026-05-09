@@ -16,6 +16,7 @@ defmodule DodoRouter.Application do
       DodoRouter.Repo,
       {DNSCluster, query: Application.get_env(:dodo_router, :dns_cluster_query) || :ignore},
       {Phoenix.PubSub, name: DodoRouter.PubSub},
+      DodoRouter.Activity,
       # Start to serve requests, typically the last entry
       DodoRouterWeb.Endpoint
     ]

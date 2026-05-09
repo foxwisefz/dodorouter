@@ -66,6 +66,7 @@ config :dodo_router, DodoRouterWeb.Endpoint,
 
 # Enable dev routes for dashboard and mailbox
 config :dodo_router, dev_routes: true
+config :dodo_router, :env, :dev
 
 # Do not include metadata nor timestamps in development logs
 config :logger, :default_formatter, format: "[$level] $message\n"

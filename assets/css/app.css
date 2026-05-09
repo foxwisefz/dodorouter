@@ -344,65 +344,6 @@ input.input,
   position: relative;
 }
 
-/* Connecting line between steps */
-.step-connector {
-  position: relative;
-  height: 12px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.step-connector-line {
-  width: 2px;
-  height: 100%;
-  background: oklch(50% 0.01 250 / 0.3);
-  border-radius: 1px;
-  transition: background 0.4s ease, box-shadow 0.4s ease;
-}
-
-.step-connector-pulse {
-  position: absolute;
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: transparent;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  transition: all 0.3s ease;
-}
-
-/* Connector states */
-.step-connector[data-status="active"] .step-connector-line {
-  background: oklch(65% 0.18 145 / 0.6);
-  box-shadow: 0 0 8px oklch(65% 0.18 145 / 0.3);
-}
-
-.step-connector[data-status="active"] .step-connector-pulse {
-  background: oklch(65% 0.18 145);
-  box-shadow: 0 0 12px oklch(65% 0.18 145 / 0.6);
-  animation: connector-particle 0.6s ease-in-out;
-}
-
-.step-connector[data-status="success"] .step-connector-line {
-  background: oklch(65% 0.18 145 / 0.5);
-}
-
-.step-connector[data-status="fallback"] .step-connector-line {
-  background: oklch(75% 0.18 55 / 0.5);
-}
-
-.step-connector[data-status="error"] .step-connector-line {
-  background: oklch(60% 0.22 25 / 0.5);
-}
-
-@keyframes connector-particle {
-  0% { transform: translate(-50%, -50%) scale(0); opacity: 0; }
-  50% { transform: translate(-50%, -50%) scale(2); opacity: 1; }
-  100% { transform: translate(-50%, -50%) scale(0); opacity: 0; }
-}
-
 /* Step number ring - spinning ring when trying */
 .step-number-ring {
   position: relative;
@@ -605,138 +546,12 @@ input.input,
 }
 
 /* Light theme adjustments */
-[data-theme="light"] .step-connector-line {
-  background: oklch(80% 0.01 250 / 0.4);
-}
-
-[data-theme="light"] .step-connector[data-status="active"] .step-connector-line {
-  background: oklch(55% 0.18 145 / 0.5);
-  box-shadow: 0 0 6px oklch(55% 0.18 145 / 0.2);
-}
-
 [data-theme="light"] .flow-particle {
   background: oklch(55% 0.18 145);
   box-shadow: 0 0 10px oklch(55% 0.18 145 / 0.4), 0 0 20px oklch(55% 0.18 145 / 0.2);
 }
 
-/* ============================================
-   Live Request Notification Bar (Top)
-   ============================================ */
 
-/* Single notification bar - drops in from top */
-.request-peek-bar {
-  position: absolute;
-  top: 0;
-  left: 15%;
-  right: 15%;
-  z-index: 50;
-  pointer-events: none;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  padding: 10px 20px;
-  border-radius: 0 0 12px 12px;
-  background: oklch(24% 0.02 250 / 0.85);
-  backdrop-filter: blur(12px);
-  border: 1px solid oklch(50% 0.1 145 / 0.3);
-  border-top: none;
-  color: oklch(85% 0.08 145);
-  font-size: 0.8rem;
-  font-weight: 500;
-  letter-spacing: 0.02em;
-  transform: translateY(-100%);
-  opacity: 0;
-  box-shadow: 0 4px 16px oklch(0% 0 0 / 0.3),
-              0 0 20px oklch(65% 0.18 145 / 0.1);
-}
-
-.request-peek-bar.active {
-  animation: bar-drop-in 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) forwards,
-             bar-breathe 2s ease-in-out infinite 0.4s;
-}
-
-.request-peek-bar .pulse-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: oklch(65% 0.18 145);
-  animation: dot-pulse 1.5s ease-in-out infinite;
-}
-
-/* Result states */
-.request-peek-bar.result-success {
-  border-color: oklch(65% 0.18 145 / 0.5);
-  color: oklch(75% 0.15 145);
-  box-shadow: 0 4px 16px oklch(0% 0 0 / 0.3),
-              0 0 24px oklch(65% 0.18 145 / 0.2);
-  animation: bar-flash-out 0.6s ease-out 0.3s forwards;
-}
-
-.request-peek-bar.result-fallback {
-  border-color: oklch(75% 0.18 55 / 0.5);
-  color: oklch(80% 0.12 55);
-  box-shadow: 0 4px 16px oklch(0% 0 0 / 0.3),
-              0 0 24px oklch(75% 0.18 55 / 0.2);
-  animation: bar-flash-out 0.6s ease-out 0.3s forwards;
-}
-
-.request-peek-bar.result-error {
-  border-color: oklch(60% 0.22 25 / 0.5);
-  color: oklch(70% 0.15 25);
-  box-shadow: 0 4px 16px oklch(0% 0 0 / 0.3),
-              0 0 24px oklch(60% 0.22 25 / 0.2);
-  animation: bar-flash-out 0.6s ease-out 0.3s forwards;
-}
-
-@keyframes bar-drop-in {
-  0% { transform: translateY(-100%); opacity: 0; }
-  100% { transform: translateY(0); opacity: 1; }
-}
-
-@keyframes bar-breathe {
-  0%, 100% { opacity: 0.75; }
-  50% { opacity: 1; }
-}
-
-@keyframes bar-flash-out {
-  0% { transform: translateY(0); opacity: 1; }
-  40% { opacity: 1; }
-  100% { transform: translateY(-100%); opacity: 0; }
-}
-
-@keyframes dot-pulse {
-  0%, 100% { opacity: 0.5; transform: scale(0.8); }
-  50% { opacity: 1; transform: scale(1.2); }
-}
-
-/* Light theme */
-[data-theme="light"] .request-peek-bar {
-  background: oklch(98% 0.01 250 / 0.9);
-  border-color: oklch(65% 0.1 145 / 0.3);
-  color: oklch(35% 0.08 145);
-  box-shadow: 0 4px 16px oklch(0% 0 0 / 0.08),
-              0 0 20px oklch(65% 0.18 145 / 0.08);
-}
-
-[data-theme="light"] .request-peek-bar .pulse-dot {
-  background: oklch(55% 0.18 145);
-}
-
-[data-theme="light"] .request-peek-bar.result-success {
-  border-color: oklch(55% 0.18 145 / 0.4);
-  color: oklch(35% 0.15 145);
-}
-
-[data-theme="light"] .request-peek-bar.result-fallback {
-  border-color: oklch(70% 0.18 55 / 0.4);
-  color: oklch(40% 0.12 55);
-}
-
-[data-theme="light"] .request-peek-bar.result-error {
-  border-color: oklch(55% 0.22 25 / 0.4);
-  color: oklch(35% 0.15 25);
-}
 
 /* ============================================
    Log Entry Animations
@@ -854,3 +669,23 @@ input.input,
 [data-theme="dark"] .code-block {
   background: hsl(240, 10%, 12%);
 }
+
+/* ============================================
+   Activity Badges - Real-time Router Status
+   ============================================ */
+
+.activity-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.25rem;
+  height: 1.25rem;
+  padding: 0 0.35rem;
+  border-radius: 9999px;
+  font-size: 0.65rem;
+  font-weight: 700;
+  line-height: 1;
+  transition: all 0.3s ease;
+}
+
+

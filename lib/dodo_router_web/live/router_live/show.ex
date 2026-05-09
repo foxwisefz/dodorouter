@@ -286,7 +286,7 @@ defmodule DodoRouterWeb.RouterLive.Show do
   @impl true
   def render(assigns) do
     ~H"""
-    <div id="router-show-page" class="relative overflow-hidden" phx-hook="PulseRing">
+    <div id="router-show-page" class="relative overflow-hidden">
       <!-- Content -->
       <div class="relative z-10">
         <!-- Header -->
@@ -481,15 +481,6 @@ defmodule DodoRouterWeb.RouterLive.Show do
               data-step-index={step.position}
               class="step-card-wrapper"
             >
-              <!-- Connecting line between steps -->
-              <div
-                :if={step.position > 0}
-                class="step-connector"
-                data-connector-index={step.position}
-              >
-                <div class="step-connector-line"></div>
-                <div class="step-connector-pulse"></div>
-              </div>
               <!-- The step card itself -->
               <div class="step-card flex items-center gap-4 relative overflow-hidden">
                 <!-- Animated border glow overlay -->
