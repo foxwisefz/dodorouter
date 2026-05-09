@@ -344,65 +344,6 @@ input.input,
   position: relative;
 }
 
-/* Connecting line between steps */
-.step-connector {
-  position: relative;
-  height: 12px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.step-connector-line {
-  width: 2px;
-  height: 100%;
-  background: oklch(50% 0.01 250 / 0.3);
-  border-radius: 1px;
-  transition: background 0.4s ease, box-shadow 0.4s ease;
-}
-
-.step-connector-pulse {
-  position: absolute;
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: transparent;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  transition: all 0.3s ease;
-}
-
-/* Connector states */
-.step-connector[data-status="active"] .step-connector-line {
-  background: oklch(65% 0.18 145 / 0.6);
-  box-shadow: 0 0 8px oklch(65% 0.18 145 / 0.3);
-}
-
-.step-connector[data-status="active"] .step-connector-pulse {
-  background: oklch(65% 0.18 145);
-  box-shadow: 0 0 12px oklch(65% 0.18 145 / 0.6);
-  animation: connector-particle 0.6s ease-in-out;
-}
-
-.step-connector[data-status="success"] .step-connector-line {
-  background: oklch(65% 0.18 145 / 0.5);
-}
-
-.step-connector[data-status="fallback"] .step-connector-line {
-  background: oklch(75% 0.18 55 / 0.5);
-}
-
-.step-connector[data-status="error"] .step-connector-line {
-  background: oklch(60% 0.22 25 / 0.5);
-}
-
-@keyframes connector-particle {
-  0% { transform: translate(-50%, -50%) scale(0); opacity: 0; }
-  50% { transform: translate(-50%, -50%) scale(2); opacity: 1; }
-  100% { transform: translate(-50%, -50%) scale(0); opacity: 0; }
-}
-
 /* Step number ring - spinning ring when trying */
 .step-number-ring {
   position: relative;
@@ -605,15 +546,6 @@ input.input,
 }
 
 /* Light theme adjustments */
-[data-theme="light"] .step-connector-line {
-  background: oklch(80% 0.01 250 / 0.4);
-}
-
-[data-theme="light"] .step-connector[data-status="active"] .step-connector-line {
-  background: oklch(55% 0.18 145 / 0.5);
-  box-shadow: 0 0 6px oklch(55% 0.18 145 / 0.2);
-}
-
 [data-theme="light"] .flow-particle {
   background: oklch(55% 0.18 145);
   box-shadow: 0 0 10px oklch(55% 0.18 145 / 0.4), 0 0 20px oklch(55% 0.18 145 / 0.2);
