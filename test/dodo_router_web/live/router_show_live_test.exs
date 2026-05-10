@@ -22,7 +22,12 @@ defmodule DodoRouterWeb.RouterShowLiveTest do
     end
 
     test "shows API usage snippet", %{conn: conn, router: router} do
-      {:ok, _live, html} = live(conn, ~p"/routers/#{router.id}")
+      {:ok, live, _html} = live(conn, ~p"/routers/#{router.id}")
+
+      html =
+        live
+        |> element("button[phx-click=\"toggle_connect\"]")
+        |> render_click()
 
       assert html =~ "curl"
       assert html =~ router.slug
@@ -36,15 +41,29 @@ defmodule DodoRouterWeb.RouterShowLiveTest do
       assert html =~ "test-provider"
     end
 
-    test "can switch snippet tabs", %{conn: conn, router: router} do
+    test "can switch code language and format", %{conn: conn, router: router} do
       {:ok, live, _html} = live(conn, ~p"/routers/#{router.id}")
 
+      # Expand Connect section first
+      live
+      |> element("button[phx-click=\"toggle_connect\"]")
+      |> render_click()
+
+      # Switch to Python
       html =
         live
-        |> element("button[phx-click=\"set_snippet_tab\"][phx-value-tab=\"python\"]")
+        |> element("button[phx-click=\"set_code_language\"][phx-value-language=\"python\"]")
         |> render_click()
 
       assert html =~ "openai" or html =~ "python"
+
+      # Switch to Anthropic format
+      html =
+        live
+        |> element("button[phx-click=\"set_api_format\"][phx-value-format=\"anthropic\"]")
+        |> render_click()
+
+      assert html =~ "anthropic" or html =~ "messages"
     end
 
     test "can toggle fail_on_context_overflow setting", %{conn: conn, router: router, user: user} do

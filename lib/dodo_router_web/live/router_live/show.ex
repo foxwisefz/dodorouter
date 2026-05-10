@@ -32,7 +32,9 @@ defmodule DodoRouterWeb.RouterLive.Show do
       |> assign(:active_request, false)
       |> assign(:has_routing_steps, length(router.routing_steps) > 0)
       |> assign(:has_logs, length(recent_logs) > 0)
-      |> assign(:snippet_tab, "curl")
+      |> assign(:api_format, "openai_chat")
+      |> assign(:code_language, "curl")
+      |> assign(:connect_collapsed, true)
       |> assign(:provider_keys, provider_keys)
       |> stream(:routing_steps, router.routing_steps)
       |> stream(:recent_logs, recent_logs)
@@ -61,8 +63,16 @@ defmodule DodoRouterWeb.RouterLive.Show do
   end
 
   @impl true
-  def handle_event("set_snippet_tab", %{"tab" => tab}, socket) do
-    {:noreply, assign(socket, :snippet_tab, tab)}
+  def handle_event("set_api_format", %{"format" => format}, socket) do
+    {:noreply, assign(socket, :api_format, format)}
+  end
+
+  def handle_event("set_code_language", %{"language" => language}, socket) do
+    {:noreply, assign(socket, :code_language, language)}
+  end
+
+  def handle_event("toggle_connect", _params, socket) do
+    {:noreply, assign(socket, :connect_collapsed, !socket.assigns.connect_collapsed)}
   end
 
   def handle_event(
@@ -386,47 +396,113 @@ defmodule DodoRouterWeb.RouterLive.Show do
           </div>
         </div>
         
-    <!-- Quick Start -->
+    <!-- Connect -->
         <div class="card-bordered mb-8">
-          <div class="flex items-center justify-between mb-3">
-            <h2 class="section-title mb-0">Quick Start</h2>
+          <div class="flex items-center justify-between mb-0">
+            <button
+              phx-click="toggle_connect"
+              class="flex items-center gap-2 group"
+            >
+              <h2 class="section-title mb-0 group-hover:text-primary transition-colors">Connect</h2>
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                class={"h-4 w-4 text-base-content/40 transition-transform duration-200 #{if @connect_collapsed, do: "-rotate-90", else: ""}"}
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+              >
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M19 9l-7 7-7-7"
+                />
+              </svg>
+            </button>
+          </div>
+
+          <div :if={!@connect_collapsed} class="mt-3 space-y-4">
+            <!-- Format selector -->
             <div class="flex bg-base-200 rounded-lg p-1 gap-1">
               <button
-                phx-click="set_snippet_tab"
-                phx-value-tab="curl"
-                class={"px-3 py-1 rounded text-sm transition-colors #{if @snippet_tab == "curl", do: "bg-base-100 text-base-content", else: "text-base-content/60 hover:text-base-content"}"}
+                phx-click="set_api_format"
+                phx-value-format="openai_chat"
+                class={"px-3 py-1 rounded text-sm transition-colors #{if @api_format == "openai_chat", do: "bg-base-100 text-base-content", else: "text-base-content/60 hover:text-base-content"}"}
               >
-                cURL
+                OpenAI Chat
               </button>
               <button
-                phx-click="set_snippet_tab"
-                phx-value-tab="python"
-                class={"px-3 py-1 rounded text-sm transition-colors #{if @snippet_tab == "python", do: "bg-base-100 text-base-content", else: "text-base-content/60 hover:text-base-content"}"}
+                phx-click="set_api_format"
+                phx-value-format="openai_responses"
+                class={"px-3 py-1 rounded text-sm transition-colors #{if @api_format == "openai_responses", do: "bg-base-100 text-base-content", else: "text-base-content/60 hover:text-base-content"}"}
               >
-                Python
+                OpenAI Responses
               </button>
               <button
-                phx-click="set_snippet_tab"
-                phx-value-tab="node"
-                class={"px-3 py-1 rounded text-sm transition-colors #{if @snippet_tab == "node", do: "bg-base-100 text-base-content", else: "text-base-content/60 hover:text-base-content"}"}
+                phx-click="set_api_format"
+                phx-value-format="anthropic"
+                class={"px-3 py-1 rounded text-sm transition-colors #{if @api_format == "anthropic", do: "bg-base-100 text-base-content", else: "text-base-content/60 hover:text-base-content"}"}
               >
-                Node.js
+                Anthropic
               </button>
             </div>
-          </div>
+            
+    <!-- Endpoint URL -->
+            <div class="p-3 rounded-lg bg-base-200/50 border border-base-300/30">
+              <div class="flex items-center gap-2 mb-1.5">
+                <span class={"px-2 py-0.5 rounded text-xs font-medium #{format_badge_class(@api_format)}"}>
+                  {format_label(@api_format)}
+                </span>
+                <span class="text-sm font-medium text-base-content/80">
+                  {format_name(@api_format)}
+                </span>
+              </div>
+              <code class="block p-2.5 bg-base-300 rounded-lg font-mono text-sm text-base-content/70 break-all">
+                {endpoint_url(@api_format, base_url(), @router.slug)}
+              </code>
+            </div>
+            
+    <!-- Language selector -->
+            <div class="flex items-center justify-between">
+              <div class="flex bg-base-200 rounded-lg p-1 gap-1">
+                <button
+                  phx-click="set_code_language"
+                  phx-value-language="curl"
+                  class={"px-3 py-1 rounded text-sm transition-colors #{if @code_language == "curl", do: "bg-base-100 text-base-content", else: "text-base-content/60 hover:text-base-content"}"}
+                >
+                  cURL
+                </button>
+                <button
+                  phx-click="set_code_language"
+                  phx-value-language="python"
+                  class={"px-3 py-1 rounded text-sm transition-colors #{if @code_language == "python", do: "bg-base-100 text-base-content", else: "text-base-content/60 hover:text-base-content"}"}
+                >
+                  Python
+                </button>
+                <button
+                  phx-click="set_code_language"
+                  phx-value-language="node"
+                  class={"px-3 py-1 rounded text-sm transition-colors #{if @code_language == "node", do: "bg-base-100 text-base-content", else: "text-base-content/60 hover:text-base-content"}"}
+                >
+                  Node.js
+                </button>
+              </div>
+            </div>
+            
+    <!-- Code snippet -->
+            <div class="code-block">
+              <pre class="text-xs text-base-content/80"><code><%= raw(snippet(@api_format, @code_language, base_url(), @router.slug)) %></code></pre>
+            </div>
 
-          <div class="code-block">
-            <pre class="text-xs text-base-content/80"><code><%= raw(snippet_for_tab(@snippet_tab, base_url(), @router.slug)) %></code></pre>
+            <p class="text-sm text-base-content/50">
+              Replace <code class="text-primary font-medium">YOUR_API_KEY</code>
+              with your router API key:
+              <code class="font-mono text-base-content/70">{@router.api_key_prefix}...</code>
+              <.link navigate={~p"/api-keys"} class="text-accent hover:underline ml-1">
+                Manage keys
+              </.link>
+            </p>
           </div>
-
-          <p class="text-sm text-base-content/50 mt-3">
-            Replace <code class="text-primary font-medium">YOUR_API_KEY</code>
-            with your router API key:
-            <code class="font-mono text-base-content/70">{@router.api_key_prefix}...</code>
-            <.link navigate={~p"/api-keys"} class="text-accent hover:underline ml-1">
-              Manage keys
-            </.link>
-          </p>
         </div>
         
     <!-- Routing Chain -->
@@ -680,7 +756,7 @@ defmodule DodoRouterWeb.RouterLive.Show do
             </.link>
           </div>
           <p :if={!@has_logs} class="empty-state py-8">
-            No requests yet. Use the Quick Start snippet above to make your first request.
+            No requests yet. Expand the Connect section above to see how to make your first request.
           </p>
         </div>
         
@@ -918,12 +994,44 @@ defmodule DodoRouterWeb.RouterLive.Show do
     DodoRouterWeb.Endpoint.url()
   end
 
-  defp snippet_for_tab("curl", base_url, slug), do: curl_snippet(base_url, slug)
-  defp snippet_for_tab("python", base_url, slug), do: python_snippet(base_url, slug)
-  defp snippet_for_tab("node", base_url, slug), do: node_snippet(base_url, slug)
-  defp snippet_for_tab(_, base_url, slug), do: curl_snippet(base_url, slug)
+  defp format_badge_class("openai_chat"), do: "bg-green-500/20 text-green-600"
+  defp format_badge_class("openai_responses"), do: "bg-green-500/20 text-green-600"
+  defp format_badge_class("anthropic"), do: "bg-orange-500/20 text-orange-600"
+  defp format_badge_class(_), do: "bg-base-300 text-base-content/60"
 
-  defp curl_snippet(base_url, slug) do
+  defp format_label("openai_chat"), do: "OpenAI"
+  defp format_label("openai_responses"), do: "OpenAI"
+  defp format_label("anthropic"), do: "Anthropic"
+  defp format_label(_), do: "Unknown"
+
+  defp format_name("openai_chat"), do: "Chat Completions"
+  defp format_name("openai_responses"), do: "Responses API"
+  defp format_name("anthropic"), do: "Messages"
+  defp format_name(_), do: "Unknown"
+
+  defp endpoint_url("openai_chat", base_url, slug),
+    do: "#{base_url}/r/#{slug}/v1/chat/completions"
+
+  defp endpoint_url("openai_responses", base_url, slug), do: "#{base_url}/r/#{slug}/v1/responses"
+  defp endpoint_url("anthropic", base_url, slug), do: "#{base_url}/r/#{slug}/v1/messages"
+  defp endpoint_url(_, base_url, slug), do: "#{base_url}/r/#{slug}/v1/chat/completions"
+
+  defp snippet(format, language, base_url, slug) do
+    case {format, language} do
+      {"openai_chat", "curl"} -> openai_chat_curl(base_url, slug)
+      {"openai_chat", "python"} -> openai_chat_python(base_url, slug)
+      {"openai_chat", "node"} -> openai_chat_node(base_url, slug)
+      {"openai_responses", "curl"} -> openai_responses_curl(base_url, slug)
+      {"openai_responses", "python"} -> openai_responses_python(base_url, slug)
+      {"openai_responses", "node"} -> openai_responses_node(base_url, slug)
+      {"anthropic", "curl"} -> anthropic_curl(base_url, slug)
+      {"anthropic", "python"} -> anthropic_python(base_url, slug)
+      {"anthropic", "node"} -> anthropic_node(base_url, slug)
+      _ -> openai_chat_curl(base_url, slug)
+    end
+  end
+
+  defp openai_chat_curl(base_url, slug) do
     """
     curl #{base_url}/r/#{slug}/v1/chat/completions \\
       -H "Authorization: Bearer YOUR_API_KEY" \\
@@ -932,7 +1040,7 @@ defmodule DodoRouterWeb.RouterLive.Show do
     """
   end
 
-  defp python_snippet(base_url, slug) do
+  defp openai_chat_python(base_url, slug) do
     """
     from openai import OpenAI
 
@@ -949,7 +1057,7 @@ defmodule DodoRouterWeb.RouterLive.Show do
     """
   end
 
-  defp node_snippet(base_url, slug) do
+  defp openai_chat_node(base_url, slug) do
     """
     import OpenAI from 'openai';
 
@@ -963,6 +1071,99 @@ defmodule DodoRouterWeb.RouterLive.Show do
       messages: [{ role: 'user', content: 'Hello!' }]
     });
     console.log(response.choices[0].message.content);
+    """
+  end
+
+  defp openai_responses_curl(base_url, slug) do
+    """
+    curl #{base_url}/r/#{slug}/v1/responses \\
+      -H "Authorization: Bearer YOUR_API_KEY" \\
+      -H "Content-Type: application/json" \\
+      -d '{"input": "Hello!"}'
+    """
+  end
+
+  defp openai_responses_python(base_url, slug) do
+    """
+    from openai import OpenAI
+
+    client = OpenAI(
+        base_url="#{base_url}/r/#{slug}/v1",
+        api_key="YOUR_API_KEY"
+    )
+
+    response = client.responses.create(
+        model="default",  # model is set by routing
+        input="Hello!"
+    )
+    print(response.output_text)
+    """
+  end
+
+  defp openai_responses_node(base_url, slug) do
+    """
+    import OpenAI from 'openai';
+
+    const client = new OpenAI({
+      baseURL: '#{base_url}/r/#{slug}/v1',
+      apiKey: 'YOUR_API_KEY'
+    });
+
+    const response = await client.responses.create({
+      model: 'default',  // model is set by routing
+      input: 'Hello!'
+    });
+    console.log(response.output_text);
+    """
+  end
+
+  defp anthropic_curl(base_url, slug) do
+    """
+    curl #{base_url}/r/#{slug}/v1/messages \\
+      -H "x-api-key: YOUR_API_KEY" \\
+      -H "Content-Type: application/json" \\
+      -H "anthropic-version: 2023-06-01" \\
+      -d '{
+        "model": "default",
+        "max_tokens": 1024,
+        "messages": [{"role": "user", "content": "Hello!"}]
+      }'
+    """
+  end
+
+  defp anthropic_python(base_url, slug) do
+    """
+    import anthropic
+
+    client = anthropic.Anthropic(
+        base_url="#{base_url}/r/#{slug}/v1",
+        api_key="YOUR_API_KEY"
+    )
+
+    response = client.messages.create(
+        model="default",  # model is set by routing
+        max_tokens=1024,
+        messages=[{"role": "user", "content": "Hello!"}]
+    )
+    print(response.content[0].text)
+    """
+  end
+
+  defp anthropic_node(base_url, slug) do
+    """
+    import Anthropic from '@anthropic-ai/sdk';
+
+    const client = new Anthropic({
+      baseURL: '#{base_url}/r/#{slug}/v1',
+      apiKey: 'YOUR_API_KEY'
+    });
+
+    const response = await client.messages.create({
+      model: 'default',  // model is set by routing
+      max_tokens: 1024,
+      messages: [{ role: 'user', content: 'Hello!' }]
+    });
+    console.log(response.content[0].text);
     """
   end
 
