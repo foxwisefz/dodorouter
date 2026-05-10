@@ -44,8 +44,8 @@ defmodule DodoRouterWeb.DashboardLiveTest do
       assert render(live) =~ router1.name
 
       live
-      |> element("select[name=\"router_id\"]")
-      |> render_change(%{router_id: router2.id})
+      |> element("button[phx-value-router_id='#{router2.id}']")
+      |> render_click()
 
       assert_patch(live, ~p"/dashboard?router_id=#{router2.id}")
     end
