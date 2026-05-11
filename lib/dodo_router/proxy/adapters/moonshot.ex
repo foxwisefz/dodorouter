@@ -236,6 +236,7 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
       |> clamp_temperature()
       |> handle_tool_choice_required()
       |> normalize_tool_call_arguments()
+      |> sanitize_tool_names()
       |> maybe_put_thinking(step)
       |> maybe_transform_kimi_reasoning(step)
 
@@ -331,6 +332,24 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
   end
 
   defp normalize_tool_call_arguments(body), do: body
+
+  # Moonshot only supports function-type tools. Filter out web_search,
+  # image_generation, and other non-function tool types.
+  defp sanitize_tool_names(%{"tools" => tools} = body) when is_list(tools) do
+    sanitized =
+      Enum.filter(tools, fn
+        %{"type" => "function"} -> true
+        _ -> false
+      end)
+
+    if sanitized == [] do
+      Map.delete(body, "tools")
+    else
+      Map.put(body, "tools", sanitized)
+    end
+  end
+
+  defp sanitize_tool_names(body), do: body
 
   defguardp is_kimi_thinking_model(model)
             when is_binary(model) and

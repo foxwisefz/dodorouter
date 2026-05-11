@@ -436,6 +436,71 @@ defmodule DodoRouter.Proxy.Adapters.MoonshotTest do
       assert Moonshot.base_url(step) == "https://api.moonshot.ai/v1"
     end
 
+    test "filters out non-function tools for Moonshot" do
+      request = %{
+        "messages" => [%{"role" => "user", "content" => "Hi"}],
+        "tools" => [
+          %{
+            "type" => "function",
+            "function" => %{
+              "name" => "exec_command",
+              "description" => "Run a command"
+            }
+          },
+          %{
+            "type" => "web_search",
+            "external_web_access" => false
+          },
+          %{
+            "type" => "image_generation",
+            "output_format" => "png"
+          },
+          %{
+            "type" => "function",
+            "function" => %{
+              "name" => "view_image",
+              "description" => "View an image"
+            }
+          }
+        ]
+      }
+
+      step = %RoutingStep{
+        provider: "moonshot",
+        model: "kimi-k2.6",
+        thinking_enabled: true
+      }
+
+      body = Moonshot.build_request_body(request, step)
+
+      assert length(body["tools"]) == 2
+
+      tool_names = Enum.map(body["tools"], &get_in(&1, ["function", "name"]))
+      assert "exec_command" in tool_names
+      assert "view_image" in tool_names
+      refute Enum.any?(body["tools"], &(&1["type"] != "function"))
+    end
+
+    test "removes tools key entirely when only non-function tools present" do
+      request = %{
+        "messages" => [%{"role" => "user", "content" => "Hi"}],
+        "tools" => [
+          %{"type" => "web_search", "external_web_access" => false},
+          %{"type" => "image_generation", "output_format" => "png"}
+        ]
+      }
+
+      step = %RoutingStep{
+        provider: "moonshot",
+        model: "kimi-k2.6",
+        thinking_enabled: true
+      }
+
+      body = Moonshot.build_request_body(request, step)
+
+      refute Map.has_key?(body, "tools")
+    end
+
     test "does not include stream_options in build_request_body" do
       request = %{"messages" => [%{"role" => "user", "content" => "hi"}]}
       step = %RoutingStep{model: "kimi-k2", provider: "moonshot"}

@@ -101,11 +101,32 @@ defmodule DodoRouter.Proxy do
     request_body = Jason.encode!(truncated_req)
 
     {truncated_resp, resp_flags} =
-      result.final_response
-      |> clean_response()
-      |> truncate_body()
+      case result.final_response do
+        nil ->
+          # No successful response — use error body from last failed attempt
+          last_error = last_step[:error_body]
 
-    response_body = Jason.encode!(truncated_resp)
+          cond do
+            is_binary(last_error) ->
+              {:ok, decoded} = Jason.decode(last_error)
+              decoded |> clean_response() |> truncate_body()
+
+            is_map(last_error) ->
+              last_error |> clean_response() |> truncate_body()
+
+            true ->
+              {nil, []}
+          end
+
+        response ->
+          response |> clean_response() |> truncate_body()
+      end
+
+    response_body =
+      case truncated_resp do
+        nil -> "null"
+        _ -> Jason.encode!(truncated_resp)
+      end
 
     truncation_flags = req_flags ++ resp_flags
 

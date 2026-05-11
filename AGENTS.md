@@ -18,6 +18,7 @@ There is also a legacy endpoint at `POST /v1/chat/completions` for backwards com
 
 - Use `mix precommit` alias when you are done with all changes and fix any pending issues
 - Use the already included and available `:req` (`Req`) library for HTTP requests, **avoid** `:httpoison`, `:tesla`, and `:httpc`. Req is included by default and is the preferred HTTP client for Phoenix apps
+- **Always practice TDD when fixing a bug**: write a failing test that reproduces the bug first, then implement the fix, and only then run the full test suite. Never fix a bug without a corresponding test.
 
 ### Phoenix v1.8 guidelines
 
