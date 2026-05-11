@@ -1,0 +1,33 @@
+[Unit]
+Description=DodoRouter LLM Proxy
+After=network.target
+
+[Service]
+Type=simple
+User=dodo-router
+Group=dodo-router
+WorkingDirectory=/opt/dodo-router
+EnvironmentFile=/opt/dodo-router/.env
+Environment="PHX_SERVER=true"
+Environment="HOME=/opt/dodo-router"
+ExecStart=/opt/dodo-router/bin/dodo_router start
+ExecStop=/opt/dodo-router/bin/dodo_router stop
+ExecReload=/opt/dodo-router/bin/dodo_router restart
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=dodo-router
+
+# Graceful shutdown
+TimeoutStopSec=30
+KillSignal=SIGTERM
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/dodo-router/logs
+
+[Install]
+WantedBy=multi-user.target
