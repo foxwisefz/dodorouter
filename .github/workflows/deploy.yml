@@ -60,7 +60,7 @@ jobs:
           # Run deploy script on server
           ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 \
             ${{ secrets.APP_DEPLOY_USER }}@${{ secrets.APP_DEPLOY_HOST }} \
-            "sudo bash /tmp/deploy-server.sh ${{ steps.version.outputs.version }}"
+            "bash /tmp/deploy-server.sh ${{ steps.version.outputs.version }}"
 
       - name: Health check
         run: |

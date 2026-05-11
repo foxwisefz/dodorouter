@@ -2,7 +2,7 @@
 set -euo pipefail
 
 VERSION=$1
-RELEASE_DIR="/opt/dodo-router"
+RELEASE_DIR="$HOME/dodo-router"
 TARBALL="/tmp/dodo-router-${VERSION}.tar.gz"
 
 if [ ! -f "$TARBALL" ]; then
@@ -16,12 +16,8 @@ echo "=== Deploying dodo-router v${VERSION} ==="
 mkdir -p "$RELEASE_DIR"
 
 # Check if service is currently running
-if systemctl is-active --quiet dodo-router; then
+if systemctl --user is-active --quiet dodo-router; then
   echo "Service is running. Performing hot upgrade..."
-  
-  # For hot upgrades, extract to the releases subdirectory
-  # The release tarball contains the full release, but we can use it for upgrade
-  # by extracting it and then running the upgrade command
   
   # Backup current release
   BACKUP_DIR="${RELEASE_DIR}.backup.$(date +%s)"
@@ -43,7 +39,7 @@ if systemctl is-active --quiet dodo-router; then
     echo "ERROR: Hot upgrade failed! Rolling back..."
     rm -rf "$RELEASE_DIR"
     mv "$BACKUP_DIR" "$RELEASE_DIR"
-    systemctl restart dodo-router
+    systemctl --user restart dodo-router
     exit 1
   fi
 else
@@ -53,12 +49,9 @@ else
   cd "$RELEASE_DIR"
   tar xzf "$TARBALL"
   
-  # Ensure proper permissions
-  chown -R dodo-router:dodo-router "$RELEASE_DIR"
-  
   # Start service
-  systemctl enable dodo-router
-  systemctl start dodo-router
+  systemctl --user enable dodo-router
+  systemctl --user start dodo-router
   
   echo "Full install completed!"
 fi
