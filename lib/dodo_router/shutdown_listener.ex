@@ -33,4 +33,9 @@ defmodule DodoRouter.ShutdownListener do
     IO.puts("[ShutdownListener] SIGTERM received, marking unhealthy")
     {:noreply, %{state | shutting_down: true}}
   end
+
+  @impl true
+  def code_change(_old_vsn, state, _extra) do
+    {:ok, state}
+  end
 end

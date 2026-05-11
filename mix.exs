@@ -10,6 +10,7 @@ defmodule DodoRouter.MixProject do
       start_permanent: Mix.env() == :prod,
       aliases: aliases(),
       deps: deps(),
+      releases: releases(),
       compilers: [:phoenix_live_view] ++ Mix.compilers(),
       listeners: [Phoenix.CodeReloader]
     ]
@@ -22,6 +23,17 @@ defmodule DodoRouter.MixProject do
     [
       mod: {DodoRouter.Application, []},
       extra_applications: [:logger, :runtime_tools]
+    ]
+  end
+
+  defp releases do
+    [
+      dodo_router: [
+        include_executables_for: [:unix],
+        strip_beams: true,
+        include_erts: true,
+        steps: [:assemble, :tar]
+      ]
     ]
   end
 
