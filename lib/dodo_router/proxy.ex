@@ -101,26 +101,7 @@ defmodule DodoRouter.Proxy do
     request_body = Jason.encode!(truncated_req)
 
     {truncated_resp, resp_flags} =
-      case result.final_response do
-        nil ->
-          # No successful response — use error body from last failed attempt
-          last_error = last_step[:error_body]
-
-          cond do
-            is_binary(last_error) ->
-              {:ok, decoded} = Jason.decode(last_error)
-              decoded |> clean_response() |> truncate_body()
-
-            is_map(last_error) ->
-              last_error |> clean_response() |> truncate_body()
-
-            true ->
-              {nil, []}
-          end
-
-        response ->
-          response |> clean_response() |> truncate_body()
-      end
+      build_log_response_body(result.final_response, last_step)
 
     response_body =
       case truncated_resp do
@@ -161,6 +142,29 @@ defmodule DodoRouter.Proxy do
     }
 
     Logs.create_log_async(log_attrs)
+  end
+
+  @doc false
+  def build_log_response_body(nil, last_step) do
+    last_error = last_step[:error_body]
+
+    cond do
+      is_binary(last_error) ->
+        case Jason.decode(last_error) do
+          {:ok, decoded} -> decoded |> clean_response() |> truncate_body()
+          {:error, _} -> {%{"_raw_error" => last_error}, []}
+        end
+
+      is_map(last_error) ->
+        last_error |> clean_response() |> truncate_body()
+
+      true ->
+        {nil, []}
+    end
+  end
+
+  def build_log_response_body(response, _last_step) do
+    response |> clean_response() |> truncate_body()
   end
 
   @doc false

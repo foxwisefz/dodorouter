@@ -116,4 +116,54 @@ defmodule DodoRouter.ProxyTest do
       assert truncated["messages"] |> hd() |> Map.get("content") == "Hello world"
     end
   end
+
+  describe "build_log_response_body/2" do
+    test "uses successful response when present" do
+      response = %{"choices" => [%{"message" => %{"content" => "Hello"}}]}
+      last_step = %{error_body: nil}
+
+      {body, flags} = Proxy.build_log_response_body(response, last_step)
+
+      assert body["choices"] |> hd() |> get_in(["message", "content"]) == "Hello"
+      assert flags == []
+    end
+
+    test "uses JSON error body from last step when no successful response" do
+      error_json = ~s({"error": {"message": "Invalid key", "type": "auth_error"}})
+      last_step = %{error_body: error_json}
+
+      {body, flags} = Proxy.build_log_response_body(nil, last_step)
+
+      assert body["error"]["message"] == "Invalid key"
+      assert flags == []
+    end
+
+    test "uses map error body from last step" do
+      last_step = %{error_body: %{"error" => %{"message" => "Rate limited"}}}
+
+      {body, flags} = Proxy.build_log_response_body(nil, last_step)
+
+      assert body["error"]["message"] == "Rate limited"
+      assert flags == []
+    end
+
+    test "stores raw error string when JSON parsing fails" do
+      raw_error = "not valid json at all"
+      last_step = %{error_body: raw_error}
+
+      {body, flags} = Proxy.build_log_response_body(nil, last_step)
+
+      assert body["_raw_error"] == raw_error
+      assert flags == []
+    end
+
+    test "returns nil when no error body exists" do
+      last_step = %{}
+
+      {body, flags} = Proxy.build_log_response_body(nil, last_step)
+
+      assert body == nil
+      assert flags == []
+    end
+  end
 end
