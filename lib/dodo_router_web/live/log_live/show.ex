@@ -444,6 +444,17 @@ defmodule DodoRouterWeb.LogLive.Show do
                     </div>
 
                     <div class="px-3 py-2 space-y-2 text-xs">
+                      <%= if attempt["endpoint"] do %>
+                        <div class="flex items-center gap-2">
+                          <span class="text-[10px] uppercase tracking-wider text-base-content/40 font-semibold">
+                            Endpoint
+                          </span>
+                          <span class="font-mono text-base-content/70 break-all">
+                            {attempt["endpoint"]}
+                          </span>
+                        </div>
+                      <% end %>
+
                       <%= if attempt["error_body"] do %>
                         <div>
                           <div class="text-[10px] uppercase tracking-wider text-base-content/40 font-semibold mb-1">
