@@ -21,6 +21,12 @@ defmodule DodoRouterWeb.LogLive.Show do
     req_headers = parse_headers(log.request_headers)
     resp_headers = parse_headers(log.response_headers)
 
+    req_headers =
+      case List.last(log.attempted_steps) do
+        %{} = step -> [{"Endpoint", step["endpoint"]} | req_headers || []]
+        _ -> req_headers
+      end
+
     socket =
       socket
       |> assign(:page_title, "Request #{String.slice(log.request_id, 0, 8)}...")
