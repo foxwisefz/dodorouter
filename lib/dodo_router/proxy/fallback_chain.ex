@@ -60,6 +60,12 @@ defmodule DodoRouter.Proxy.FallbackChain do
     start_time = System.monotonic_time(:millisecond)
     endpoint = endpoint_for(step)
 
+    require Logger
+
+    Logger.info(
+      "[FallbackChain] Step #{step_index + 1}: #{step.provider}/#{step.model} -> #{endpoint}"
+    )
+
     case execute_step(step, state) do
       {:ok, response, meta} ->
         attempt = %{
@@ -67,6 +73,8 @@ defmodule DodoRouter.Proxy.FallbackChain do
           model: step.model,
           endpoint: endpoint,
           plan_type: step.plan_type,
+          provider_key_id: key_id_for(step),
+          provider_key_label: key_label_for(step),
           status: "success",
           latency_ms: latency(start_time),
           forwarded_headers: build_forwarded_headers(step),
@@ -101,6 +109,8 @@ defmodule DodoRouter.Proxy.FallbackChain do
           model: step.model,
           endpoint: endpoint,
           plan_type: step.plan_type,
+          provider_key_id: key_id_for(step),
+          provider_key_label: key_label_for(step),
           status: "error",
           error: to_string(reason),
           http_status: details[:status],
@@ -304,6 +314,12 @@ defmodule DodoRouter.Proxy.FallbackChain do
   end
 
   defp latency(start_time), do: System.monotonic_time(:millisecond) - start_time
+
+  defp key_id_for(%{provider_key: %{id: id}}), do: id
+  defp key_id_for(_step), do: nil
+
+  defp key_label_for(%{provider_key: %{label: label}}), do: label
+  defp key_label_for(_step), do: nil
 
   defp build_forwarded_headers(_step), do: %{}
 end
