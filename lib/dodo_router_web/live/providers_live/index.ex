@@ -16,9 +16,30 @@ defmodule DodoRouterWeb.ProvidersLive.Index do
       |> assign(:provider_info, Registry.provider_info())
       |> assign(:adding_to, nil)
       |> assign(:editing_key, nil)
+      |> assign(:highlighted_key_id, nil)
+      |> assign(:filtered_provider, nil)
       |> assign(:form, nil)
 
     {:ok, socket}
+  end
+
+  @impl true
+  def handle_params(params, _uri, socket) do
+    socket =
+      socket
+      |> assign(:highlighted_key_id, params["highlight"])
+      |> assign(:filtered_provider, params["provider"])
+
+    {:noreply, socket}
+  end
+
+  @impl true
+  def handle_event("filter_provider", %{"provider" => provider_slug}, socket) do
+    {:noreply, assign(socket, :filtered_provider, provider_slug)}
+  end
+
+  def handle_event("clear_filter", _params, socket) do
+    {:noreply, assign(socket, :filtered_provider, nil)}
   end
 
   @impl true
@@ -149,66 +170,142 @@ defmodule DodoRouterWeb.ProvidersLive.Index do
         <p class="text-base-content/50 text-sm">Connect your LLM provider API keys</p>
       </div>
       
+    <!-- Provider Filter -->
+      <div class="flex items-center gap-2 mb-4 flex-wrap">
+        <button
+          type="button"
+          phx-click="clear_filter"
+          class={[
+            "px-3 py-1.5 text-xs font-medium rounded-lg transition",
+            is_nil(@filtered_provider) && "bg-primary text-primary-content",
+            not is_nil(@filtered_provider) && "bg-base-200 text-base-content hover:bg-base-300"
+          ]}
+        >
+          All
+        </button>
+        <%= for provider_slug <- ProviderKey.provider_slugs() do %>
+          <% info = @provider_info[provider_slug] %>
+          <button
+            type="button"
+            phx-click="filter_provider"
+            phx-value-provider={provider_slug}
+            class={[
+              "px-3 py-1.5 text-xs font-medium rounded-lg transition",
+              @filtered_provider == provider_slug && "bg-primary text-primary-content",
+              @filtered_provider != provider_slug && "bg-base-200 text-base-content hover:bg-base-300"
+            ]}
+          >
+            {info.name}
+          </button>
+        <% end %>
+      </div>
+      
     <!-- Provider Cards -->
       <div class="space-y-3">
         <%= for provider_slug <- ProviderKey.provider_slugs() do %>
           <% info = @provider_info[provider_slug] %>
           <% keys = Map.get(@provider_keys, provider_slug, []) %>
           <% key_count = length(keys) %>
-
-          <div class="card-bordered overflow-hidden">
-            <!-- Provider Header -->
-            <div class="p-4 flex items-center justify-between">
-              <div class="flex items-center gap-3">
-                <div class={[
-                  "w-8 h-8 rounded-lg flex items-center justify-center shrink-0",
-                  provider_bg(info.color)
-                ]}>
-                  <.provider_logo slug={provider_slug} />
+          <% show_card = is_nil(@filtered_provider) || @filtered_provider == provider_slug %>
+          <%= if show_card do %>
+            <div class="card-bordered overflow-hidden">
+              <!-- Provider Header -->
+              <div class="p-4 flex items-center justify-between">
+                <div class="flex items-center gap-3">
+                  <div class={[
+                    "w-8 h-8 rounded-lg flex items-center justify-center shrink-0",
+                    provider_bg(info.color)
+                  ]}>
+                    <.provider_logo slug={provider_slug} />
+                  </div>
+                  <div>
+                    <h2 class="font-semibold">{info.name}</h2>
+                    <p class="text-xs text-base-content/50">{info.short}</p>
+                  </div>
                 </div>
-                <div>
-                  <h2 class="font-semibold">{info.name}</h2>
-                  <p class="text-xs text-base-content/50">{info.short}</p>
+                <div class="flex items-center gap-3">
+                  <%= if key_count > 0 do %>
+                    <span class="text-xs text-base-content/50">
+                      {key_count} {if key_count == 1, do: "key", else: "keys"}
+                    </span>
+                  <% end %>
+                  <%= if @adding_to != provider_slug do %>
+                    <button
+                      phx-click="start_add"
+                      phx-value-provider={provider_slug}
+                      class="btn btn-sm btn-primary"
+                    >
+                      Add Key
+                    </button>
+                  <% end %>
                 </div>
               </div>
-              <div class="flex items-center gap-3">
-                <%= if key_count > 0 do %>
-                  <span class="text-xs text-base-content/50">
-                    {key_count} {if key_count == 1, do: "key", else: "keys"}
-                  </span>
-                <% end %>
-                <%= if @adding_to != provider_slug do %>
-                  <button
-                    phx-click="start_add"
-                    phx-value-provider={provider_slug}
-                    class="btn btn-sm btn-primary"
-                  >
-                    Add Key
-                  </button>
-                <% end %>
-              </div>
-            </div>
-            
+              
     <!-- Keys List -->
-            <%= if key_count > 0 || @adding_to == provider_slug do %>
-              <div class="border-t border-base-300/40 bg-base-200/30">
-                <!-- Existing Keys -->
-                <%= for key <- keys do %>
-                  <div class="flex items-center justify-between px-4 py-3 border-b border-base-300/20 last:border-b-0">
-                    <%= if @editing_key == key.id do %>
-                      <form phx-submit="save_label" class="flex items-center gap-2 flex-1">
-                        <input type="hidden" name="key_id" value={key.id} />
-                        <input
-                          type="text"
-                          name="label"
-                          value={key.label}
-                          class="flex-1 px-2 py-1 bg-base-100 border border-base-300/50 rounded text-sm focus:outline-none focus:border-primary/50"
-                          autofocus
-                        />
-                        <button type="submit" class="text-primary hover:text-primary/80 p-1">
+              <%= if key_count > 0 || @adding_to == provider_slug do %>
+                <div class="border-t border-base-300/40 bg-base-200/30">
+                  <!-- Existing Keys -->
+                  <%= for key <- keys do %>
+                    <div
+                      id={"key-#{key.id}"}
+                      class={[
+                        "flex items-center justify-between px-4 py-3 border-b border-base-300/20 last:border-b-0",
+                        @highlighted_key_id == key.id && "bg-primary/10 border-l-2 border-primary"
+                      ]}
+                      phx-hook={@highlighted_key_id == key.id && "ScrollIntoView"}
+                    >
+                      <%= if @editing_key == key.id do %>
+                        <form phx-submit="save_label" class="flex items-center gap-2 flex-1">
+                          <input type="hidden" name="key_id" value={key.id} />
+                          <input
+                            type="text"
+                            name="label"
+                            value={key.label}
+                            class="flex-1 px-2 py-1 bg-base-100 border border-base-300/50 rounded text-sm focus:outline-none focus:border-primary/50"
+                            autofocus
+                          />
+                          <button type="submit" class="text-primary hover:text-primary/80 p-1">
+                            <svg
+                              xmlns="http://www.w3.org/2000/svg"
+                              class="h-4 w-4"
+                              fill="none"
+                              viewBox="0 0 24 24"
+                              stroke="currentColor"
+                            >
+                              <path
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                                stroke-width="2"
+                                d="M5 13l4 4L19 7"
+                              />
+                            </svg>
+                          </button>
+                          <button
+                            type="button"
+                            phx-click="cancel_edit"
+                            class="text-base-content/40 hover:text-base-content p-1"
+                          >
+                            <svg
+                              xmlns="http://www.w3.org/2000/svg"
+                              class="h-4 w-4"
+                              fill="none"
+                              viewBox="0 0 24 24"
+                              stroke="currentColor"
+                            >
+                              <path
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                                stroke-width="2"
+                                d="M6 18L18 6M6 6l12 12"
+                              />
+                            </svg>
+                          </button>
+                        </form>
+                      <% else %>
+                        <div class="flex items-center gap-3">
                           <svg
                             xmlns="http://www.w3.org/2000/svg"
-                            class="h-4 w-4"
+                            class="h-4 w-4 text-success"
                             fill="none"
                             viewBox="0 0 24 24"
                             stroke="currentColor"
@@ -220,11 +317,22 @@ defmodule DodoRouterWeb.ProvidersLive.Index do
                               d="M5 13l4 4L19 7"
                             />
                           </svg>
-                        </button>
+                          <button
+                            phx-click="start_edit"
+                            phx-value-id={key.id}
+                            class="text-sm hover:text-primary transition-colors"
+                          >
+                            {key.label}
+                            <span class="text-base-content/40 font-mono text-xs ml-1.5">
+                              {key.key_hint}
+                            </span>
+                          </button>
+                        </div>
                         <button
-                          type="button"
-                          phx-click="cancel_edit"
-                          class="text-base-content/40 hover:text-base-content p-1"
+                          phx-click="delete"
+                          phx-value-id={key.id}
+                          data-confirm="Remove this API key?"
+                          class="text-base-content/40 hover:text-error transition-colors p-1"
                         >
                           <svg
                             xmlns="http://www.w3.org/2000/svg"
@@ -241,91 +349,43 @@ defmodule DodoRouterWeb.ProvidersLive.Index do
                             />
                           </svg>
                         </button>
-                      </form>
-                    <% else %>
-                      <div class="flex items-center gap-3">
-                        <svg
-                          xmlns="http://www.w3.org/2000/svg"
-                          class="h-4 w-4 text-success"
-                          fill="none"
-                          viewBox="0 0 24 24"
-                          stroke="currentColor"
-                        >
-                          <path
-                            stroke-linecap="round"
-                            stroke-linejoin="round"
-                            stroke-width="2"
-                            d="M5 13l4 4L19 7"
-                          />
-                        </svg>
-                        <button
-                          phx-click="start_edit"
-                          phx-value-id={key.id}
-                          class="text-sm hover:text-primary transition-colors"
-                        >
-                          {key.label}
-                          <span class="text-base-content/40 font-mono text-xs ml-1.5">
-                            {key.key_hint}
-                          </span>
+                      <% end %>
+                    </div>
+                  <% end %>
+                  
+    <!-- Add Key Form -->
+                  <%= if @adding_to == provider_slug do %>
+                    <.form
+                      for={@form}
+                      phx-submit="save"
+                      class="px-4 py-3"
+                      autocomplete="off"
+                      data-1p-ignore
+                      data-lpignore="true"
+                    >
+                      <div class="flex gap-2">
+                        <input
+                          type="text"
+                          name="provider_key[api_key]"
+                          placeholder="Paste your API key here..."
+                          class="flex-1 px-3 py-2 bg-base-100 border border-base-300/50 rounded-lg text-sm font-mono focus:outline-none focus:border-primary/50"
+                          autocomplete="off"
+                          data-1p-ignore
+                          data-lpignore="true"
+                          spellcheck="false"
+                          autofocus
+                        />
+                        <button type="submit" class="btn btn-sm btn-primary">Save</button>
+                        <button type="button" phx-click="cancel_add" class="btn btn-sm btn-ghost">
+                          Cancel
                         </button>
                       </div>
-                      <button
-                        phx-click="delete"
-                        phx-value-id={key.id}
-                        data-confirm="Remove this API key?"
-                        class="text-base-content/40 hover:text-error transition-colors p-1"
-                      >
-                        <svg
-                          xmlns="http://www.w3.org/2000/svg"
-                          class="h-4 w-4"
-                          fill="none"
-                          viewBox="0 0 24 24"
-                          stroke="currentColor"
-                        >
-                          <path
-                            stroke-linecap="round"
-                            stroke-linejoin="round"
-                            stroke-width="2"
-                            d="M6 18L18 6M6 6l12 12"
-                          />
-                        </svg>
-                      </button>
-                    <% end %>
-                  </div>
-                <% end %>
-                
-    <!-- Add Key Form -->
-                <%= if @adding_to == provider_slug do %>
-                  <.form
-                    for={@form}
-                    phx-submit="save"
-                    class="px-4 py-3"
-                    autocomplete="off"
-                    data-1p-ignore
-                    data-lpignore="true"
-                  >
-                    <div class="flex gap-2">
-                      <input
-                        type="text"
-                        name="provider_key[api_key]"
-                        placeholder="Paste your API key here..."
-                        class="flex-1 px-3 py-2 bg-base-100 border border-base-300/50 rounded-lg text-sm font-mono focus:outline-none focus:border-primary/50"
-                        autocomplete="off"
-                        data-1p-ignore
-                        data-lpignore="true"
-                        spellcheck="false"
-                        autofocus
-                      />
-                      <button type="submit" class="btn btn-sm btn-primary">Save</button>
-                      <button type="button" phx-click="cancel_add" class="btn btn-sm btn-ghost">
-                        Cancel
-                      </button>
-                    </div>
-                  </.form>
-                <% end %>
-              </div>
-            <% end %>
-          </div>
+                    </.form>
+                  <% end %>
+                </div>
+              <% end %>
+            </div>
+          <% end %>
         <% end %>
       </div>
     </div>

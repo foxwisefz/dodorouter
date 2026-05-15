@@ -75,6 +75,7 @@ defmodule DodoRouter.Proxy.FallbackChain do
           plan_type: step.plan_type,
           provider_key_id: key_id_for(step),
           provider_key_label: key_label_for(step),
+          provider_key_slug: key_slug_for(step),
           status: "success",
           latency_ms: latency(start_time),
           forwarded_headers: build_forwarded_headers(step),
@@ -111,6 +112,7 @@ defmodule DodoRouter.Proxy.FallbackChain do
           plan_type: step.plan_type,
           provider_key_id: key_id_for(step),
           provider_key_label: key_label_for(step),
+          provider_key_slug: key_slug_for(step),
           status: "error",
           error: to_string(reason),
           http_status: details[:status],
@@ -320,6 +322,9 @@ defmodule DodoRouter.Proxy.FallbackChain do
 
   defp key_label_for(%{provider_key: %{label: label}}), do: label
   defp key_label_for(_step), do: nil
+
+  defp key_slug_for(%{provider_key: %{provider_slug: slug}}), do: slug
+  defp key_slug_for(_step), do: nil
 
   defp build_forwarded_headers(_step), do: %{}
 end

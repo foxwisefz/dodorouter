@@ -23,8 +23,17 @@ defmodule DodoRouterWeb.LogLive.Show do
 
     req_headers =
       case List.last(log.attempted_steps) do
-        %{} = step -> [{"Endpoint", step["endpoint"]} | req_headers || []]
-        _ -> req_headers
+        %{} = step ->
+          headers = [{"Endpoint", step["endpoint"]} | req_headers || []]
+
+          if step["provider_key_label"] do
+            [{"API Key", step["provider_key_label"]} | headers]
+          else
+            headers
+          end
+
+        _ ->
+          req_headers
       end
 
     socket =
@@ -227,13 +236,16 @@ defmodule DodoRouterWeb.LogLive.Show do
                     <span class="text-error">✗</span>
                   <% end %>
                   <span class="font-medium truncate">{attempt["provider"]}</span>
-                  <%= if attempt["provider_key_label"] do %>
-                    <span
-                      class="text-[10px] text-base-content/40 truncate max-w-[80px]"
+                  <%= if attempt["provider_key_id"] && attempt["provider_key_slug"] do %>
+                    <.link
+                      navigate={
+                        ~p"/providers?highlight=#{attempt["provider_key_id"]}&provider=#{attempt["provider_key_slug"]}"
+                      }
+                      class="text-[10px] text-primary hover:underline truncate max-w-[80px]"
                       title={attempt["provider_key_label"]}
                     >
                       {attempt["provider_key_label"]}
-                    </span>
+                    </.link>
                   <% end %>
                   <span class="text-base-content/40 font-mono ml-auto">
                     {attempt["latency_ms"]}ms
@@ -469,14 +481,19 @@ defmodule DodoRouterWeb.LogLive.Show do
                         </div>
                       <% end %>
 
-                      <%= if attempt["provider_key_label"] do %>
+                      <%= if attempt["provider_key_id"] && attempt["provider_key_slug"] do %>
                         <div class="flex items-center gap-2">
                           <span class="text-[10px] uppercase tracking-wider text-base-content/40 font-semibold">
                             API Key
                           </span>
-                          <span class="font-mono text-base-content/70">
+                          <.link
+                            navigate={
+                              ~p"/providers?highlight=#{attempt["provider_key_id"]}&provider=#{attempt["provider_key_slug"]}"
+                            }
+                            class="font-mono text-primary hover:underline"
+                          >
                             {attempt["provider_key_label"]}
-                          </span>
+                          </.link>
                         </div>
                       <% end %>
 
