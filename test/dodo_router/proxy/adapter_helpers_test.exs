@@ -473,6 +473,26 @@ defmodule DodoRouter.Proxy.AdapterHelpersTest do
              end)
     end
 
+    test "strips x-api-key from client headers" do
+      client_headers = [
+        {"x-request-id", "123"},
+        {"x-api-key", "client-anthropic-key"}
+      ]
+
+      proxy_headers = [
+        {"Authorization", "Bearer proxy-token"}
+      ]
+
+      result = Adapter.build_forwarded_headers(client_headers, proxy_headers)
+
+      assert {"x-request-id", "123"} in result
+      assert {"Authorization", "Bearer proxy-token"} in result
+
+      refute Enum.any?(result, fn {k, _} ->
+               String.downcase(k) == "x-api-key"
+             end)
+    end
+
     test "handles nil client_headers" do
       proxy_headers = [{"Authorization", "Bearer test"}]
       result = Adapter.build_forwarded_headers(nil, proxy_headers)

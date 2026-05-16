@@ -497,6 +497,28 @@ defmodule DodoRouterWeb.LogLive.Show do
                         </div>
                       <% end %>
 
+                      <%= if attempt["outbound_headers"] do %>
+                        <div>
+                          <button
+                            type="button"
+                            phx-click={JS.toggle(to: "#step-outbound-headers-#{idx}")}
+                            class="text-[10px] uppercase tracking-wider text-primary hover:underline font-semibold mb-1"
+                          >
+                            Outbound Headers
+                          </button>
+                          <div id={"step-outbound-headers-#{idx}"} class="hidden">
+                            <div class="p-2 bg-base-200 rounded text-xs font-mono space-y-1">
+                              <%= for {key, value} <- attempt["outbound_headers"] do %>
+                                <div class="flex gap-2">
+                                  <span class="text-base-content/60 shrink-0">{key}:</span>
+                                  <span class="break-all">{value}</span>
+                                </div>
+                              <% end %>
+                            </div>
+                          </div>
+                        </div>
+                      <% end %>
+
                       <%= if attempt["error_body"] do %>
                         <div>
                           <div class="text-[10px] uppercase tracking-wider text-base-content/40 font-semibold mb-1">

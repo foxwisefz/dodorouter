@@ -79,6 +79,7 @@ defmodule DodoRouter.Proxy.FallbackChain do
           status: "success",
           latency_ms: latency(start_time),
           forwarded_headers: build_forwarded_headers(step),
+          outbound_headers: meta[:outbound_headers],
           request_body: state.request,
           response_body: response,
           response_headers: meta[:headers]
@@ -124,6 +125,7 @@ defmodule DodoRouter.Proxy.FallbackChain do
           partial_content_length:
             if(is_binary(partial_content), do: String.length(partial_content), else: nil),
           forwarded_headers: build_forwarded_headers(step),
+          outbound_headers: details[:outbound_headers],
           request_body: state.request,
           response_headers: details[:headers]
         }
