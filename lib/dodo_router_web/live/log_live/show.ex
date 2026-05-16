@@ -227,6 +227,14 @@ defmodule DodoRouterWeb.LogLive.Show do
                     <span class="text-error">✗</span>
                   <% end %>
                   <span class="font-medium truncate">{attempt["provider"]}</span>
+                  <%= if attempt["provider_key_label"] do %>
+                    <span
+                      class="text-[10px] text-base-content/40 truncate max-w-[80px]"
+                      title={attempt["provider_key_label"]}
+                    >
+                      {attempt["provider_key_label"]}
+                    </span>
+                  <% end %>
                   <span class="text-base-content/40 font-mono ml-auto">
                     {attempt["latency_ms"]}ms
                   </span>
@@ -457,6 +465,17 @@ defmodule DodoRouterWeb.LogLive.Show do
                           </span>
                           <span class="font-mono text-base-content/70 break-all">
                             {attempt["endpoint"]}
+                          </span>
+                        </div>
+                      <% end %>
+
+                      <%= if attempt["provider_key_label"] do %>
+                        <div class="flex items-center gap-2">
+                          <span class="text-[10px] uppercase tracking-wider text-base-content/40 font-semibold">
+                            API Key
+                          </span>
+                          <span class="font-mono text-base-content/70">
+                            {attempt["provider_key_label"]}
                           </span>
                         </div>
                       <% end %>

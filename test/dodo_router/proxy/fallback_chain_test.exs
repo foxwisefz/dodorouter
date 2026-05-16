@@ -320,6 +320,74 @@ defmodule DodoRouter.Proxy.FallbackChainTest do
     end
   end
 
+  describe "attempt metadata tracking" do
+    setup do
+      user = AccountsFixtures.user_fixture()
+      {router, _api_key} = RoutersFixtures.router_fixture(user)
+
+      step_with_key =
+        create_step_with_key(router, user, "zai", "glm-5.1", "zai_standard", "production key")
+
+      {:ok, step_without_key} =
+        Routers.create_routing_step(router, %{
+          "provider" => "openai",
+          "model" => "gpt-4o"
+        })
+
+      step_without_key = Repo.preload(step_without_key, :provider_key)
+
+      %{router: router, step_with_key: step_with_key, step_without_key: step_without_key}
+    end
+
+    test "records endpoint in attempt", %{router: router, step_with_key: step} do
+      result =
+        FallbackChain.execute(
+          %{"messages" => [%{"role" => "user", "content" => "hi"}], "model" => "test"},
+          [step],
+          router.id,
+          stream: false
+        )
+
+      attempt = hd(result.attempted_steps)
+      assert String.contains?(attempt.endpoint, "api.z.ai")
+      assert String.ends_with?(attempt.endpoint, "/chat/completions")
+    end
+
+    test "records provider_key_id and label when key is assigned", %{
+      router: router,
+      step_with_key: step
+    } do
+      result =
+        FallbackChain.execute(
+          %{"messages" => [%{"role" => "user", "content" => "hi"}], "model" => "test"},
+          [step],
+          router.id,
+          stream: false
+        )
+
+      attempt = hd(result.attempted_steps)
+      assert attempt.provider_key_id == step.provider_key.id
+      assert attempt.provider_key_label == "production key"
+    end
+
+    test "records nil provider_key_id and label when no key is assigned", %{
+      router: router,
+      step_without_key: step
+    } do
+      result =
+        FallbackChain.execute(
+          %{"messages" => [%{"role" => "user", "content" => "hi"}], "model" => "test"},
+          [step],
+          router.id,
+          stream: false
+        )
+
+      attempt = hd(result.attempted_steps)
+      assert attempt.provider_key_id == nil
+      assert attempt.provider_key_label == nil
+    end
+  end
+
   describe "truncate_error" do
     test "returns nil for nil" do
       assert DodoRouter.Proxy.FallbackChain.truncate_error(nil) == nil
