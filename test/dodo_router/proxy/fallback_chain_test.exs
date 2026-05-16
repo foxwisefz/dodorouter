@@ -368,6 +368,7 @@ defmodule DodoRouter.Proxy.FallbackChainTest do
       attempt = hd(result.attempted_steps)
       assert attempt.provider_key_id == step.provider_key.id
       assert attempt.provider_key_label == "production key"
+      assert attempt.provider_key_slug == "zai_standard"
     end
 
     test "records nil provider_key_id and label when no key is assigned", %{
@@ -385,6 +386,7 @@ defmodule DodoRouter.Proxy.FallbackChainTest do
       attempt = hd(result.attempted_steps)
       assert attempt.provider_key_id == nil
       assert attempt.provider_key_label == nil
+      assert attempt.provider_key_slug == nil
     end
   end
 
