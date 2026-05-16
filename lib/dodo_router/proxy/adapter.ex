@@ -379,7 +379,7 @@ defmodule DodoRouter.Proxy.Adapter do
     "call_" <> (:crypto.strong_rand_bytes(12) |> Base.encode16(case: :lower))
   end
 
-  @proxy_overrides ~w(authorization content-type)
+  @proxy_overrides ~w(authorization content-type x-api-key)
                    |> Enum.map(&String.downcase/1)
 
   def build_forwarded_headers(client_headers, proxy_headers) when is_list(client_headers) do
