@@ -117,6 +117,43 @@ defmodule DodoRouter.ProxyTest do
     end
   end
 
+  describe "attempted_steps JSON serialization" do
+    test "handles outbound_headers with tuples" do
+      # Simulates what FallbackChain produces when adapters return headers as tuples
+      attempted_steps = [
+        %{
+          provider: "moonshot",
+          model: "kimi-k2",
+          endpoint: "https://api.kimi.com/coding/v1/chat/completions",
+          status: "success",
+          latency_ms: 1234,
+          outbound_headers: [
+            {"Authorization", "Bearer sk-test"},
+            {"Content-Type", "application/json"}
+          ],
+          response_headers: [
+            {"content-type", "application/json"}
+          ]
+        }
+      ]
+
+      # This is what Proxy.log_request does before DB insert
+      processed = Proxy.stringify_keys(attempted_steps)
+      json = Jason.encode!(processed)
+      decoded = Jason.decode!(json)
+
+      step = hd(decoded)
+      assert step["provider"] == "moonshot"
+
+      assert step["outbound_headers"] == [
+               ["Authorization", "Bearer sk-test"],
+               ["Content-Type", "application/json"]
+             ]
+
+      assert step["response_headers"] == [["content-type", "application/json"]]
+    end
+  end
+
   describe "build_log_response_body/2" do
     test "uses successful response when present" do
       response = %{"choices" => [%{"message" => %{"content" => "Hello"}}]}
