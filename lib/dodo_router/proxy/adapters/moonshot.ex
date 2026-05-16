@@ -70,7 +70,8 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
           "provider_processing_ms" => nil
         }
 
-        {:ok, Map.put(response_body, "_meta", meta), %{headers: resp_headers}}
+        {:ok, Map.put(response_body, "_meta", meta),
+         %{headers: resp_headers, outbound_headers: headers}}
 
       {:ok, %{status: status, body: response_body, headers: resp_headers}} ->
         Logger.error(
@@ -84,7 +85,8 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
            status: status,
            body: response_body,
            latency_ms: latency(start_time),
-           headers: resp_headers
+           headers: resp_headers,
+           outbound_headers: headers
          }}
 
       {:error, %Req.TransportError{reason: :timeout}} ->
@@ -194,7 +196,8 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
           provider_processing_ms: nil
         }
 
-        {:ok, build_final_response(acc, timing_meta), %{headers: resp_headers}}
+        {:ok, build_final_response(acc, timing_meta),
+         %{headers: resp_headers, outbound_headers: headers}}
 
       {:ok, %Req.Response{status: status, body: body, headers: resp_headers}} ->
         error_body = if body in ["", nil], do: parse_raw_error(raw_error), else: body
@@ -207,7 +210,8 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
            status: status,
            body: error_body,
            latency_ms: latency(start_time),
-           headers: resp_headers
+           headers: resp_headers,
+           outbound_headers: headers
          }}
 
       {:error, %Req.TransportError{reason: :timeout}} ->
