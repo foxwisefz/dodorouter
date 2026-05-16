@@ -309,24 +309,22 @@ defmodule DodoRouterWeb.LogLive.Show do
               >
                 Final Response
               </button>
-              <%= if length(@log.attempted_steps) > 1 do %>
-                <button
-                  type="button"
-                  phx-click="set_tab"
-                  phx-value-tab="fallback_trace"
-                  role="tab"
-                  aria-selected={@active_tab == "fallback_trace"}
-                  class={[
-                    "px-3 py-1.5 text-xs font-medium rounded-t-lg transition",
-                    @active_tab == "fallback_trace" &&
-                      "bg-base-100 text-base-content border-t border-x border-base-300/30 -mb-px",
-                    @active_tab != "fallback_trace" &&
-                      "text-base-content/60 hover:text-base-content hover:bg-base-200/50"
-                  ]}
-                >
-                  Fallback Trace
-                </button>
-              <% end %>
+              <button
+                type="button"
+                phx-click="set_tab"
+                phx-value-tab="fallback_trace"
+                role="tab"
+                aria-selected={@active_tab == "fallback_trace"}
+                class={[
+                  "px-3 py-1.5 text-xs font-medium rounded-t-lg transition",
+                  @active_tab == "fallback_trace" &&
+                    "bg-base-100 text-base-content border-t border-x border-base-300/30 -mb-px",
+                  @active_tab != "fallback_trace" &&
+                    "text-base-content/60 hover:text-base-content hover:bg-base-200/50"
+                ]}
+              >
+                {if length(@log.attempted_steps) > 1, do: "Fallback Trace", else: "Provider Details"}
+              </button>
             </div>
           </div>
           
@@ -369,6 +367,57 @@ defmodule DodoRouterWeb.LogLive.Show do
 
             <%= if @active_tab == "raw_request" do %>
               <div class="p-4 space-y-3">
+                <% final_attempt = List.last(@log.attempted_steps) %>
+                <%= if final_attempt do %>
+                  <div class="space-y-2">
+                    <%= if final_attempt["endpoint"] do %>
+                      <div class="flex items-center gap-2">
+                        <span class="text-[10px] uppercase tracking-wider text-base-content/40 font-semibold">
+                          Endpoint
+                        </span>
+                        <span class="font-mono text-base-content/70 text-xs break-all">
+                          {final_attempt["endpoint"]}
+                        </span>
+                      </div>
+                    <% end %>
+                    <%= if final_attempt["provider_key_id"] && final_attempt["provider_key_slug"] do %>
+                      <div class="flex items-center gap-2">
+                        <span class="text-[10px] uppercase tracking-wider text-base-content/40 font-semibold">
+                          API Key
+                        </span>
+                        <.link
+                          navigate={
+                            ~p"/providers?highlight=#{final_attempt["provider_key_id"]}&provider=#{final_attempt["provider_key_slug"]}"
+                          }
+                          class="text-xs text-primary hover:underline"
+                        >
+                          {final_attempt["provider_key_label"] || "Key"}
+                        </.link>
+                      </div>
+                    <% end %>
+                    <%= if final_attempt["outbound_headers"] do %>
+                      <div>
+                        <button
+                          type="button"
+                          phx-click={JS.toggle(to: "#original-outbound-headers")}
+                          class="text-[10px] uppercase tracking-wider text-primary hover:underline font-semibold"
+                        >
+                          Outbound Headers
+                        </button>
+                        <div id="original-outbound-headers" class="hidden">
+                          <div class="mt-2 p-2 bg-base-200 rounded text-xs font-mono space-y-1">
+                            <%= for {key, value} <- final_attempt["outbound_headers"] do %>
+                              <div class="flex gap-2">
+                                <span class="text-base-content/60 shrink-0">{key}:</span>
+                                <span class="break-all">{value}</span>
+                              </div>
+                            <% end %>
+                          </div>
+                        </div>
+                      </div>
+                    <% end %>
+                  </div>
+                <% end %>
                 <%= if @req_headers do %>
                   <div>
                     <button
