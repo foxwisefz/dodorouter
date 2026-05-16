@@ -21,20 +21,7 @@ defmodule DodoRouterWeb.LogLive.Show do
     req_headers = parse_headers(log.request_headers)
     resp_headers = parse_headers(log.response_headers)
 
-    req_headers =
-      case List.last(log.attempted_steps) do
-        %{} = step ->
-          headers = [{"Endpoint", step["endpoint"]} | req_headers || []]
-
-          if step["provider_key_label"] do
-            [{"API Key", step["provider_key_label"]} | headers]
-          else
-            headers
-          end
-
-        _ ->
-          req_headers
-      end
+    req_headers = req_headers
 
     socket =
       socket
@@ -406,7 +393,7 @@ defmodule DodoRouterWeb.LogLive.Show do
                         </button>
                         <div id="original-outbound-headers" class="hidden">
                           <div class="mt-2 p-2 bg-base-200 rounded text-xs font-mono space-y-1">
-                            <%= for {key, value} <- final_attempt["outbound_headers"] do %>
+                            <%= for [key, value] <- final_attempt["outbound_headers"] do %>
                               <div class="flex gap-2">
                                 <span class="text-base-content/60 shrink-0">{key}:</span>
                                 <span class="break-all">{value}</span>
@@ -557,7 +544,7 @@ defmodule DodoRouterWeb.LogLive.Show do
                           </button>
                           <div id={"step-outbound-headers-#{idx}"} class="hidden">
                             <div class="p-2 bg-base-200 rounded text-xs font-mono space-y-1">
-                              <%= for {key, value} <- attempt["outbound_headers"] do %>
+                              <%= for [key, value] <- attempt["outbound_headers"] do %>
                                 <div class="flex gap-2">
                                   <span class="text-base-content/60 shrink-0">{key}:</span>
                                   <span class="break-all">{value}</span>

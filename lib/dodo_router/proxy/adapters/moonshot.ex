@@ -42,6 +42,15 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
     ]
   end
 
+  # Debug helper - returns key hint or indicates nil/empty
+  defp key_hint(nil), do: "nil"
+  defp key_hint(""), do: "empty"
+
+  defp key_hint(key) when byte_size(key) > 8,
+    do: "#{String.slice(key, 0, 4)}...#{String.slice(key, -4, 4)}"
+
+  defp key_hint(_), do: "short"
+
   @impl true
   def call(request, %RoutingStep{} = step, api_key, client_headers \\ []) do
     url = base_url(step) <> "/chat/completions"
@@ -52,6 +61,7 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
 
     Logger.info(
       "[Moonshot:call] url=#{url} model=#{body["model"]} plan=#{step.plan_type || "standard"} " <>
+        "key_hint=#{key_hint(api_key)} auth_present=#{Enum.any?(headers, fn {k, _} -> String.downcase(k) == "authorization" end)} " <>
         "headers=#{inspect(safe_headers(headers))}"
     )
 
@@ -110,6 +120,7 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
 
     Logger.info(
       "[Moonshot:stream] url=#{url} model=#{body["model"]} plan=#{step.plan_type || "standard"} " <>
+        "key_hint=#{key_hint(api_key)} auth_present=#{Enum.any?(headers, fn {k, _} -> String.downcase(k) == "authorization" end)} " <>
         "headers=#{inspect(safe_headers(headers))}"
     )
 
