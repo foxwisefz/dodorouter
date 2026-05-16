@@ -282,13 +282,29 @@ defmodule DodoRouter.Proxy do
   end
 
   # Convert atom keys to string keys for JSON storage
-  defp stringify_keys(list) when is_list(list) do
+  @doc false
+  def stringify_keys(list) when is_list(list) do
     Enum.map(list, &stringify_map_keys/1)
   end
 
-  defp stringify_map_keys(map) when is_map(map) do
-    Map.new(map, fn {k, v} -> {to_string(k), v} end)
+  @doc false
+  def stringify_map_keys(map) when is_map(map) do
+    Map.new(map, fn {k, v} -> {to_string(k), normalize_for_json(v)} end)
   end
+
+  # Convert tuple lists (headers) to list-of-lists for JSON serialization
+  defp normalize_for_json(list) when is_list(list) do
+    Enum.map(list, fn
+      {k, v} -> [k, v]
+      other -> normalize_for_json(other)
+    end)
+  end
+
+  defp normalize_for_json(map) when is_map(map) do
+    stringify_map_keys(map)
+  end
+
+  defp normalize_for_json(value), do: value
 
   defp broadcast_request_started(router, request_id, first_step, streaming) do
     DodoRouter.Activity.request_started(router.id, request_id)
