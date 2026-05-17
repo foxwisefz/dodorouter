@@ -27,6 +27,50 @@ defmodule DodoRouter.Logs.MessageNormalizer do
   def parse_request_body(_), do: {[], %{}}
 
   @doc """
+  Extract tool definitions from the request body params.
+  Returns a list of normalized tool maps with :name, :description, and :parameters.
+  """
+  def extract_tools(%{"tools" => tools}) when is_list(tools) do
+    Enum.map(tools, &normalize_tool/1)
+  end
+
+  def extract_tools(_), do: []
+
+  defp normalize_tool(%{"function" => func} = tool) when is_map(func) do
+    %{
+      name: func["name"] || tool["name"] || "unknown",
+      description: normalize_description(func["description"]),
+      parameters: func["parameters"] || %{}
+    }
+  end
+
+  defp normalize_tool(%{"name" => name} = tool) do
+    %{
+      name: name,
+      description: normalize_description(tool["description"]),
+      parameters: tool["parameters"] || tool["input_schema"] || %{}
+    }
+  end
+
+  defp normalize_tool(tool) do
+    %{
+      name: tool["name"] || "unknown",
+      description: normalize_description(tool["description"]),
+      parameters: tool["parameters"] || %{}
+    }
+  end
+
+  defp normalize_description(nil), do: ""
+
+  defp normalize_description(str) when is_binary(str) do
+    str
+    |> String.replace("\\n", "\n")
+    |> String.replace("\\t", "\t")
+  end
+
+  defp normalize_description(other), do: to_string(other)
+
+  @doc """
   Parse a stored response body and return the assistant-side normalized message,
   or nil if the body is missing or malformed.
   """

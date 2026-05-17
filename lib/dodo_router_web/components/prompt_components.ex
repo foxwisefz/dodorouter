@@ -4,6 +4,8 @@ defmodule DodoRouterWeb.PromptComponents do
   """
   use Phoenix.Component
 
+  import DodoRouterWeb.CoreComponents
+
   alias DodoRouterWeb.MarkdownRenderer
 
   @doc """
@@ -20,8 +22,17 @@ defmodule DodoRouterWeb.PromptComponents do
   attr :response, :any, default: nil
   attr :model, :string, default: nil
   attr :provider, :string, default: nil
+  attr :tools, :list, default: []
 
   def conversation(assigns) do
+    {system_messages, other_messages} =
+      Enum.split_with(assigns.messages, fn msg -> msg.role == "system" end)
+
+    assigns =
+      assigns
+      |> assign(:system_messages, system_messages)
+      |> assign(:other_messages, other_messages)
+
     ~H"""
     <div class="space-y-4">
       <%= if @model || @provider do %>
@@ -36,7 +47,13 @@ defmodule DodoRouterWeb.PromptComponents do
       <% end %>
 
       <div class="space-y-3">
-        <.collapsed_message_list messages={@messages} response={@response} />
+        <.collapsed_message_list messages={@system_messages} response={false} />
+
+        <%= if length(@tools) > 0 do %>
+          <.available_tools tools={@tools} />
+        <% end %>
+
+        <.collapsed_message_list messages={@other_messages} response={@response} />
       </div>
     </div>
     """
@@ -299,4 +316,61 @@ defmodule DodoRouterWeb.PromptComponents do
   defp role_color("system"), do: "text-base-content/40"
   defp role_color("tool"), do: "text-warning"
   defp role_color(_), do: "text-base-content/40"
+
+  attr :tools, :list, required: true
+
+  def available_tools(assigns) do
+    ~H"""
+    <div class="px-4 py-2 bg-base-200/20 border-y border-base-300/20">
+      <div class="flex items-center gap-2 mb-1.5">
+        <span class="text-[10px] uppercase tracking-wider text-base-content/40 font-semibold">
+          Tools
+        </span>
+        <span class="text-[10px] text-base-content/30">{length(@tools)} available</span>
+      </div>
+      <div class="flex flex-wrap gap-1.5">
+        <%= for tool <- @tools do %>
+          <button
+            type="button"
+            phx-click="show_tool"
+            phx-value-name={tool.name}
+            class="inline-flex items-center gap-1 px-2 py-1 rounded bg-base-100/80 border border-base-300/30 text-[11px] hover:bg-base-200 hover:border-base-300/50 transition select-none cursor-pointer"
+          >
+            <.icon name={tool_icon(tool.name)} class="w-3 h-3 text-base-content/50" />
+            <span class="font-medium font-mono text-base-content/70">{tool.name}</span>
+          </button>
+        <% end %>
+      </div>
+    </div>
+    """
+  end
+
+  def tool_icon(name) do
+    icons = [
+      "hero-wrench",
+      "hero-bolt",
+      "hero-cog-6-tooth",
+      "hero-magnifying-glass",
+      "hero-calculator",
+      "hero-globe-alt",
+      "hero-cloud",
+      "hero-database",
+      "hero-code-bracket",
+      "hero-document-text",
+      "hero-chart-bar",
+      "hero-envelope",
+      "hero-map-pin",
+      "hero-camera",
+      "hero-shield-check"
+    ]
+
+    index =
+      name
+      |> to_string()
+      |> String.to_charlist()
+      |> Enum.sum()
+      |> rem(length(icons))
+
+    Enum.at(icons, index)
+  end
 end

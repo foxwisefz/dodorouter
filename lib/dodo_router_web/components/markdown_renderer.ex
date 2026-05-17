@@ -41,14 +41,50 @@ defmodule DodoRouterWeb.MarkdownRenderer do
   @doc false
   # Parse content into a flat list of blocks. XML tag bodies are recursively
   # parsed, producing nested `:xml_block` nodes.
+  #
+  # Order: block parsing first, then XML splitting within each block. This
+  # ensures XML tags inside list items stay inside those list items.
   def parse(content) when is_binary(content) do
     content
-    |> split_xml()
+    |> parse_blocks()
+    |> Enum.flat_map(&split_xml_in_block/1)
+  end
+
+  # After blocks are parsed, look for XML tags inside each block.
+  defp split_xml_in_block({:paragraph, text}) do
+    split_xml(text)
     |> Enum.flat_map(fn
-      {:text, text} -> parse_blocks(text)
-      {:xml, name, body} -> [{:xml_block, name, parse(body)}]
+      {:text, t} ->
+        trimmed = String.trim(t)
+        if trimmed == "", do: [], else: [{:paragraph, trimmed}]
+
+      {:xml, name, body} ->
+        [{:xml_block, name, parse(body)}]
     end)
   end
+
+  defp split_xml_in_block({:list, type, items}) do
+    new_items =
+      Enum.map(items, fn item_text ->
+        split_xml(item_text)
+        |> Enum.flat_map(fn
+          {:text, t} ->
+            trimmed = String.trim(t)
+            if trimmed == "", do: [], else: [{:inline_paragraph, trimmed}]
+
+          {:xml, name, body} ->
+            [{:xml_block, name, parse(body)}]
+        end)
+      end)
+
+    [{:list, type, new_items}]
+  end
+
+  defp split_xml_in_block({:blockquote, children}) do
+    [{:blockquote, Enum.flat_map(children, &split_xml_in_block/1)}]
+  end
+
+  defp split_xml_in_block(block), do: [block]
 
   # Splits content on balanced XML-like tags (best-effort, no nesting of the
   # same tag name). Returns a list of `{:text, str} | {:xml, name, body}`.
@@ -306,12 +342,12 @@ defmodule DodoRouterWeb.MarkdownRenderer do
     <details class="md-xml">
       <summary class={[
         "md-xml-summary cursor-pointer select-none flex items-center gap-1.5 py-0.5 -ml-3 pl-3",
-        "text-[11px] font-mono text-base-content/50 hover:text-primary list-none"
+        "text-[11px] font-mono text-base-content/70 hover:text-primary list-none"
       ]}>
         <.disclosure_arrow />
-        <span class="text-secondary/70">&lt;{@name}&gt;</span>
+        <span class="text-base-content/80 font-semibold">&lt;{@name}&gt;</span>
       </summary>
-      <div class="md-xml-body pl-3 border-l border-secondary/20 mt-1 space-y-1.5">
+      <div class="md-xml-body pl-3 border-l border-base-content/20 mt-1 space-y-1.5">
         <.md_nodes nodes={@children} />
       </div>
     </details>
@@ -331,6 +367,14 @@ defmodule DodoRouterWeb.MarkdownRenderer do
 
     ~H"""
     <p class="break-words"><.inline text={@text} /></p>
+    """
+  end
+
+  defp md_node(%{node: {:inline_paragraph, text}} = assigns) do
+    assigns = assign(assigns, :text, normalize_paragraph(text))
+
+    ~H"""
+    <span class="break-words"><.inline text={@text} /></span>
     """
   end
 
@@ -354,7 +398,7 @@ defmodule DodoRouterWeb.MarkdownRenderer do
     ~H"""
     <ul class="list-disc pl-5 space-y-0.5 marker:text-base-content/30">
       <%= for item <- @items do %>
-        <li><.inline text={item} /></li>
+        <li class="break-words"><.md_nodes nodes={item} /></li>
       <% end %>
     </ul>
     """
@@ -366,7 +410,7 @@ defmodule DodoRouterWeb.MarkdownRenderer do
     ~H"""
     <ol class="list-decimal pl-5 space-y-0.5 marker:text-base-content/30">
       <%= for item <- @items do %>
-        <li><.inline text={item} /></li>
+        <li class="break-words"><.md_nodes nodes={item} /></li>
       <% end %>
     </ol>
     """
@@ -389,7 +433,7 @@ defmodule DodoRouterWeb.MarkdownRenderer do
   defp disclosure_arrow(assigns) do
     ~H"""
     <svg
-      class="md-arrow w-3 h-3 flex-shrink-0 text-base-content/40 transition-transform"
+      class="md-arrow w-3 h-3 flex-shrink-0 text-base-content/60 transition-transform"
       viewBox="0 0 12 12"
       fill="currentColor"
       aria-hidden="true"
