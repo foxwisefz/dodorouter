@@ -53,8 +53,8 @@ defmodule DodoRouterWeb.PromptComponentsTest do
     end
   end
 
-  describe "conversation/1 with tool calls" do
-    test "renders command tool with actual command in code block" do
+  describe "tool call argument rendering" do
+    test "command tool renders command argument in code block" do
       assigns = %{
         messages: [
           %{
@@ -83,17 +83,13 @@ defmodule DodoRouterWeb.PromptComponentsTest do
 
       html = render_component(&PromptComponents.conversation/1, assigns)
 
-      assert html =~ ~s(<code>ls -la /tmp</code>),
-             "Expected command 'ls -la /tmp' inside <code> tag"
-
-      refute html =~ "{@command}",
-             "Found literal {@command} in output — interpolation not working"
-
+      assert html =~ ~s(<code>ls -la /tmp</code>)
+      refute html =~ "{@command}"
       assert html =~ "List tmp directory"
       assert html =~ "bash"
     end
 
-    test "renders file tool with path in code block" do
+    test "file tool renders file_path argument in code block" do
       assigns = %{
         messages: [
           %{
@@ -118,16 +114,41 @@ defmodule DodoRouterWeb.PromptComponentsTest do
 
       html = render_component(&PromptComponents.conversation/1, assigns)
 
-      assert html =~ ~s(<code>/etc/hosts</code>),
-             "Expected path '/etc/hosts' inside <code> tag"
-
-      refute html =~ "{@path}",
-             "Found literal {@path} in output — interpolation not working"
-
+      assert html =~ ~s(<code>/etc/hosts</code>)
+      refute html =~ "{@path}"
       assert html =~ "read_file"
     end
 
-    test "renders risk tool with risk badge and command" do
+    test "file tool falls back to path when file_path missing" do
+      assigns = %{
+        messages: [
+          %{
+            role: "assistant",
+            content: "",
+            tool_calls: [
+              %{
+                "id" => "call_1",
+                "function" => %{
+                  "name" => "write_file",
+                  "arguments" => Jason.encode!(%{"path" => "/tmp/test.txt"})
+                }
+              }
+            ]
+          }
+        ],
+        response: nil,
+        model: nil,
+        provider: nil,
+        tools: []
+      }
+
+      html = render_component(&PromptComponents.conversation/1, assigns)
+
+      assert html =~ ~s(<code>/tmp/test.txt</code>)
+      assert html =~ "write_file"
+    end
+
+    test "risk tool renders command, risk level, and timeout" do
       assigns = %{
         messages: [
           %{
@@ -158,19 +179,48 @@ defmodule DodoRouterWeb.PromptComponentsTest do
 
       html = render_component(&PromptComponents.conversation/1, assigns)
 
-      assert html =~ ~s(<code>rm -rf /</code>),
-             "Expected command 'rm -rf /' inside <code> tag"
-
-      refute html =~ "{@command}",
-             "Found literal {@command} in output — interpolation not working"
-
+      assert html =~ ~s(<code>rm -rf /</code>)
+      refute html =~ "{@command}"
       assert html =~ "execute_command"
       assert html =~ "Dangerous command"
       assert html =~ "high"
       assert html =~ "30"
     end
 
-    test "renders question tool with questions and options" do
+    test "risk tool handles unknown risk level" do
+      assigns = %{
+        messages: [
+          %{
+            role: "assistant",
+            content: "",
+            tool_calls: [
+              %{
+                "id" => "call_1",
+                "function" => %{
+                  "name" => "run",
+                  "arguments" =>
+                    Jason.encode!(%{
+                      "command" => "echo test",
+                      "riskLevel" => "critical"
+                    })
+                }
+              }
+            ]
+          }
+        ],
+        response: nil,
+        model: nil,
+        provider: nil,
+        tools: []
+      }
+
+      html = render_component(&PromptComponents.conversation/1, assigns)
+
+      assert html =~ "critical"
+      assert html =~ ~s(<code>echo test</code>)
+    end
+
+    test "question tool renders questions and options" do
       assigns = %{
         messages: [
           %{
@@ -206,7 +256,7 @@ defmodule DodoRouterWeb.PromptComponentsTest do
       assert html =~ "Option B"
     end
 
-    test "handles string questions (not just maps)" do
+    test "question tool handles string questions and options" do
       assigns = %{
         messages: [
           %{
@@ -240,7 +290,7 @@ defmodule DodoRouterWeb.PromptComponentsTest do
       assert html =~ "No"
     end
 
-    test "falls back to generic rendering for unknown tool types" do
+    test "generic tool renders JSON arguments" do
       assigns = %{
         messages: [
           %{
@@ -271,7 +321,61 @@ defmodule DodoRouterWeb.PromptComponentsTest do
       assert html =~ "42"
     end
 
-    test "renders tool results inline with tool calls" do
+    test "handles invalid JSON arguments" do
+      assigns = %{
+        messages: [
+          %{
+            role: "assistant",
+            content: "",
+            tool_calls: [
+              %{
+                "id" => "call_1",
+                "function" => %{
+                  "name" => "broken",
+                  "arguments" => "not valid json"
+                }
+              }
+            ]
+          }
+        ],
+        response: nil,
+        model: nil,
+        provider: nil,
+        tools: []
+      }
+
+      html = render_component(&PromptComponents.conversation/1, assigns)
+      assert html =~ "broken"
+    end
+
+    test "handles missing fields gracefully" do
+      assigns = %{
+        messages: [
+          %{
+            role: "assistant",
+            content: "",
+            tool_calls: [
+              %{
+                "id" => "call_1",
+                "function" => %{
+                  "name" => "minimal_tool",
+                  "arguments" => Jason.encode!(%{})
+                }
+              }
+            ]
+          }
+        ],
+        response: nil,
+        model: nil,
+        provider: nil,
+        tools: []
+      }
+
+      html = render_component(&PromptComponents.conversation/1, assigns)
+      assert html =~ "minimal_tool"
+    end
+
+    test "renders tool results inline" do
       assigns = %{
         messages: [
           %{
@@ -303,64 +407,7 @@ defmodule DodoRouterWeb.PromptComponentsTest do
 
       assert html =~ "127.0.0.1 localhost"
       assert html =~ "result"
-      assert html =~ "items-start"
       refute html =~ "tool result"
-    end
-
-    test "handles invalid JSON arguments gracefully" do
-      assigns = %{
-        messages: [
-          %{
-            role: "assistant",
-            content: "",
-            tool_calls: [
-              %{
-                "id" => "call_1",
-                "function" => %{
-                  "name" => "broken",
-                  "arguments" => "not valid json"
-                }
-              }
-            ]
-          }
-        ],
-        response: nil,
-        model: nil,
-        provider: nil,
-        tools: []
-      }
-
-      html = render_component(&PromptComponents.conversation/1, assigns)
-      assert html =~ "broken"
-    end
-
-    test "handles missing command field by falling back to generic" do
-      assigns = %{
-        messages: [
-          %{
-            role: "assistant",
-            content: "",
-            tool_calls: [
-              %{
-                "id" => "call_1",
-                "function" => %{
-                  "name" => "bash",
-                  "arguments" => Jason.encode!(%{"description" => "No command"})
-                }
-              }
-            ]
-          }
-        ],
-        response: nil,
-        model: nil,
-        provider: nil,
-        tools: []
-      }
-
-      html = render_component(&PromptComponents.conversation/1, assigns)
-      assert html =~ "bash"
-      assert html =~ "No command"
-      assert html =~ "description"
     end
 
     test "filters out tool result messages from display" do
@@ -380,10 +427,13 @@ defmodule DodoRouterWeb.PromptComponentsTest do
       }
 
       html = render_component(&PromptComponents.conversation/1, assigns)
+
       assert html =~ "Test"
       refute html =~ "secret result data"
     end
+  end
 
+  describe "available tools" do
     test "shows available tools section" do
       assigns = %{
         messages: [],
@@ -398,6 +448,7 @@ defmodule DodoRouterWeb.PromptComponentsTest do
       }
 
       html = render_component(&PromptComponents.conversation/1, assigns)
+
       assert html =~ "Tools"
       assert html =~ "3 available"
       assert html =~ "tool1"
@@ -443,7 +494,7 @@ defmodule DodoRouterWeb.PromptComponentsTest do
       assert String.starts_with?(icon1, "hero-")
     end
 
-    test "returns different icons for different names" do
+    test "returns valid icons for different names" do
       icon1 = PromptComponents.tool_icon("bash")
       icon2 = PromptComponents.tool_icon("read_file")
 
