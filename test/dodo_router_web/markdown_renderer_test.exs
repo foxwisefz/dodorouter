@@ -27,22 +27,23 @@ defmodule DodoRouterWeb.MarkdownRendererTest do
              ] = parsed
     end
 
-    test "handles mixed content in list items" do
-      content = "- First item\n- <example>content</example>\n- Third item"
+    test "handles XML tags inside list items" do
+      content = "Examples:\n- <example>content</example>"
 
       parsed = MarkdownRenderer.parse(content)
 
-      assert [{:list, :unordered, items}] = parsed
-      assert [item1, item2, item3] = items
+      assert [{:paragraph, "Examples:"}, {:list, :unordered, [item]}] = parsed
+      assert [{:xml_block, "example", _}] = item
+    end
 
-      # First item should be plain text
-      assert [{:inline_paragraph, "First item"}] = item1
+    test "handles multi-block XML tags like system-reminder" do
+      content =
+        "<system-reminder>\n- gemini-marketing: ...\n- landing-pages: ...\n</system-reminder>\n\nhi"
 
-      # Second item should contain the XML block
-      assert [{:xml_block, "example", _}] = item2
+      parsed = MarkdownRenderer.parse(content)
 
-      # Third item should be plain text
-      assert [{:inline_paragraph, "Third item"}] = item3
+      # Should extract the entire system-reminder as one XML block
+      assert [{:xml_block, "system-reminder", _}, {:paragraph, "hi"}] = parsed
     end
   end
 end

@@ -66,7 +66,11 @@ defmodule DodoRouterWeb.PromptComponents do
           <.available_tools tools={@tools} />
         <% end %>
 
-        <.collapsed_message_list messages={@display_messages} response={@response} tool_results={@tool_results} />
+        <.collapsed_message_list
+          messages={@display_messages}
+          response={@response}
+          tool_results={@tool_results}
+        />
       </div>
     </div>
     """
@@ -309,10 +313,10 @@ defmodule DodoRouterWeb.PromptComponents do
     </div>
     <div class="px-3 py-2 space-y-1.5">
       <%= if @description && String.length(@description) > 0 do %>
-        <div class="text-sm text-base-content/50 italic"><%= @description %></div>
+        <div class="text-sm text-base-content/50 italic">{@description}</div>
       <% end %>
       <div class="font-mono text-[11px] bg-base-300/20 rounded px-2 py-1.5 border border-base-300/30">
-        <code phx-no-curly-interpolation><%= @command %></code>
+        <code phx-no-curly-interpolation>{@command}</code>
       </div>
       <.raw_json_toggle raw_args={@raw_args} />
     </div>
@@ -331,7 +335,7 @@ defmodule DodoRouterWeb.PromptComponents do
     </div>
     <div class="px-3 py-2 space-y-1.5">
       <div class="font-mono text-[11px] bg-base-300/20 rounded px-2 py-1.5 border border-base-300/30 truncate">
-        <code phx-no-curly-interpolation><%= @path %></code>
+        <code phx-no-curly-interpolation>{@path}</code>
       </div>
       <.raw_json_toggle raw_args={@raw_args} />
     </div>
@@ -369,13 +373,13 @@ defmodule DodoRouterWeb.PromptComponents do
     </div>
     <div class="px-3 py-2 space-y-1.5">
       <%= if @description && String.length(@description) > 0 do %>
-        <div class="text-sm text-base-content/50 italic"><%= @description %></div>
+        <div class="text-sm text-base-content/50 italic">{@description}</div>
       <% end %>
       <div class="font-mono text-[11px] bg-base-300/20 rounded px-2 py-1.5 border border-base-300/30">
-        <code phx-no-curly-interpolation><%= @command %></code>
+        <code phx-no-curly-interpolation>{@command}</code>
       </div>
       <%= if @timeout do %>
-        <div class="text-xs text-base-content/50">Timeout: <%= @timeout %>s</div>
+        <div class="text-xs text-base-content/50">Timeout: {@timeout}s</div>
       <% end %>
       <.raw_json_toggle raw_args={@raw_args} />
     </div>
