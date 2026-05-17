@@ -120,36 +120,86 @@ defmodule DodoRouterWeb.ProxyController do
       |> put_resp_content_type("text/event-stream")
       |> put_resp_header("cache-control", "no-cache")
       |> put_resp_header("x-request-id", request_id)
-      |> send_chunked(200)
+
+    # Use Agent to track the mutable conn state across chunk callbacks.
+    # This lets us delay sending HTTP 200 until we know the request will succeed.
+    # If all providers fail before any chunks are sent, we can return HTTP 400
+    # instead of HTTP 200 + SSE error — which is critical for client SDKs like
+    # the AI SDK to properly detect errors (e.g. context overflow) via APICallError.
+    {:ok, conn_holder} = Agent.start(fn -> conn end)
 
     send_chunk = fn data ->
-      chunk(conn, data)
+      Agent.get_and_update(conn_holder, fn current_conn ->
+        new_conn = send_chunked(current_conn, 200)
+
+        case chunk(new_conn, data) do
+          {:ok, chunked_conn} -> {{:ok, chunked_conn}, chunked_conn}
+          error -> {error, new_conn}
+        end
+      end)
+
       :ok
     end
 
-    case Proxy.dispatch_streaming(router, params, send_chunk,
-           session: session,
-           recording_id: recording_id,
-           client_headers: client_headers
-         ) do
+    result =
+      Proxy.dispatch_streaming(router, params, send_chunk,
+        session: session,
+        recording_id: recording_id,
+        client_headers: client_headers
+      )
+
+    final_conn = Agent.get(conn_holder, fn c -> c end)
+    Agent.stop(conn_holder)
+
+    case result do
       {:ok, _response, _timing} ->
-        conn
+        if final_conn.state == :unset do
+          # No chunks sent — close the stream cleanly
+          {:ok, done_conn} = send_chunked(final_conn, 200) |> chunk("data: [DONE]\n\n")
+          done_conn
+        else
+          final_conn
+        end
 
       {:error, :no_routing_configured} ->
-        error_event =
-          "data: " <> Jason.encode!(%{error: %{message: "No routing configured"}}) <> "\n\n"
-
-        chunk(conn, error_event)
-        chunk(conn, "data: [DONE]\n\n")
-        conn
+        if final_conn.state == :unset do
+          final_conn
+          |> put_status(400)
+          |> put_resp_content_type("application/json")
+          |> json(%{error: %{message: "No routing configured"}})
+        else
+          {:ok, done_conn} = chunk(final_conn, "data: [DONE]\n\n")
+          done_conn
+        end
 
       {:error, :all_providers_failed, attempts} ->
-        error_payload = Proxy.streaming_error_payload(attempts)
-        error_event = "data: " <> Jason.encode!(error_payload) <> "\n\n"
+        if final_conn.state == :unset do
+          # No chunks were sent to the client yet.
+          # Return a proper HTTP error status so client SDKs (e.g. AI SDK) detect
+          # this as an APICallError rather than a generic stream error.
+          {status, error_response} = Proxy.error_response(attempts)
 
-        chunk(conn, error_event)
-        chunk(conn, "data: [DONE]\n\n")
-        conn
+          final_conn
+          |> put_status(status)
+          |> put_resp_content_type("application/json")
+          |> json(error_response)
+        else
+          # Chunks were already streamed to the client.
+          # Must continue with SSE format since we can't change HTTP status mid-stream.
+          error_payload = Proxy.streaming_error_payload(attempts)
+          error_event = "data: " <> Jason.encode!(error_payload) <> "\n\n"
+
+          final_conn
+          |> chunk(error_event)
+          |> case do
+            {:ok, err_conn} ->
+              {:ok, done_conn} = chunk(err_conn, "data: [DONE]\n\n")
+              done_conn
+
+            _ ->
+              final_conn
+          end
+        end
     end
   end
 
