@@ -42,49 +42,67 @@ defmodule DodoRouterWeb.MarkdownRenderer do
   # Parse content into a flat list of blocks. XML tag bodies are recursively
   # parsed, producing nested `:xml_block` nodes.
   #
-  # Order: block parsing first, then XML splitting within each block. This
-  # ensures XML tags inside list items stay inside those list items.
+  # Order: split XML first (so multi-block tags like <system-reminder> that
+  # contain lists are captured), then parse blocks. After that, merge any
+  # empty list items that were left behind when an XML tag was extracted
+  # from inside a list item.
   def parse(content) when is_binary(content) do
     content
-    |> parse_blocks()
-    |> Enum.flat_map(&split_xml_in_block/1)
+    |> split_xml()
+    |> Enum.flat_map(fn
+      {:text, text} -> parse_blocks(text)
+      {:xml, name, body} -> [{:xml_block, name, parse(body)}]
+    end)
+    |> merge_xml_into_lists()
+    |> normalize_list_items()
   end
 
-  # After blocks are parsed, look for XML tags inside each block.
-  defp split_xml_in_block({:paragraph, text}) do
-    split_xml(text)
-    |> Enum.flat_map(fn
-      {:text, t} ->
-        trimmed = String.trim(t)
-        if trimmed == "", do: [], else: [{:paragraph, trimmed}]
+  # When split_xml extracts a tag from inside a list item, it leaves an empty
+  # string as the last item. Detect that pattern and move the XML block into
+  # the list so it renders inline with the bullet.
+  defp merge_xml_into_lists(blocks), do: merge_xml_into_lists(blocks, [])
 
-      {:xml, name, body} ->
-        [{:xml_block, name, parse(body)}]
+  defp merge_xml_into_lists([], acc), do: Enum.reverse(acc)
+
+  defp merge_xml_into_lists([{:list, type, items} | rest], acc) do
+    case List.last(items) do
+      "" ->
+        case List.first(rest) do
+          {:xml_block, name, children} ->
+            new_items = List.delete_at(items, -1) ++ [{:xml_block, name, children}]
+            merge_xml_into_lists(tl(rest), [{:list, type, new_items} | acc])
+
+          _ ->
+            merge_xml_into_lists(rest, [{:list, type, items} | acc])
+        end
+
+      _ ->
+        merge_xml_into_lists(rest, [{:list, type, items} | acc])
+    end
+  end
+
+  defp merge_xml_into_lists([block | rest], acc) do
+    merge_xml_into_lists(rest, [block | acc])
+  end
+
+  # Normalize list items so every item is a list of nodes (consistent type).
+  # String items become [{:inline_paragraph, text}], XML blocks stay as-is.
+  defp normalize_list_items(blocks) do
+    Enum.map(blocks, fn
+      {:list, type, items} ->
+        new_items =
+          Enum.map(items, fn
+            "" -> []
+            item when is_binary(item) -> [{:inline_paragraph, item}]
+            other -> [other]
+          end)
+
+        {:list, type, new_items}
+
+      other ->
+        other
     end)
   end
-
-  defp split_xml_in_block({:list, type, items}) do
-    new_items =
-      Enum.map(items, fn item_text ->
-        split_xml(item_text)
-        |> Enum.flat_map(fn
-          {:text, t} ->
-            trimmed = String.trim(t)
-            if trimmed == "", do: [], else: [{:inline_paragraph, trimmed}]
-
-          {:xml, name, body} ->
-            [{:xml_block, name, parse(body)}]
-        end)
-      end)
-
-    [{:list, type, new_items}]
-  end
-
-  defp split_xml_in_block({:blockquote, children}) do
-    [{:blockquote, Enum.flat_map(children, &split_xml_in_block/1)}]
-  end
-
-  defp split_xml_in_block(block), do: [block]
 
   # Splits content on balanced XML-like tags (best-effort, no nesting of the
   # same tag name). Returns a list of `{:text, str} | {:xml, name, body}`.

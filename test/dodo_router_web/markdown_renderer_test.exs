@@ -27,22 +27,75 @@ defmodule DodoRouterWeb.MarkdownRendererTest do
              ] = parsed
     end
 
-    test "handles mixed content in list items" do
-      content = "- First item\n- <example>content</example>\n- Third item"
+    test "handles XML tags inside list items" do
+      content = "Examples:\n- <example>content</example>"
 
       parsed = MarkdownRenderer.parse(content)
 
-      assert [{:list, :unordered, items}] = parsed
-      assert [item1, item2, item3] = items
+      assert [{:paragraph, "Examples:"}, {:list, :unordered, [item]}] = parsed
+      assert [{:xml_block, "example", _}] = item
+    end
 
-      # First item should be plain text
-      assert [{:inline_paragraph, "First item"}] = item1
+    test "handles multi-block XML tags like system-reminder" do
+      content =
+        "<system-reminder>\n- gemini-marketing: ...\n- landing-pages: ...\n</system-reminder>\n\nhi"
 
-      # Second item should contain the XML block
-      assert [{:xml_block, "example", _}] = item2
+      parsed = MarkdownRenderer.parse(content)
 
-      # Third item should be plain text
-      assert [{:inline_paragraph, "Third item"}] = item3
+      # Should extract the entire system-reminder as one XML block
+      assert [{:xml_block, "system-reminder", _}, {:paragraph, "hi"}] = parsed
+    end
+
+    test "handles XML tags inside ordered lists" do
+      content = "Steps:\n1. <step>First step content</step>\n2. Second step"
+
+      parsed = MarkdownRenderer.parse(content)
+
+      assert [
+               {:paragraph, "Steps:"},
+               {:list, :ordered, [[{:xml_block, "step", _}]]},
+               {:list, :ordered, [[{:inline_paragraph, "Second step"}]]}
+             ] = parsed
+    end
+
+    test "handles multiple XML tags in sequence" do
+      content = "<tag1>content1</tag1>\n\n<tag2>content2</tag2>"
+
+      parsed = MarkdownRenderer.parse(content)
+
+      assert [
+               {:xml_block, "tag1", _},
+               {:xml_block, "tag2", _}
+             ] = parsed
+    end
+
+    test "handles XML tag with list content inside" do
+      content = "<example>\n- item1\n- item2\n</example>"
+
+      parsed = MarkdownRenderer.parse(content)
+
+      assert [{:xml_block, "example", children}] = parsed
+      assert [{:list, :unordered, _}] = children
+    end
+
+    test "handles mixed XML and regular blocks" do
+      content = "# Heading\n\n<note>Important</note>\n\nRegular paragraph"
+
+      parsed = MarkdownRenderer.parse(content)
+
+      assert [
+               {:heading, 1, "Heading"},
+               {:xml_block, "note", _},
+               {:paragraph, "Regular paragraph"}
+             ] = parsed
+    end
+
+    test "handles plain text without XML" do
+      content = "Just a paragraph\n\nAnother paragraph"
+
+      parsed = MarkdownRenderer.parse(content)
+
+      assert [{:paragraph, "Just a paragraph"}, {:paragraph, "Another paragraph"}] = parsed
     end
   end
 end
