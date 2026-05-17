@@ -308,12 +308,12 @@ defmodule DodoRouterWeb.PromptComponents do
       <span class="font-semibold">{@name}</span>
     </div>
     <div class="px-3 py-2 space-y-1.5">
+      <%= if @description && String.length(@description) > 0 do %>
+        <div class="text-sm text-base-content/50 italic"><%= @description %></div>
+      <% end %>
       <div class="font-mono text-[11px] bg-base-300/20 rounded px-2 py-1.5 border border-base-300/30">
         <code phx-no-curly-interpolation><%= @command %></code>
       </div>
-      <%= if @description && String.length(@description) > 0 do %>
-        <div class="text-[10px] text-base-content/50 italic"><%= @description %></div>
-      <% end %>
       <.raw_json_toggle raw_args={@raw_args} />
     </div>
     """
@@ -368,14 +368,14 @@ defmodule DodoRouterWeb.PromptComponents do
       <span class={["badge badge-xs", @risk_class]}>{@risk_level}</span>
     </div>
     <div class="px-3 py-2 space-y-1.5">
+      <%= if @description && String.length(@description) > 0 do %>
+        <div class="text-sm text-base-content/50 italic"><%= @description %></div>
+      <% end %>
       <div class="font-mono text-[11px] bg-base-300/20 rounded px-2 py-1.5 border border-base-300/30">
         <code phx-no-curly-interpolation><%= @command %></code>
       </div>
       <%= if @timeout do %>
-        <div class="text-[10px] text-base-content/50">Timeout: <%= @timeout %>s</div>
-      <% end %>
-      <%= if @description && String.length(@description) > 0 do %>
-        <div class="text-[10px] text-base-content/50 italic"><%= @description %></div>
+        <div class="text-xs text-base-content/50">Timeout: <%= @timeout %>s</div>
       <% end %>
       <.raw_json_toggle raw_args={@raw_args} />
     </div>
