@@ -4,6 +4,7 @@ defmodule DodoRouterWeb.LogLive.Show do
   alias DodoRouter.Logs
   alias DodoRouter.Logs.MessageNormalizer
   alias DodoRouter.Proxy.Adapter.Registry
+  alias DodoRouterWeb.MarkdownRenderer
 
   import DodoRouterWeb.PromptComponents
 
@@ -20,6 +21,7 @@ defmodule DodoRouterWeb.LogLive.Show do
     resp_message = MessageNormalizer.parse_response_body(log.response_body)
     req_headers = parse_headers(log.request_headers)
     resp_headers = parse_headers(log.response_headers)
+    available_tools = MessageNormalizer.extract_tools(req_params)
 
     req_headers = req_headers
 
@@ -32,6 +34,8 @@ defmodule DodoRouterWeb.LogLive.Show do
       |> assign(:resp_message, resp_message)
       |> assign(:req_headers, req_headers)
       |> assign(:resp_headers, resp_headers)
+      |> assign(:available_tools, available_tools)
+      |> assign(:selected_tool, nil)
       |> assign(:active_tab, "conversation")
       |> assign(:show_req_headers, false)
       |> assign(:show_resp_headers, false)
@@ -44,6 +48,15 @@ defmodule DodoRouterWeb.LogLive.Show do
   @impl true
   def handle_event("set_tab", %{"tab" => tab}, socket) do
     {:noreply, assign(socket, :active_tab, tab)}
+  end
+
+  def handle_event("show_tool", %{"name" => name}, socket) do
+    tool = Enum.find(socket.assigns.available_tools, &(&1.name == name))
+    {:noreply, assign(socket, :selected_tool, tool)}
+  end
+
+  def handle_event("hide_tool", _params, socket) do
+    {:noreply, assign(socket, :selected_tool, nil)}
   end
 
   def handle_event("toggle_req_headers", _params, socket) do
@@ -348,6 +361,7 @@ defmodule DodoRouterWeb.LogLive.Show do
                   response={@resp_message}
                   model={@log.final_model}
                   provider={@log.final_provider}
+                  tools={@available_tools}
                 />
               </div>
             <% end %>
@@ -629,6 +643,37 @@ defmodule DodoRouterWeb.LogLive.Show do
           </div>
         </div>
       </div>
+
+      <.modal
+        :if={@selected_tool}
+        id="tool-modal"
+        show
+        on_cancel={JS.push("hide_tool")}
+      >
+        <div class="flex items-center gap-2 mb-4">
+          <.icon name={tool_icon(@selected_tool.name)} class="w-5 h-5 text-base-content/60" />
+          <h3 class="text-lg font-semibold font-mono">{@selected_tool.name}</h3>
+        </div>
+
+        <%= if @selected_tool.description && String.length(@selected_tool.description) > 0 do %>
+          <div class="mb-4">
+            <div class="flex items-center gap-2 mb-2 text-sm text-base-content/40 font-semibold">
+              <.icon name="hero-document-text" class="w-4 h-4" />
+              <span>Description</span>
+            </div>
+            <MarkdownRenderer.render content={@selected_tool.description} />
+          </div>
+        <% end %>
+
+        <%= if @selected_tool.parameters != %{} do %>
+          <div class="text-[10px] uppercase tracking-wider text-base-content/40 font-semibold mb-2">
+            Parameters
+          </div>
+          <div class="mockup-code text-xs max-h-96 overflow-auto">
+            <pre><code phx-no-curly-interpolation><%= Jason.encode!(@selected_tool.parameters, pretty: true) %></code></pre>
+          </div>
+        <% end %>
+      </.modal>
     </div>
     """
   end
