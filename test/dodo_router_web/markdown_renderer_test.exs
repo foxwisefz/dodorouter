@@ -45,5 +45,57 @@ defmodule DodoRouterWeb.MarkdownRendererTest do
       # Should extract the entire system-reminder as one XML block
       assert [{:xml_block, "system-reminder", _}, {:paragraph, "hi"}] = parsed
     end
+
+    test "handles XML tags inside ordered lists" do
+      content = "Steps:\n1. <step>First step content</step>\n2. Second step"
+
+      parsed = MarkdownRenderer.parse(content)
+
+      assert [
+               {:paragraph, "Steps:"},
+               {:list, :ordered, [[{:xml_block, "step", _}]]},
+               {:list, :ordered, [[{:inline_paragraph, "Second step"}]]}
+             ] = parsed
+    end
+
+    test "handles multiple XML tags in sequence" do
+      content = "<tag1>content1</tag1>\n\n<tag2>content2</tag2>"
+
+      parsed = MarkdownRenderer.parse(content)
+
+      assert [
+               {:xml_block, "tag1", _},
+               {:xml_block, "tag2", _}
+             ] = parsed
+    end
+
+    test "handles XML tag with list content inside" do
+      content = "<example>\n- item1\n- item2\n</example>"
+
+      parsed = MarkdownRenderer.parse(content)
+
+      assert [{:xml_block, "example", children}] = parsed
+      assert [{:list, :unordered, _}] = children
+    end
+
+    test "handles mixed XML and regular blocks" do
+      content = "# Heading\n\n<note>Important</note>\n\nRegular paragraph"
+
+      parsed = MarkdownRenderer.parse(content)
+
+      assert [
+               {:heading, 1, "Heading"},
+               {:xml_block, "note", _},
+               {:paragraph, "Regular paragraph"}
+             ] = parsed
+    end
+
+    test "handles plain text without XML" do
+      content = "Just a paragraph\n\nAnother paragraph"
+
+      parsed = MarkdownRenderer.parse(content)
+
+      assert [{:paragraph, "Just a paragraph"}, {:paragraph, "Another paragraph"}] = parsed
+    end
   end
 end

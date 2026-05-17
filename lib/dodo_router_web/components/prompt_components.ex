@@ -105,11 +105,11 @@ defmodule DodoRouterWeb.PromptComponents do
     """
   end
 
-  defp message_at(segments, index) when index >= 0 and index < length(segments) do
+  def message_at(segments, index) when index >= 0 and index < length(segments) do
     Enum.at(segments, index).message
   end
 
-  defp message_at(_, _), do: nil
+  def message_at(_, _), do: nil
 
   defp build_segments(messages, response) do
     items =
@@ -399,12 +399,12 @@ defmodule DodoRouterWeb.PromptComponents do
     </div>
     <div class="px-3 py-2 space-y-2">
       <%= for q <- @questions do %>
-        <div class="text-[11px] font-medium">{q["question"] || q}</div>
+        <div class="text-[11px] font-medium">{question_text(q)}</div>
       <% end %>
       <%= if length(@options) > 0 do %>
         <div class="flex flex-wrap gap-1">
           <%= for opt <- @options do %>
-            <span class="px-2 py-0.5 rounded bg-base-200 text-[10px]">{opt["label"] || opt}</span>
+            <span class="px-2 py-0.5 rounded bg-base-200 text-[10px]">{option_label(opt)}</span>
           <% end %>
         </div>
       <% end %>
@@ -412,6 +412,14 @@ defmodule DodoRouterWeb.PromptComponents do
     </div>
     """
   end
+
+  defp question_text(q) when is_map(q), do: q["question"] || ""
+  defp question_text(q) when is_binary(q), do: q
+  defp question_text(_), do: ""
+
+  defp option_label(opt) when is_map(opt), do: opt["label"] || ""
+  defp option_label(opt) when is_binary(opt), do: opt
+  defp option_label(_), do: ""
 
   defp render_generic_tool(assigns) do
     ~H"""
