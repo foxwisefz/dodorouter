@@ -28,10 +28,23 @@ defmodule DodoRouterWeb.PromptComponents do
     {system_messages, other_messages} =
       Enum.split_with(assigns.messages, fn msg -> msg.role == "system" end)
 
+    # Build lookup of tool_call_id -> result content from tool messages
+    tool_results =
+      other_messages
+      |> Enum.filter(fn msg -> msg.role == "tool" end)
+      |> Enum.reduce(%{}, fn msg, acc ->
+        id = msg.tool_call_id || msg.name || "unknown"
+        Map.put(acc, id, msg.content)
+      end)
+
+    # Filter out tool result messages from display - they'll be shown inline
+    display_messages = Enum.reject(other_messages, fn msg -> msg.role == "tool" end)
+
     assigns =
       assigns
       |> assign(:system_messages, system_messages)
-      |> assign(:other_messages, other_messages)
+      |> assign(:display_messages, display_messages)
+      |> assign(:tool_results, tool_results)
 
     ~H"""
     <div class="space-y-4">
@@ -47,13 +60,13 @@ defmodule DodoRouterWeb.PromptComponents do
       <% end %>
 
       <div class="space-y-3">
-        <.collapsed_message_list messages={@system_messages} response={false} />
+        <.collapsed_message_list messages={@system_messages} response={false} tool_results={%{}} />
 
         <%= if length(@tools) > 0 do %>
           <.available_tools tools={@tools} />
         <% end %>
 
-        <.collapsed_message_list messages={@other_messages} response={@response} />
+        <.collapsed_message_list messages={@display_messages} response={@response} tool_results={@tool_results} />
       </div>
     </div>
     """
@@ -61,13 +74,14 @@ defmodule DodoRouterWeb.PromptComponents do
 
   attr :messages, :list, required: true
   attr :response, :any, default: nil
+  attr :tool_results, :map, default: %{}
 
   defp collapsed_message_list(assigns) do
     segments = build_segments(assigns.messages, assigns.response)
     assigns = assign(assigns, :segments, segments)
 
     ~H"""
-    <%= for seg <- @segments do %>
+    <%= for {seg, idx} <- Enum.with_index(@segments) do %>
       <div :if={seg.collapsed} class="flex items-center gap-2 px-4 py-2">
         <div class="flex-1 border-t border-dashed border-base-300/40"></div>
         <span class="text-xs text-base-content/40 font-medium">
@@ -75,10 +89,23 @@ defmodule DodoRouterWeb.PromptComponents do
         </span>
         <div class="flex-1 border-t border-dashed border-base-300/40"></div>
       </div>
-      <.message_bubble message={seg.message} index={seg.index} response={seg.response} />
+      <.message_bubble
+        message={seg.message}
+        index={seg.index}
+        response={seg.response}
+        next_message={message_at(@segments, idx + 1)}
+        prev_message={message_at(@segments, idx - 1)}
+        tool_results={@tool_results}
+      />
     <% end %>
     """
   end
+
+  defp message_at(segments, index) when index >= 0 and index < length(segments) do
+    Enum.at(segments, index).message
+  end
+
+  defp message_at(_, _), do: nil
 
   defp build_segments(messages, response) do
     items =
@@ -140,6 +167,9 @@ defmodule DodoRouterWeb.PromptComponents do
   attr :message, :map, required: true
   attr :index, :any, required: true
   attr :response, :boolean, default: false
+  attr :next_message, :map, default: nil
+  attr :prev_message, :map, default: nil
+  attr :tool_results, :map, default: %{}
 
   defp message_bubble(assigns) do
     role = assigns.message.role
@@ -180,7 +210,7 @@ defmodule DodoRouterWeb.PromptComponents do
         <%= if @message.tool_calls && @message.tool_calls != [] do %>
           <div class="mt-3 space-y-2">
             <%= for tc <- @message.tool_calls do %>
-              <.tool_call_card call={tc} />
+              <.tool_call_card call={tc} tool_results={@tool_results} />
             <% end %>
           </div>
         <% end %>
@@ -209,29 +239,198 @@ defmodule DodoRouterWeb.PromptComponents do
   defp align_class(_), do: "items-start"
 
   attr :call, :map, required: true
+  attr :tool_results, :map, default: %{}
 
   defp tool_call_card(assigns) do
     name = get_in(assigns.call, ["function", "name"]) || assigns.call["name"] || "tool"
+    call_id = assigns.call["id"] || ""
 
     raw_args =
       get_in(assigns.call, ["function", "arguments"]) || assigns.call["arguments"] || "{}"
 
-    args_pretty =
+    args =
       case Jason.decode(to_string(raw_args)) do
-        {:ok, decoded} -> Jason.encode!(decoded, pretty: true)
-        _ -> to_string(raw_args)
+        {:ok, decoded} -> decoded
+        _ -> %{}
       end
 
-    assigns = assign(assigns, name: name, args: args_pretty)
+    result = Map.get(assigns.tool_results, call_id)
+
+    assigns =
+      assign(assigns,
+        name: name,
+        args: args,
+        raw_args: raw_args,
+        call_id: call_id,
+        has_result: not is_nil(result),
+        result: result
+      )
 
     ~H"""
     <div class="rounded border border-base-300/40 bg-base-100/40 overflow-hidden">
-      <div class="flex items-center gap-2 px-3 py-1.5 text-xs font-mono bg-base-300/30">
-        <span class="text-secondary">⚙</span>
-        <span class="font-semibold">{@name}</span>
-      </div>
-      <pre class="px-3 py-2 text-[11px] overflow-x-auto"><code phx-no-curly-interpolation><%= @args %></code></pre>
+      <.heuristic_tool_call name={@name} args={@args} raw_args={@raw_args} />
+      <%= if @has_result do %>
+        <div class="border-t border-base-300/30 bg-base-200/30">
+          <div class="flex items-center gap-1.5 px-3 py-1 text-[10px] text-base-content/40">
+            <.icon name="hero-arrow-down" class="w-3 h-3" />
+            <span>result</span>
+          </div>
+          <pre class="px-3 pb-2 text-[11px] overflow-x-auto whitespace-pre-wrap font-mono"><%= @result %></pre>
+        </div>
+      <% end %>
     </div>
+    """
+  end
+
+  attr :name, :string, required: true
+  attr :args, :map, required: true
+  attr :raw_args, :string, default: "{}"
+
+  defp heuristic_tool_call(assigns) do
+    cond do
+      assigns.args["command"] -> render_command_tool(assigns)
+      assigns.args["file_path"] || assigns.args["path"] -> render_file_tool(assigns)
+      assigns.args["riskLevel"] -> render_risk_tool(assigns)
+      assigns.args["questions"] || assigns.args["options"] -> render_question_tool(assigns)
+      true -> render_generic_tool(assigns)
+    end
+  end
+
+  defp render_command_tool(assigns) do
+    command = assigns.args["command"] || ""
+    description = assigns.args["description"] || ""
+
+    assigns = assign(assigns, command: command, description: description)
+
+    ~H"""
+    <div class="flex items-center gap-2 px-3 py-1.5 text-xs font-mono bg-base-300/30">
+      <.icon name="hero-command-line" class="w-4 h-4 text-secondary" />
+      <span class="font-semibold">{@name}</span>
+    </div>
+    <div class="px-3 py-2 space-y-1.5">
+      <div class="font-mono text-[11px] bg-base-300/20 rounded px-2 py-1.5 border border-base-300/30">
+        <code phx-no-curly-interpolation><%= @command %></code>
+      </div>
+      <%= if @description && String.length(@description) > 0 do %>
+        <div class="text-[10px] text-base-content/50 italic"><%= @description %></div>
+      <% end %>
+      <.raw_json_toggle raw_args={@raw_args} />
+    </div>
+    """
+  end
+
+  defp render_file_tool(assigns) do
+    path = assigns.args["file_path"] || assigns.args["path"] || ""
+
+    assigns = assign(assigns, path: path)
+
+    ~H"""
+    <div class="flex items-center gap-2 px-3 py-1.5 text-xs font-mono bg-base-300/30">
+      <.icon name="hero-document-text" class="w-4 h-4 text-secondary" />
+      <span class="font-semibold">{@name}</span>
+    </div>
+    <div class="px-3 py-2 space-y-1.5">
+      <div class="font-mono text-[11px] bg-base-300/20 rounded px-2 py-1.5 border border-base-300/30 truncate">
+        <code phx-no-curly-interpolation><%= @path %></code>
+      </div>
+      <.raw_json_toggle raw_args={@raw_args} />
+    </div>
+    """
+  end
+
+  defp render_risk_tool(assigns) do
+    command = assigns.args["command"] || ""
+    risk_level = assigns.args["riskLevel"] || "unknown"
+    timeout = assigns.args["timeout"]
+    description = assigns.args["description"] || ""
+
+    risk_class =
+      case risk_level do
+        "low" -> "badge-success"
+        "medium" -> "badge-warning"
+        "high" -> "badge-error"
+        _ -> "badge-ghost"
+      end
+
+    assigns =
+      assign(assigns,
+        command: command,
+        risk_level: risk_level,
+        timeout: timeout,
+        description: description,
+        risk_class: risk_class
+      )
+
+    ~H"""
+    <div class="flex items-center gap-2 px-3 py-1.5 text-xs font-mono bg-base-300/30">
+      <.icon name="hero-play" class="w-4 h-4 text-secondary" />
+      <span class="font-semibold">{@name}</span>
+      <span class={["badge badge-xs", @risk_class]}>{@risk_level}</span>
+    </div>
+    <div class="px-3 py-2 space-y-1.5">
+      <div class="font-mono text-[11px] bg-base-300/20 rounded px-2 py-1.5 border border-base-300/30">
+        <code phx-no-curly-interpolation><%= @command %></code>
+      </div>
+      <%= if @timeout do %>
+        <div class="text-[10px] text-base-content/50">Timeout: <%= @timeout %>s</div>
+      <% end %>
+      <%= if @description && String.length(@description) > 0 do %>
+        <div class="text-[10px] text-base-content/50 italic"><%= @description %></div>
+      <% end %>
+      <.raw_json_toggle raw_args={@raw_args} />
+    </div>
+    """
+  end
+
+  defp render_question_tool(assigns) do
+    questions = assigns.args["questions"] || []
+    options = assigns.args["options"] || []
+
+    assigns = assign(assigns, questions: questions, options: options)
+
+    ~H"""
+    <div class="flex items-center gap-2 px-3 py-1.5 text-xs font-mono bg-base-300/30">
+      <.icon name="hero-question-mark-circle" class="w-4 h-4 text-secondary" />
+      <span class="font-semibold">{@name}</span>
+    </div>
+    <div class="px-3 py-2 space-y-2">
+      <%= for q <- @questions do %>
+        <div class="text-[11px] font-medium">{q["question"] || q}</div>
+      <% end %>
+      <%= if length(@options) > 0 do %>
+        <div class="flex flex-wrap gap-1">
+          <%= for opt <- @options do %>
+            <span class="px-2 py-0.5 rounded bg-base-200 text-[10px]">{opt["label"] || opt}</span>
+          <% end %>
+        </div>
+      <% end %>
+      <.raw_json_toggle raw_args={@raw_args} />
+    </div>
+    """
+  end
+
+  defp render_generic_tool(assigns) do
+    ~H"""
+    <div class="flex items-center gap-2 px-3 py-1.5 text-xs font-mono bg-base-300/30">
+      <.icon name="hero-wrench" class="w-4 h-4 text-secondary" />
+      <span class="font-semibold">{@name}</span>
+    </div>
+    <div class="px-3 py-2">
+      <pre class="text-[11px] overflow-x-auto"><code phx-no-curly-interpolation><%= Jason.encode!(@args, pretty: true) %></code></pre>
+    </div>
+    """
+  end
+
+  attr :raw_args, :string, required: true
+
+  defp raw_json_toggle(assigns) do
+    ~H"""
+    <details class="text-[10px]">
+      <summary class="text-base-content/40 hover:text-base-content cursor-pointer select-none">
+        Show raw JSON
+      </summary>
+      <pre class="mt-1 p-1.5 bg-base-300/20 rounded overflow-x-auto"><code phx-no-curly-interpolation><%= @raw_args %></code></pre>
+    </details>
     """
   end
 
