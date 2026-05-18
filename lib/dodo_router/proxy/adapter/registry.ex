@@ -22,7 +22,8 @@ defmodule DodoRouter.Proxy.Adapter.Registry do
     DodoRouter.Proxy.Adapters.DeepSeek,
     DodoRouter.Proxy.Adapters.Cohere,
     DodoRouter.Proxy.Adapters.Moonshot,
-    DodoRouter.Proxy.Adapters.Zai
+    DodoRouter.Proxy.Adapters.Zai,
+    DodoRouter.Proxy.Adapters.TestProvider
   ]
 
   @type adapter_config :: %{

@@ -4,7 +4,7 @@ defmodule DodoRouter.Proxy.Adapter.RegistryTest do
   alias DodoRouter.Proxy.Adapter.Registry
 
   describe "all_adapters/0" do
-    test "returns all 10 providers keyed by slug" do
+    test "returns all 11 providers keyed by slug" do
       adapters = Registry.all_adapters()
 
       assert Map.has_key?(adapters, "openai")
@@ -17,7 +17,8 @@ defmodule DodoRouter.Proxy.Adapter.RegistryTest do
       assert Map.has_key?(adapters, "cohere")
       assert Map.has_key?(adapters, "moonshot")
       assert Map.has_key?(adapters, "zai")
-      assert map_size(adapters) == 10
+      assert Map.has_key?(adapters, "test_provider")
+      assert map_size(adapters) == 11
     end
 
     test "each adapter has required config fields" do
@@ -41,7 +42,8 @@ defmodule DodoRouter.Proxy.Adapter.RegistryTest do
       assert providers == Enum.sort(providers)
       assert "openai" in providers
       assert "zai" in providers
-      assert length(providers) == 10
+      assert "test_provider" in providers
+      assert length(providers) == 11
     end
   end
 

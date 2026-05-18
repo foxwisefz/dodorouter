@@ -28,7 +28,13 @@ defmodule DodoRouter.Logs do
   end
 
   def create_log_async(attrs) do
-    Task.start(fn -> create_log(attrs) end)
+    # In test, log synchronously to avoid sandbox ownership races
+    # with async tasks that outlive the test process.
+    if Application.get_env(:dodo_router, :env) == :test do
+      create_log(attrs)
+    else
+      Task.start(fn -> create_log(attrs) end)
+    end
   end
 
   defp broadcast_log_created(log) do

@@ -23,7 +23,10 @@ config :dodo_router, DodoRouter.Repo,
 config :dodo_router, DodoRouterWeb.Endpoint,
   http: [ip: {127, 0, 0, 1}, port: 4002],
   secret_key_base: "wwgxtkRJg8HU8+ay2dMaj55xkV6/YKMIzozfVMxA+Z9pyiDtbcK+SCN7uh3OqwLq",
-  server: false
+  server: true
+
+# Enable SQL sandbox for concurrent transactional acceptance tests
+config :dodo_router, :sql_sandbox, true
 
 # In test we don't send emails
 config :dodo_router, DodoRouter.Mailer, adapter: Swoosh.Adapters.Test

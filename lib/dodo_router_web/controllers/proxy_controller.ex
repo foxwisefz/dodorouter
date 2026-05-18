@@ -120,36 +120,101 @@ defmodule DodoRouterWeb.ProxyController do
       |> put_resp_content_type("text/event-stream")
       |> put_resp_header("cache-control", "no-cache")
       |> put_resp_header("x-request-id", request_id)
-      |> send_chunked(200)
+
+    # Use process dictionary to track the mutable conn state across chunk callbacks.
+    # This lets us delay sending HTTP 200 until we know the request will succeed.
+    # If all providers fail before any chunks are sent, we can return HTTP 400
+    # instead of HTTP 200 + SSE error — which is critical for client SDKs like
+    # the AI SDK to properly detect errors (e.g. context overflow) via APICallError.
+    #
+    # We use Process.put/Process.get (not Agent) because Bandit requires that
+    # send_chunked/2 and chunk/2 be called by the stream owner process. All
+    # adapter callbacks run in the controller process, so the process dictionary
+    # stays in the same process.
+    Process.put(:__stream_conn__, conn)
 
     send_chunk = fn data ->
-      chunk(conn, data)
-      :ok
+      current_conn = Process.get(:__stream_conn__)
+
+      # send_chunked/2 can only be called once per connection.
+      # After the first chunk it transitions state to :chunked.
+      new_conn =
+        if current_conn.state == :unset do
+          send_chunked(current_conn, 200)
+        else
+          current_conn
+        end
+
+      case chunk(new_conn, data) do
+        {:ok, chunked_conn} ->
+          Process.put(:__stream_conn__, chunked_conn)
+          :ok
+
+        _error ->
+          Process.put(:__stream_conn__, new_conn)
+          :ok
+      end
     end
 
-    case Proxy.dispatch_streaming(router, params, send_chunk,
-           session: session,
-           recording_id: recording_id,
-           client_headers: client_headers
-         ) do
+    result =
+      Proxy.dispatch_streaming(router, params, send_chunk,
+        session: session,
+        recording_id: recording_id,
+        client_headers: client_headers
+      )
+
+    final_conn = Process.get(:__stream_conn__)
+    Process.delete(:__stream_conn__)
+
+    case result do
       {:ok, _response, _timing} ->
-        conn
+        if final_conn.state == :unset do
+          # No chunks sent — close the stream cleanly
+          {:ok, done_conn} = send_chunked(final_conn, 200) |> chunk("data: [DONE]\n\n")
+          done_conn
+        else
+          final_conn
+        end
 
       {:error, :no_routing_configured} ->
-        error_event =
-          "data: " <> Jason.encode!(%{error: %{message: "No routing configured"}}) <> "\n\n"
-
-        chunk(conn, error_event)
-        chunk(conn, "data: [DONE]\n\n")
-        conn
+        if final_conn.state == :unset do
+          final_conn
+          |> put_status(400)
+          |> put_resp_content_type("application/json")
+          |> json(%{error: %{message: "No routing configured"}})
+        else
+          {:ok, done_conn} = chunk(final_conn, "data: [DONE]\n\n")
+          done_conn
+        end
 
       {:error, :all_providers_failed, attempts} ->
-        error_payload = Proxy.streaming_error_payload(attempts)
-        error_event = "data: " <> Jason.encode!(error_payload) <> "\n\n"
+        if final_conn.state == :unset do
+          # No chunks were sent to the client yet.
+          # Return a proper HTTP error status so client SDKs (e.g. AI SDK) detect
+          # this as an APICallError rather than a generic stream error.
+          {status, error_response} = Proxy.error_response(attempts)
 
-        chunk(conn, error_event)
-        chunk(conn, "data: [DONE]\n\n")
-        conn
+          final_conn
+          |> put_status(status)
+          |> put_resp_content_type("application/json")
+          |> json(error_response)
+        else
+          # Chunks were already streamed to the client.
+          # Must continue with SSE format since we can't change HTTP status mid-stream.
+          error_payload = Proxy.streaming_error_payload(attempts)
+          error_event = "data: " <> Jason.encode!(error_payload) <> "\n\n"
+
+          final_conn
+          |> chunk(error_event)
+          |> case do
+            {:ok, err_conn} ->
+              {:ok, done_conn} = chunk(err_conn, "data: [DONE]\n\n")
+              done_conn
+
+            _ ->
+              final_conn
+          end
+        end
     end
   end
 
