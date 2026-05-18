@@ -177,7 +177,7 @@ defmodule DodoRouterWeb.ProxyIntegrationTest do
       assert :done in events
     end
 
-    test "returns HTTP 200 SSE error when no routing configured", %{metadata: metadata} do
+    test "returns HTTP 400 JSON error when no routing configured (not SSE)", %{metadata: metadata} do
       {router, api_key} = RoutersFixtures.router_fixture()
 
       {:ok, response} =
@@ -189,16 +189,12 @@ defmodule DodoRouterWeb.ProxyIntegrationTest do
           stream: true
         )
 
-      # Current behavior: when no providers are configured, streaming requests
-      # return HTTP 200 with SSE error events. This is the existing behavior
-      # (a future fix may change this to HTTP 400 with JSON).
-      assert response.status == 200
-      assert response.headers["content-type"] == ["text/event-stream; charset=utf-8"]
-
-      events = parse_sse_events(response.body)
-      error_event = Enum.find(events, fn e -> is_map(e) && e["error"] end)
-      assert error_event["error"]["message"] == "No routing configured"
-      assert :done in events
+      # When no providers are configured and no chunks were sent,
+      # we should get HTTP 400 with JSON error — not HTTP 200 with SSE events.
+      # This ensures client SDKs (e.g. AI SDK) detect the error as APICallError.
+      assert response.status == 400
+      assert response.headers["content-type"] == ["application/json; charset=utf-8"]
+      assert response.body["error"]["message"] == "No routing configured"
     end
 
     test "falls back to next provider when first fails mid-stream", %{metadata: metadata} do

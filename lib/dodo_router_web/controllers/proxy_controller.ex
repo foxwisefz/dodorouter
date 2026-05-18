@@ -121,24 +121,39 @@ defmodule DodoRouterWeb.ProxyController do
       |> put_resp_header("cache-control", "no-cache")
       |> put_resp_header("x-request-id", request_id)
 
-    # Use Agent to track the mutable conn state across chunk callbacks.
+    # Use process dictionary to track the mutable conn state across chunk callbacks.
     # This lets us delay sending HTTP 200 until we know the request will succeed.
     # If all providers fail before any chunks are sent, we can return HTTP 400
     # instead of HTTP 200 + SSE error — which is critical for client SDKs like
     # the AI SDK to properly detect errors (e.g. context overflow) via APICallError.
-    {:ok, conn_holder} = Agent.start(fn -> conn end)
+    #
+    # We use Process.put/Process.get (not Agent) because Bandit requires that
+    # send_chunked/2 and chunk/2 be called by the stream owner process. All
+    # adapter callbacks run in the controller process, so the process dictionary
+    # stays in the same process.
+    Process.put(:__stream_conn__, conn)
 
     send_chunk = fn data ->
-      Agent.get_and_update(conn_holder, fn current_conn ->
-        new_conn = send_chunked(current_conn, 200)
+      current_conn = Process.get(:__stream_conn__)
 
-        case chunk(new_conn, data) do
-          {:ok, chunked_conn} -> {{:ok, chunked_conn}, chunked_conn}
-          error -> {error, new_conn}
+      # send_chunked/2 can only be called once per connection.
+      # After the first chunk it transitions state to :chunked.
+      new_conn =
+        if current_conn.state == :unset do
+          send_chunked(current_conn, 200)
+        else
+          current_conn
         end
-      end)
 
-      :ok
+      case chunk(new_conn, data) do
+        {:ok, chunked_conn} ->
+          Process.put(:__stream_conn__, chunked_conn)
+          :ok
+
+        _error ->
+          Process.put(:__stream_conn__, new_conn)
+          :ok
+      end
     end
 
     result =
@@ -148,8 +163,8 @@ defmodule DodoRouterWeb.ProxyController do
         client_headers: client_headers
       )
 
-    final_conn = Agent.get(conn_holder, fn c -> c end)
-    Agent.stop(conn_holder)
+    final_conn = Process.get(:__stream_conn__)
+    Process.delete(:__stream_conn__)
 
     case result do
       {:ok, _response, _timing} ->
