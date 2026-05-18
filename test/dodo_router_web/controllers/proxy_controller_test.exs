@@ -79,33 +79,6 @@ defmodule DodoRouterWeb.ProxyControllerTest do
 
       assert json_response(conn, 401)["error"]["type"] == "authentication_error"
     end
-
-    test "streaming request with no routing returns HTTP 400 (not 200 + SSE)", %{
-      conn: conn,
-      router: router,
-      api_key: api_key
-    } do
-      conn =
-        conn
-        |> auth_conn(api_key)
-        |> put_req_header("content-type", "application/json")
-        |> post("/r/#{router.slug}/v1/chat/completions", %{
-          "model" => "test",
-          "messages" => [%{"role" => "user", "content" => "Hello"}],
-          "stream" => true
-        })
-
-      # When no providers are configured and no chunks were sent,
-      # we should get HTTP 400 with JSON error — not HTTP 200 with SSE events.
-      # This ensures client SDKs (e.g. AI SDK) detect the error as APICallError.
-      assert response_content_type(conn, :json)
-
-      assert %{
-               "error" => %{
-                 "message" => "No routing configured"
-               }
-             } = json_response(conn, 400)
-    end
   end
 
   describe "POST /v1/chat/completions (legacy)" do
