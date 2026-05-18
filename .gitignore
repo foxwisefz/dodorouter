@@ -44,3 +44,4 @@ npm-debug.log
 # Environment files
 .env
 .env.local
+dodo_router-*.tar.gz

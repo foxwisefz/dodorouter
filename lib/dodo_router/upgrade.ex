@@ -4,7 +4,11 @@ defmodule DodoRouter.Upgrade do
 
   Usage:
       bin/dodo_router eval "DodoRouter.Upgrade.install('0.1.1')"
+
+  Note: release_handler.unpack_release automatically appends .tar.gz
   """
+
+
 
   @compile {:no_warn_undefined, {:release_handler, :unpack_release, 1}}
   @compile {:no_warn_undefined, {:release_handler, :install_release, 1}}
