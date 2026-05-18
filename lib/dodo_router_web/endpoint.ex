@@ -12,6 +12,10 @@ defmodule DodoRouterWeb.Endpoint do
     same_site: "Lax"
   ]
 
+  if Application.compile_env(:dodo_router, :sql_sandbox) do
+    plug Phoenix.Ecto.SQL.Sandbox
+  end
+
   socket "/live", Phoenix.LiveView.Socket,
     websocket: [connect_info: [session: @session_options]],
     longpoll: [connect_info: [session: @session_options]]

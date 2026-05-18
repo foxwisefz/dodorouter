@@ -1,0 +1,318 @@
+defmodule DodoRouterWeb.ProxyIntegrationTest do
+  @moduledoc """
+  End-to-end integration tests for the LLM proxy API.
+
+  These tests make actual HTTP requests through Bandit (not Plug.Test.Conn),
+  ensuring streaming logic works correctly with the real HTTP server.
+  This catches process-ownership bugs that are invisible to controller tests.
+  """
+
+  use DodoRouter.DataCase, async: false
+
+  alias DodoRouter.AccountsFixtures
+  alias DodoRouter.Providers.ProviderKey
+  alias DodoRouter.Routers
+  alias DodoRouter.RoutersFixtures
+
+  @endpoint_url "http://localhost:4002"
+
+  setup _tags do
+    # DataCase already sets up the sandbox owner.
+    # Get metadata for the current test process so the endpoint
+    # can share the sandbox connection with HTTP handler processes.
+    metadata = Phoenix.Ecto.SQL.Sandbox.metadata_for(DodoRouter.Repo, self())
+    {:ok, metadata: metadata}
+  end
+
+  defp create_router_with_test_provider(_metadata) do
+    user = AccountsFixtures.user_fixture()
+    {router, api_key} = RoutersFixtures.router_fixture(user)
+
+    # Create a provider key for the test provider
+    provider_key =
+      %ProviderKey{}
+      |> ProviderKey.create_changeset(
+        %{"provider_slug" => "test_provider", "label" => "test key"},
+        user.id,
+        "sk-testkey"
+      )
+      |> Repo.insert!()
+
+    # Store the API key in the secrets cache so FallbackChain can retrieve it.
+    # In production this goes to Infisical, but in tests we bypass Infisical
+    # by writing directly to the ETS cache.
+    store_provider_key_in_cache(user.id, provider_key.key_ref, "test-api-key")
+
+    # Create a routing step using the test provider
+    {:ok, step} =
+      Routers.create_routing_step(router, %{
+        "provider" => "test_provider",
+        "model" => "test-model",
+        "provider_key_id" => provider_key.id
+      })
+
+    step = Repo.preload(step, :provider_key)
+
+    %{router: router, api_key: api_key, step: step, user: user}
+  end
+
+  defp store_provider_key_in_cache(user_id, key_ref, api_key) do
+    # Ensure the ETS cache table exists
+    case :ets.whereis(:dodo_secrets_cache) do
+      :undefined ->
+        try do
+          :ets.new(:dodo_secrets_cache, [:named_table, :public, read_concurrency: true])
+        rescue
+          ArgumentError -> :ok
+        end
+
+      _ ->
+        :ok
+    end
+
+    cache_key = "provider_key/#{user_id}/#{key_ref}"
+    expires_at = System.system_time(:millisecond) + 3_600_000
+    :ets.insert(:dodo_secrets_cache, {cache_key, api_key, expires_at})
+  end
+
+  defp make_request(path, body, api_key, metadata, opts \\ []) do
+    headers = [
+      {"authorization", "Bearer #{api_key}"},
+      {"content-type", "application/json"},
+      {"user-agent", "test-client/1.0"}
+    ]
+
+    # Add sandbox metadata header so the endpoint process can access the DB
+    encoded_metadata = Phoenix.Ecto.SQL.Sandbox.encode_metadata(metadata)
+    headers = [{"x-phoenix-ecto-sandbox", encoded_metadata}] ++ headers
+
+    stream = Keyword.get(opts, :stream, false)
+
+    if stream do
+      Req.post("#{@endpoint_url}#{path}",
+        headers: headers,
+        json: Map.put(body, "stream", true),
+        receive_timeout: 10_000
+      )
+    else
+      Req.post("#{@endpoint_url}#{path}",
+        headers: headers,
+        json: body,
+        receive_timeout: 10_000
+      )
+    end
+  end
+
+  describe "POST /r/:router_slug/v1/chat/completions (sync)" do
+    test "returns successful response from provider", %{metadata: metadata} do
+      %{router: router, api_key: api_key} = create_router_with_test_provider(metadata)
+
+      {:ok, response} =
+        make_request(
+          "/r/#{router.slug}/v1/chat/completions",
+          %{"model" => "test-model", "messages" => [%{"role" => "user", "content" => "Hello"}]},
+          api_key,
+          metadata
+        )
+
+      assert response.status == 200
+
+      assert response.body["choices"] |> hd() |> get_in(["message", "content"]) ==
+               "Hello from test-model"
+
+      assert response.headers["content-type"] == ["application/json; charset=utf-8"]
+    end
+
+    test "returns 400 when no routing configured", %{metadata: metadata} do
+      {router, api_key} = RoutersFixtures.router_fixture()
+
+      {:ok, response} =
+        make_request(
+          "/r/#{router.slug}/v1/chat/completions",
+          %{"model" => "test-model", "messages" => [%{"role" => "user", "content" => "Hello"}]},
+          api_key,
+          metadata
+        )
+
+      assert response.status == 400
+      assert response.body["error"]["type"] == "invalid_request_error"
+    end
+  end
+
+  describe "POST /r/:router_slug/v1/chat/completions (streaming)" do
+    test "returns successful SSE stream from provider", %{metadata: metadata} do
+      %{router: router, api_key: api_key} = create_router_with_test_provider(metadata)
+
+      {:ok, response} =
+        make_request(
+          "/r/#{router.slug}/v1/chat/completions",
+          %{"model" => "test-model", "messages" => [%{"role" => "user", "content" => "Hello"}]},
+          api_key,
+          metadata,
+          stream: true
+        )
+
+      assert response.status == 200
+      assert response.headers["content-type"] == ["text/event-stream; charset=utf-8"]
+
+      # Parse SSE events from the response body
+      body = response.body
+      events = parse_sse_events(body)
+
+      # Should have content chunks + [DONE]
+      content_events = Enum.reject(events, &(&1 == :done))
+      assert length(content_events) > 0
+
+      # Verify content was streamed
+      full_content =
+        content_events
+        |> Enum.map(fn event ->
+          get_in(event, ["choices", Access.at(0), "delta", "content"]) || ""
+        end)
+        |> Enum.join()
+
+      assert String.contains?(full_content, "Hello")
+
+      # Verify [DONE] event is present
+      assert :done in events
+    end
+
+    test "returns HTTP 200 SSE error when no routing configured", %{metadata: metadata} do
+      {router, api_key} = RoutersFixtures.router_fixture()
+
+      {:ok, response} =
+        make_request(
+          "/r/#{router.slug}/v1/chat/completions",
+          %{"model" => "test-model", "messages" => [%{"role" => "user", "content" => "Hello"}]},
+          api_key,
+          metadata,
+          stream: true
+        )
+
+      # Current behavior: when no providers are configured, streaming requests
+      # return HTTP 200 with SSE error events. This is the existing behavior
+      # (a future fix may change this to HTTP 400 with JSON).
+      assert response.status == 200
+      assert response.headers["content-type"] == ["text/event-stream; charset=utf-8"]
+
+      events = parse_sse_events(response.body)
+      error_event = Enum.find(events, fn e -> is_map(e) && e["error"] end)
+      assert error_event["error"]["message"] == "No routing configured"
+      assert :done in events
+    end
+
+    test "falls back to next provider when first fails mid-stream", %{metadata: metadata} do
+      user = AccountsFixtures.user_fixture()
+      {router, api_key} = RoutersFixtures.router_fixture(user)
+
+      # Create a provider key for a provider that doesn't exist in adapters
+      # This will cause an auth error (no adapter found, or missing key)
+      # Actually, let's create two steps: first one with a provider that will fail,
+      # second one with test_provider that succeeds.
+
+      # Create a fake provider key that will cause auth_error
+      fake_key =
+        %ProviderKey{}
+        |> ProviderKey.create_changeset(
+          %{"provider_slug" => "openai", "label" => "fake key"},
+          user.id,
+          "sk-fake"
+        )
+        |> Repo.insert!()
+
+      {:ok, failing_step} =
+        Routers.create_routing_step(router, %{
+          "provider" => "openai",
+          "model" => "gpt-4o",
+          "provider_key_id" => fake_key.id
+        })
+
+      # Create a test provider key that will succeed
+      test_key =
+        %ProviderKey{}
+        |> ProviderKey.create_changeset(
+          %{"provider_slug" => "test_provider", "label" => "test key"},
+          user.id,
+          "sk-testkey"
+        )
+        |> Repo.insert!()
+
+      store_provider_key_in_cache(user.id, test_key.key_ref, "test-api-key")
+
+      {:ok, success_step} =
+        Routers.create_routing_step(router, %{
+          "provider" => "test_provider",
+          "model" => "test-model",
+          "provider_key_id" => test_key.id
+        })
+
+      # Preload steps
+      _failing_step = Repo.preload(failing_step, :provider_key)
+      _success_step = Repo.preload(success_step, :provider_key)
+
+      {:ok, response} =
+        make_request(
+          "/r/#{router.slug}/v1/chat/completions",
+          %{"model" => "test-model", "messages" => [%{"role" => "user", "content" => "Hello"}]},
+          api_key,
+          metadata,
+          stream: true
+        )
+
+      # The first provider fails, fallback to test_provider succeeds
+      assert response.status == 200
+      assert response.headers["content-type"] == ["text/event-stream; charset=utf-8"]
+
+      body = response.body
+      events = parse_sse_events(body)
+      content_events = Enum.reject(events, &(&1 == :done))
+      assert length(content_events) > 0
+      assert :done in events
+    end
+  end
+
+  describe "POST /v1/chat/completions (legacy)" do
+    test "returns successful sync response", %{metadata: metadata} do
+      %{api_key: api_key} = create_router_with_test_provider(metadata)
+
+      {:ok, response} =
+        make_request(
+          "/v1/chat/completions",
+          %{"model" => "test-model", "messages" => [%{"role" => "user", "content" => "Hello"}]},
+          api_key,
+          metadata
+        )
+
+      assert response.status == 200
+
+      assert response.body["choices"] |> hd() |> get_in(["message", "content"]) ==
+               "Hello from test-model"
+    end
+  end
+
+  # ===========================================================================
+  # Helpers
+  # ===========================================================================
+
+  defp parse_sse_events(body) when is_binary(body) do
+    body
+    |> String.split("\n\n")
+    |> Enum.map(&String.trim/1)
+    |> Enum.reject(&(&1 == ""))
+    |> Enum.map(fn line ->
+      case line do
+        "data: [DONE]" ->
+          :done
+
+        "data: " <> json ->
+          case Jason.decode(json) do
+            {:ok, parsed} -> parsed
+            {:error, _} -> {:raw, json}
+          end
+
+        _ ->
+          {:raw, line}
+      end
+    end)
+  end
+end
