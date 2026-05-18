@@ -4,13 +4,13 @@ After=network.target
 
 [Service]
 Type=simple
-WorkingDirectory=%h/dodorouter
+WorkingDirectory=%h/dodorouter/current
 EnvironmentFile=%h/dodorouter/.env
 Environment="PHX_SERVER=true"
 Environment="HOME=%h"
-ExecStart=%h/dodorouter/bin/dodo_router start
-ExecStop=%h/dodorouter/bin/dodo_router stop
-ExecReload=%h/dodorouter/bin/dodo_router restart
+ExecStart=%h/dodorouter/current/bin/dodo_router start
+ExecStop=%h/dodorouter/current/bin/dodo_router stop
+ExecReload=%h/dodorouter/current/bin/dodo_router restart
 Restart=on-failure
 RestartSec=5
 StandardOutput=journal

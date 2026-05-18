@@ -12,7 +12,7 @@ defmodule DodoRouter.Upgrade do
 
   def install(version) do
     release_root = :code.root_dir() |> to_string()
-    tarball = Path.join(release_root, "releases/#{version}.tar.gz")
+    tarball = Path.join(release_root, "releases/dodo_router-#{version}.tar.gz")
 
     unless File.exists?(tarball) do
       IO.puts("ERROR: Upgrade tarball not found: #{tarball}")
