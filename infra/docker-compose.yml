@@ -11,49 +11,5 @@ services:
       timeout: 5s
       retries: 5
 
-  app1:
-    image: foxwise/dodorouter:latest
-    restart: unless-stopped
-    ports:
-      - "4001:4000"
-    env_file: .app.env
-    volumes:
-      - app1_logs:/app/logs
-    depends_on:
-      db:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:4000/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 3
-      start_period: 30s
-    stop_grace_period: 30s
-    command: >
-      sh -c "/app/bin/migrate && /app/bin/server"
-
-  app2:
-    image: foxwise/dodorouter:latest
-    restart: unless-stopped
-    ports:
-      - "4002:4000"
-    env_file: .app.env
-    volumes:
-      - app2_logs:/app/logs
-    depends_on:
-      db:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:4000/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 3
-      start_period: 30s
-    stop_grace_period: 30s
-    command: >
-      sh -c "/app/bin/server"
-
 volumes:
   postgres_data:
-  app1_logs:
-  app2_logs:

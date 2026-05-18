@@ -1,0 +1,25 @@
+[Unit]
+Description=DodoRouter LLM Proxy
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/dodorouter
+EnvironmentFile=%h/dodorouter/.env
+Environment="PHX_SERVER=true"
+Environment="HOME=%h"
+ExecStart=%h/dodorouter/bin/dodo_router start
+ExecStop=%h/dodorouter/bin/dodo_router stop
+ExecReload=%h/dodorouter/bin/dodo_router restart
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=dodo-router
+
+# Graceful shutdown
+TimeoutStopSec=30
+KillSignal=SIGTERM
+
+[Install]
+WantedBy=default.target

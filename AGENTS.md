@@ -457,3 +457,84 @@ This matches each provider's native error format so clients (Claude Code, OpenCo
 
 
 <!-- usage-rules-end -->
+
+## Releases and Deployment
+
+This application is deployed using Elixir releases with **hot upgrades** — code is updated without restarting the BEAM VM or dropping in-flight requests.
+
+### Release Configuration
+
+Releases are configured in `mix.exs` under the `releases:` key:
+- Unix-only executables
+- Stripped BEAM files for smaller size
+- Full ERTS included for portability
+
+### Build Process
+
+1. Push to `main` triggers `.github/workflows/build-release.yml`
+2. Version is auto-bumped (patch level) via `.github/scripts/bump-version.sh`
+3. GitHub Actions builds the release with `MIX_ENV=prod mix release`
+4. If a previous release exists, an upgrade tarball is also built with `mix release --upgrade`
+5. Release is published as a GitHub Release with attached tarball
+
+### Deployment Process
+
+1. `.github/workflows/deploy.yml` triggers on release publication
+2. Downloads the release tarball from GitHub Releases
+3. Uses Tailscale VPN to connect to the Hetzner VPS
+4. SCPs tarball and `infra/deploy-server.sh` to the server
+5. Executes deploy script which performs a **hot upgrade** via `bin/dodo_router upgrade <version>`
+
+### Server Infrastructure
+
+- **Systemd user service**: `infra/dodo-router.service` runs the release at `~/dodorouter/`
+- **Docker Compose**: Only runs Postgres (`infra/docker-compose.yml`). The app itself runs natively via user-level systemd.
+- **Environment variables**: Loaded from `~/dodo-router/.env`
+
+### Hot Upgrade Requirements
+
+For hot upgrades to work correctly:
+
+1. **Stateful processes must implement `code_change/3`**
+   - `DodoRouter.Activity` — preserves in-flight request counts
+   - `DodoRouter.ShutdownListener` — preserves shutdown flag
+   - Any new stateful GenServers must include `code_change/3`
+
+2. **Database migrations must be backward-compatible**
+   - Run migrations **before** the hot upgrade using `bin/dodo_router eval DodoRouter.Release.migrate`
+   - Add new columns as nullable first
+   - Avoid renaming columns or removing constraints during upgrades
+   - Schema changes that break old code require a full restart instead
+
+3. **ERTS version must match**
+   - Upgrading Elixir or OTP versions requires a full release (not hot upgrade)
+   - The build workflow detects ERTS changes and falls back to full deploy
+
+### Rollback
+
+If a hot upgrade fails, the deploy script automatically restores from backup and restarts the service. Manual rollback:
+```bash
+~/dodorouter/bin/dodo_router downgrade <previous_version>
+```
+
+### Production Commands
+
+```bash
+# Check status
+systemctl --user status dodo-router
+
+# View logs
+journalctl --user -u dodo-router -f
+
+# Remote console
+~/dodorouter/bin/dodo_router remote
+
+# Run migrations
+~/dodorouter/bin/migrate
+
+# Run seeds
+~/dodorouter/bin/seed
+
+# Manual restart (if hot upgrade not possible)
+systemctl --user restart dodo-router
+```

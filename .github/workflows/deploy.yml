@@ -1,0 +1,77 @@
+name: Deploy to Production
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to deploy (e.g., 0.1.1)'
+        required: true
+        type: string
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 15
+
+    steps:
+      - name: Get version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "release" ]; then
+            VERSION=${{ github.event.release.tag_name }}
+            VERSION=${VERSION#v}
+          else
+            VERSION=${{ inputs.version }}
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Deploying version: $VERSION"
+
+      - name: Download release
+        run: |
+          mkdir -p /tmp/release
+          cd /tmp/release
+          gh release download "v${{ steps.version.outputs.version }}" \
+            --repo "${{ github.repository }}" \
+            --pattern "dodo-router-${{ steps.version.outputs.version }}.tar.gz"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Tailscale
+        uses: tailscale/github-action@v2
+        with:
+          authkey: ${{ secrets.TAILSCALE_AUTHKEY }}
+
+      - name: Copy deploy script
+        run: |
+          scp -o StrictHostKeyChecking=no -o ConnectTimeout=10 \
+            infra/deploy-server.sh \
+            ${{ secrets.APP_DEPLOY_USER }}@${{ secrets.APP_DEPLOY_HOST }}:/tmp/deploy-server.sh
+
+      - name: Deploy to server
+        run: |
+          # Copy release tarball to server
+          scp -o StrictHostKeyChecking=no -o ConnectTimeout=10 \
+            /tmp/release/dodo-router-${{ steps.version.outputs.version }}.tar.gz \
+            ${{ secrets.APP_DEPLOY_USER }}@${{ secrets.APP_DEPLOY_HOST }}:/tmp/dodo-router-${{ steps.version.outputs.version }}.tar.gz
+
+          # Run deploy script on server
+          ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 \
+            ${{ secrets.APP_DEPLOY_USER }}@${{ secrets.APP_DEPLOY_HOST }} \
+            "bash /tmp/deploy-server.sh ${{ steps.version.outputs.version }}"
+
+      - name: Health check
+        run: |
+          echo "Waiting for health check..."
+          for i in {1..30}; do
+            if curl -sf "http://${{ secrets.APP_DEPLOY_HOST }}:4000/health" > /dev/null 2>&1; then
+              echo "Health check passed!"
+              exit 0
+            fi
+            echo "Waiting... ($i/30)"
+            sleep 2
+          done
+          echo "ERROR: Health check failed"
+          exit 1
