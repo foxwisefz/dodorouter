@@ -35,7 +35,7 @@ jobs:
           cd /tmp/release
           gh release download "v${{ steps.version.outputs.version }}" \
             --repo "${{ github.repository }}" \
-            --pattern "dodo-router-${{ steps.version.outputs.version }}.tar.gz"
+            --pattern "dodo_router-${{ steps.version.outputs.version }}.tar.gz"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
