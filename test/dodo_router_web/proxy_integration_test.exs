@@ -271,6 +271,119 @@ defmodule DodoRouterWeb.ProxyIntegrationTest do
     end
   end
 
+  describe "POST /r/:router_slug/v1/messages (Anthropic sync)" do
+    test "returns successful Anthropic-format response", %{metadata: metadata} do
+      %{router: router, api_key: api_key} = create_router_with_test_provider(metadata)
+
+      {:ok, response} =
+        make_request(
+          "/r/#{router.slug}/v1/messages",
+          %{
+            "model" => "test-model",
+            "messages" => [%{"role" => "user", "content" => "Hello"}],
+            "max_tokens" => 1024
+          },
+          api_key,
+          metadata
+        )
+
+      assert response.status == 200
+      assert response.headers["content-type"] == ["application/json; charset=utf-8"]
+
+      body = response.body
+      assert body["type"] == "message"
+      assert body["role"] == "assistant"
+      assert get_in(body, ["content", Access.at(0), "text"]) == "Hello from test-model"
+    end
+
+    test "returns 400 when no routing configured", %{metadata: metadata} do
+      {router, api_key} = RoutersFixtures.router_fixture()
+
+      {:ok, response} =
+        make_request(
+          "/r/#{router.slug}/v1/messages",
+          %{
+            "model" => "test-model",
+            "messages" => [%{"role" => "user", "content" => "Hello"}],
+            "max_tokens" => 1024
+          },
+          api_key,
+          metadata
+        )
+
+      assert response.status == 400
+      assert get_in(response.body, ["error", "type"]) == "invalid_request_error"
+    end
+  end
+
+  describe "POST /r/:router_slug/v1/messages (Anthropic streaming)" do
+    test "returns successful Anthropic-format SSE stream", %{metadata: metadata} do
+      %{router: router, api_key: api_key} = create_router_with_test_provider(metadata)
+
+      {:ok, response} =
+        make_request(
+          "/r/#{router.slug}/v1/messages",
+          %{
+            "model" => "test-model",
+            "messages" => [%{"role" => "user", "content" => "Hello"}],
+            "max_tokens" => 1024
+          },
+          api_key,
+          metadata,
+          stream: true
+        )
+
+      assert response.status == 200
+      assert response.headers["content-type"] == ["text/event-stream; charset=utf-8"]
+
+      events = parse_anthropic_sse_events(response.body)
+
+      # Should have content_delta events
+      content_deltas =
+        Enum.filter(events, fn e ->
+          is_map(e) && e["type"] == "content_block_delta"
+        end)
+
+      assert length(content_deltas) > 0
+
+      full_content =
+        content_deltas
+        |> Enum.map(&get_in(&1, ["delta", "text"]) || "")
+        |> Enum.join()
+
+      assert String.contains?(full_content, "Hello")
+    end
+
+    test "returns HTTP 200 SSE error when no routing configured", %{metadata: metadata} do
+      {router, api_key} = RoutersFixtures.router_fixture()
+
+      {:ok, response} =
+        make_request(
+          "/r/#{router.slug}/v1/messages",
+          %{
+            "model" => "test-model",
+            "messages" => [%{"role" => "user", "content" => "Hello"}],
+            "max_tokens" => 1024
+          },
+          api_key,
+          metadata,
+          stream: true
+        )
+
+      assert response.status == 200
+      assert response.headers["content-type"] == ["text/event-stream; charset=utf-8"]
+
+      events = parse_anthropic_sse_events(response.body)
+
+      error_event =
+        Enum.find(events, fn e ->
+          is_map(e) && e["type"] == "error"
+        end)
+
+      assert error_event["error"]["message"] == "No routing configured"
+    end
+  end
+
   describe "POST /v1/chat/completions (legacy)" do
     test "returns successful sync response", %{metadata: metadata} do
       %{api_key: api_key} = create_router_with_test_provider(metadata)
@@ -312,6 +425,38 @@ defmodule DodoRouterWeb.ProxyIntegrationTest do
 
         _ ->
           {:raw, line}
+      end
+    end)
+  end
+
+  defp parse_anthropic_sse_events(body) when is_binary(body) do
+    body
+    |> String.split("\n\n")
+    |> Enum.map(&String.trim/1)
+    |> Enum.reject(&(&1 == ""))
+    |> Enum.map(fn block ->
+      lines = String.split(block, "\n")
+
+      event_type =
+        Enum.find_value(lines, fn line ->
+          case line do
+            "event: " <> name -> name
+            _ -> nil
+          end
+        end)
+
+      data_line =
+        Enum.find(lines, fn line -> String.starts_with?(line, "data: ") end)
+
+      case data_line do
+        "data: " <> json ->
+          case Jason.decode(json) do
+            {:ok, parsed} -> Map.put(parsed, "type", event_type || parsed["type"])
+            {:error, _} -> %{"type" => event_type, "raw" => json}
+          end
+
+        nil ->
+          %{"type" => event_type}
       end
     end)
   end
