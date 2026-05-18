@@ -3,7 +3,7 @@ set -euo pipefail
 
 VERSION=$1
 RELEASE_DIR="$HOME/dodorouter"
-TARBALL="/tmp/dodo-router-${VERSION}.tar.gz"
+TARBALL="/tmp/dodo_router-${VERSION}.tar.gz"
 
 if [ ! -f "$TARBALL" ]; then
   echo "ERROR: Release tarball not found: $TARBALL"
@@ -24,13 +24,12 @@ if systemctl --user is-active --quiet dodo-router; then
   cp -r "$RELEASE_DIR" "$BACKUP_DIR"
   echo "Backup created at $BACKUP_DIR"
   
-  # Extract new release over existing one
-  # Note: This is safe because the BEAM VM keeps files in memory
-  cd "$RELEASE_DIR"
-  tar xzf "$TARBALL" --overwrite
+  # Copy upgrade tarball to releases directory
+  mkdir -p "$RELEASE_DIR/releases"
+  cp "$TARBALL" "$RELEASE_DIR/releases/dodo_router-${VERSION}.tar.gz"
   
-  # Perform hot upgrade
-  if "$RELEASE_DIR/bin/dodo_router" upgrade "$VERSION"; then
+  # Perform hot upgrade using release_handler
+  if "$RELEASE_DIR/bin/upgrade" "$VERSION"; then
     echo "Hot upgrade to v${VERSION} completed successfully!"
     
     # Clean up old backups (keep last 3)

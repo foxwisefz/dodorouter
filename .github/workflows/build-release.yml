@@ -66,7 +66,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: dodo-router-release-${{ steps.version.outputs.version }}
-          path: _build/prod/rel/dodo_router/dodo_router-${{ steps.version.outputs.version }}.tar.gz
+          path: _build/prod/dodo_router-${{ steps.version.outputs.version }}.tar.gz
           retention-days: 90
 
       - name: Download previous release
@@ -82,7 +82,7 @@ jobs:
             # Try to download from existing release
             mkdir -p /tmp/prev-release
             cd /tmp/prev-release
-            gh release download "$PREV_TAG" --pattern "dodo-router-${PREV_VERSION}.tar.gz" || true
+            gh release download "$PREV_TAG" --pattern "dodo_router-${PREV_VERSION}.tar.gz" || true
             cd -
           else
             echo "No previous version found"
@@ -110,7 +110,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: dodo-router-upgrade-${{ steps.previous.outputs.prev_version }}-to-${{ steps.version.outputs.version }}
-          path: _build/prod/rel/dodo_router/dodo_router-${{ steps.version.outputs.version }}.tar.gz
+          path: _build/prod/dodo_router-${{ steps.version.outputs.version }}.tar.gz
           retention-days: 90
 
       - name: Create GitHub Release
@@ -119,6 +119,6 @@ jobs:
           tag_name: v${{ steps.version.outputs.version }}
           name: Release v${{ steps.version.outputs.version }}
           files: |
-            _build/prod/rel/dodo_router/dodo_router-${{ steps.version.outputs.version }}.tar.gz
+            _build/prod/dodo_router-${{ steps.version.outputs.version }}.tar.gz
           generate_release_notes: true
           fail_on_unmatched_files: false

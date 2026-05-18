@@ -32,6 +32,7 @@ defmodule DodoRouter.MixProject do
         include_executables_for: [:unix],
         strip_beams: true,
         include_erts: true,
+        applications: [sasl: :permanent],
         steps: [:assemble, :tar]
       ]
     ]
