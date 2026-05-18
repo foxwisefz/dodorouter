@@ -6,6 +6,10 @@ defmodule DodoRouter.Upgrade do
       bin/dodo_router eval "DodoRouter.Upgrade.install('0.1.1')"
   """
 
+  @compile {:no_warn_undefined, {:release_handler, :unpack_release, 1}}
+  @compile {:no_warn_undefined, {:release_handler, :install_release, 1}}
+  @compile {:no_warn_undefined, {:release_handler, :make_permanent, 1}}
+
   def install(version) do
     release_root = :code.root_dir() |> to_string()
     tarball = Path.join(release_root, "releases/#{version}.tar.gz")
