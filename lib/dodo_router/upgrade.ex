@@ -12,7 +12,9 @@ defmodule DodoRouter.Upgrade do
 
   def install(version) do
     release_root = :code.root_dir() |> to_string()
-    tarball = Path.join(release_root, "releases/dodo_router-#{version}.tar.gz")
+    # release_handler.unpack_release automatically appends .tar.gz
+    tarball_base = Path.join(release_root, "releases/dodo_router-#{version}")
+    tarball = tarball_base <> ".tar.gz"
 
     unless File.exists?(tarball) do
       IO.puts("ERROR: Upgrade tarball not found: #{tarball}")
@@ -21,7 +23,7 @@ defmodule DodoRouter.Upgrade do
 
     IO.puts("Unpacking release #{version}...")
 
-    case :release_handler.unpack_release(String.to_charlist(tarball)) do
+    case :release_handler.unpack_release(String.to_charlist(tarball_base)) do
       {:ok, ^version} ->
         IO.puts("Installing release #{version}...")
 
