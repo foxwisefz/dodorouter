@@ -54,8 +54,8 @@ jobs:
         run: |
           # Copy release tarball to server
           scp -o StrictHostKeyChecking=no -o ConnectTimeout=10 \
-            /tmp/release/dodo-router-${{ steps.version.outputs.version }}.tar.gz \
-            ${{ secrets.APP_DEPLOY_USER }}@${{ secrets.APP_DEPLOY_HOST }}:/tmp/dodo-router-${{ steps.version.outputs.version }}.tar.gz
+            /tmp/release/dodo_router-${{ steps.version.outputs.version }}.tar.gz \
+            ${{ secrets.APP_DEPLOY_USER }}@${{ secrets.APP_DEPLOY_HOST }}:/tmp/dodo_router-${{ steps.version.outputs.version }}.tar.gz
 
           # Run deploy script on server
           ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 \

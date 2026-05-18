@@ -489,7 +489,7 @@ Releases are configured in `mix.exs` under the `releases:` key:
 
 - **Systemd user service**: `infra/dodo-router.service` runs the release at `~/dodorouter/`
 - **Docker Compose**: Only runs Postgres (`infra/docker-compose.yml`). The app itself runs natively via user-level systemd.
-- **Environment variables**: Loaded from `~/dodo-router/.env`
+- **Environment variables**: Loaded from `~/dodorouter/.env`
 
 ### Hot Upgrade Requirements
 

@@ -1,0 +1,6 @@
+#!/bin/sh
+set -eu
+
+cd -P -- "$(dirname -- "$0")"
+VERSION=$1
+exec ./dodo_router rpc "DodoRouter.Upgrade.install('$VERSION')"
