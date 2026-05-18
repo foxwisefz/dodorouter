@@ -487,7 +487,7 @@ Releases are configured in `mix.exs` under the `releases:` key:
 
 ### Server Infrastructure
 
-- **Systemd user service**: `infra/dodo-router.service` runs the release at `~/dodo-router/`
+- **Systemd user service**: `infra/dodo-router.service` runs the release at `~/dodorouter/`
 - **Docker Compose**: Only runs Postgres (`infra/docker-compose.yml`). The app itself runs natively via user-level systemd.
 - **Environment variables**: Loaded from `~/dodo-router/.env`
 
@@ -514,7 +514,7 @@ For hot upgrades to work correctly:
 
 If a hot upgrade fails, the deploy script automatically restores from backup and restarts the service. Manual rollback:
 ```bash
-~/dodo-router/bin/dodo_router downgrade <previous_version>
+~/dodorouter/bin/dodo_router downgrade <previous_version>
 ```
 
 ### Production Commands
@@ -527,13 +527,13 @@ systemctl --user status dodo-router
 journalctl --user -u dodo-router -f
 
 # Remote console
-~/dodo-router/bin/dodo_router remote
+~/dodorouter/bin/dodo_router remote
 
 # Run migrations
-~/dodo-router/bin/migrate
+~/dodorouter/bin/migrate
 
 # Run seeds
-~/dodo-router/bin/seed
+~/dodorouter/bin/seed
 
 # Manual restart (if hot upgrade not possible)
 systemctl --user restart dodo-router

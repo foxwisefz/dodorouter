@@ -2,7 +2,7 @@
 set -euo pipefail
 
 VERSION=$1
-RELEASE_DIR="$HOME/dodo-router"
+RELEASE_DIR="$HOME/dodorouter"
 TARBALL="/tmp/dodo-router-${VERSION}.tar.gz"
 
 if [ ! -f "$TARBALL" ]; then
