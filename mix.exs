@@ -11,7 +11,8 @@ defmodule DodoRouter.MixProject do
       aliases: aliases(),
       deps: deps(),
       releases: releases(),
-      compilers: [:phoenix_live_view] ++ Mix.compilers(),
+      appup: "appup.ex",
+      compilers: [:phoenix_live_view, :appup] ++ Mix.compilers(),
       listeners: [Phoenix.CodeReloader]
     ]
   end
@@ -33,7 +34,7 @@ defmodule DodoRouter.MixProject do
         strip_beams: true,
         include_erts: true,
         applications: [sasl: :permanent],
-        steps: [:assemble, :tar]
+        steps: [&Forecastle.pre_assemble/1, :assemble, &Forecastle.post_assemble/1, :tar]
       ]
     ]
   end
@@ -79,8 +80,9 @@ defmodule DodoRouter.MixProject do
       {:gettext, "~> 0.26"},
       {:jason, "~> 1.2"},
       {:dns_cluster, "~> 0.2.0"},
-      {:bandit, "~> 1.5"},
-      {:logger_file_backend, "~> 0.0.14"}
+       {:bandit, "~> 1.5"},
+       {:logger_file_backend, "~> 0.0.14"},
+       {:castle, "~> 0.3.1"}
     ]
   end
 
