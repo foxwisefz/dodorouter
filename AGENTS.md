@@ -538,3 +538,17 @@ journalctl --user -u dodo-router -f
 # Manual restart (if hot upgrade not possible)
 systemctl --user restart dodo-router
 ```
+
+### Elixir Hot Code Upgrades (OTP Release Protocol)
+
+When preparing a hot code upgrade, you must act as an Erlang/OTP systems expert. Do NOT attempt to manually write or generate `.relup` files.
+
+Follow this strict protocol using `git diff main...HEAD`:
+
+1. **Analyze the Diff:** Identify exactly which modules, GenServers, and Supervisors have been modified, added, or deleted.
+2. **Generate the `.appup` File:** Create the precise Erlang `.appup` syntax required for the upgrade. Place this file in the `ebin` directory of the application (`lib/dodo_router/ebin/dodo_router.appup`).
+3. **Implement `code_change/3`:** For every modified GenServer, you MUST provide the updated Elixir code containing the `code_change/3` callback to safely transition the in-memory state map/struct from the old version to the new version.
+4. **Provide the Compilation Steps:** Output the exact Elixir/Mix script or `:systools.make_relup/4` command required to compile the generated `.appup` into the `.relup` file locally or in the CI pipeline.
+5. **Risk Assessment:** Briefly flag any state transitions that might result in dropped connections or require a standard restart instead of a hot upgrade.
+
+**Important:** Hot upgrades require careful management of process state. The BEAM VM loads new code alongside old code, but stateful processes must explicitly handle the transition via `code_change/3`. If any GenServer's state structure changes (e.g., new fields added, types changed), you MUST implement the migration logic in `code_change/3`.
