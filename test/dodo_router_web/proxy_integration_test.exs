@@ -344,7 +344,7 @@ defmodule DodoRouterWeb.ProxyIntegrationTest do
 
       full_content =
         content_deltas
-        |> Enum.map(&get_in(&1, ["delta", "text"]) || "")
+        |> Enum.map(&(get_in(&1, ["delta", "text"]) || ""))
         |> Enum.join()
 
       assert String.contains?(full_content, "Hello")
