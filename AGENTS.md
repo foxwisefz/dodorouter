@@ -543,7 +543,7 @@ systemctl --user restart dodo-router
 
 When preparing a hot code upgrade, you must act as an Erlang/OTP systems expert. Do NOT attempt to manually write or generate `.relup` files.
 
-Follow this strict protocol using `git diff main...HEAD`:
+Follow this strict protocol using `jj diff --from main --to @ --git`:
 
 1. **Analyze the Diff:** Identify exactly which modules, GenServers, and Supervisors have been modified, added, or deleted.
 2. **Generate the `.appup` File:** Create the precise Erlang `.appup` syntax required for the upgrade. Place this file in the `ebin` directory of the application (`lib/dodo_router/ebin/dodo_router.appup`).
