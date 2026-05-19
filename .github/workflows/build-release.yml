@@ -62,54 +62,10 @@ jobs:
       - name: Build release
         run: MIX_ENV=prod mix release
 
-      - name: Upload full release artifact
+      - name: Upload release artifact
         uses: actions/upload-artifact@v4
         with:
           name: dodo-router-release-${{ steps.version.outputs.version }}
-          path: _build/prod/dodo_router-${{ steps.version.outputs.version }}.tar.gz
-          retention-days: 90
-
-      - name: Download previous release
-        id: previous
-        run: |
-          PREV_TAG=$(git tag --sort=-v:refname | grep -v "v${{ steps.version.outputs.version }}" | head -1)
-          if [ -n "$PREV_TAG" ]; then
-            PREV_VERSION=${PREV_TAG#v}
-            echo "prev_version=$PREV_VERSION" >> $GITHUB_OUTPUT
-            echo "prev_tag=$PREV_TAG" >> $GITHUB_OUTPUT
-            echo "Previous version: $PREV_VERSION"
-            
-            # Try to download from existing release
-            mkdir -p /tmp/prev-release
-            cd /tmp/prev-release
-            gh release download "$PREV_TAG" --pattern "dodo_router-${PREV_VERSION}.tar.gz" || true
-            cd -
-          else
-            echo "No previous version found"
-          fi
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Build upgrade tarball
-        if: steps.previous.outputs.prev_version != ''
-        run: |
-          mkdir -p _build/prod/rel/dodo_router_prev
-          cd _build/prod/rel/dodo_router_prev
-          if [ -f "/tmp/prev-release/dodo-router-${{ steps.previous.outputs.prev_version }}.tar.gz" ]; then
-            tar xzf "/tmp/prev-release/dodo-router-${{ steps.previous.outputs.prev_version }}.tar.gz"
-            cd -
-            MIX_ENV=prod mix release --upgrade --path _build/prod/rel/dodo_router_prev
-            echo "Upgrade tarball built successfully"
-          else
-            echo "Previous release tarball not found, skipping upgrade build"
-            cd -
-          fi
-
-      - name: Upload upgrade artifact
-        if: steps.previous.outputs.prev_version != ''
-        uses: actions/upload-artifact@v4
-        with:
-          name: dodo-router-upgrade-${{ steps.previous.outputs.prev_version }}-to-${{ steps.version.outputs.version }}
           path: _build/prod/dodo_router-${{ steps.version.outputs.version }}.tar.gz
           retention-days: 90
 
