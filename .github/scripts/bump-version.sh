@@ -25,12 +25,23 @@ NEW_VERSION="${MAJOR}.${MINOR}.${NEW_PATCH}"
 sed -i.bak -E "s/(version: \")${CURRENT_VERSION}(\",)/\1${NEW_VERSION}\2/" "$MIX_FILE"
 rm -f "$MIX_FILE.bak"
 
+# Update appup.ex
+APPUP_FILE="appup.ex"
+if [ -f "$APPUP_FILE" ]; then
+  sed -i.bak -E "1s/~c\"${CURRENT_VERSION}\"/~c\"${NEW_VERSION}\"/" "$APPUP_FILE"
+  rm -f "$APPUP_FILE.bak"
+  echo "Updated appup version: ${CURRENT_VERSION} -> ${NEW_VERSION}"
+fi
+
 echo "Bumped version: ${CURRENT_VERSION} -> ${NEW_VERSION}"
 
 # Configure git and commit
 git config user.name "github-actions[bot]"
 git config user.email "github-actions[bot]@users.noreply.github.com"
 git add "$MIX_FILE"
+if [ -f "$APPUP_FILE" ]; then
+  git add "$APPUP_FILE"
+fi
 git commit -m "Bump version to ${NEW_VERSION} [skip ci]"
 git push
 

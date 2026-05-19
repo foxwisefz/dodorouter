@@ -62,6 +62,53 @@ jobs:
       - name: Build release
         run: MIX_ENV=prod mix release
 
+      - name: Download previous release
+        id: previous
+        run: |
+          PREV_TAG=$(git tag --sort=-v:refname | grep -v "v${{ steps.version.outputs.version }}" | head -1)
+          if [ -n "$PREV_TAG" ]; then
+            PREV_VERSION=${PREV_TAG#v}
+            echo "prev_version=$PREV_VERSION" >> $GITHUB_OUTPUT
+            echo "prev_tag=$PREV_TAG" >> $GITHUB_OUTPUT
+            echo "Previous version: $PREV_VERSION"
+            
+            # Download from existing release
+            mkdir -p /tmp/prev-release
+            cd /tmp/prev-release
+            gh release download "$PREV_TAG" --pattern "dodo_router-${PREV_VERSION}.tar.gz" || true
+            cd -
+          else
+            echo "No previous version found"
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Generate .relup
+        if: steps.previous.outputs.prev_version != ''
+        run: |
+          mkdir -p /tmp/prev-release/extracted
+          cd /tmp/prev-release/extracted
+          tar xzf "/tmp/prev-release/dodo_router-${{ steps.previous.outputs.prev_version }}.tar.gz"
+          cd -
+          
+          # Generate relup using Castle
+          mix castle.relup \
+            --target _build/prod/rel/dodo_router \
+            --fromto /tmp/prev-release/extracted/dodo_router
+          
+          # Copy relup into the release
+          cp relup _build/prod/rel/dodo_router/releases/${{ steps.version.outputs.version }}/relup
+          
+          echo "Generated relup file"
+
+      - name: Rebuild tarball with relup
+        if: steps.previous.outputs.prev_version != ''
+        run: |
+          # Recreate tarball with relup included
+          cd _build/prod/rel
+          tar czf dodo_router-${{ steps.version.outputs.version }}.tar.gz dodo_router
+          mv dodo_router-${{ steps.version.outputs.version }}.tar.gz ../
+
       - name: Upload release artifact
         uses: actions/upload-artifact@v4
         with:
