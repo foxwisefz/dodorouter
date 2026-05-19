@@ -483,7 +483,7 @@ Releases are configured in `mix.exs` under the `releases:` key:
 2. Downloads the release tarball from GitHub Releases
 3. Uses Tailscale VPN to connect to the Hetzner VPS
 4. SCPs tarball and `infra/deploy-server.sh` to the server
-5. Executes deploy script which performs a **hot upgrade** via `bin/dodo_router upgrade <version>`
+5. Executes deploy script which performs a **hot upgrade** via Castle (`bin/dodo_router unpack/install/commit <version>`)
 
 ### Server Infrastructure
 
@@ -512,9 +512,16 @@ For hot upgrades to work correctly:
 
 ### Rollback
 
-If a hot upgrade fails, the deploy script automatically restores from backup and restarts the service. Manual rollback:
+If a hot upgrade fails, the deploy script automatically restores from backup and restarts the service. Manual rollback with Castle:
 ```bash
-~/dodorouter/current/bin/dodo_router downgrade <previous_version>
+# List releases to see what's available
+~/dodorouter/current/bin/dodo_router releases
+
+# Remove failed version
+~/dodorouter/current/bin/dodo_router remove <failed_version>
+
+# Restart to boot into previous permanent version
+systemctl --user restart dodo-router
 ```
 
 ### Production Commands
@@ -537,18 +544,32 @@ journalctl --user -u dodo-router -f
 
 # Manual restart (if hot upgrade not possible)
 systemctl --user restart dodo-router
+
+# Castle release management
+~/dodorouter/current/bin/dodo_router releases          # List installed releases
+~/dodorouter/current/bin/dodo_router unpack 0.1.8      # Extract release tarball
+~/dodorouter/current/bin/dodo_router install 0.1.8     # Install as current version
+~/dodorouter/current/bin/dodo_router commit 0.1.8      # Make permanent
+~/dodorouter/current/bin/dodo_router remove 0.1.7      # Clean up old version
 ```
 
 ### Elixir Hot Code Upgrades (OTP Release Protocol)
 
-When preparing a hot code upgrade, you must act as an Erlang/OTP systems expert. Do NOT attempt to manually write or generate `.relup` files.
+This project uses **Castle** (v0.3.1) to manage hot code upgrades. Castle handles the runtime orchestration — unpacking releases, installing them, and managing the `RELEASES` file. However, you are still responsible for writing `.appup` files that describe how each module transitions between versions.
 
-Follow this strict protocol using `jj diff --from main --to @ --git`:
+**Castle's role:**
+- Build-time: Integrates via Forecastle to wrap release assembly
+- Runtime: Provides `bin/releases`, `bin/unpack`, `bin/install`, `bin/commit` commands
+- Generates `sys.config` from `runtime.exs` before boot and during upgrades
+
+**Your responsibility:**
+
+When preparing a hot code upgrade, follow this protocol using `jj diff --from main --to @ --git`:
 
 1. **Analyze the Diff:** Identify exactly which modules, GenServers, and Supervisors have been modified, added, or deleted.
-2. **Generate the `.appup` File:** Create the precise Erlang `.appup` syntax required for the upgrade. Place this file in the `ebin` directory of the application (`lib/dodo_router/ebin/dodo_router.appup`).
+2. **Update the `.appup` File:** The `appup.ex` file in the project root describes the upgrade. Castle's `:appup` compiler copies it into the release. Update it to list changed modules and their upgrade instructions.
 3. **Implement `code_change/3`:** For every modified GenServer, you MUST provide the updated Elixir code containing the `code_change/3` callback to safely transition the in-memory state map/struct from the old version to the new version.
-4. **Provide the Compilation Steps:** Output the exact Elixir/Mix script or `:systools.make_relup/4` command required to compile the generated `.appup` into the `.relup` file locally or in the CI pipeline.
+4. **Generate `.relup`:** The CI pipeline automatically generates `.relup` files using `mix castle.relup` when building releases. For local testing, you can manually run: `mix castle.relup --target releases/<vsn>/dodo_router --fromto releases/<prev_vsn>/dodo_router`
 5. **Risk Assessment:** Briefly flag any state transitions that might result in dropped connections or require a standard restart instead of a hot upgrade.
 
 **Important:** Hot upgrades require careful management of process state. The BEAM VM loads new code alongside old code, but stateful processes must explicitly handle the transition via `code_change/3`. If any GenServer's state structure changes (e.g., new fields added, types changed), you MUST implement the migration logic in `code_change/3`.

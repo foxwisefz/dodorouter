@@ -1,37 +1,430 @@
 # Appup file for DodoRouter
 # This describes how to upgrade the application between versions
-# See: https://hexdocs.pm/castle/readme.html#the-appup-compiler
-
-# Example format:
-# {
-#   ~c"0.1.2",
-#   [
-#     {~c"0.1.1", [
-#       {:update, MyApp.Server, {:advanced, []}}
-#     ]}
-#   ],
-#   [
-#     {~c"0.1.1", [
-#       {:update, MyApp.Server, {:advanced, []}}
-#     ]}
-#   ]
-# }
-
-# For now, we use a simple upgrade that just reloads changed modules
-# Castle will auto-generate this based on git diffs in the future
+# Castle's :appup compiler reads this and copies it into the release ebin directory
+# Format: {NewVsn, [{OldVsn, [Instructions]}], [{OldVsn, [Instructions]}]}
+# 
+# Instructions:
+#   {load_module, Module} - reload a changed module
+#   {update, Module, {advanced, []}} - update a GenServer/Agent and call code_change/3
+#   {add_module, Module} - add a new module
+#   {delete_module, Module} - remove a deleted module
 
 {
-  ~c"0.1.8",
+  ~c"0.1.12",
   [
+    {~c"0.1.11", [
+      # Stateful processes that changed - must use {advanced, []} to trigger code_change/3
+      {:update, DodoRouter.Activity, {:advanced, []}},
+      {:update, DodoRouter.ShutdownListener, {:advanced, []}},
+      
+      # Modules that changed but are not stateful processes
+      {:load_module, DodoRouter.Application},
+      {:load_module, DodoRouter.Release},
+      {:load_module, DodoRouter.Repo},
+      {:load_module, DodoRouter.Accounts},
+      {:load_module, DodoRouter.Mailer},
+      {:load_module, DodoRouter.Models},
+      {:load_module, DodoRouter.Providers},
+      {:load_module, DodoRouter.Proxy},
+      {:load_module, DodoRouter.Recordings},
+      {:load_module, DodoRouter.Routers},
+      {:load_module, DodoRouter.Secrets},
+      {:load_module, DodoRouter.Logs},
+      {:load_module, DodoRouter.Redact}
+    ]},
+    {~c"0.1.10", [
+      {:update, DodoRouter.Activity, {:advanced, []}},
+      {:update, DodoRouter.ShutdownListener, {:advanced, []}},
+      {:load_module, DodoRouter.Application},
+      {:load_module, DodoRouter.Release},
+      {:load_module, DodoRouter.Repo},
+      {:load_module, DodoRouter.Accounts},
+      {:load_module, DodoRouter.Mailer},
+      {:load_module, DodoRouter.Models},
+      {:load_module, DodoRouter.Providers},
+      {:load_module, DodoRouter.Proxy},
+      {:load_module, DodoRouter.Recordings},
+      {:load_module, DodoRouter.Routers},
+      {:load_module, DodoRouter.Secrets},
+      {:load_module, DodoRouter.Logs},
+      {:load_module, DodoRouter.Redact}
+    ]},
+    {~c"0.1.9", [
+      {:update, DodoRouter.Activity, {:advanced, []}},
+      {:update, DodoRouter.ShutdownListener, {:advanced, []}},
+      {:load_module, DodoRouter.Application},
+      {:load_module, DodoRouter.Release},
+      {:load_module, DodoRouter.Repo},
+      {:load_module, DodoRouter.Accounts},
+      {:load_module, DodoRouter.Mailer},
+      {:load_module, DodoRouter.Models},
+      {:load_module, DodoRouter.Providers},
+      {:load_module, DodoRouter.Proxy},
+      {:load_module, DodoRouter.Recordings},
+      {:load_module, DodoRouter.Routers},
+      {:load_module, DodoRouter.Secrets},
+      {:load_module, DodoRouter.Logs},
+      {:load_module, DodoRouter.Redact}
+    ]},
+    {~c"0.1.8", [
+      {:update, DodoRouter.Activity, {:advanced, []}},
+      {:update, DodoRouter.ShutdownListener, {:advanced, []}},
+      {:load_module, DodoRouter.Application},
+      {:load_module, DodoRouter.Release},
+      {:load_module, DodoRouter.Repo},
+      {:load_module, DodoRouter.Accounts},
+      {:load_module, DodoRouter.Mailer},
+      {:load_module, DodoRouter.Models},
+      {:load_module, DodoRouter.Providers},
+      {:load_module, DodoRouter.Proxy},
+      {:load_module, DodoRouter.Recordings},
+      {:load_module, DodoRouter.Routers},
+      {:load_module, DodoRouter.Secrets},
+      {:load_module, DodoRouter.Logs},
+      {:load_module, DodoRouter.Redact}
+    ]},
     {~c"0.1.7", [
       {:update, DodoRouter.Activity, {:advanced, []}},
-      {:update, DodoRouter.ShutdownListener, {:advanced, []}}
+      {:update, DodoRouter.ShutdownListener, {:advanced, []}},
+      {:load_module, DodoRouter.Application},
+      {:load_module, DodoRouter.Release},
+      {:load_module, DodoRouter.Repo},
+      {:load_module, DodoRouter.Accounts},
+      {:load_module, DodoRouter.Mailer},
+      {:load_module, DodoRouter.Models},
+      {:load_module, DodoRouter.Providers},
+      {:load_module, DodoRouter.Proxy},
+      {:load_module, DodoRouter.Recordings},
+      {:load_module, DodoRouter.Routers},
+      {:load_module, DodoRouter.Secrets},
+      {:load_module, DodoRouter.Logs},
+      {:load_module, DodoRouter.Redact}
+    ]},
+    {~c"0.1.6", [
+      {:update, DodoRouter.Activity, {:advanced, []}},
+      {:update, DodoRouter.ShutdownListener, {:advanced, []}},
+      {:load_module, DodoRouter.Application},
+      {:load_module, DodoRouter.Release},
+      {:load_module, DodoRouter.Repo},
+      {:load_module, DodoRouter.Accounts},
+      {:load_module, DodoRouter.Mailer},
+      {:load_module, DodoRouter.Models},
+      {:load_module, DodoRouter.Providers},
+      {:load_module, DodoRouter.Proxy},
+      {:load_module, DodoRouter.Recordings},
+      {:load_module, DodoRouter.Routers},
+      {:load_module, DodoRouter.Secrets},
+      {:load_module, DodoRouter.Logs},
+      {:load_module, DodoRouter.Redact}
+    ]},
+    {~c"0.1.5", [
+      {:update, DodoRouter.Activity, {:advanced, []}},
+      {:update, DodoRouter.ShutdownListener, {:advanced, []}},
+      {:load_module, DodoRouter.Application},
+      {:load_module, DodoRouter.Release},
+      {:load_module, DodoRouter.Repo},
+      {:load_module, DodoRouter.Accounts},
+      {:load_module, DodoRouter.Mailer},
+      {:load_module, DodoRouter.Models},
+      {:load_module, DodoRouter.Providers},
+      {:load_module, DodoRouter.Proxy},
+      {:load_module, DodoRouter.Recordings},
+      {:load_module, DodoRouter.Routers},
+      {:load_module, DodoRouter.Secrets},
+      {:load_module, DodoRouter.Logs},
+      {:load_module, DodoRouter.Redact}
+    ]},
+    {~c"0.1.4", [
+      {:update, DodoRouter.Activity, {:advanced, []}},
+      {:update, DodoRouter.ShutdownListener, {:advanced, []}},
+      {:load_module, DodoRouter.Application},
+      {:load_module, DodoRouter.Release},
+      {:load_module, DodoRouter.Repo},
+      {:load_module, DodoRouter.Accounts},
+      {:load_module, DodoRouter.Mailer},
+      {:load_module, DodoRouter.Models},
+      {:load_module, DodoRouter.Providers},
+      {:load_module, DodoRouter.Proxy},
+      {:load_module, DodoRouter.Recordings},
+      {:load_module, DodoRouter.Routers},
+      {:load_module, DodoRouter.Secrets},
+      {:load_module, DodoRouter.Logs},
+      {:load_module, DodoRouter.Redact}
+    ]},
+    {~c"0.1.3", [
+      {:update, DodoRouter.Activity, {:advanced, []}},
+      {:update, DodoRouter.ShutdownListener, {:advanced, []}},
+      {:load_module, DodoRouter.Application},
+      {:load_module, DodoRouter.Release},
+      {:load_module, DodoRouter.Repo},
+      {:load_module, DodoRouter.Accounts},
+      {:load_module, DodoRouter.Mailer},
+      {:load_module, DodoRouter.Models},
+      {:load_module, DodoRouter.Providers},
+      {:load_module, DodoRouter.Proxy},
+      {:load_module, DodoRouter.Recordings},
+      {:load_module, DodoRouter.Routers},
+      {:load_module, DodoRouter.Secrets},
+      {:load_module, DodoRouter.Logs},
+      {:load_module, DodoRouter.Redact}
+    ]},
+    {~c"0.1.2", [
+      {:update, DodoRouter.Activity, {:advanced, []}},
+      {:update, DodoRouter.ShutdownListener, {:advanced, []}},
+      {:load_module, DodoRouter.Application},
+      {:load_module, DodoRouter.Release},
+      {:load_module, DodoRouter.Repo},
+      {:load_module, DodoRouter.Accounts},
+      {:load_module, DodoRouter.Mailer},
+      {:load_module, DodoRouter.Models},
+      {:load_module, DodoRouter.Providers},
+      {:load_module, DodoRouter.Proxy},
+      {:load_module, DodoRouter.Recordings},
+      {:load_module, DodoRouter.Routers},
+      {:load_module, DodoRouter.Secrets},
+      {:load_module, DodoRouter.Logs},
+      {:load_module, DodoRouter.Redact}
+    ]},
+    {~c"0.1.1", [
+      {:update, DodoRouter.Activity, {:advanced, []}},
+      {:update, DodoRouter.ShutdownListener, {:advanced, []}},
+      {:load_module, DodoRouter.Application},
+      {:load_module, DodoRouter.Release},
+      {:load_module, DodoRouter.Repo},
+      {:load_module, DodoRouter.Accounts},
+      {:load_module, DodoRouter.Mailer},
+      {:load_module, DodoRouter.Models},
+      {:load_module, DodoRouter.Providers},
+      {:load_module, DodoRouter.Proxy},
+      {:load_module, DodoRouter.Recordings},
+      {:load_module, DodoRouter.Routers},
+      {:load_module, DodoRouter.Secrets},
+      {:load_module, DodoRouter.Logs},
+      {:load_module, DodoRouter.Redact}
+    ]},
+    {~c"0.1.0", [
+      {:update, DodoRouter.Activity, {:advanced, []}},
+      {:update, DodoRouter.ShutdownListener, {:advanced, []}},
+      {:load_module, DodoRouter.Application},
+      {:load_module, DodoRouter.Release},
+      {:load_module, DodoRouter.Repo},
+      {:load_module, DodoRouter.Accounts},
+      {:load_module, DodoRouter.Mailer},
+      {:load_module, DodoRouter.Models},
+      {:load_module, DodoRouter.Providers},
+      {:load_module, DodoRouter.Proxy},
+      {:load_module, DodoRouter.Recordings},
+      {:load_module, DodoRouter.Routers},
+      {:load_module, DodoRouter.Secrets},
+      {:load_module, DodoRouter.Logs},
+      {:load_module, DodoRouter.Redact}
     ]}
   ],
   [
+    # Downgrade instructions (reverse of upgrade)
+    {~c"0.1.11", [
+      {:update, DodoRouter.Activity, {:advanced, []}},
+      {:update, DodoRouter.ShutdownListener, {:advanced, []}},
+      {:load_module, DodoRouter.Application},
+      {:load_module, DodoRouter.Release},
+      {:load_module, DodoRouter.Repo},
+      {:load_module, DodoRouter.Accounts},
+      {:load_module, DodoRouter.Mailer},
+      {:load_module, DodoRouter.Models},
+      {:load_module, DodoRouter.Providers},
+      {:load_module, DodoRouter.Proxy},
+      {:load_module, DodoRouter.Recordings},
+      {:load_module, DodoRouter.Routers},
+      {:load_module, DodoRouter.Secrets},
+      {:load_module, DodoRouter.Logs},
+      {:load_module, DodoRouter.Redact}
+    ]},
+    {~c"0.1.10", [
+      {:update, DodoRouter.Activity, {:advanced, []}},
+      {:update, DodoRouter.ShutdownListener, {:advanced, []}},
+      {:load_module, DodoRouter.Application},
+      {:load_module, DodoRouter.Release},
+      {:load_module, DodoRouter.Repo},
+      {:load_module, DodoRouter.Accounts},
+      {:load_module, DodoRouter.Mailer},
+      {:load_module, DodoRouter.Models},
+      {:load_module, DodoRouter.Providers},
+      {:load_module, DodoRouter.Proxy},
+      {:load_module, DodoRouter.Recordings},
+      {:load_module, DodoRouter.Routers},
+      {:load_module, DodoRouter.Secrets},
+      {:load_module, DodoRouter.Logs},
+      {:load_module, DodoRouter.Redact}
+    ]},
+    {~c"0.1.9", [
+      {:update, DodoRouter.Activity, {:advanced, []}},
+      {:update, DodoRouter.ShutdownListener, {:advanced, []}},
+      {:load_module, DodoRouter.Application},
+      {:load_module, DodoRouter.Release},
+      {:load_module, DodoRouter.Repo},
+      {:load_module, DodoRouter.Accounts},
+      {:load_module, DodoRouter.Mailer},
+      {:load_module, DodoRouter.Models},
+      {:load_module, DodoRouter.Providers},
+      {:load_module, DodoRouter.Proxy},
+      {:load_module, DodoRouter.Recordings},
+      {:load_module, DodoRouter.Routers},
+      {:load_module, DodoRouter.Secrets},
+      {:load_module, DodoRouter.Logs},
+      {:load_module, DodoRouter.Redact}
+    ]},
+    {~c"0.1.8", [
+      {:update, DodoRouter.Activity, {:advanced, []}},
+      {:update, DodoRouter.ShutdownListener, {:advanced, []}},
+      {:load_module, DodoRouter.Application},
+      {:load_module, DodoRouter.Release},
+      {:load_module, DodoRouter.Repo},
+      {:load_module, DodoRouter.Accounts},
+      {:load_module, DodoRouter.Mailer},
+      {:load_module, DodoRouter.Models},
+      {:load_module, DodoRouter.Providers},
+      {:load_module, DodoRouter.Proxy},
+      {:load_module, DodoRouter.Recordings},
+      {:load_module, DodoRouter.Routers},
+      {:load_module, DodoRouter.Secrets},
+      {:load_module, DodoRouter.Logs},
+      {:load_module, DodoRouter.Redact}
+    ]},
     {~c"0.1.7", [
       {:update, DodoRouter.Activity, {:advanced, []}},
-      {:update, DodoRouter.ShutdownListener, {:advanced, []}}
+      {:update, DodoRouter.ShutdownListener, {:advanced, []}},
+      {:load_module, DodoRouter.Application},
+      {:load_module, DodoRouter.Release},
+      {:load_module, DodoRouter.Repo},
+      {:load_module, DodoRouter.Accounts},
+      {:load_module, DodoRouter.Mailer},
+      {:load_module, DodoRouter.Models},
+      {:load_module, DodoRouter.Providers},
+      {:load_module, DodoRouter.Proxy},
+      {:load_module, DodoRouter.Recordings},
+      {:load_module, DodoRouter.Routers},
+      {:load_module, DodoRouter.Secrets},
+      {:load_module, DodoRouter.Logs},
+      {:load_module, DodoRouter.Redact}
+    ]},
+    {~c"0.1.6", [
+      {:update, DodoRouter.Activity, {:advanced, []}},
+      {:update, DodoRouter.ShutdownListener, {:advanced, []}},
+      {:load_module, DodoRouter.Application},
+      {:load_module, DodoRouter.Release},
+      {:load_module, DodoRouter.Repo},
+      {:load_module, DodoRouter.Accounts},
+      {:load_module, DodoRouter.Mailer},
+      {:load_module, DodoRouter.Models},
+      {:load_module, DodoRouter.Providers},
+      {:load_module, DodoRouter.Proxy},
+      {:load_module, DodoRouter.Recordings},
+      {:load_module, DodoRouter.Routers},
+      {:load_module, DodoRouter.Secrets},
+      {:load_module, DodoRouter.Logs},
+      {:load_module, DodoRouter.Redact}
+    ]},
+    {~c"0.1.5", [
+      {:update, DodoRouter.Activity, {:advanced, []}},
+      {:update, DodoRouter.ShutdownListener, {:advanced, []}},
+      {:load_module, DodoRouter.Application},
+      {:load_module, DodoRouter.Release},
+      {:load_module, DodoRouter.Repo},
+      {:load_module, DodoRouter.Accounts},
+      {:load_module, DodoRouter.Mailer},
+      {:load_module, DodoRouter.Models},
+      {:load_module, DodoRouter.Providers},
+      {:load_module, DodoRouter.Proxy},
+      {:load_module, DodoRouter.Recordings},
+      {:load_module, DodoRouter.Routers},
+      {:load_module, DodoRouter.Secrets},
+      {:load_module, DodoRouter.Logs},
+      {:load_module, DodoRouter.Redact}
+    ]},
+    {~c"0.1.4", [
+      {:update, DodoRouter.Activity, {:advanced, []}},
+      {:update, DodoRouter.ShutdownListener, {:advanced, []}},
+      {:load_module, DodoRouter.Application},
+      {:load_module, DodoRouter.Release},
+      {:load_module, DodoRouter.Repo},
+      {:load_module, DodoRouter.Accounts},
+      {:load_module, DodoRouter.Mailer},
+      {:load_module, DodoRouter.Models},
+      {:load_module, DodoRouter.Providers},
+      {:load_module, DodoRouter.Proxy},
+      {:load_module, DodoRouter.Recordings},
+      {:load_module, DodoRouter.Routers},
+      {:load_module, DodoRouter.Secrets},
+      {:load_module, DodoRouter.Logs},
+      {:load_module, DodoRouter.Redact}
+    ]},
+    {~c"0.1.3", [
+      {:update, DodoRouter.Activity, {:advanced, []}},
+      {:update, DodoRouter.ShutdownListener, {:advanced, []}},
+      {:load_module, DodoRouter.Application},
+      {:load_module, DodoRouter.Release},
+      {:load_module, DodoRouter.Repo},
+      {:load_module, DodoRouter.Accounts},
+      {:load_module, DodoRouter.Mailer},
+      {:load_module, DodoRouter.Models},
+      {:load_module, DodoRouter.Providers},
+      {:load_module, DodoRouter.Proxy},
+      {:load_module, DodoRouter.Recordings},
+      {:load_module, DodoRouter.Routers},
+      {:load_module, DodoRouter.Secrets},
+      {:load_module, DodoRouter.Logs},
+      {:load_module, DodoRouter.Redact}
+    ]},
+    {~c"0.1.2", [
+      {:update, DodoRouter.Activity, {:advanced, []}},
+      {:update, DodoRouter.ShutdownListener, {:advanced, []}},
+      {:load_module, DodoRouter.Application},
+      {:load_module, DodoRouter.Release},
+      {:load_module, DodoRouter.Repo},
+      {:load_module, DodoRouter.Accounts},
+      {:load_module, DodoRouter.Mailer},
+      {:load_module, DodoRouter.Models},
+      {:load_module, DodoRouter.Providers},
+      {:load_module, DodoRouter.Proxy},
+      {:load_module, DodoRouter.Recordings},
+      {:load_module, DodoRouter.Routers},
+      {:load_module, DodoRouter.Secrets},
+      {:load_module, DodoRouter.Logs},
+      {:load_module, DodoRouter.Redact}
+    ]},
+    {~c"0.1.1", [
+      {:update, DodoRouter.Activity, {:advanced, []}},
+      {:update, DodoRouter.ShutdownListener, {:advanced, []}},
+      {:load_module, DodoRouter.Application},
+      {:load_module, DodoRouter.Release},
+      {:load_module, DodoRouter.Repo},
+      {:load_module, DodoRouter.Accounts},
+      {:load_module, DodoRouter.Mailer},
+      {:load_module, DodoRouter.Models},
+      {:load_module, DodoRouter.Providers},
+      {:load_module, DodoRouter.Proxy},
+      {:load_module, DodoRouter.Recordings},
+      {:load_module, DodoRouter.Routers},
+      {:load_module, DodoRouter.Secrets},
+      {:load_module, DodoRouter.Logs},
+      {:load_module, DodoRouter.Redact}
+    ]},
+    {~c"0.1.0", [
+      {:update, DodoRouter.Activity, {:advanced, []}},
+      {:update, DodoRouter.ShutdownListener, {:advanced, []}},
+      {:load_module, DodoRouter.Application},
+      {:load_module, DodoRouter.Release},
+      {:load_module, DodoRouter.Repo},
+      {:load_module, DodoRouter.Accounts},
+      {:load_module, DodoRouter.Mailer},
+      {:load_module, DodoRouter.Models},
+      {:load_module, DodoRouter.Providers},
+      {:load_module, DodoRouter.Proxy},
+      {:load_module, DodoRouter.Recordings},
+      {:load_module, DodoRouter.Routers},
+      {:load_module, DodoRouter.Secrets},
+      {:load_module, DodoRouter.Logs},
+      {:load_module, DodoRouter.Redact}
     ]}
   ]
 }
