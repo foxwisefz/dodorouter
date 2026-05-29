@@ -16,7 +16,7 @@ defmodule DodoRouter.Upgrade do
       raise "Release tarball not found: #{tarball}"
     end
 
-    IO.puts("Preparing release #{version}...")
+    IO.puts("=== Starting hot upgrade to #{version} ===")
 
     tmp = "/tmp/dodo_upgrade_#{version}"
     File.rm_rf!(tmp)
@@ -41,8 +41,25 @@ defmodule DodoRouter.Upgrade do
 
     v = to_charlist(version)
 
-    IO.puts("Unpacking release #{version}...")
-    :ok = :release_handler.unpack_release(v)
+    Path.join([root, "releases", "COOKIE"]) |> File.read!() |> then(fn cookie ->
+      IO.puts("Unpacking release #{version}...")
+
+      case :release_handler.unpack_release(v) do
+        :ok -> :ok
+        {:ok, _} -> :ok
+        {:error, {:existing_release, _}} ->
+          IO.puts("Release #{version} already unpacked, proceeding...")
+        other ->
+          raise "Failed to unpack release #{version}: #{inspect(other)}"
+      end
+
+      # Release_handler.unpack_release does NOT extract lib files — only processes
+      # the release metadata. We must explicitly extract lib files from the tarball.
+      extract_lib(tarball, root, version)
+
+      # Restore COOKIE — the tarball contains one that may be stale
+      File.write!(Path.join([root, "releases", "COOKIE"]), cookie)
+    end)
 
     # Copy relup from new release to current release (release_handler looks for it in current's dir)
     relup_src = Path.join([root, "releases", version, "relup"])
@@ -62,6 +79,35 @@ defmodule DodoRouter.Upgrade do
 
     IO.puts("Successfully upgraded to #{version}")
     IO.puts("Hot upgrade complete at #{DateTime.utc_now()}")
+  end
+
+  defp extract_lib(tarball, root, version) do
+    tmp = "/tmp/dodo_lib_#{version}"
+    File.rm_rf!(tmp)
+    File.mkdir_p!(tmp)
+
+    :erl_tar.extract(tarball, [:compressed, {:cwd, tmp}])
+
+    src = if File.dir?(Path.join(tmp, "dodo_router")), do: Path.join(tmp, "dodo_router"), else: tmp
+    lib_src = Path.join(src, "lib")
+
+    if File.dir?(lib_src) do
+      lib_root = Path.join(root, "lib")
+      File.mkdir_p!(lib_root)
+
+      for app_dir <- File.ls!(lib_src) do
+        full = Path.join(lib_src, app_dir)
+        dest = Path.join(lib_root, app_dir)
+
+        if File.dir?(full) do
+          File.rm_rf!(dest)
+          File.cp_r!(full, dest)
+          IO.puts("  Extracted lib/#{app_dir}")
+        end
+      end
+    end
+
+    File.rm_rf!(tmp)
   end
 
   defp release_root do
