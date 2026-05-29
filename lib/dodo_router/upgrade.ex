@@ -56,6 +56,7 @@ defmodule DodoRouter.Upgrade do
     :ok = :release_handler.make_permanent(v)
 
     IO.puts("Successfully upgraded to #{version}")
+    IO.puts("Hot upgrade complete at #{DateTime.utc_now()}")
   end
 
   defp release_root do
