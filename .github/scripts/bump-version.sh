@@ -26,36 +26,10 @@ NEW_VERSION="${MAJOR}.${MINOR}.${NEW_PATCH}"
 sed -i.bak -E "s/(version: \")${CURRENT_VERSION}(\",)/\1${NEW_VERSION}\2/" "$MIX_FILE"
 rm -f "$MIX_FILE.bak"
 
-# Update appup.ex - change top version and add new entry
+# Update appup.ex - only change the version string on line 1
 if [ -f "$APPUP_FILE" ]; then
-  # Create temp file with new version and entry
-  cat > /tmp/appup_new.txt << EOF
-{
-  ~c"${NEW_VERSION}",
-  [
-    {~c"${CURRENT_VERSION}", []},
-EOF
-  
-  # Extract the old upgrade entries (skip first line and first entry)
-  sed -n '6,$p' "$APPUP_FILE" | sed '1,/^  ],$/d' | sed '1,/^  \[$/d' | sed '/^  ]$/,$d' > /tmp/appup_old_entries.txt
-  
-  # Build new appup file
-  cat /tmp/appup_new.txt > "$APPUP_FILE"
-  cat /tmp/appup_old_entries.txt >> "$APPUP_FILE"
-  
-  # Add closing brackets and downgrade section
-  cat >> "$APPUP_FILE" << EOF
-  ],
-  [
-    {~c"${CURRENT_VERSION}", []},
-EOF
-  
-  # Add old downgrade entries
-  sed -n '/^  ],$/,$p' "$APPUP_FILE.bak" 2>/dev/null | tail -n +2 | sed '/^}$/d' >> "$APPUP_FILE" || true
-  
-  # Add final closing bracket
-  echo "}" >> "$APPUP_FILE"
-  
+  sed -i.bak -E "1s/~c\"${CURRENT_VERSION}\"/~c\"${NEW_VERSION}\"/" "$APPUP_FILE"
+  rm -f "$APPUP_FILE.bak"
   echo "Updated appup version: ${CURRENT_VERSION} -> ${NEW_VERSION}"
 fi
 
