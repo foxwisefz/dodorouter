@@ -10,14 +10,14 @@
 #   {delete_module, Module} - remove a deleted module
 
 {
-  ~c"0.1.36",
+  ~c"0.1.37",
   [
-    {~c"0.1.35", [
+    {~c"0.1.36", [
       {:load_module, DodoRouter.Upgrade}
     ]}
   ],
   [
-    {~c"0.1.35", [
+    {~c"0.1.36", [
       {:load_module, DodoRouter.Upgrade}
     ]}
   ]
