@@ -78,6 +78,11 @@ defmodule DodoRouter.Upgrade do
     IO.puts("Making permanent...")
     :ok = :release_handler.make_permanent(v)
 
+    # Reload application configuration from the new release's sys.config
+    # release_handler.install_release should do this, but we've seen it fail
+    # silently in some OTP versions, leaving the app env stale.
+    reload_config(root, version)
+
     IO.puts("Successfully upgraded to #{version}")
     IO.puts("Hot upgrade complete at #{DateTime.utc_now()}")
   end
@@ -109,6 +114,33 @@ defmodule DodoRouter.Upgrade do
     end
 
     File.rm_rf!(tmp)
+  end
+
+  defp reload_config(root, version) do
+    sys_config = Path.join([root, "releases", version, "sys.config"])
+
+    if File.exists?(sys_config) do
+      IO.puts("Reloading configuration from #{sys_config}...")
+
+      case :file.consult(String.to_charlist(sys_config)) do
+        {:ok, [config]} when is_list(config) ->
+          for {app, env} <- config, is_atom(app), is_list(env) do
+            for {key, val} <- env do
+              :application.set_env(app, key, val, persistent: true)
+            end
+          end
+
+          IO.puts("Configuration reloaded for #{length(config)} applications")
+
+        {:ok, other} ->
+          IO.puts("Warning: unexpected sys.config format: #{inspect(other)}")
+
+        {:error, reason} ->
+          IO.puts("Warning: could not read sys.config: #{inspect(reason)}")
+      end
+    else
+      IO.puts("Warning: sys.config not found at #{sys_config}")
+    end
   end
 
   defp release_root do
