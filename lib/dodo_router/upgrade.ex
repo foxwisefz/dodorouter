@@ -39,17 +39,20 @@ defmodule DodoRouter.Upgrade do
       |> elem(1)
       |> List.to_string()
 
-    relup_src = Path.join([root, "releases", version, "relup"])
-    relup_dst = Path.join([root, "releases", current_vsn, "relup"])
-    if File.exists?(relup_src) do
-      File.cp!(relup_src, relup_dst)
-      IO.puts("Copied relup #{current_vsn} -> #{version}")
-    end
-
     v = to_charlist(version)
 
     IO.puts("Unpacking release #{version}...")
     :ok = :release_handler.unpack_release(v)
+
+    # Copy relup from new release to current release (release_handler looks for it in current's dir)
+    relup_src = Path.join([root, "releases", version, "relup"])
+    relup_dst = Path.join([root, "releases", current_vsn, "relup"])
+    if File.exists?(relup_src) do
+      File.cp!(relup_src, relup_dst)
+      IO.puts("Copied relup to #{current_vsn} for upgrade to #{version}")
+    else
+      IO.puts("No relup file found at #{relup_src} — upgrade will fail")
+    end
 
     IO.puts("Installing release #{version}...")
     {:ok, _, _} = :release_handler.install_release(v)
