@@ -81,7 +81,10 @@ jobs:
             if [ -f "dodo_router-${PREV_VERSION}.tar.gz" ]; then
               mkdir -p extracted
               tar xzf "dodo_router-${PREV_VERSION}.tar.gz" -C extracted
+              echo "prev_extracted=true" >> $GITHUB_OUTPUT
               echo "Extracted previous release"
+            else
+              echo "prev_extracted=false" >> $GITHUB_OUTPUT
             fi
             cd -
           else
@@ -91,7 +94,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Generate .relup
-        if: steps.previous.outputs.prev_version != ''
+        if: steps.previous.outputs.prev_extracted == 'true'
         run: |
           PREV_VERSION="${{ steps.previous.outputs.prev_version }}"
           CURR_VERSION="${{ steps.version.outputs.version }}"
