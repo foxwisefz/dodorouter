@@ -18,45 +18,40 @@ mkdir -p "$RELEASE_DIR"
 # Check if service is currently running
 if systemctl --user is-active --quiet dodo-router; then
   echo "Service is running. Performing hot upgrade..."
-  
-  # Copy tarball to releases directory
-  mkdir -p "$RELEASE_DIR/releases"
-  cp "$TARBALL" "$RELEASE_DIR/releases/dodo_router-${VERSION}.tar.gz"
-  
-  cd "$RELEASE_DIR"
-  
-  # Ensure SASL is running (needed for release_handler)
-  if ! ./bin/dodo_router rpc ":erlang.whereis(:release_handler)" | grep -q "pid"; then
-    echo "Starting SASL..."
-    ./bin/dodo_router rpc ":application.start(:sasl)"
-    sleep 1
-  fi
-  
-  # Use our custom upgrade module
+
+  RELEASE_ROOT="$RELEASE_DIR/dodo_router"
+
+  # Copy tarball (renamed for release_handler: unpacks <VSN>.tar.gz)
+  mkdir -p "$RELEASE_ROOT/releases"
+  cp "$TARBALL" "$RELEASE_ROOT/releases/${VERSION}.tar.gz"
+
+  cd "$RELEASE_ROOT"
+
+  # bin/upgrade calls DodoRouter.Upgrade.install/1 which starts SASL itself
   echo "Upgrading to v${VERSION}..."
   ./bin/upgrade "$VERSION"
-  
+
   echo "Hot upgrade to v${VERSION} completed successfully!"
 else
   echo "Service not running. Performing full install..."
-  
+
   # Clear old release if any
   rm -rf "$RELEASE_DIR"/*
-  
-  # Extract full release
+
+  # Extract full release (creates dodo_router/ inside current/)
   cd "$RELEASE_DIR"
   tar xzf "$TARBALL"
-  
+
   # Start service
   systemctl --user enable dodo-router
   systemctl --user start dodo-router
-  
+
   echo "Full install completed!"
 fi
 
 # Verify version
 sleep 2
-ACTUAL_VERSION=$(./bin/dodo_router version 2>/dev/null || echo "unknown")
+ACTUAL_VERSION=$("$RELEASE_DIR/dodo_router/bin/dodo_router" version 2>/dev/null || echo "unknown")
 echo "Running version: $ACTUAL_VERSION"
 
 # Clean up tarball
