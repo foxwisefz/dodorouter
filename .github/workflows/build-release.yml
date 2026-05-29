@@ -98,7 +98,7 @@ jobs:
           
           # Generate relup using Forecastle
           # Point to .rel files (without .rel extension)
-          mix forecastle.relup \
+          MIX_ENV=prod mix forecastle.relup \
             --target "_build/prod/rel/dodo_router/releases/${CURR_VERSION}/dodo_router" \
             --fromto "/tmp/prev-release/extracted/dodo_router/releases/${PREV_VERSION}/dodo_router"
           
