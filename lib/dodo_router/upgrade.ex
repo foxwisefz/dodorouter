@@ -16,7 +16,7 @@ defmodule DodoRouter.Upgrade do
       raise "Release tarball not found: #{tarball}"
     end
 
-    IO.puts("Preparing release #{version}...")
+    IO.puts("=== Starting hot upgrade to #{version} ===")
 
     tmp = "/tmp/dodo_upgrade_#{version}"
     File.rm_rf!(tmp)
