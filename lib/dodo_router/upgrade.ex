@@ -24,8 +24,8 @@ defmodule DodoRouter.Upgrade do
 
     src = if File.dir?(Path.join(tmp, "dodo_router")), do: Path.join(tmp, "dodo_router"), else: tmp
 
-    old_rel = Path.join(src, "releases", "dodo_router-#{version}.rel")
-    new_rel = Path.join(src, "releases", "#{version}.rel")
+    old_rel = Path.join([src, "releases", "dodo_router-#{version}.rel"])
+    new_rel = Path.join([src, "releases", "#{version}.rel"])
     if File.exists?(old_rel), do: File.rename!(old_rel, new_rel)
 
     :erl_tar.create(tarball, File.ls!(src), [:compressed, {:cwd, src}])
