@@ -11,7 +11,7 @@ defmodule DodoRouter.MixProject do
       aliases: aliases(),
       deps: deps(),
       releases: releases(),
-      compilers: [:phoenix_live_view] ++ Mix.compilers()
+      compilers: [:phoenix_live_view, :castle] ++ Mix.compilers()
     ]
   end
 
