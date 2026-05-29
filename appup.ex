@@ -12,12 +12,12 @@
 {
   ~c"0.1.22",
   [
-    {~c"0.1.22", [
+    {~c"0.1.21", [
       {:load_module, DodoRouter.Upgrade}
     ]}
   ],
   [
-    {~c"0.1.22", [
+    {~c"0.1.21", [
       {:load_module, DodoRouter.Upgrade}
     ]}
   ]

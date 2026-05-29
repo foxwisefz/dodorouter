@@ -41,9 +41,9 @@ if [ -f "$APPUP_FILE" ]; then
     rm -f "$APPUP_FILE.bak"
   fi
 
-  # Step 2: bump the new version (first occurrence of CURRENT_VERSION → NEW_VERSION)
-  # s/// without g replaces first occurrence on the first matching line
-  sed -i.bak -E "s/~c\"${CURRENT_VERSION}\"/~c\"${NEW_VERSION}\"/" "$APPUP_FILE"
+  # Step 2: bump the new version (first occurrence in entire file)
+  # GNU sed: 0,/pattern/{s//replacement/} replaces only first file-wide match
+  sed -i.bak -E "0,/~c\"${CURRENT_VERSION}\"/{s//~c\"${NEW_VERSION}\"/}" "$APPUP_FILE"
   rm -f "$APPUP_FILE.bak"
 
   echo "Updated appup: ${CURRENT_VERSION} -> ${NEW_VERSION}"
