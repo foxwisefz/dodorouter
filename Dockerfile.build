@@ -1,0 +1,25 @@
+FROM elixir:1.18.2
+
+RUN apt-get update && apt-get install -y build-essential git
+
+WORKDIR /app
+
+# Install hex and rebar
+RUN mix local.hex --force && mix local.rebar --force
+
+# Copy only files needed for dependency resolution
+COPY mix.exs mix.lock ./
+
+# Get dependencies
+RUN mix deps.get --only prod
+
+# Copy rest of the app
+COPY . .
+
+# Build release
+RUN MIX_ENV=prod mix compile
+RUN MIX_ENV=prod mix assets.deploy
+RUN MIX_ENV=prod mix release
+
+# Copy tarball to accessible location
+RUN cp _build/prod/dodo_router-*.tar.gz /app/

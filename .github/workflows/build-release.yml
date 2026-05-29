@@ -39,7 +39,7 @@ jobs:
         uses: erlef/setup-beam@v1
         with:
           elixir-version: "1.18"
-          otp-version: "28"
+          otp-version: "27"
 
       - name: Restore dependencies cache
         uses: actions/cache@v4
@@ -76,6 +76,13 @@ jobs:
             mkdir -p /tmp/prev-release
             cd /tmp/prev-release
             gh release download "$PREV_TAG" --pattern "dodo_router-${PREV_VERSION}.tar.gz" || true
+            
+            # Extract previous release for relup generation
+            if [ -f "dodo_router-${PREV_VERSION}.tar.gz" ]; then
+              mkdir -p extracted
+              tar xzf "dodo_router-${PREV_VERSION}.tar.gz" -C extracted
+              echo "Extracted previous release"
+            fi
             cd -
           else
             echo "No previous version found"
@@ -86,28 +93,31 @@ jobs:
       - name: Generate .relup
         if: steps.previous.outputs.prev_version != ''
         run: |
-          mkdir -p /tmp/prev-release/extracted
-          cd /tmp/prev-release/extracted
-          tar xzf "/tmp/prev-release/dodo_router-${{ steps.previous.outputs.prev_version }}.tar.gz"
-          cd -
+          PREV_VERSION="${{ steps.previous.outputs.prev_version }}"
+          CURR_VERSION="${{ steps.version.outputs.version }}"
           
-          # Generate relup using Castle
-          mix castle.relup \
-            --target _build/prod/rel/dodo_router \
-            --fromto /tmp/prev-release/extracted/dodo_router
+          # Generate relup using Forecastle
+          # Point to .rel files (without .rel extension)
+          mix forecastle.relup \
+            --target "_build/prod/rel/dodo_router/releases/${CURR_VERSION}/dodo_router" \
+            --fromto "/tmp/prev-release/extracted/dodo_router/releases/${PREV_VERSION}/dodo_router"
           
-          # Copy relup into the release
-          cp relup _build/prod/rel/dodo_router/releases/${{ steps.version.outputs.version }}/relup
-          
-          echo "Generated relup file"
+          # Verify relup was generated
+          if [ -f "relup" ]; then
+            cp relup "_build/prod/rel/dodo_router/releases/${CURR_VERSION}/relup"
+            echo "Generated relup file"
+          else
+            echo "WARNING: relup file not generated"
+          fi
 
       - name: Rebuild tarball with relup
         if: steps.previous.outputs.prev_version != ''
         run: |
+          CURR_VERSION="${{ steps.version.outputs.version }}"
           # Recreate tarball with relup included
           cd _build/prod/rel
-          tar czf dodo_router-${{ steps.version.outputs.version }}.tar.gz dodo_router
-          mv dodo_router-${{ steps.version.outputs.version }}.tar.gz ../
+          tar czf "dodo_router-${CURR_VERSION}.tar.gz" dodo_router
+          mv "dodo_router-${CURR_VERSION}.tar.gz" ../
 
       - name: Upload release artifact
         uses: actions/upload-artifact@v4

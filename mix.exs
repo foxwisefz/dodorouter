@@ -4,16 +4,14 @@ defmodule DodoRouter.MixProject do
   def project do
     [
       app: :dodo_router,
-      version: "0.1.13",
+      version: "0.1.16",
       elixir: "~> 1.15",
       elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
       aliases: aliases(),
       deps: deps(),
       releases: releases(),
-      appup: "appup.ex",
-      compilers: [:phoenix_live_view, :appup] ++ Mix.compilers(),
-      listeners: [Phoenix.CodeReloader]
+      compilers: [:phoenix_live_view] ++ Mix.compilers()
     ]
   end
 
@@ -80,9 +78,10 @@ defmodule DodoRouter.MixProject do
       {:gettext, "~> 0.26"},
       {:jason, "~> 1.2"},
       {:dns_cluster, "~> 0.2.0"},
-       {:bandit, "~> 1.5"},
-       {:logger_file_backend, "~> 0.0.14"},
-       {:castle, "~> 0.3.1"}
+      {:bandit, "~> 1.5"},
+      {:logger_file_backend, "~> 0.0.14"},
+      {:castle, "~> 0.3.1"},
+      {:forecastle, "~> 0.1.3"}
     ]
   end
 
