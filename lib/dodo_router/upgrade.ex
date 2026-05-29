@@ -30,6 +30,7 @@ defmodule DodoRouter.Upgrade do
     new_rel = Path.join([src, "releases", "#{version}.rel"])
     if File.exists?(old_rel), do: File.rename!(old_rel, new_rel)
 
+    File.rm!(tarball)
     :erl_tar.create(tarball, File.ls!(src), [:compressed, {:cwd, src}])
     File.rm_rf!(tmp)
 
@@ -111,10 +112,8 @@ defmodule DodoRouter.Upgrade do
   end
 
   defp release_root do
-    :release_handler.which_releases()
-    |> hd()
-    |> elem(2)
-    |> hd()
+    :dodo_router
+    |> :code.lib_dir()
     |> List.to_string()
     |> Path.dirname()
     |> Path.dirname()
