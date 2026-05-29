@@ -4,6 +4,8 @@ defmodule DodoRouter.Upgrade do
   Called by bin/upgrade script.
   """
 
+  def install(version) when is_list(version), do: install(List.to_string(version))
+
   def install(version) when is_binary(version) do
     :application.start(:sasl)
 
