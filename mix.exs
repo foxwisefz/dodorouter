@@ -32,7 +32,7 @@ defmodule DodoRouter.MixProject do
         strip_beams: true,
         include_erts: true,
         applications: [sasl: :permanent],
-        steps: [&Forecastle.pre_assemble/1, :assemble, &Forecastle.post_assemble/1, :tar]
+        steps: [&Forecastle.pre_assemble/1, :assemble, &compile_appup/1, &Forecastle.post_assemble/1, :tar]
       ]
     ]
   end
@@ -106,5 +106,16 @@ defmodule DodoRouter.MixProject do
       ],
       precommit: ["compile --warning-as-errors", "deps.unlock --unused", "format", "test"]
     ]
+  end
+
+  defp compile_appup(release) do
+    if File.exists?("appup.ex") do
+      {appup, _} = Code.eval_file("appup.ex")
+      ebin = Path.join([release.path, "lib", "dodo_router-#{release.version}", "ebin"])
+      File.mkdir_p!(ebin)
+      File.write!(Path.join(ebin, "dodo_router.appup"), :erlang.term_to_binary(appup))
+    end
+
+    release
   end
 end
