@@ -32,9 +32,12 @@ defmodule DodoRouter.Upgrade do
     new_rel = Path.join([src, "releases", "#{version}.rel"])
     if File.exists?(old_rel), do: File.rename!(old_rel, new_rel)
 
-    File.rm!(tarball)
-    :erl_tar.create(tarball, File.ls!(src), [:compressed, {:cwd, src}])
+    tmp_tar = "/tmp/dodo_upgrade_#{version}.tar.gz"
+    File.rm!(tmp_tar)
+    :erl_tar.create(tmp_tar, File.ls!(src), [:compressed, {:cwd, src}])
+    File.cp!(tmp_tar, tarball)
     File.rm_rf!(tmp)
+    File.rm_rf!(tmp_tar)
 
     current_vsn =
       :release_handler.which_releases()
