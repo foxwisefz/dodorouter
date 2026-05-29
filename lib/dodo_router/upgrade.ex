@@ -7,6 +7,8 @@ defmodule DodoRouter.Upgrade do
   def install(version) when is_binary(version) do
     v = to_charlist(version)
 
+    :application.start(:sasl)
+
     IO.puts("Unpacking release #{version}...")
     :ok = :release_handler.unpack_release(v)
 

@@ -26,11 +26,27 @@ NEW_VERSION="${MAJOR}.${MINOR}.${NEW_PATCH}"
 sed -i.bak -E "s/(version: \")${CURRENT_VERSION}(\",)/\1${NEW_VERSION}\2/" "$MIX_FILE"
 rm -f "$MIX_FILE.bak"
 
-# Update appup.ex - only change the version string on line 1
+# Update appup.ex:
+#   1. Shift old version refs forward (N-1 → N) globally
+#   2. Bump the new version (first ~c"N" → ~c"N+1")
 if [ -f "$APPUP_FILE" ]; then
-  sed -i.bak -E "1s/~c\"${CURRENT_VERSION}\"/~c\"${NEW_VERSION}\"/" "$APPUP_FILE"
+  # Compute previous patch (N-1)
+  OLD_OLD_PATCH=$((PATCH - 1))
+
+  if [ "$OLD_OLD_PATCH" -ge 0 ]; then
+    OLD_OLD_VERSION="${MAJOR}.${MINOR}.${OLD_OLD_PATCH}"
+
+    # Step 1: shift all old-old refs to current version
+    sed -i.bak -E "s/~c\"${OLD_OLD_VERSION}\"/~c\"${CURRENT_VERSION}\"/g" "$APPUP_FILE"
+    rm -f "$APPUP_FILE.bak"
+  fi
+
+  # Step 2: bump the new version (first occurrence of CURRENT_VERSION → NEW_VERSION)
+  # s/// without g replaces first occurrence on the first matching line
+  sed -i.bak -E "s/~c\"${CURRENT_VERSION}\"/~c\"${NEW_VERSION}\"/" "$APPUP_FILE"
   rm -f "$APPUP_FILE.bak"
-  echo "Updated appup version: ${CURRENT_VERSION} -> ${NEW_VERSION}"
+
+  echo "Updated appup: ${CURRENT_VERSION} -> ${NEW_VERSION}"
 fi
 
 echo "Bumped version: ${CURRENT_VERSION} -> ${NEW_VERSION}"
