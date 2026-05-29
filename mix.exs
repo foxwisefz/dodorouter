@@ -113,7 +113,7 @@ defmodule DodoRouter.MixProject do
       {appup, _} = Code.eval_file("appup.ex")
       ebin = Path.join([release.path, "lib", "dodo_router-#{release.version}", "ebin"])
       File.mkdir_p!(ebin)
-      File.write!(Path.join(ebin, "dodo_router.appup"), :erlang.term_to_binary(appup))
+      File.write!(Path.join(ebin, "dodo_router.appup"), :io_lib.format("~tp.\n", [appup]))
     end
 
     release
