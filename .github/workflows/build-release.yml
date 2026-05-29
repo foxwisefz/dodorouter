@@ -71,22 +71,24 @@ jobs:
             echo "prev_version=$PREV_VERSION" >> $GITHUB_OUTPUT
             echo "prev_tag=$PREV_TAG" >> $GITHUB_OUTPUT
             echo "Previous version: $PREV_VERSION"
-            
-            # Download from existing release
+
             mkdir -p /tmp/prev-release
-            cd /tmp/prev-release
-            gh release download "$PREV_TAG" --pattern "dodo_router-${PREV_VERSION}.tar.gz" || true
-            
+
+            # gh needs --repo or it fails when cwd is not a git repo
+            gh release download "$PREV_TAG" \
+              --repo "${{ github.repository }}" \
+              --pattern "dodo_router-${PREV_VERSION}.tar.gz" \
+              --dir /tmp/prev-release 2>&1 || echo "gh download failed"
+
             # Extract previous release for relup generation
-            if [ -f "dodo_router-${PREV_VERSION}.tar.gz" ]; then
-              mkdir -p extracted
-              tar xzf "dodo_router-${PREV_VERSION}.tar.gz" -C extracted
+            if [ -f "/tmp/prev-release/dodo_router-${PREV_VERSION}.tar.gz" ]; then
+              mkdir -p /tmp/prev-release/extracted
+              tar xzf "/tmp/prev-release/dodo_router-${PREV_VERSION}.tar.gz" -C /tmp/prev-release/extracted
               echo "prev_extracted=true" >> $GITHUB_OUTPUT
               echo "Extracted previous release"
             else
               echo "prev_extracted=false" >> $GITHUB_OUTPUT
             fi
-            cd -
           else
             echo "No previous version found"
           fi
@@ -98,12 +100,26 @@ jobs:
         run: |
           PREV_VERSION="${{ steps.previous.outputs.prev_version }}"
           CURR_VERSION="${{ steps.version.outputs.version }}"
-          
-          # Generate relup using Forecastle
-          # Point to .rel files (without .rel extension)
+
+          PREV_REL_FILE="dodo_router-${PREV_VERSION}.rel"
+          PREV_REL_DIR="/tmp/prev-release/extracted/dodo_router/releases"
+
+          # The .rel file could be at releases/<vsn>/dodo_router or releases/dodo_router-<vsn>
+          if [ -f "${PREV_REL_DIR}/${PREV_VERSION}/dodo_router.rel" ]; then
+            FROMTO="${PREV_REL_DIR}/${PREV_VERSION}/dodo_router"
+          elif [ -f "${PREV_REL_DIR}/${PREV_REL_FILE}" ]; then
+            # For flat rel files, strip .rel extension
+            FROMTO="${PREV_REL_DIR}/${PREV_REL_FILE%.rel}"
+          else
+            echo "ERROR: Previous release .rel file not found"
+            exit 1
+          fi
+
+          echo "From: $FROMTO"
+
           MIX_ENV=prod mix forecastle.relup \
             --target "_build/prod/rel/dodo_router/releases/${CURR_VERSION}/dodo_router" \
-            --fromto "/tmp/prev-release/extracted/dodo_router/releases/${PREV_VERSION}/dodo_router"
+            --fromto "$FROMTO"
           
           # Verify relup was generated
           if [ -f "relup" ]; then
