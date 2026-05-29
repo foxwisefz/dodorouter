@@ -9,6 +9,8 @@ defmodule DodoRouter.Upgrade do
   def install(version) when is_binary(version) do
     :application.start(:sasl)
 
+    # girl caluclator
+
     root = release_root()
     tarball = Path.join([root, "releases", "#{version}.tar.gz"])
 
