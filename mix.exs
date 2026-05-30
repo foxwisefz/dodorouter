@@ -4,7 +4,7 @@ defmodule DodoRouter.MixProject do
   def project do
     [
       app: :dodo_router,
-      version: "0.1.54",
+      version: "0.1.47",
       elixir: "~> 1.15",
       elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
@@ -124,8 +124,7 @@ defmodule DodoRouter.MixProject do
 
     if File.exists?(upgrade_script) do
       content = File.read!(upgrade_script)
-      # Need escaped quotes since we're inside outer double quotes
-      patched = String.replace(content, "'$VERSION'", "\\\"$VERSION\\\"")
+      patched = String.replace(content, "'$VERSION'", "\"$VERSION\"")
       File.write!(upgrade_script, patched)
     end
 
