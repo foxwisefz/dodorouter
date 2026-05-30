@@ -119,33 +119,6 @@ defmodule DodoRouter.Upgrade do
     File.rm_rf!(tmp)
   end
 
-  defp reload_config(root, version) do
-    sys_config = Path.join([root, "releases", version, "sys.config"])
-
-    if File.exists?(sys_config) do
-      IO.puts("Reloading configuration from #{sys_config}...")
-
-      case :file.consult(String.to_charlist(sys_config)) do
-        {:ok, [config]} when is_list(config) ->
-          for {app, env} <- config, is_atom(app), is_list(env) do
-            for {key, val} <- env do
-              :application.set_env(app, key, val, persistent: true)
-            end
-          end
-
-          IO.puts("Configuration reloaded for #{length(config)} applications")
-
-        {:ok, other} ->
-          IO.puts("Warning: unexpected sys.config format: #{inspect(other)}")
-
-        {:error, reason} ->
-          IO.puts("Warning: could not read sys.config: #{inspect(reason)}")
-      end
-    else
-      IO.puts("Warning: sys.config not found at #{sys_config}")
-    end
-  end
-
   defp release_root do
     :dodo_router
     |> :code.lib_dir()
