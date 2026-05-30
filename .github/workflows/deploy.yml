@@ -42,6 +42,7 @@ jobs:
         id: deploy_path
         run: |
           TARGET_VERSION="${{ steps.version.outputs.version }}"
+          REPO="${{ github.repository }}"
           
           # Get currently running version from server
           CURRENT_VERSION=$(ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 \
@@ -69,19 +70,38 @@ jobs:
           
           # Build list of versions to deploy sequentially
           VERSIONS_TO_DEPLOY=""
+          ALL_RELEASES_EXIST=true
+          
           for ((patch=CURRENT_PATCH+1; patch<=TARGET_PATCH; patch++)); do
             MAJOR_MINOR=$(echo "$CURRENT_VERSION" | awk -F. '{print $1 "." $2}')
             VERSION="${MAJOR_MINOR}.${patch}"
+            
             if [ -z "$VERSIONS_TO_DEPLOY" ]; then
               VERSIONS_TO_DEPLOY="$VERSION"
             else
               VERSIONS_TO_DEPLOY="${VERSIONS_TO_DEPLOY},${VERSION}"
             fi
+            
+            # Check if release exists on GitHub
+            if ! gh release view "v${VERSION}" --repo "$REPO" > /dev/null 2>&1; then
+              echo "WARNING: Release v${VERSION} does not exist on GitHub"
+              ALL_RELEASES_EXIST=false
+            fi
           done
           
           echo "Versions to deploy: $VERSIONS_TO_DEPLOY"
-          echo "deploy_versions=$VERSIONS_TO_DEPLOY" >> $GITHUB_OUTPUT
-          echo "full_install=false" >> $GITHUB_OUTPUT
+          echo "All releases exist: $ALL_RELEASES_EXIST"
+          
+          if [ "$ALL_RELEASES_EXIST" = "true" ]; then
+            echo "deploy_versions=$VERSIONS_TO_DEPLOY" >> $GITHUB_OUTPUT
+            echo "full_install=false" >> $GITHUB_OUTPUT
+          else
+            echo "WARNING: Missing intermediate releases - will do full restart to $TARGET_VERSION"
+            echo "deploy_versions=$TARGET_VERSION" >> $GITHUB_OUTPUT
+            echo "full_install=true" >> $GITHUB_OUTPUT
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Download releases
         run: |
