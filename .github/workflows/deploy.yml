@@ -10,6 +10,10 @@ on:
         required: true
         type: string
 
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
 jobs:
   deploy:
     runs-on: ubuntu-22.04
@@ -29,20 +33,74 @@ jobs:
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "Deploying version: $VERSION"
 
-      - name: Download release
-        run: |
-          mkdir -p /tmp/release
-          cd /tmp/release
-          gh release download "v${{ steps.version.outputs.version }}" \
-            --repo "${{ github.repository }}" \
-            --pattern "dodo_router-${{ steps.version.outputs.version }}.tar.gz"
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Setup Tailscale
         uses: tailscale/github-action@v2
         with:
           authkey: ${{ secrets.TAILSCALE_AUTHKEY }}
+
+      - name: Determine deploy path
+        id: deploy_path
+        run: |
+          TARGET_VERSION="${{ steps.version.outputs.version }}"
+          
+          # Get currently running version from server
+          CURRENT_VERSION=$(ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 \
+            ${{ secrets.APP_DEPLOY_USER }}@${{ secrets.APP_DEPLOY_HOST }} \
+            "~/dodorouter/current/dodo_router/bin/dodo_router version 2>/dev/null | awk '{print \$2}'" || echo "unknown")
+          
+          echo "Current running version: $CURRENT_VERSION"
+          echo "Target version: $TARGET_VERSION"
+          
+          if [ "$CURRENT_VERSION" = "unknown" ]; then
+            echo "No current version detected - will do full install"
+            echo "deploy_versions=$TARGET_VERSION" >> $GITHUB_OUTPUT
+            echo "full_install=true" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          
+          # Extract patch numbers
+          CURRENT_PATCH=$(echo "$CURRENT_VERSION" | awk -F. '{print $3}')
+          TARGET_PATCH=$(echo "$TARGET_VERSION" | awk -F. '{print $3}')
+          
+          if [ "$TARGET_PATCH" -le "$CURRENT_PATCH" ]; then
+            echo "ERROR: Target version $TARGET_VERSION is not newer than current $CURRENT_VERSION"
+            exit 1
+          fi
+          
+          # Build list of versions to deploy sequentially
+          VERSIONS_TO_DEPLOY=""
+          for ((patch=CURRENT_PATCH+1; patch<=TARGET_PATCH; patch++)); do
+            MAJOR_MINOR=$(echo "$CURRENT_VERSION" | awk -F. '{print $1 "." $2}')
+            VERSION="${MAJOR_MINOR}.${patch}"
+            if [ -z "$VERSIONS_TO_DEPLOY" ]; then
+              VERSIONS_TO_DEPLOY="$VERSION"
+            else
+              VERSIONS_TO_DEPLOY="${VERSIONS_TO_DEPLOY},${VERSION}"
+            fi
+          done
+          
+          echo "Versions to deploy: $VERSIONS_TO_DEPLOY"
+          echo "deploy_versions=$VERSIONS_TO_DEPLOY" >> $GITHUB_OUTPUT
+          echo "full_install=false" >> $GITHUB_OUTPUT
+
+      - name: Download releases
+        run: |
+          IFS=',' read -ra VERSIONS <<< "${{ steps.deploy_path.outputs.deploy_versions }}"
+          
+          mkdir -p /tmp/release
+          cd /tmp/release
+          
+          for VERSION in "${VERSIONS[@]}"; do
+            echo "Downloading v${VERSION}..."
+            gh release download "v${VERSION}" \
+              --repo "${{ github.repository }}" \
+              --pattern "dodo_router-${VERSION}.tar.gz" || {
+              echo "ERROR: Failed to download v${VERSION}"
+              exit 1
+            }
+          done
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Copy deploy script
         run: |
@@ -52,15 +110,31 @@ jobs:
 
       - name: Deploy to server
         run: |
-          # Copy release tarball to server
-          scp -o StrictHostKeyChecking=no -o ConnectTimeout=10 \
-            /tmp/release/dodo_router-${{ steps.version.outputs.version }}.tar.gz \
-            ${{ secrets.APP_DEPLOY_USER }}@${{ secrets.APP_DEPLOY_HOST }}:/tmp/dodo_router-${{ steps.version.outputs.version }}.tar.gz
-
-          # Run deploy script on server
-          ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 \
-            ${{ secrets.APP_DEPLOY_USER }}@${{ secrets.APP_DEPLOY_HOST }} \
-            "bash /tmp/deploy-server.sh ${{ steps.version.outputs.version }}"
+          IFS=',' read -ra VERSIONS <<< "${{ steps.deploy_path.outputs.deploy_versions }}"
+          FULL_INSTALL="${{ steps.deploy_path.outputs.full_install }}"
+          
+          if [ "$FULL_INSTALL" = "true" ]; then
+            VERSION="${VERSIONS[-1]}"
+            echo "Performing full install of v${VERSION}..."
+            scp -o StrictHostKeyChecking=no -o ConnectTimeout=10 \
+              /tmp/release/dodo_router-${VERSION}.tar.gz \
+              ${{ secrets.APP_DEPLOY_USER }}@${{ secrets.APP_DEPLOY_HOST }}:/tmp/dodo_router-${VERSION}.tar.gz
+            ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 \
+              ${{ secrets.APP_DEPLOY_USER }}@${{ secrets.APP_DEPLOY_HOST }} \
+              "systemctl --user stop dodo-router && rm -rf ~/dodorouter/current/* && cd ~/dodorouter/current && tar xzf /tmp/dodo_router-${VERSION}.tar.gz && systemctl --user start dodo-router"
+          else
+            # Sequential hot upgrades
+            for VERSION in "${VERSIONS[@]}"; do
+              echo "Deploying v${VERSION} via hot upgrade..."
+              scp -o StrictHostKeyChecking=no -o ConnectTimeout=10 \
+                /tmp/release/dodo_router-${VERSION}.tar.gz \
+                ${{ secrets.APP_DEPLOY_USER }}@${{ secrets.APP_DEPLOY_HOST }}:/tmp/dodo_router-${VERSION}.tar.gz
+              ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 \
+                ${{ secrets.APP_DEPLOY_USER }}@${{ secrets.APP_DEPLOY_HOST }} \
+                "cp /tmp/dodo_router-${VERSION}.tar.gz ~/dodorouter/current/dodo_router/releases/${VERSION}.tar.gz && ~/dodorouter/current/dodo_router/bin/upgrade ${VERSION}"
+              echo "v${VERSION} deployed successfully"
+            done
+          fi
 
       - name: Health check
         run: |
