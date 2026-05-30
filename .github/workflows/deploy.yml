@@ -145,10 +145,24 @@ jobs:
               scp -o StrictHostKeyChecking=no -o ConnectTimeout=10 \
                 /tmp/release/dodo_router-${VERSION}.tar.gz \
                 ${{ secrets.APP_DEPLOY_USER }}@${{ secrets.APP_DEPLOY_HOST }}:/tmp/dodo_router-${VERSION}.tar.gz
+              
+              # Run upgrade but don't fail immediately - the RPC process gets killed after make_permanent
               ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 \
                 ${{ secrets.APP_DEPLOY_USER }}@${{ secrets.APP_DEPLOY_HOST }} \
-                "cp /tmp/dodo_router-${VERSION}.tar.gz ~/dodorouter/current/dodo_router/releases/${VERSION}.tar.gz && ~/dodorouter/current/dodo_router/bin/upgrade ${VERSION}"
-              echo "v${VERSION} deployed successfully"
+                "cp /tmp/dodo_router-${VERSION}.tar.gz ~/dodorouter/current/dodo_router/releases/${VERSION}.tar.gz && ~/dodorouter/current/dodo_router/bin/upgrade ${VERSION}" || true
+              
+              # Verify upgrade succeeded by checking version
+              sleep 3
+              CURRENT_VERSION=$(ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 \
+                ${{ secrets.APP_DEPLOY_USER }}@${{ secrets.APP_DEPLOY_HOST }} \
+                "~/dodorouter/current/dodo_router/bin/dodo_router version 2>/dev/null | awk '{print \$2}'" || echo "unknown")
+              
+              if [ "$CURRENT_VERSION" = "$VERSION" ]; then
+                echo "v${VERSION} deployed successfully (verified)"
+              else
+                echo "ERROR: Version verification failed. Expected ${VERSION}, got ${CURRENT_VERSION}"
+                exit 1
+              fi
             done
           fi
 
