@@ -137,7 +137,7 @@ jobs:
               ${{ secrets.APP_DEPLOY_USER }}@${{ secrets.APP_DEPLOY_HOST }}:/tmp/dodo_router-${VERSION}.tar.gz
             ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 \
               ${{ secrets.APP_DEPLOY_USER }}@${{ secrets.APP_DEPLOY_HOST }} \
-              "systemctl --user stop dodo-router && rm -rf ~/dodorouter/current/* && cd ~/dodorouter/current && tar xzf /tmp/dodo_router-${VERSION}.tar.gz && systemctl --user start dodo-router"
+              "systemctl --user stop dodo-router && rm -rf ~/dodorouter/current/* && mkdir -p ~/dodorouter/current/dodo_router && tar xzf /tmp/dodo_router-${VERSION}.tar.gz -C ~/dodorouter/current/dodo_router && systemctl --user start dodo-router"
           else
             # Sequential hot upgrades
             for VERSION in "${VERSIONS[@]}"; do
@@ -146,10 +146,15 @@ jobs:
                 /tmp/release/dodo_router-${VERSION}.tar.gz \
                 ${{ secrets.APP_DEPLOY_USER }}@${{ secrets.APP_DEPLOY_HOST }}:/tmp/dodo_router-${VERSION}.tar.gz
               
+              # Copy flat tarball directly to releases dir (no extraction/repacking needed)
+              ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 \
+                ${{ secrets.APP_DEPLOY_USER }}@${{ secrets.APP_DEPLOY_HOST }} \
+                "cp /tmp/dodo_router-${VERSION}.tar.gz ~/dodorouter/current/dodo_router/releases/${VERSION}.tar.gz"
+              
               # Run upgrade but don't fail immediately - the RPC process gets killed after make_permanent
               ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 \
                 ${{ secrets.APP_DEPLOY_USER }}@${{ secrets.APP_DEPLOY_HOST }} \
-                "cp /tmp/dodo_router-${VERSION}.tar.gz ~/dodorouter/current/dodo_router/releases/${VERSION}.tar.gz && ~/dodorouter/current/dodo_router/bin/upgrade ${VERSION}" || true
+                "~/dodorouter/current/dodo_router/bin/upgrade ${VERSION}" || true
               
               # Verify upgrade succeeded by checking version
               sleep 3

@@ -9,8 +9,6 @@ defmodule DodoRouter.Upgrade do
   def install(version) when is_binary(version) do
     :application.start(:sasl)
 
-    # number taker
-
     root = release_root()
     tarball = Path.join([root, "releases", "#{version}.tar.gz"])
 
@@ -20,22 +18,6 @@ defmodule DodoRouter.Upgrade do
 
     IO.puts("=== Starting hot upgrade to #{version} ===")
 
-    tmp = "/tmp/dodo_upgrade_#{version}"
-    File.rm_rf!(tmp)
-    File.mkdir_p!(tmp)
-
-    :erl_tar.extract(tarball, [:compressed, {:cwd, tmp}])
-
-    src = if File.dir?(Path.join(tmp, "dodo_router")), do: Path.join(tmp, "dodo_router"), else: tmp
-
-    old_rel = Path.join([src, "releases", "dodo_router-#{version}.rel"])
-    new_rel = Path.join([src, "releases", "#{version}.rel"])
-    if File.exists?(old_rel), do: File.rename!(old_rel, new_rel)
-
-    # Use OS tar to avoid OTP erl_tar compressed create bug
-    System.cmd("tar", ["czf", tarball, "-C", src | File.ls!(src)])
-    File.rm_rf!(tmp)
-
     current_vsn =
       :release_handler.which_releases()
       |> Enum.find(fn {_, _, _, s} -> s == :permanent end)
@@ -44,25 +26,25 @@ defmodule DodoRouter.Upgrade do
 
     v = to_charlist(version)
 
-    Path.join([root, "releases", "COOKIE"]) |> File.read!() |> then(fn cookie ->
-      IO.puts("Unpacking release #{version}...")
+    IO.puts("Unpacking release #{version}...")
+    case :release_handler.unpack_release(v) do
+      :ok -> :ok
+      {:ok, _} -> :ok
+      {:error, {:existing_release, _}} ->
+        IO.puts("Release #{version} already unpacked, proceeding...")
+      other ->
+        raise "Failed to unpack release #{version}: #{inspect(other)}"
+    end
 
-      case :release_handler.unpack_release(v) do
-        :ok -> :ok
-        {:ok, _} -> :ok
-        {:error, {:existing_release, _}} ->
-          IO.puts("Release #{version} already unpacked, proceeding...")
-        other ->
-          raise "Failed to unpack release #{version}: #{inspect(other)}"
-      end
+    # Release_handler.unpack_release does NOT extract lib files — only processes
+    # the release metadata. We must explicitly extract lib files from the tarball.
+    extract_lib(tarball, root, version)
 
-      # Release_handler.unpack_release does NOT extract lib files — only processes
-      # the release metadata. We must explicitly extract lib files from the tarball.
-      extract_lib(tarball, root, version)
-
-      # Restore COOKIE — the tarball contains one that may be stale
-      File.write!(Path.join([root, "releases", "COOKIE"]), cookie)
-    end)
+    # Castle generates sys.config from runtime.exs during boot, but for hot
+    # upgrades we must generate it BEFORE install_release so the config is
+    # available when OTP reloads the application environment.
+    IO.puts("Generating sys.config for #{version}...")
+    Castle.generate(version)
 
     # Copy relup from new release to current release (release_handler looks for it in current's dir)
     relup_src = Path.join([root, "releases", version, "relup"])
@@ -73,12 +55,6 @@ defmodule DodoRouter.Upgrade do
     else
       IO.puts("No relup file found at #{relup_src} — upgrade will fail")
     end
-
-    # Castle generates sys.config from runtime.exs during boot, but for hot
-    # upgrades we must generate it BEFORE install_release so the config is
-    # available when OTP reloads the application environment.
-    IO.puts("Generating sys.config for #{version}...")
-    Castle.generate(version)
 
     IO.puts("Installing release #{version}...")
     {:ok, _, _} = :release_handler.install_release(v)
@@ -97,8 +73,7 @@ defmodule DodoRouter.Upgrade do
 
     :erl_tar.extract(tarball, [:compressed, {:cwd, tmp}])
 
-    src = if File.dir?(Path.join(tmp, "dodo_router")), do: Path.join(tmp, "dodo_router"), else: tmp
-    lib_src = Path.join(src, "lib")
+    lib_src = Path.join(tmp, "lib")
 
     if File.dir?(lib_src) do
       lib_root = Path.join(root, "lib")
