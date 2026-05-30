@@ -74,16 +74,17 @@ defmodule DodoRouter.Upgrade do
       IO.puts("No relup file found at #{relup_src} — upgrade will fail")
     end
 
+    # Castle generates sys.config from runtime.exs during boot, but for hot
+    # upgrades we must generate it BEFORE install_release so the config is
+    # available when OTP reloads the application environment.
+    IO.puts("Generating sys.config for #{version}...")
+    Castle.generate(version)
+
     IO.puts("Installing release #{version}...")
     {:ok, _, _} = :release_handler.install_release(v)
 
     IO.puts("Making permanent...")
     :ok = :release_handler.make_permanent(v)
-
-    # Reload application configuration from the new release's sys.config
-    # release_handler.install_release should do this, but we've seen it fail
-    # silently in some OTP versions, leaving the app env stale.
-    reload_config(root, version)
 
     IO.puts("Successfully upgraded to #{version}")
     IO.puts("Hot upgrade complete at #{DateTime.utc_now()}")
