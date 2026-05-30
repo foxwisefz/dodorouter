@@ -24,7 +24,6 @@ defmodule DodoRouterWeb.SidebarActivityLive do
          routers: [],
          activity: %{},
          total_active: 0,
-         requests: %{},
          current_path: current_path
        )}
     else
@@ -32,7 +31,7 @@ defmodule DodoRouterWeb.SidebarActivityLive do
       routers = Routers.list_routers_with_step_count(user)
       router_ids = Enum.map(routers, & &1.id)
 
-      # Read initial activity state from Agent
+      # Read initial activity state from Activity (source of truth)
       activity = Activity.get_routers_counts(router_ids)
       total_active = Activity.get_total_active(router_ids)
 
@@ -47,8 +46,6 @@ defmodule DodoRouterWeb.SidebarActivityLive do
         |> assign(:routers, routers)
         |> assign(:activity, activity)
         |> assign(:total_active, total_active)
-        # request_id => {router_id, status}
-        |> assign(:requests, %{})
         |> assign(:current_path, current_path)
 
       {:ok, socket}
@@ -121,107 +118,39 @@ defmodule DodoRouterWeb.SidebarActivityLive do
   end
 
   @impl true
-  def handle_info({:log_pending, pending}, socket) do
-    router_id = pending.router_id || pending.router.id
-    request_id = pending.request_id
-
-    requests = Map.put(socket.assigns.requests, request_id, {router_id, :primary})
-    activity = update_activity_count(socket.assigns.activity, router_id, :primary, +1)
-    total_active = socket.assigns.total_active + 1
-
-    {:noreply,
-     socket
-     |> assign(:requests, requests)
-     |> assign(:activity, activity)
-     |> assign(:total_active, total_active)}
-  end
-
-  @impl true
-  def handle_info(
-        {:step_started, %{request_id: request_id, router_id: router_id, step_index: step_index}},
-        socket
-      )
-      when step_index > 0 do
-    requests = socket.assigns.requests
-
-    case Map.get(requests, request_id) do
-      {^router_id, :primary} ->
-        new_requests = Map.put(requests, request_id, {router_id, :fallback})
-
-        activity =
-          socket.assigns.activity
-          |> update_activity_count(router_id, :primary, -1)
-          |> update_activity_count(router_id, :fallback, +1)
-
-        {:noreply,
-         socket
-         |> assign(:requests, new_requests)
-         |> assign(:activity, activity)}
-
-      _ ->
-        {:noreply, socket}
-    end
+  def handle_info({:log_pending, _pending}, socket) do
+    {:noreply, refresh_activity(socket)}
   end
 
   @impl true
   def handle_info({:step_started, _}, socket) do
-    {:noreply, socket}
+    {:noreply, refresh_activity(socket)}
   end
 
   @impl true
-  def handle_info({:proxy_event, %{request_id: request_id, router_id: router_id}}, socket) do
-    remove_request(socket, request_id, router_id)
+  def handle_info({:proxy_event, _}, socket) do
+    {:noreply, refresh_activity(socket)}
   end
 
   @impl true
-  def handle_info({:log_created, log}, socket) do
-    router_id = log.router_id
-    request_id = log.request_id
-    remove_request(socket, request_id, router_id)
+  def handle_info({:log_created, _}, socket) do
+    {:noreply, refresh_activity(socket)}
   end
 
   @impl true
   def handle_info({:step_completed, _}, socket) do
-    {:noreply, socket}
+    {:noreply, refresh_activity(socket)}
   end
 
-  defp remove_request(socket, request_id, router_id) do
-    requests = socket.assigns.requests
+  # Refresh activity counts from Activity (source of truth).
+  # Called on every event to ensure we never go out of sync.
+  defp refresh_activity(socket) do
+    router_ids = Enum.map(socket.assigns.routers, & &1.id)
+    activity = Activity.get_routers_counts(router_ids)
+    total_active = Activity.get_total_active(router_ids)
 
-    case Map.pop(requests, request_id) do
-      {{^router_id, status}, new_requests} ->
-        activity = update_activity_count(socket.assigns.activity, router_id, status, -1)
-        total_active = max(0, socket.assigns.total_active - 1)
-
-        {:noreply,
-         socket
-         |> assign(:requests, new_requests)
-         |> assign(:activity, activity)
-         |> assign(:total_active, total_active)}
-
-      _ ->
-        # Request not tracked locally (e.g., after reconnect/hot upgrade).
-        # Re-sync activity counts from Activity to avoid stale UI.
-        activity = Activity.get_routers_counts(socket.assigns.routers |> Enum.map(& &1.id))
-        total_active = Activity.get_total_active(socket.assigns.routers |> Enum.map(& &1.id))
-
-        {:noreply,
-         socket
-         |> assign(:activity, activity)
-         |> assign(:total_active, total_active)}
-    end
-  end
-
-  defp update_activity_count(activity, router_id, status, delta) do
-    {primary, fallback} = Map.get(activity, router_id, {0, 0})
-
-    new_counts =
-      case status do
-        :primary -> {max(0, primary + delta), fallback}
-        :fallback -> {primary, max(0, fallback + delta)}
-        _ -> {primary, fallback}
-      end
-
-    Map.put(activity, router_id, new_counts)
+    socket
+    |> assign(:activity, activity)
+    |> assign(:total_active, total_active)
   end
 end
