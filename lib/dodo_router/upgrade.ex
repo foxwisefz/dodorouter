@@ -30,12 +30,27 @@ defmodule DodoRouter.Upgrade do
     v = to_charlist(version)
 
     # Handle old tarball format where .rel file is named dodo_router-{vsn}.rel
-    # instead of {vsn}.rel. release_handler expects {vsn}.rel.
-    old_rel = Path.join([root, "releases", "dodo_router-#{version}.rel"])
-    new_rel = Path.join([root, "releases", "#{version}.rel"])
-    if File.exists?(old_rel) and not File.exists?(new_rel) do
-      File.rename!(old_rel, new_rel)
-      IO.puts("Renamed .rel file to #{version}.rel")
+    # instead of {vsn}.rel. We must extract the tarball first, fix the naming,
+    # then call release_handler.unpack_release.
+    rel_dir = Path.join([root, "releases", version])
+    expected_rel = Path.join([root, "releases", "#{version}.rel"])
+    old_rel_name = "dodo_router-#{version}.rel"
+
+    if not File.exists?(expected_rel) do
+      tmp = "/tmp/dodo_relfix_#{version}"
+      File.rm_rf!(tmp)
+      File.mkdir_p!(tmp)
+      :erl_tar.extract(tarball, [:compressed, {:cwd, tmp}])
+
+      # Check if the old .rel file exists in the extracted tarball
+      old_rel = Path.join(tmp, old_rel_name)
+      if File.exists?(old_rel) do
+        File.mkdir_p!(Path.dirname(expected_rel))
+        File.cp!(old_rel, expected_rel)
+        IO.puts("Fixed .rel file naming for #{version}")
+      end
+
+      File.rm_rf!(tmp)
     end
 
     IO.puts("Unpacking release #{version}...")
