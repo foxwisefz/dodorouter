@@ -200,7 +200,15 @@ defmodule DodoRouterWeb.SidebarActivityLive do
          |> assign(:total_active, total_active)}
 
       _ ->
-        {:noreply, socket}
+        # Request not tracked locally (e.g., after reconnect/hot upgrade).
+        # Re-sync activity counts from Activity to avoid stale UI.
+        activity = Activity.get_routers_counts(socket.assigns.routers |> Enum.map(& &1.id))
+        total_active = Activity.get_total_active(socket.assigns.routers |> Enum.map(& &1.id))
+
+        {:noreply,
+         socket
+         |> assign(:activity, activity)
+         |> assign(:total_active, total_active)}
     end
   end
 
