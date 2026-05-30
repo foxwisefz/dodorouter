@@ -84,15 +84,6 @@ jobs:
             if [ -f "/tmp/prev-release/dodo_router-${PREV_VERSION}.tar.gz" ]; then
               mkdir -p /tmp/prev-release/extracted
               tar xzf "/tmp/prev-release/dodo_router-${PREV_VERSION}.tar.gz" -C /tmp/prev-release/extracted
-              
-              # Handle both flat and prefixed tarball formats
-              if [ -d "/tmp/prev-release/extracted/dodo_router" ]; then
-                # Old format with dodo_router/ prefix
-                mv /tmp/prev-release/extracted/dodo_router /tmp/prev-release/extracted/dodo_router_moved
-                mv /tmp/prev-release/extracted/dodo_router_moved/* /tmp/prev-release/extracted/
-                rmdir /tmp/prev-release/extracted/dodo_router_moved 2>/dev/null || true
-              fi
-              
               echo "prev_extracted=true" >> $GITHUB_OUTPUT
               echo "Extracted previous release"
             else
@@ -111,20 +102,16 @@ jobs:
           CURR_VERSION="${{ steps.version.outputs.version }}"
 
           PREV_REL_FILE="dodo_router-${PREV_VERSION}.rel"
-          PREV_REL_DIR="/tmp/prev-release/extracted/releases"
+          PREV_REL_DIR="/tmp/prev-release/extracted/dodo_router/releases"
 
-          # The .rel file could be at releases/<vsn>/dodo_router or releases/<vsn>/{vsn}
+          # The .rel file could be at releases/<vsn>/dodo_router or releases/dodo_router-<vsn>
           if [ -f "${PREV_REL_DIR}/${PREV_VERSION}/dodo_router.rel" ]; then
             FROMTO="${PREV_REL_DIR}/${PREV_VERSION}/dodo_router"
-          elif [ -f "${PREV_REL_DIR}/${PREV_VERSION}/${PREV_VERSION}.rel" ]; then
-            FROMTO="${PREV_REL_DIR}/${PREV_VERSION}/${PREV_VERSION}"
           elif [ -f "${PREV_REL_DIR}/${PREV_REL_FILE}" ]; then
             # For flat rel files, strip .rel extension
             FROMTO="${PREV_REL_DIR}/${PREV_REL_FILE%.rel}"
           else
             echo "ERROR: Previous release .rel file not found"
-            echo "Searched in:"
-            ls -la "${PREV_REL_DIR}/${PREV_VERSION}/" 2>/dev/null || true
             exit 1
           fi
 
@@ -143,25 +130,13 @@ jobs:
           fi
 
       - name: Rebuild tarball with relup
+        if: steps.previous.outputs.prev_version != ''
         run: |
           CURR_VERSION="${{ steps.version.outputs.version }}"
-          
-          # Release handler expects .rel file named as {vsn}.rel, not dodo_router.rel
-          # Rename it so hot upgrades work without extraction/repacking
-          cd _build/prod/rel/dodo_router
-          if [ -f "releases/${CURR_VERSION}/dodo_router.rel" ]; then
-            cp "releases/${CURR_VERSION}/dodo_router.rel" "releases/${CURR_VERSION}/${CURR_VERSION}.rel"
-          fi
-          if [ -f "releases/dodo_router-${CURR_VERSION}.rel" ]; then
-            mv "releases/dodo_router-${CURR_VERSION}.rel" "releases/${CURR_VERSION}.rel" 2>/dev/null || true
-          fi
-          
-          # Create flat upgrade tarball (no dodo_router/ prefix)
-          # This is what release_handler.unpack_release expects
-          tar czf "../dodo_router-${CURR_VERSION}.tar.gz" *
-          
-          cd ..
-          echo "Created flat tarball: dodo_router-${CURR_VERSION}.tar.gz"
+          # Recreate tarball with relup included
+          cd _build/prod/rel
+          tar czf "dodo_router-${CURR_VERSION}.tar.gz" dodo_router
+          mv "dodo_router-${CURR_VERSION}.tar.gz" ../
 
       - name: Upload release artifact
         uses: actions/upload-artifact@v4
