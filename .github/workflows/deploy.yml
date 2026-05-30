@@ -124,12 +124,6 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Copy deploy script
-        run: |
-          scp -o StrictHostKeyChecking=no -o ConnectTimeout=10 \
-            infra/deploy-server.sh \
-            ${{ secrets.APP_DEPLOY_USER }}@${{ secrets.APP_DEPLOY_HOST }}:/tmp/deploy-server.sh
-
       - name: Deploy to server
         run: |
           IFS=',' read -ra VERSIONS <<< "${{ steps.deploy_path.outputs.deploy_versions }}"
