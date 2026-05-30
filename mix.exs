@@ -124,7 +124,8 @@ defmodule DodoRouter.MixProject do
 
     if File.exists?(upgrade_script) do
       content = File.read!(upgrade_script)
-      patched = String.replace(content, "'$VERSION'", "\"$VERSION\"")
+      # Need escaped quotes since we're inside outer double quotes
+      patched = String.replace(content, "'$VERSION'", "\\\"$VERSION\\\"")
       File.write!(upgrade_script, patched)
     end
 
