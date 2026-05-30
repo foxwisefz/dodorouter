@@ -26,6 +26,15 @@ defmodule DodoRouter.Upgrade do
 
     v = to_charlist(version)
 
+    # Handle old tarball format where .rel file is named dodo_router-{vsn}.rel
+    # instead of {vsn}.rel. release_handler expects {vsn}.rel.
+    old_rel = Path.join([root, "releases", "dodo_router-#{version}.rel"])
+    new_rel = Path.join([root, "releases", "#{version}.rel"])
+    if File.exists?(old_rel) and not File.exists?(new_rel) do
+      File.rename!(old_rel, new_rel)
+      IO.puts("Renamed .rel file to #{version}.rel")
+    end
+
     IO.puts("Unpacking release #{version}...")
     case :release_handler.unpack_release(v) do
       :ok -> :ok
