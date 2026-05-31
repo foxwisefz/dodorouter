@@ -32,7 +32,7 @@ defmodule DodoRouter.MixProject do
         strip_beams: true,
         include_erts: true,
         applications: [sasl: :permanent],
-        steps: [&Forecastle.pre_assemble/1, :assemble, &compile_appup/1, &patch_upgrade_script/1, &Forecastle.post_assemble/1, :tar]
+        steps: [&Forecastle.pre_assemble/1, :assemble, &compile_appup/1, &Forecastle.post_assemble/1, :tar]
       ]
     ]
   end
@@ -119,15 +119,4 @@ defmodule DodoRouter.MixProject do
     release
   end
 
-  defp patch_upgrade_script(release) do
-    upgrade_script = Path.join([release.path, "bin", "upgrade"])
-
-    if File.exists?(upgrade_script) do
-      content = File.read!(upgrade_script)
-      patched = String.replace(content, "'$VERSION'", "\"$VERSION\"")
-      File.write!(upgrade_script, patched)
-    end
-
-    release
-  end
 end
