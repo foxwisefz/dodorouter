@@ -24,7 +24,7 @@ defmodule DodoRouter.Upgrade do
 
     :erl_tar.extract(tarball, [:compressed, {:cwd, tmp}])
 
-    src = if File.dir?(Path.join(tmp, "dodo_router")), do: Path.join(tmp, "dodo_router"), else: tmp
+    src = Path.join(tmp, "dodo_router")
 
     old_rel = Path.join([src, "releases", "dodo_router-#{version}.rel"])
     new_rel = Path.join([src, "releases", "#{version}.rel"])
@@ -95,7 +95,7 @@ defmodule DodoRouter.Upgrade do
 
     :erl_tar.extract(tarball, [:compressed, {:cwd, tmp}])
 
-    src = if File.dir?(Path.join(tmp, "dodo_router")), do: Path.join(tmp, "dodo_router"), else: tmp
+    src = Path.join(tmp, "dodo_router")
     lib_src = Path.join(src, "lib")
 
     if File.dir?(lib_src) do

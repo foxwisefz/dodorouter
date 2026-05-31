@@ -102,19 +102,10 @@ jobs:
           CURR_VERSION="${{ steps.version.outputs.version }}"
 
           PREV_REL_FILE="dodo_router-${PREV_VERSION}.rel"
-          # Handle both old format (with dodo_router/ prefix) and flat format
-          if [ -d "/tmp/prev-release/extracted/dodo_router" ]; then
-            PREV_REL_DIR="/tmp/prev-release/extracted/dodo_router/releases"
-          else
-            PREV_REL_DIR="/tmp/prev-release/extracted/releases"
-          fi
+          PREV_REL_DIR="/tmp/prev-release/extracted/dodo_router/releases"
 
-          # The .rel file could be at releases/<vsn>/dodo_router or releases/dodo_router-<vsn>
           if [ -f "${PREV_REL_DIR}/${PREV_VERSION}/dodo_router.rel" ]; then
             FROMTO="${PREV_REL_DIR}/${PREV_VERSION}/dodo_router"
-          elif [ -f "${PREV_REL_DIR}/${PREV_REL_FILE}" ]; then
-            # For flat rel files, strip .rel extension
-            FROMTO="${PREV_REL_DIR}/${PREV_REL_FILE%.rel}"
           else
             echo "ERROR: Previous release .rel file not found"
             echo "Searched in:"
