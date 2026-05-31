@@ -310,6 +310,15 @@
         </main>
       </div>
 
+      <%!-- Footer --%>
+      <footer class={[
+        "fixed bottom-0 right-0 z-40 px-4 py-2 text-xs text-base-content/30 bg-base-100/80 backdrop-blur border-t border-base-300/30 transition-all duration-200",
+        @current_scope.user.sidebar_collapsed && "lg:left-16",
+        !@current_scope.user.sidebar_collapsed && "lg:left-56"
+      ]}>
+        v<%= Application.spec(:dodo_router, :vsn) |> to_string() %>
+      </footer>
+
       <%!-- Mobile Sidebar Drawer (overlay) --%>
       <div class="lg:hidden fixed inset-0 z-40 pointer-events-none peer-checked:pointer-events-auto">
         <%!-- Backdrop --%>
