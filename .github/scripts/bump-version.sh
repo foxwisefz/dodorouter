@@ -26,38 +26,37 @@ NEW_VERSION="${MAJOR}.${MINOR}.${NEW_PATCH}"
 sed -i.bak -E "s/(version: \")${CURRENT_VERSION}(\",)/\1${NEW_VERSION}\2/" "$MIX_FILE"
 rm -f "$MIX_FILE.bak"
 
-# Update appup.ex:
-#   1. Shift old version refs forward (N-1 → N) globally
-#   2. Bump the new version (first ~c"N" → ~c"N+1")
-if [ -f "$APPUP_FILE" ]; then
-  # Compute previous patch (N-1)
-  OLD_OLD_PATCH=$((PATCH - 1))
+# Generate fresh appup.ex with empty instructions
+# (Developers should manually add module changes when needed)
+cat > "$APPUP_FILE" << EOF
+# Appup file for DodoRouter
+# This describes how to upgrade the application between versions
+# Castle's :appup compiler reads this and copies it into the release ebin directory
+# Format: {NewVsn, [{OldVsn, [Instructions]}], [{OldVsn, [Instructions]}]}
+#
+# Instructions:
+#   {load_module, Module} - reload a changed module
+#   {update, Module, {advanced, []}} - update a GenServer/Agent and call code_change/3
+#   {add_module, Module} - add a new module
+#   {delete_module, Module} - remove a deleted module
 
-  if [ "$OLD_OLD_PATCH" -ge 0 ]; then
-    OLD_OLD_VERSION="${MAJOR}.${MINOR}.${OLD_OLD_PATCH}"
-
-    # Step 1: shift all old-old refs to current version
-    sed -i.bak -E "s/~c\"${OLD_OLD_VERSION}\"/~c\"${CURRENT_VERSION}\"/g" "$APPUP_FILE"
-    rm -f "$APPUP_FILE.bak"
-  fi
-
-  # Step 2: bump the new version (first occurrence in entire file)
-  # GNU sed: 0,/pattern/{s//replacement/} replaces only first file-wide match
-  sed -i.bak -E "0,/~c\"${CURRENT_VERSION}\"/{s//~c\"${NEW_VERSION}\"/}" "$APPUP_FILE"
-  rm -f "$APPUP_FILE.bak"
-
-  echo "Updated appup: ${CURRENT_VERSION} -> ${NEW_VERSION}"
-fi
+{
+  ~c"${NEW_VERSION}",
+  [
+    {~c"${CURRENT_VERSION}", []}
+  ],
+  [
+    {~c"${CURRENT_VERSION}", []}
+  ]
+}
+EOF
 
 echo "Bumped version: ${CURRENT_VERSION} -> ${NEW_VERSION}"
 
 # Configure git and commit
 git config user.name "github-actions[bot]"
 git config user.email "github-actions[bot]@users.noreply.github.com"
-git add "$MIX_FILE"
-if [ -f "$APPUP_FILE" ]; then
-  git add "$APPUP_FILE"
-fi
+git add "$MIX_FILE" "$APPUP_FILE"
 git commit -m "Bump version to ${NEW_VERSION} [skip ci]"
 git push
 
