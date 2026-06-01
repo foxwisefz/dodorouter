@@ -316,7 +316,7 @@
         @current_scope.user.sidebar_collapsed && "lg:left-16",
         !@current_scope.user.sidebar_collapsed && "lg:left-56"
       ]}>
-        v<%= Application.spec(:dodo_router, :vsn) |> to_string() %>
+        v{Application.spec(:dodo_router, :vsn) |> to_string()}
       </footer>
 
       <%!-- Mobile Sidebar Drawer (overlay) --%>

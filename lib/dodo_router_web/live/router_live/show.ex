@@ -328,6 +328,9 @@ defmodule DodoRouterWeb.RouterLive.Show do
               <div>
                 <h1 class="text-2xl font-bold">{@router.name}</h1>
                 <p class="text-base-content/50 font-mono text-sm">{@router.slug}</p>
+                <p class="text-xs text-base-content/40 mt-0.5">
+                  Session header: <span class="font-mono">{@router.session_header}</span>
+                </p>
               </div>
             </div>
           </div>

@@ -263,9 +263,13 @@ defmodule DodoRouterWeb.ResponsesProxyController do
   end
 
   defp extract_session(conn) do
+    router = conn.assigns.current_router
+    session_header = router.session_header || "x-session-id"
+    session_name_header = String.replace(session_header, "-id", "-name")
+
     %{
-      session_id: get_req_header(conn, "x-session-id") |> List.first(),
-      session_name: get_req_header(conn, "x-session-name") |> List.first()
+      session_id: get_req_header(conn, session_header) |> List.first(),
+      session_name: get_req_header(conn, session_name_header) |> List.first()
     }
   end
 

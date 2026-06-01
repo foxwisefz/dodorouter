@@ -336,6 +336,16 @@ defmodule DodoRouter.Logs do
   end
 
   @doc """
+  Updates the session_name for all logs in a session.
+  """
+  def update_session_name(%Router{} = router, session_id, session_name) do
+    from(l in RequestLog,
+      where: l.router_id == ^router.id and l.session_id == ^session_id
+    )
+    |> Repo.update_all(set: [session_name: session_name])
+  end
+
+  @doc """
   Gets aggregate stats for a session.
   """
   def session_stats(%Router{} = router, session_id) do

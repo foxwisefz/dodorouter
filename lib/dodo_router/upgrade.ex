@@ -42,14 +42,21 @@ defmodule DodoRouter.Upgrade do
 
     v = to_charlist(version)
 
-    Path.join([root, "releases", "COOKIE"]) |> File.read!() |> then(fn cookie ->
+    Path.join([root, "releases", "COOKIE"])
+    |> File.read!()
+    |> then(fn cookie ->
       IO.puts("Unpacking release #{version}...")
 
       case :release_handler.unpack_release(v) do
-        :ok -> :ok
-        {:ok, _} -> :ok
+        :ok ->
+          :ok
+
+        {:ok, _} ->
+          :ok
+
         {:error, {:existing_release, _}} ->
           IO.puts("Release #{version} already unpacked, proceeding...")
+
         other ->
           raise "Failed to unpack release #{version}: #{inspect(other)}"
       end
@@ -65,6 +72,7 @@ defmodule DodoRouter.Upgrade do
     # Copy relup from new release to current release (release_handler looks for it in current's dir)
     relup_src = Path.join([root, "releases", version, "relup"])
     relup_dst = Path.join([root, "releases", current_vsn, "relup"])
+
     if File.exists?(relup_src) do
       File.cp!(relup_src, relup_dst)
       IO.puts("Copied relup to #{current_vsn} for upgrade to #{version}")

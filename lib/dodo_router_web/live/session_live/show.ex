@@ -17,6 +17,7 @@ defmodule DodoRouterWeb.SessionLive.Show do
       |> assign(:router, router)
       |> assign(:session_id, session_id)
       |> assign(:page_title, "Session #{session_id}")
+      |> assign(:editing_name, false)
       |> load_data()
 
     {:ok, socket}
@@ -38,15 +39,58 @@ defmodule DodoRouterWeb.SessionLive.Show do
   def handle_info(_msg, socket), do: {:noreply, socket}
 
   @impl true
+  def handle_event("edit_name", _params, socket) do
+    {:noreply, assign(socket, :editing_name, true)}
+  end
+
+  def handle_event("cancel_edit", _params, socket) do
+    {:noreply, assign(socket, :editing_name, false)}
+  end
+
+  def handle_event("save_name", %{"session_name" => session_name}, socket) do
+    router = socket.assigns.router
+    session_id = socket.assigns.session_id
+
+    Logs.update_session_name(router, session_id, session_name)
+
+    {:noreply,
+     socket
+     |> assign(:editing_name, false)
+     |> assign(:session_name, session_name)}
+  end
+
+  @impl true
   def render(assigns) do
     ~H"""
     <div>
       <div class="flex items-center gap-3 mb-6">
         <a href={~p"/routers/#{@router.id}/sessions"} class="btn btn-ghost btn-sm btn-circle">←</a>
-        <div>
-          <h1 class="text-xl font-bold">
-            {if @session_name, do: @session_name, else: "Session"}
-          </h1>
+        <div class="flex-1">
+          <%= if @editing_name do %>
+            <form phx-submit="save_name" class="flex items-center gap-2">
+              <input
+                type="text"
+                name="session_name"
+                value={@session_name || ""}
+                placeholder="Session name"
+                class="input input-sm input-bordered w-full max-w-xs"
+                phx-mounted={JS.focus()}
+              />
+              <button type="submit" class="btn btn-sm btn-primary">Save</button>
+              <button type="button" phx-click="cancel_edit" class="btn btn-sm btn-ghost">
+                Cancel
+              </button>
+            </form>
+          <% else %>
+            <div class="flex items-center gap-2">
+              <h1 class="text-xl font-bold">
+                {if @session_name, do: @session_name, else: "Session"}
+              </h1>
+              <button phx-click="edit_name" class="btn btn-ghost btn-xs" title="Edit name">
+                <.icon name="hero-pencil" class="size-3" />
+              </button>
+            </div>
+          <% end %>
           <p class="text-sm font-mono text-base-content/50">{@session_id}</p>
         </div>
       </div>
