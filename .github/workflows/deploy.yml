@@ -124,6 +124,17 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Run database migrations
+        run: |
+          echo "Running database migrations before deploy..."
+          ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 \
+            ${{ secrets.APP_DEPLOY_USER }}@${{ secrets.APP_DEPLOY_HOST }} \
+            "~/dodorouter/current/bin/migrate" || {
+            echo "ERROR: Database migration failed"
+            exit 1
+          }
+          echo "Migrations completed successfully"
+
       - name: Deploy to server
         run: |
           IFS=',' read -ra VERSIONS <<< "${{ steps.deploy_path.outputs.deploy_versions }}"
