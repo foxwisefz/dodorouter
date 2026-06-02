@@ -51,6 +51,7 @@ defmodule DodoRouterWeb.Router do
   scope "/", DodoRouterWeb do
     pipe_through :api
     get "/health", HealthController, :index
+    get "/api/version", VersionController, :index
   end
 
   # Public routes
