@@ -472,7 +472,7 @@ Releases are configured in `mix.exs` under the `releases:` key:
 ### Build Process
 
 1. Push to `main` triggers `.github/workflows/build-release.yml`
-2. Version is auto-bumped (patch level) via `.github/scripts/bump-version.sh`
+2. Version is auto-bumped (patch level) via `.github/scripts/bump-version.sh`, which also **auto-generates `appup.ex`** from the git diff
 3. GitHub Actions builds the release with `MIX_ENV=prod mix release`
 4. If a previous release exists, an upgrade tarball is also built with `mix release --upgrade`
 5. Release is published as a GitHub Release with attached tarball
@@ -564,12 +564,24 @@ This project uses **Castle** (v0.3.1) to manage hot code upgrades. Castle handle
 
 **Your responsibility:**
 
-When preparing a hot code upgrade, follow this protocol using `jj diff --from main --to @ --git`:
+The CI pipeline **auto-generates** `.appup` files via `scripts/generate_appup.exs` during the `bump-version.sh` step. The script detects changed `.ex` and `.html.heex` files and maps them to OTP modules automatically.
 
-1. **Analyze the Diff:** Identify exactly which modules, GenServers, and Supervisors have been modified, added, or deleted.
-2. **Update the `.appup` File:** The `appup.ex` file in the project root describes the upgrade. Castle's `:appup` compiler copies it into the release. Update it to list changed modules and their upgrade instructions.
-3. **Implement `code_change/3`:** For every modified GenServer, you MUST provide the updated Elixir code containing the `code_change/3` callback to safely transition the in-memory state map/struct from the old version to the new version.
-4. **Generate `.relup`:** The CI pipeline automatically generates `.relup` files using `mix castle.relup` when building releases. For local testing, you can manually run: `mix castle.relup --target releases/<vsn>/dodo_router --fromto releases/<prev_vsn>/dodo_router`
-5. **Risk Assessment:** Briefly flag any state transitions that might result in dropped connections or require a standard restart instead of a hot upgrade.
+**What you must do when modifying stateful processes:**
 
-**Important:** Hot upgrades require careful management of process state. The BEAM VM loads new code alongside old code, but stateful processes must explicitly handle the transition via `code_change/3`. If any GenServer's state structure changes (e.g., new fields added, types changed), you MUST implement the migration logic in `code_change/3`.
+If your changes touch any GenServer, Agent, or Supervisor, you **MUST** implement `code_change/3` to migrate in-memory state. The auto-generated appup will use `{update, Module, {advanced, []}}` for these, which triggers `code_change/3` during the hot upgrade.
+
+**What you do NOT need to do:**
+- Manually edit `appup.ex` — CI generates it automatically
+- List changed modules — the script handles this
+- Worry about `{load_module}` vs `{update}` — the script distinguishes regular modules from GenServers/Agents
+
+**Important considerations:**
+- **Formatting-only changes** (e.g., whitespace, line breaks) may create harmless false positives in the auto-generated appup. Including them with `{load_module}` is safe but unnecessary.
+- **Non-standard template paths** — if you add `.html.heex` files outside `components/layouts/` or `controllers/*_html/`, the script may miss them. In this case, add the parent module manually to `appup.ex` before pushing.
+- **GenServer state migrations** — If a GenServer's state structure changes (new fields, type changes), implement `code_change/3` with migration logic. If the migration is complex or risky, flag it for a full restart instead of hot upgrade.
+
+**Verify locally (optional):**
+```bash
+# Preview what the appup will look like for your changes
+elixir scripts/generate_appup.exs <old-sha> <new-sha>
+```
