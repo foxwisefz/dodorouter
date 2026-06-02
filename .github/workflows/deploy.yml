@@ -159,6 +159,12 @@ jobs:
               exit 1
             }
             
+            # Sync static assets to Caddy
+            echo "Syncing static assets to Caddy..."
+            ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 \
+              ${{ secrets.APP_DEPLOY_USER }}@${{ secrets.APP_DEPLOY_HOST }} \
+              "rsync -a ~/dodorouter/current/dodo_router/lib/dodo_router-${VERSION}/priv/static/ ~/lobsterfarm-backend/web_files/dodorouter-static/"
+            
             # Start the new version
             ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 \
               ${{ secrets.APP_DEPLOY_USER }}@${{ secrets.APP_DEPLOY_HOST }} \
@@ -185,6 +191,12 @@ jobs:
                 echo "ERROR: Database migration failed"
                 exit 1
               }
+              
+              # Sync static assets to Caddy
+              echo "Syncing static assets to Caddy..."
+              ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 \
+                ${{ secrets.APP_DEPLOY_USER }}@${{ secrets.APP_DEPLOY_HOST }} \
+                "rsync -a ~/dodorouter/current/dodo_router/lib/dodo_router-${VERSION}/priv/static/ ~/lobsterfarm-backend/web_files/dodorouter-static/"
               
               # Verify upgrade succeeded by checking version
               CURRENT_VERSION=$(ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 \
