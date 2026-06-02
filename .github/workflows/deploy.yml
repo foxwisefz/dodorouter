@@ -129,7 +129,7 @@ jobs:
           echo "Running database migrations before deploy..."
           ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 \
             ${{ secrets.APP_DEPLOY_USER }}@${{ secrets.APP_DEPLOY_HOST }} \
-            "~/dodorouter/current/bin/migrate" || {
+            "~/dodorouter/current/dodo_router/bin/dodo_router eval DodoRouter.Release.migrate" || {
             echo "ERROR: Database migration failed"
             exit 1
           }

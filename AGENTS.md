@@ -543,7 +543,7 @@ journalctl --user -u dodo-router -f
 ~/dodorouter/current/bin/dodo_router remote
 
 # Run migrations
-~/dodorouter/current/bin/migrate
+~/dodorouter/current/dodo_router/bin/dodo_router eval DodoRouter.Release.migrate
 
 # Run seeds
 ~/dodorouter/current/bin/seed
