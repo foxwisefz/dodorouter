@@ -124,16 +124,14 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Run database migrations
+      - name: Check pending migrations
         run: |
-          echo "Running database migrations before deploy..."
+          echo "Checking pending migrations..."
           ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 \
             ${{ secrets.APP_DEPLOY_USER }}@${{ secrets.APP_DEPLOY_HOST }} \
-            "~/dodorouter/current/dodo_router/bin/dodo_router eval DodoRouter.Release.migrate" || {
-            echo "ERROR: Database migration failed"
-            exit 1
+            "~/dodorouter/current/dodo_router/bin/dodo_router eval 'Ecto.Migrator.with_repo(DodoRouter.Repo, fn repo -> IO.inspect(Ecto.Migrator.migrations(repo)) end)'" || {
+            echo "WARNING: Could not check pending migrations"
           }
-          echo "Migrations completed successfully"
 
       - name: Deploy to server
         run: |
@@ -146,9 +144,25 @@ jobs:
             scp -o StrictHostKeyChecking=no -o ConnectTimeout=10 \
               /tmp/release/dodo_router-${VERSION}.tar.gz \
               ${{ secrets.APP_DEPLOY_USER }}@${{ secrets.APP_DEPLOY_HOST }}:/tmp/dodo_router-${VERSION}.tar.gz
+            
+            # Stop current version, extract new version
             ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 \
               ${{ secrets.APP_DEPLOY_USER }}@${{ secrets.APP_DEPLOY_HOST }} \
-              "systemctl --user stop dodo-router && rm -rf ~/dodorouter/current/* && cd ~/dodorouter/current && tar xzf /tmp/dodo_router-${VERSION}.tar.gz && systemctl --user start dodo-router"
+              "systemctl --user stop dodo-router && rm -rf ~/dodorouter/current/* && cd ~/dodorouter/current && tar xzf /tmp/dodo_router-${VERSION}.tar.gz"
+            
+            # Run migrations using the NEW release before starting
+            echo "Running database migrations with new release..."
+            ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 \
+              ${{ secrets.APP_DEPLOY_USER }}@${{ secrets.APP_DEPLOY_HOST }} \
+              "~/dodorouter/current/dodo_router/bin/dodo_router eval DodoRouter.Release.migrate" || {
+              echo "ERROR: Database migration failed"
+              exit 1
+            }
+            
+            # Start the new version
+            ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 \
+              ${{ secrets.APP_DEPLOY_USER }}@${{ secrets.APP_DEPLOY_HOST }} \
+              "systemctl --user start dodo-router"
           else
             # Sequential hot upgrades
             for VERSION in "${VERSIONS[@]}"; do
@@ -162,8 +176,17 @@ jobs:
                 ${{ secrets.APP_DEPLOY_USER }}@${{ secrets.APP_DEPLOY_HOST }} \
                 "cp /tmp/dodo_router-${VERSION}.tar.gz ~/dodorouter/current/dodo_router/releases/${VERSION}.tar.gz && ~/dodorouter/current/dodo_router/bin/upgrade ${VERSION}" || true
               
-              # Verify upgrade succeeded by checking version
+              # Run migrations using the newly upgraded release
+              echo "Running database migrations after hot upgrade..."
               sleep 3
+              ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 \
+                ${{ secrets.APP_DEPLOY_USER }}@${{ secrets.APP_DEPLOY_HOST }} \
+                "~/dodorouter/current/dodo_router/bin/dodo_router eval DodoRouter.Release.migrate" || {
+                echo "ERROR: Database migration failed"
+                exit 1
+              }
+              
+              # Verify upgrade succeeded by checking version
               CURRENT_VERSION=$(ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 \
                 ${{ secrets.APP_DEPLOY_USER }}@${{ secrets.APP_DEPLOY_HOST }} \
                 "~/dodorouter/current/dodo_router/bin/dodo_router version 2>/dev/null | awk '{print \$2}'" || echo "unknown")
