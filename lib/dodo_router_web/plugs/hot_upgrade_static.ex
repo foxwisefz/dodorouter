@@ -19,10 +19,10 @@ defmodule DodoRouterWeb.HotUpgradeStatic do
   @impl Plug
   def call(conn, opts) do
     app = opts[:from]
-    app_dir = Application.app_dir(app)
+    static_dir = Path.join(Application.app_dir(app), "priv/static")
 
     # Check current version first (fast path for new assets)
-    case Plug.Static.call(conn, get_initialized(opts, app_dir)) do
+    case Plug.Static.call(conn, get_initialized(opts, static_dir)) do
       %{status: 404} = conn ->
         # Asset not found in current version, search older versions
         try_fallback_versions(conn, opts, app)
@@ -45,7 +45,8 @@ defmodule DodoRouterWeb.HotUpgradeStatic do
           |> Enum.filter(&String.starts_with?(&1, app_name))
           |> Enum.sort(:desc)
           |> Enum.map(&Path.join(lib_dir, &1))
-          |> Enum.reject(&(&1 == app_dir))
+          |> Enum.map(&Path.join(&1, "priv/static"))
+          |> Enum.reject(&(&1 == Path.join(app_dir, "priv/static")))
 
         _ ->
           []
