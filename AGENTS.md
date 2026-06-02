@@ -502,7 +502,7 @@ For hot upgrades to work correctly:
 
 2. **Database migrations must be backward-compatible**
    - **CRITICAL**: Migrations run **before** the new code deploys. The old code is still running when migrations execute.
-   - **Always** follow these rules when creating migrations:
+   - The deploy workflow automatically runs migrations before deploying. **Always** follow these rules when creating migrations:
      - **Adding columns**: Add as `null: true` (no `default` on existing rows). The old code won't know about the new column, so it must not fail on insert.
      - **Adding tables**: Safe — old code won't reference them.
      - **Adding indexes**: Use `create_index/3` with `concurrently: true` to avoid locking tables.
@@ -510,6 +510,7 @@ For hot upgrades to work correctly:
      - **Removing columns**: **Never** drop columns during a hot upgrade. Old code may still reference them. Mark as deprecated first, remove in a later deploy.
      - **Removing tables**: **Never** drop tables during a hot upgrade. Old code may still query them.
      - **Changing constraints**: **Never** add `NOT NULL` to existing columns during a hot upgrade. Old code may insert rows without that field. Add as nullable, then enforce in application code, then make NOT NULL in a later deploy.
+   - **Migration failures**: If the deploy workflow reports "Migrations already up" but the app crashes with missing columns, the `schema_migrations` table is out of sync with the actual schema. Fix by manually running the migration SQL or resetting the migration record.
    - If a migration cannot be made backward-compatible, the deploy must be a **full restart** (not hot upgrade). Flag this in the PR description.
 
 3. **ERTS version must match**
