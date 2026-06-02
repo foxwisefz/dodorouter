@@ -123,6 +123,105 @@ defmodule DodoRouterWeb.ProxyIntegrationTest do
       assert response.headers["content-type"] == ["application/json; charset=utf-8"]
     end
 
+    test "extracts session from default x-session-id header", %{metadata: metadata} do
+      %{router: router, api_key: api_key} = create_router_with_test_provider(metadata)
+
+      session_id = "test-session-#{System.unique_integer([:positive])}"
+      session_name = "Test Session"
+
+      {:ok, response} =
+        Req.post("#{@endpoint_url}/r/#{router.slug}/v1/chat/completions",
+          headers: [
+            {"authorization", "Bearer #{api_key}"},
+            {"content-type", "application/json"},
+            {"x-phoenix-ecto-sandbox", Phoenix.Ecto.SQL.Sandbox.encode_metadata(metadata)},
+            {"x-session-id", session_id},
+            {"x-session-name", session_name}
+          ],
+          json: %{
+            "model" => "test-model",
+            "messages" => [%{"role" => "user", "content" => "Hello"}]
+          },
+          receive_timeout: 10_000
+        )
+
+      assert response.status == 200
+
+      # Verify the log was created with session info
+      log = DodoRouter.Repo.get_by(DodoRouter.Logs.RequestLog, session_id: session_id)
+      assert log != nil
+      assert log.session_id == session_id
+      assert log.session_name == session_name
+    end
+
+    test "extracts session from custom session header", %{metadata: metadata} do
+      user = DodoRouter.AccountsFixtures.user_fixture()
+
+      {router, api_key} =
+        DodoRouter.RoutersFixtures.router_fixture(user, %{session_header: "x-session-affinity"})
+
+      # Create provider and routing step
+      provider_key =
+        %DodoRouter.Providers.ProviderKey{}
+        |> DodoRouter.Providers.ProviderKey.create_changeset(
+          %{"provider_slug" => "test_provider", "label" => "test key"},
+          user.id,
+          "sk-testkey"
+        )
+        |> DodoRouter.Repo.insert!()
+
+      # Ensure the ETS cache table exists
+      case :ets.whereis(:dodo_secrets_cache) do
+        :undefined ->
+          try do
+            :ets.new(:dodo_secrets_cache, [:named_table, :public, read_concurrency: true])
+          rescue
+            ArgumentError -> :ok
+          end
+
+        _ ->
+          :ok
+      end
+
+      cache_key = "provider_key/#{user.id}/#{provider_key.key_ref}"
+      expires_at = System.system_time(:millisecond) + 3_600_000
+      :ets.insert(:dodo_secrets_cache, {cache_key, "test-api-key", expires_at})
+
+      {:ok, _step} =
+        DodoRouter.Routers.create_routing_step(router, %{
+          "provider" => "test_provider",
+          "model" => "test-model",
+          "provider_key_id" => provider_key.id
+        })
+
+      session_id = "ses_#{System.unique_integer([:positive])}"
+      session_name = "RTK Session"
+
+      {:ok, response} =
+        Req.post("#{@endpoint_url}/r/#{router.slug}/v1/chat/completions",
+          headers: [
+            {"authorization", "Bearer #{api_key}"},
+            {"content-type", "application/json"},
+            {"x-phoenix-ecto-sandbox", Phoenix.Ecto.SQL.Sandbox.encode_metadata(metadata)},
+            {"x-session-affinity", session_id},
+            {"x-session-affinity-name", session_name}
+          ],
+          json: %{
+            "model" => "test-model",
+            "messages" => [%{"role" => "user", "content" => "Hello"}]
+          },
+          receive_timeout: 10_000
+        )
+
+      assert response.status == 200
+
+      # Verify the log was created with custom session header info
+      log = DodoRouter.Repo.get_by(DodoRouter.Logs.RequestLog, session_id: session_id)
+      assert log != nil
+      assert log.session_id == session_id
+      assert log.session_name == session_name
+    end
+
     test "returns 400 when no routing configured", %{metadata: metadata} do
       {router, api_key} = RoutersFixtures.router_fixture()
 

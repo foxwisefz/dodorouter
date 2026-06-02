@@ -248,6 +248,10 @@ defmodule DodoRouterWeb.RouterLive.Show do
      })}
   end
 
+  def handle_info({DodoRouterWeb.RouterLive.FormComponent, {:saved, router}}, socket) do
+    {:noreply, assign(socket, :router, router)}
+  end
+
   def handle_info({:proxy_event, event}, socket) do
     recent_events = [event | Enum.take(socket.assigns.recent_events, 9)]
 
@@ -328,10 +332,19 @@ defmodule DodoRouterWeb.RouterLive.Show do
               <div>
                 <h1 class="text-2xl font-bold">{@router.name}</h1>
                 <p class="text-base-content/50 font-mono text-sm">{@router.slug}</p>
+                <p class="text-xs text-base-content/40 mt-0.5">
+                  Session header: <span class="font-mono">{@router.session_header}</span>
+                </p>
               </div>
             </div>
           </div>
           <div class="flex items-center gap-2">
+            <.link
+              patch={~p"/routers/#{@router}/edit"}
+              class="btn btn-sm bg-base-200 border-base-300/50 hover:bg-base-300 gap-2"
+            >
+              <.icon name="hero-pencil" class="size-4" /> Edit
+            </.link>
             <.link
               navigate={~p"/routers/#{@router}/recordings"}
               class="btn btn-sm bg-base-200 border-base-300/50 hover:bg-base-300 gap-2"
@@ -910,6 +923,23 @@ defmodule DodoRouterWeb.RouterLive.Show do
         </.modal>
       </div>
       <!-- close content z-10 wrapper -->
+
+      <.modal
+        :if={@live_action == :edit}
+        id="router-edit-modal"
+        show
+        on_cancel={JS.patch(~p"/routers/#{@router}")}
+      >
+        <.live_component
+          module={DodoRouterWeb.RouterLive.FormComponent}
+          id={@router.id}
+          title="Edit Router"
+          action={:edit}
+          router={@router}
+          current_user={@current_user}
+          patch={~p"/routers/#{@router}"}
+        />
+      </.modal>
     </div>
     """
   end

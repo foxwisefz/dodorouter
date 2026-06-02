@@ -10,6 +10,7 @@ defmodule DodoRouter.Routers.Router do
     field :api_key_hash, :string
     field :api_key_prefix, :string
     field :fail_on_context_overflow, :boolean, default: false
+    field :session_header, :string, default: "x-session-id"
 
     belongs_to :user, DodoRouter.Accounts.User
     has_many :routing_steps, DodoRouter.Routers.RoutingStep
@@ -19,7 +20,7 @@ defmodule DodoRouter.Routers.Router do
 
   def changeset(router, attrs) do
     router
-    |> cast(attrs, [:name, :slug, :fail_on_context_overflow])
+    |> cast(attrs, [:name, :slug, :fail_on_context_overflow, :session_header])
     |> validate_required([:name])
     |> maybe_derive_slug()
     |> validate_required(:slug)

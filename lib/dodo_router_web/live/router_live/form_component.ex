@@ -25,6 +25,12 @@ defmodule DodoRouterWeb.RouterLive.FormComponent do
           phx-mounted={JS.focus()}
           autocomplete="router-name"
         />
+        <.input
+          field={@form[:session_header]}
+          type="text"
+          label="Session Header"
+          placeholder="x-session-id"
+        />
         <:actions>
           <.button phx-disable-with="Saving...">Save Router</.button>
         </:actions>

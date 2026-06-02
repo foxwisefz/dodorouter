@@ -32,7 +32,13 @@ defmodule DodoRouter.MixProject do
         strip_beams: true,
         include_erts: true,
         applications: [sasl: :permanent],
-        steps: [&Forecastle.pre_assemble/1, :assemble, &compile_appup/1, &Forecastle.post_assemble/1, :tar]
+        steps: [
+          &Forecastle.pre_assemble/1,
+          :assemble,
+          &compile_appup/1,
+          &Forecastle.post_assemble/1,
+          :tar
+        ]
       ]
     ]
   end
@@ -118,5 +124,4 @@ defmodule DodoRouter.MixProject do
 
     release
   end
-
 end
