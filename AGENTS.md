@@ -501,10 +501,16 @@ For hot upgrades to work correctly:
    - Any new stateful GenServers must include `code_change/3`
 
 2. **Database migrations must be backward-compatible**
-   - Run migrations **before** the hot upgrade using `bin/dodo_router eval DodoRouter.Release.migrate`
-   - Add new columns as nullable first
-   - Avoid renaming columns or removing constraints during upgrades
-   - Schema changes that break old code require a full restart instead
+   - **CRITICAL**: Migrations run **before** the new code deploys. The old code is still running when migrations execute.
+   - **Always** follow these rules when creating migrations:
+     - **Adding columns**: Add as `null: true` (no `default` on existing rows). The old code won't know about the new column, so it must not fail on insert.
+     - **Adding tables**: Safe — old code won't reference them.
+     - **Adding indexes**: Use `create_index/3` with `concurrently: true` to avoid locking tables.
+     - **Renaming columns**: **Never** rename during a hot upgrade. Old code will reference the old name and crash. Do it in two deploys: add new column → migrate data → deploy code → remove old column.
+     - **Removing columns**: **Never** drop columns during a hot upgrade. Old code may still reference them. Mark as deprecated first, remove in a later deploy.
+     - **Removing tables**: **Never** drop tables during a hot upgrade. Old code may still query them.
+     - **Changing constraints**: **Never** add `NOT NULL` to existing columns during a hot upgrade. Old code may insert rows without that field. Add as nullable, then enforce in application code, then make NOT NULL in a later deploy.
+   - If a migration cannot be made backward-compatible, the deploy must be a **full restart** (not hot upgrade). Flag this in the PR description.
 
 3. **ERTS version must match**
    - Upgrading Elixir or OTP versions requires a full release (not hot upgrade)
