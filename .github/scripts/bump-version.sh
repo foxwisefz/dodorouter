@@ -26,9 +26,13 @@ NEW_VERSION="${MAJOR}.${MINOR}.${NEW_PATCH}"
 sed -i.bak -E "s/(version: \")${CURRENT_VERSION}(\",)/\1${NEW_VERSION}\2/" "$MIX_FILE"
 rm -f "$MIX_FILE.bak"
 
-# Generate fresh appup.ex with empty instructions
-# (Developers should manually add module changes when needed)
-cat > "$APPUP_FILE" << EOF
+# Generate appup.ex automatically from git diff
+if command -v elixir >/dev/null 2>&1; then
+  echo "Generating appup.ex from changed modules..."
+  elixir scripts/generate_appup.exs "$CURRENT_VERSION" "$NEW_VERSION" > "$APPUP_FILE"
+else
+  echo "WARNING: elixir not available, generating empty appup.ex"
+  cat > "$APPUP_FILE" << EOF
 # Appup file for DodoRouter
 # This describes how to upgrade the application between versions
 # Castle's :appup compiler reads this and copies it into the release ebin directory
@@ -50,6 +54,7 @@ cat > "$APPUP_FILE" << EOF
   ]
 }
 EOF
+fi
 
 echo "Bumped version: ${CURRENT_VERSION} -> ${NEW_VERSION}"
 

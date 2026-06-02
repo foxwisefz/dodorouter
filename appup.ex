@@ -12,31 +12,33 @@
 {
   ~c"0.1.66",
   [
-    {~c"0.1.65", [
-      {load_module, DodoRouter.Logs},
-      {load_module, DodoRouter.Routers.Router},
-      {load_module, DodoRouter.Upgrade},
-      {load_module, DodoRouterWeb.Layouts},
-      {load_module, DodoRouterWeb.AnthropicProxyController},
-      {load_module, DodoRouterWeb.ProxyController},
-      {load_module, DodoRouterWeb.ResponsesProxyController},
-      {load_module, DodoRouterWeb.RouterLive.FormComponent},
-      {load_module, DodoRouterWeb.RouterLive.Show},
-      {load_module, DodoRouterWeb.SessionLive.Show}
-    ]}
+    {~c"0.1.65",
+     [
+       {load_module, DodoRouter.Logs},
+       {load_module, DodoRouter.Routers.Router},
+       {load_module, DodoRouter.Upgrade},
+       {load_module, DodoRouterWeb.Layouts},
+       {load_module, DodoRouterWeb.AnthropicProxyController},
+       {load_module, DodoRouterWeb.ProxyController},
+       {load_module, DodoRouterWeb.ResponsesProxyController},
+       {load_module, DodoRouterWeb.RouterLive.FormComponent},
+       {load_module, DodoRouterWeb.RouterLive.Show},
+       {load_module, DodoRouterWeb.SessionLive.Show}
+     ]}
   ],
   [
-    {~c"0.1.65", [
-      {load_module, DodoRouter.Logs},
-      {load_module, DodoRouter.Routers.Router},
-      {load_module, DodoRouter.Upgrade},
-      {load_module, DodoRouterWeb.Layouts},
-      {load_module, DodoRouterWeb.AnthropicProxyController},
-      {load_module, DodoRouterWeb.ProxyController},
-      {load_module, DodoRouterWeb.ResponsesProxyController},
-      {load_module, DodoRouterWeb.RouterLive.FormComponent},
-      {load_module, DodoRouterWeb.RouterLive.Show},
-      {load_module, DodoRouterWeb.SessionLive.Show}
-    ]}
+    {~c"0.1.65",
+     [
+       {load_module, DodoRouter.Logs},
+       {load_module, DodoRouter.Routers.Router},
+       {load_module, DodoRouter.Upgrade},
+       {load_module, DodoRouterWeb.Layouts},
+       {load_module, DodoRouterWeb.AnthropicProxyController},
+       {load_module, DodoRouterWeb.ProxyController},
+       {load_module, DodoRouterWeb.ResponsesProxyController},
+       {load_module, DodoRouterWeb.RouterLive.FormComponent},
+       {load_module, DodoRouterWeb.RouterLive.Show},
+       {load_module, DodoRouterWeb.SessionLive.Show}
+     ]}
   ]
 }
