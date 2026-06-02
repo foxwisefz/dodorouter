@@ -272,6 +272,35 @@ document.addEventListener("DOMContentLoaded", () => {
   })
 })
 
+// Poll for new app versions and show refresh banner
+function initVersionPolling() {
+  const meta = document.querySelector("meta[name='app-version']")
+  if (!meta) return
+
+  const currentVersion = meta.getAttribute("content")
+  if (!currentVersion) return
+
+  // Poll every 30 seconds
+  setInterval(() => {
+    fetch("/api/version")
+      .then(r => r.json())
+      .then(data => {
+        if (data.version && data.version !== currentVersion) {
+          const banner = document.getElementById("version-banner")
+          if (banner) banner.classList.remove("hidden")
+        }
+      })
+      .catch(() => {})
+  }, 30000)
+}
+
+// Start polling after page loads
+if (document.readyState === "loading") {
+  document.addEventListener("DOMContentLoaded", initVersionPolling)
+} else {
+  initVersionPolling()
+}
+
 // The lines below enable quality of life phoenix_live_reload
 // development features:
 //

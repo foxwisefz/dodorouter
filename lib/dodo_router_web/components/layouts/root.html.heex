@@ -9,6 +9,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="csrf-token" content={get_csrf_token()} />
+    <meta name="app-version" content={Application.spec(:dodo_router, :vsn) |> to_string()} />
     <.live_title default="DodoRouter">
       {assigns[:page_title]}
     </.live_title>
@@ -39,6 +40,25 @@
     </script>
   </head>
   <body class="min-h-screen bg-base-200 font-body antialiased">
+    <div
+      id="version-banner"
+      class="hidden fixed top-0 left-0 right-0 z-[70] bg-warning/90 text-warning-content px-4 py-2 text-sm text-center backdrop-blur"
+    >
+      <span class="font-medium">New version available.</span>
+      <button
+        onclick="window.location.reload()"
+        class="ml-2 underline hover:no-underline font-semibold"
+      >
+        Refresh to update
+      </button>
+      <button
+        onclick="document.getElementById('version-banner').classList.add('hidden')"
+        class="ml-4 text-warning-content/70 hover:text-warning-content"
+      >
+        Dismiss
+      </button>
+    </div>
+
     <%= if @current_scope && @current_scope.user do %>
       <%!-- Mobile sidebar toggle checkbox (hidden) --%>
       <input type="checkbox" id="mobile-sidebar" class="hidden peer" />

@@ -513,7 +513,16 @@ For hot upgrades to work correctly:
    - **Migration failures**: If the deploy workflow reports "Migrations already up" but the app crashes with missing columns, the `schema_migrations` table is out of sync with the actual schema. Fix by manually running the migration SQL or resetting the migration record.
    - If a migration cannot be made backward-compatible, the deploy must be a **full restart** (not hot upgrade). Flag this in the PR description.
 
-3. **ERTS version must match**
+3. **HEEx templates must be backward-compatible**
+   - Old LiveView processes keep running with old templates during a hot upgrade.
+   - **Always** make template changes additive or compatible:
+     - **Adding new elements**: Safe — old processes just won't show them.
+     - **Adding CSS classes**: Safe if old CSS handles them gracefully.
+     - **Removing elements**: Risky — old CSS/JS may break without them. Do in a later deploy.
+     - **Changing IDs or data attributes**: Risky — old JS hooks may break. Do in a later deploy.
+   - The `HotUpgradeStatic` plug serves assets from all installed releases, so old processes get old CSS/JS.
+
+4. **ERTS version must match**
    - Upgrading Elixir or OTP versions requires a full release (not hot upgrade)
    - The build workflow detects ERTS changes and falls back to full deploy
 
