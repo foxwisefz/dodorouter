@@ -5,8 +5,10 @@
 [old_vsn, new_vsn | _] = System.argv()
 
 # Try tags first, fall back to raw refs
-range = if System.cmd("git", ["rev-parse", "v#{old_vsn}"], stderr_to_stdout: true) |> elem(1) == 0 and
-           System.cmd("git", ["rev-parse", "v#{new_vsn}"], stderr_to_stdout: true) |> elem(1) == 0 do
+has_old_tag = System.cmd("git", ["tag", "-l", "v#{old_vsn}"]) |> elem(0) |> String.trim() != ""
+has_new_tag = System.cmd("git", ["tag", "-l", "v#{new_vsn}"]) |> elem(0) |> String.trim() != ""
+
+range = if has_old_tag and has_new_tag do
   "v#{old_vsn}..v#{new_vsn}"
 else
   "#{old_vsn}..#{new_vsn}"
