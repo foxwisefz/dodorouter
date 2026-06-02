@@ -924,7 +924,12 @@ defmodule DodoRouterWeb.RouterLive.Show do
       </div>
       <!-- close content z-10 wrapper -->
 
-      <.modal :if={@live_action == :edit} id="router-edit-modal" show on_cancel={JS.patch(~p"/routers/#{@router}")}>
+      <.modal
+        :if={@live_action == :edit}
+        id="router-edit-modal"
+        show
+        on_cancel={JS.patch(~p"/routers/#{@router}")}
+      >
         <.live_component
           module={DodoRouterWeb.RouterLive.FormComponent}
           id={@router.id}
