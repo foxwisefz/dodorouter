@@ -51,4 +51,49 @@ defmodule DodoRouterWeb.SessionLiveTest do
       end
     end
   end
+
+  describe "Show" do
+    test "shows session details", %{conn: conn, router: router} do
+      session_id = "session-#{System.unique_integer([:positive])}"
+      LogsFixtures.log_with_session(router, session_id)
+
+      {:ok, _live, html} = live(conn, ~p"/routers/#{router.id}/sessions/#{session_id}")
+
+      assert html =~ session_id
+    end
+
+    test "shows session name from logs", %{conn: conn, router: router} do
+      session_id = "test-session"
+      session_name = "My Test Session"
+      LogsFixtures.log_with_session(router, session_id, %{session_name: session_name})
+
+      {:ok, _live, html} = live(conn, ~p"/routers/#{router.id}/sessions/#{session_id}")
+
+      assert html =~ session_name
+    end
+
+    test "allows editing session name", %{conn: conn, router: router} do
+      session_id = "test-session"
+      LogsFixtures.log_with_session(router, session_id)
+
+      {:ok, live, _html} = live(conn, ~p"/routers/#{router.id}/sessions/#{session_id}")
+
+      # Click edit button (has icon, no text)
+      assert live |> element("button[phx-click='edit_name']") |> render_click()
+
+      # Fill in new name
+      new_name = "Updated Session Name"
+
+      assert live
+             |> form("form", %{"session_name" => new_name})
+             |> render_submit()
+
+      # Verify the name was updated
+      assert render(live) =~ new_name
+
+      # Verify in database
+      logs = DodoRouter.Logs.list_logs_by_session(router, session_id)
+      assert Enum.all?(logs, &(&1.session_name == new_name))
+    end
+  end
 end
