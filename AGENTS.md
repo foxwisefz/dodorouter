@@ -520,7 +520,7 @@ For hot upgrades to work correctly:
      - **Adding CSS classes**: Safe if old CSS handles them gracefully.
      - **Removing elements**: Risky — old CSS/JS may break without them. Do in a later deploy.
      - **Changing IDs or data attributes**: Risky — old JS hooks may break. Do in a later deploy.
-   - The `HotUpgradeStatic` plug serves assets from all installed releases, so old processes get old CSS/JS.
+   - Caddy serves `/assets/*` directly from disk, bypassing Phoenix. The deploy workflow syncs `priv/static` to Caddy's mounted directory after each deploy.
 
 4. **ERTS version must match**
    - Upgrading Elixir or OTP versions requires a full release (not hot upgrade)
