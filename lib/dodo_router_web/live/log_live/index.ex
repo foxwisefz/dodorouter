@@ -176,39 +176,34 @@ defmodule DodoRouterWeb.LogLive.Index do
           <.link
             patch={favorites_toggle_path(@selected_router_id, @favorites_only)}
             class={[
-             "btn btn-sm gap-1.5",
+              "btn btn-sm gap-1.5",
               @favorites_only && "btn-primary",
               !@favorites_only && "btn-ghost"
             ]}
           >
-
             <.icon
-             name={if @favorites_only, do: "hero-star-solid", else: "hero-star"}
+              name={if @favorites_only, do: "hero-star-solid", else: "hero-star"}
               class="w-4 h-4"
             />
             <span>Favorites</span>
-
           </.link>
           <form phx-change="select_router" class="contents">
-           <select
-
+            <select
               name="router_id"
               class="py-2 px-3 bg-base-200 border border-base-300/50 rounded-lg text-sm w-full sm:w-48"
-           >
-
+            >
               <option value="">All routers</option>
-             <option
+              <option
                 :for={r <- @routers}
                 value={r.id}
                 selected={to_string(r.id) == @selected_router_id}
               >
                 {r.name}
               </option>
-
             </select>
           </form>
         </div>
-     </div>
+      </div>
       
     <!-- Logs Table -->
       <div class="rounded-lg border border-base-300/50 bg-base-100 overflow-hidden">
@@ -330,9 +325,8 @@ defmodule DodoRouterWeb.LogLive.Index do
               </td>
               <td class="px-4 py-2.5 text-sm font-mono text-base-content/50 hidden md:table-cell">
                 <div class="flex items-center gap-1.5">
-
-                {Map.get(log, :total_tokens) || "-"}
-                 <%= if Map.get(log, :cache_read_tokens) && log.cache_read_tokens > 0 do %>
+                  {Map.get(log, :total_tokens) || "-"}
+                  <%= if Map.get(log, :cache_read_tokens) && log.cache_read_tokens > 0 do %>
                     <span class="inline-flex items-center gap-0.5 text-[10px] text-success bg-success/10 px-1 py-0.5 rounded">
                       <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path
@@ -439,7 +433,7 @@ defmodule DodoRouterWeb.LogLive.Index do
     end
   end
 
-    defp favorites_toggle_path(router_id, current?) do
+  defp favorites_toggle_path(router_id, current?) do
     params =
       if router_id,
         do: %{"router_id" => router_id},

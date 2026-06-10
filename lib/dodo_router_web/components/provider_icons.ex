@@ -222,5 +222,6 @@ defmodule DodoRouterWeb.ProviderIcons do
   def normalize_slug("zai_standard"), do: "zai"
   def normalize_slug("zai_coding"), do: "zai"
   def normalize_slug("moonshot_coding"), do: "moonshot"
+  def normalize_slug("openai-codex"), do: "openai"
   def normalize_slug(slug), do: slug
 end

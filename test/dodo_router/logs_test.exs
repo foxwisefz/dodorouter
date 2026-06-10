@@ -102,9 +102,8 @@ defmodule DodoRouter.LogsTest do
   end
 
   describe "toggle_favorite/2" do
-
     test "toggles favorite from false to true and back" do
-     user = AccountsFixtures.user_fixture()
+      user = AccountsFixtures.user_fixture()
       {router, _api_key} = RoutersFixtures.router_fixture(user)
       log = LogsFixtures.log_fixture(router)
 
@@ -117,9 +116,8 @@ defmodule DodoRouter.LogsTest do
       refute updated2.favorite
     end
 
-
     test "toggles favorite by request_id" do
-     user = AccountsFixtures.user_fixture()
+      user = AccountsFixtures.user_fixture()
       {router, _api_key} = RoutersFixtures.router_fixture(user)
       log = LogsFixtures.log_fixture(router)
 
@@ -129,9 +127,8 @@ defmodule DodoRouter.LogsTest do
   end
 
   describe "list_logs_for_user/2 favorites filter" do
-
     test "returns only favorited logs" do
-     user = AccountsFixtures.user_fixture()
+      user = AccountsFixtures.user_fixture()
       {router, _api_key} = RoutersFixtures.router_fixture(user)
 
       LogsFixtures.log_fixture(router, %{favorite: true, final_provider: "fav-provider"})

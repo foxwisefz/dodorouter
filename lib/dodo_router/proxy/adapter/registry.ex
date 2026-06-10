@@ -14,6 +14,7 @@ defmodule DodoRouter.Proxy.Adapter.Registry do
   # Explicit list of all adapter modules - add new adapters here
   @adapter_modules [
     DodoRouter.Proxy.Adapters.OpenAI,
+    DodoRouter.Proxy.Adapters.OpenAICodex,
     DodoRouter.Proxy.Adapters.Anthropic,
     DodoRouter.Proxy.Adapters.Google,
     DodoRouter.Proxy.Adapters.Groq,
@@ -26,11 +27,22 @@ defmodule DodoRouter.Proxy.Adapter.Registry do
     DodoRouter.Proxy.Adapters.TestProvider
   ]
 
+  @type oauth_config :: %{
+          authorization_url: String.t(),
+          token_url: String.t(),
+          client_id: String.t(),
+          client_secret: String.t(),
+          scope: String.t(),
+          redirect_uri: String.t()
+        }
+
   @type adapter_config :: %{
           slug: String.t(),
           display_name: String.t(),
           module: module(),
           key_slugs: [String.t()],
+          key_generation_url: String.t() | nil,
+          oauth_config: oauth_config() | nil,
           endpoints: %{String.t() => String.t()},
           models: [String.t()],
           color: String.t(),
@@ -53,6 +65,8 @@ defmodule DodoRouter.Proxy.Adapter.Registry do
           module: __MODULE__,
           key_slugs: unquote(opts[:key_slugs]),
           key_display_names: unquote(opts[:key_display_names]),
+          key_generation_url: unquote(opts[:key_generation_url]),
+          oauth_config: unquote(opts[:oauth_config]),
           endpoints: unquote(opts[:endpoints]),
           models: unquote(opts[:models]),
           color: unquote(opts[:color]),
@@ -186,7 +200,9 @@ defmodule DodoRouter.Proxy.Adapter.Registry do
            name: name,
            short: config.short_description,
            endpoint: Map.get(config.endpoints, key_slug),
-           color: config.color
+           color: config.color,
+           key_generation_url: config.key_generation_url,
+           oauth_config: config.oauth_config
          }}
       end
     end)
