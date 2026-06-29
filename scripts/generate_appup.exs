@@ -4,14 +4,15 @@
 
 [old_vsn, new_vsn | _] = System.argv()
 
-# Try tags first, fall back to raw refs
+# Try tags first, fall back to the current checkout for the not-yet-tagged version
 has_old_tag = System.cmd("git", ["tag", "-l", "v#{old_vsn}"]) |> elem(0) |> String.trim() != ""
 has_new_tag = System.cmd("git", ["tag", "-l", "v#{new_vsn}"]) |> elem(0) |> String.trim() != ""
 
-range = if has_old_tag and has_new_tag do
-  "v#{old_vsn}..v#{new_vsn}"
-else
-  "#{old_vsn}..#{new_vsn}"
+range = cond do
+  has_old_tag and has_new_tag -> "v#{old_vsn}..v#{new_vsn}"
+  has_old_tag -> "v#{old_vsn}..HEAD"
+  has_new_tag -> "HEAD..v#{new_vsn}"
+  true -> "HEAD"
 end
 
 # Get changed files between versions
