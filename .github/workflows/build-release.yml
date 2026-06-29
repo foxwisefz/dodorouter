@@ -24,6 +24,12 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           fetch-depth: 0
 
+      - name: Set up Elixir
+        uses: erlef/setup-beam@v1
+        with:
+          elixir-version: "1.18"
+          otp-version: "27"
+
       - name: Bump version
         run: |
           .github/scripts/bump-version.sh
@@ -34,12 +40,6 @@ jobs:
           VERSION=$(grep -E '^\s+version:\s+"[0-9]+\.[0-9]+\.[0-9]+",' mix.exs | sed -E 's/.*"([0-9]+\.[0-9]+\.[0-9]+)".*/\1/')
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "Building version: $VERSION"
-
-      - name: Set up Elixir
-        uses: erlef/setup-beam@v1
-        with:
-          elixir-version: "1.18"
-          otp-version: "27"
 
       - name: Restore dependencies cache
         uses: actions/cache@v4
@@ -142,7 +142,7 @@ jobs:
         with:
           name: dodo-router-release-${{ steps.version.outputs.version }}
           path: _build/prod/dodo_router-${{ steps.version.outputs.version }}.tar.gz
-          retention-days: 90
+          retention-days: 7
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1

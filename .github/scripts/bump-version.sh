@@ -63,6 +63,11 @@ git config user.name "github-actions[bot]"
 git config user.email "github-actions[bot]@users.noreply.github.com"
 git add "$MIX_FILE" "$APPUP_FILE"
 git commit -m "Bump version to ${NEW_VERSION} [skip ci]"
-git push
+
+# Rebase onto latest main in case other commits landed while this job was running
+git fetch origin main
+git rebase origin/main
+
+git push origin HEAD:main
 
 echo "$NEW_VERSION"
