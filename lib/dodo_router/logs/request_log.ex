@@ -54,6 +54,9 @@ defmodule DodoRouter.Logs.RequestLog do
     # Truncation metadata
     field :truncation_flags, {:array, :string}, default: []
 
+    # Favorited for later review/benchmarking
+    field :favorite, :boolean, default: false
+
     # Cost
     field :estimated_cost_usd, :decimal
 
@@ -93,7 +96,8 @@ defmodule DodoRouter.Logs.RequestLog do
       :session_id,
       :session_name,
       :recording_id,
-      :truncation_flags
+      :truncation_flags,
+      :favorite
     ])
     |> validate_required([:router_id, :request_id, :status, :inserted_at])
     |> validate_inclusion(:status, @statuses)

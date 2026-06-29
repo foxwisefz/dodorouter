@@ -3,6 +3,8 @@ defmodule DodoRouter.LogsTest do
 
   alias DodoRouter.Logs
   alias DodoRouter.Recordings
+  alias DodoRouter.AccountsFixtures
+  alias DodoRouter.LogsFixtures
   alias DodoRouter.RoutersFixtures
 
   describe "create_log/1" do
@@ -96,6 +98,49 @@ defmodule DodoRouter.LogsTest do
 
       assert session
       assert session.request_count == 3
+    end
+  end
+
+  describe "toggle_favorite/2" do
+
+    test "toggles favorite from false to true and back" do
+     user = AccountsFixtures.user_fixture()
+      {router, _api_key} = RoutersFixtures.router_fixture(user)
+      log = LogsFixtures.log_fixture(router)
+
+      refute log.favorite
+
+      {:ok, updated} = Logs.toggle_favorite(user, log.id)
+      assert updated.favorite
+
+      {:ok, updated2} = Logs.toggle_favorite(user, log.id)
+      refute updated2.favorite
+    end
+
+
+    test "toggles favorite by request_id" do
+     user = AccountsFixtures.user_fixture()
+      {router, _api_key} = RoutersFixtures.router_fixture(user)
+      log = LogsFixtures.log_fixture(router)
+
+      {:ok, updated} = Logs.toggle_favorite(user, log.request_id)
+      assert updated.favorite
+    end
+  end
+
+  describe "list_logs_for_user/2 favorites filter" do
+
+    test "returns only favorited logs" do
+     user = AccountsFixtures.user_fixture()
+      {router, _api_key} = RoutersFixtures.router_fixture(user)
+
+      LogsFixtures.log_fixture(router, %{favorite: true, final_provider: "fav-provider"})
+      LogsFixtures.log_fixture(router, %{favorite: false, final_provider: "other-provider"})
+
+      logs = Logs.list_logs_for_user(user, favorites_only: true)
+
+      assert length(logs) == 1
+      assert hd(logs).final_provider == "fav-provider"
     end
   end
 
