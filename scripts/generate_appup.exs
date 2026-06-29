@@ -72,8 +72,8 @@ modules =
   end)
 
 instructions =
-  Enum.map(regular_modules, fn mod -> "      {load_module, #{mod}}" end) ++
-  Enum.map(genserver_modules, fn mod -> "      {update, #{mod}, {advanced, []}}" end)
+  Enum.map(regular_modules, fn mod -> "      {:load_module, #{mod}}" end) ++
+  Enum.map(genserver_modules, fn mod -> "      {:update, #{mod}, {:advanced, []}}" end)
 
 instructions_str = instructions |> Enum.join(",\n")
 
