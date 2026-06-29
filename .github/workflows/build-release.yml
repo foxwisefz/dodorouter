@@ -32,7 +32,7 @@ jobs:
 
       - name: Bump version
         run: |
-          .github/scripts/bump-version.sh
+          .github/scripts/bump-version.sh --no-push
 
       - name: Get version
         id: version
@@ -137,13 +137,6 @@ jobs:
           tar czf "dodo_router-${CURR_VERSION}.tar.gz" dodo_router
           mv "dodo_router-${CURR_VERSION}.tar.gz" ../
 
-      - name: Upload release artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: dodo-router-release-${{ steps.version.outputs.version }}
-          path: _build/prod/dodo_router-${{ steps.version.outputs.version }}.tar.gz
-          retention-days: 7
-
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
         with:
@@ -153,3 +146,13 @@ jobs:
             _build/prod/dodo_router-${{ steps.version.outputs.version }}.tar.gz
           generate_release_notes: true
           fail_on_unmatched_files: false
+
+      - name: Commit and push version bump
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add mix.exs appup.ex
+          git commit -m "Bump version to ${{ steps.version.outputs.version }} [skip ci]"
+          git fetch origin main
+          git rebase origin/main
+          git push origin HEAD:main

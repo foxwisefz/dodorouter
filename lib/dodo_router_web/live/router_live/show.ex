@@ -759,7 +759,12 @@ defmodule DodoRouterWeb.RouterLive.Show do
                   <%= if Map.get(log, :cache_read_tokens) && log.cache_read_tokens > 0 do %>
                     <span class="inline-flex items-center gap-1 text-[10px] text-success bg-success/10 px-1.5 py-0.5 rounded">
                       <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                        <path
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                          stroke-width="2"
+                          d="M13 10V3L4 14h7v7l9-11h-7z"
+                        />
                       </svg>
                       {cache_pct(log)}
                     </span>

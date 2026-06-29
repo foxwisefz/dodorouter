@@ -2,7 +2,12 @@
 set -euo pipefail
 
 # Bump the patch version in mix.exs and update appup.ex
-# Usage: ./bump-version.sh
+# Usage: ./bump-version.sh [--no-push]
+
+PUSH=true
+if [ "${1:-}" = "--no-push" ]; then
+  PUSH=false
+fi
 
 MIX_FILE="mix.exs"
 APPUP_FILE="appup.ex"
@@ -58,16 +63,18 @@ fi
 
 echo "Bumped version: ${CURRENT_VERSION} -> ${NEW_VERSION}"
 
-# Configure git and commit
-git config user.name "github-actions[bot]"
-git config user.email "github-actions[bot]@users.noreply.github.com"
-git add "$MIX_FILE" "$APPUP_FILE"
-git commit -m "Bump version to ${NEW_VERSION} [skip ci]"
+if [ "$PUSH" = true ]; then
+  # Configure git and commit
+  git config user.name "github-actions[bot]"
+  git config user.email "github-actions[bot]@users.noreply.github.com"
+  git add "$MIX_FILE" "$APPUP_FILE"
+  git commit -m "Bump version to ${NEW_VERSION} [skip ci]"
 
-# Rebase onto latest main in case other commits landed while this job was running
-git fetch origin main
-git rebase origin/main
+  # Rebase onto latest main in case other commits landed while this job was running
+  git fetch origin main
+  git rebase origin/main
 
-git push origin HEAD:main
+  git push origin HEAD:main
+fi
 
 echo "$NEW_VERSION"
