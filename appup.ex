@@ -1,20 +1,49 @@
-# Appup file for DodoRouter
-# This describes how to upgrade the application between versions
-# Castle's :appup compiler reads this and copies it into the release ebin directory
-# Format: {NewVsn, [{OldVsn, [Instructions]}], [{OldVsn, [Instructions]}]}
-#
-# Instructions:
-#   {load_module, Module} - reload a changed module
-#   {update, Module, {advanced, []}} - update a GenServer/Agent and call code_change/3
-#   {add_module, Module} - add a new module
-#   {delete_module, Module} - remove a deleted module
+# Auto-generated appup for 0.1.76 <- 0.1.75
+# Run: mix appup.generate 0.1.75 0.1.76
 
 {
-  ~c"0.1.75",
+  ~c"0.1.76",
   [
-    {~c"0.1.74", []}
+    {~c"0.1.75", [
+      {load_module, DodoRouter.Logs},
+      {load_module, DodoRouter.Logs.MessageNormalizer},
+      {load_module, DodoRouter.Logs.RequestLog},
+      {load_module, DodoRouter.Models},
+      {load_module, DodoRouter.Models.Model},
+      {load_module, DodoRouter.Models.Sync},
+      {load_module, DodoRouter.Proxy},
+      {load_module, DodoRouter.Proxy.Adapter},
+      {load_module, DodoRouter.Proxy.Adapters.Anthropic},
+      {load_module, DodoRouter.Proxy.Adapters.Google},
+      {load_module, DodoRouter.Proxy.FallbackChain},
+      {load_module, DodoRouterWeb.AnthropicFormat},
+      {load_module, DodoRouterWeb.DashboardLive},
+      {load_module, DodoRouterWeb.LogLive.Index},
+      {load_module, DodoRouterWeb.LogLive.Show},
+      {load_module, DodoRouterWeb.PromptComponents},
+      {load_module, DodoRouterWeb.RouterLive.Show}
+    ]}
   ],
   [
-    {~c"0.1.74", []}
+    {~c"0.1.75", [
+      {load_module, DodoRouter.Logs},
+      {load_module, DodoRouter.Logs.MessageNormalizer},
+      {load_module, DodoRouter.Logs.RequestLog},
+      {load_module, DodoRouter.Models},
+      {load_module, DodoRouter.Models.Model},
+      {load_module, DodoRouter.Models.Sync},
+      {load_module, DodoRouter.Proxy},
+      {load_module, DodoRouter.Proxy.Adapter},
+      {load_module, DodoRouter.Proxy.Adapters.Anthropic},
+      {load_module, DodoRouter.Proxy.Adapters.Google},
+      {load_module, DodoRouter.Proxy.FallbackChain},
+      {load_module, DodoRouterWeb.AnthropicFormat},
+      {load_module, DodoRouterWeb.DashboardLive},
+      {load_module, DodoRouterWeb.LogLive.Index},
+      {load_module, DodoRouterWeb.LogLive.Show},
+      {load_module, DodoRouterWeb.PromptComponents},
+      {load_module, DodoRouterWeb.RouterLive.Show}
+    ]}
   ]
 }
+
