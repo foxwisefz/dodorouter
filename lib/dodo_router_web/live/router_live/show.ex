@@ -756,6 +756,14 @@ defmodule DodoRouterWeb.RouterLive.Show do
                   </span>
                 </div>
                 <div class="flex items-center gap-4 text-base-content/50 text-sm shrink-0">
+                  <%= if Map.get(log, :cache_read_tokens) && log.cache_read_tokens > 0 do %>
+                    <span class="inline-flex items-center gap-1 text-[10px] text-success bg-success/10 px-1.5 py-0.5 rounded">
+                      <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                      </svg>
+                      {cache_pct(log)}
+                    </span>
+                  <% end %>
                   <span :if={Map.get(log, :latency_ms)} class="font-mono">{log.latency_ms}ms</span>
                   <span class="font-mono text-xs">{format_time(log.inserted_at)}</span>
                 </div>
@@ -1019,6 +1027,18 @@ defmodule DodoRouterWeb.RouterLive.Show do
   end
 
   defp format_time(dt), do: Calendar.strftime(dt, "%H:%M:%S")
+
+  defp cache_pct(log) do
+    cached = log.cache_read_tokens || 0
+    prompt = log.prompt_tokens || 0
+
+    if prompt > 0 do
+      pct = Float.round(cached / prompt * 100, 0)
+      "#{trunc(pct)}%"
+    else
+      ""
+    end
+  end
 
   defp base_url do
     DodoRouterWeb.Endpoint.url()

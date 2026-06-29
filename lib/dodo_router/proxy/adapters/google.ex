@@ -340,11 +340,19 @@ defmodule DodoRouter.Proxy.Adapters.Google do
 
     usage =
       if gemini_response["usageMetadata"] do
-        %{
-          "prompt_tokens" => gemini_response["usageMetadata"]["promptTokenCount"],
-          "completion_tokens" => gemini_response["usageMetadata"]["candidatesTokenCount"],
-          "total_tokens" => gemini_response["usageMetadata"]["totalTokenCount"]
+        meta = gemini_response["usageMetadata"]
+
+        base = %{
+          "prompt_tokens" => meta["promptTokenCount"],
+          "completion_tokens" => meta["candidatesTokenCount"],
+          "total_tokens" => meta["totalTokenCount"]
         }
+
+        if meta["cachedContentTokenCount"] do
+          Map.put(base, "cache_read_tokens", meta["cachedContentTokenCount"])
+        else
+          base
+        end
       end
 
     message = %{"role" => "assistant", "content" => text_content}
@@ -430,16 +438,22 @@ defmodule DodoRouter.Proxy.Adapters.Google do
       usage = chunk["usageMetadata"]
 
       new_acc =
-        if usage,
-          do: %{
-            new_acc
-            | usage: %{
-                "prompt_tokens" => usage["promptTokenCount"],
-                "completion_tokens" => usage["candidatesTokenCount"],
-                "total_tokens" => usage["totalTokenCount"]
-              }
-          },
-          else: new_acc
+        if usage do
+          base = %{
+            "prompt_tokens" => usage["promptTokenCount"],
+            "completion_tokens" => usage["candidatesTokenCount"],
+            "total_tokens" => usage["totalTokenCount"]
+          }
+
+          base =
+            if usage["cachedContentTokenCount"],
+              do: Map.put(base, "cache_read_tokens", usage["cachedContentTokenCount"]),
+              else: base
+
+          %{new_acc | usage: base}
+        else
+          new_acc
+        end
 
       if text != "" do
         openai_chunk =

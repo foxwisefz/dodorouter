@@ -88,24 +88,31 @@ defmodule DodoRouter.Models do
   end
 
   @doc """
-  Calculate cost for a request given token counts.
+  Calculate cost for a request given token counts including cache.
   Returns cost in USD.
-  """
-  def calculate_cost(%Model{} = model, input_tokens, output_tokens) do
-    input_cost =
-      if model.input_price_per_million do
-        Decimal.mult(model.input_price_per_million, Decimal.div(input_tokens, 1_000_000))
-      else
-        Decimal.new(0)
-      end
 
-    output_cost =
-      if model.output_price_per_million do
-        Decimal.mult(model.output_price_per_million, Decimal.div(output_tokens, 1_000_000))
-      else
-        Decimal.new(0)
-      end
+  Cache reads are typically cheaper (e.g., 10% of input price for Anthropic),
+  cache writes are typically more expensive (e.g., 125% of input price).
+  """
+  def calculate_cost(%Model{} = model, input_tokens, output_tokens, opts \\ []) do
+    cache_read_tokens = Keyword.get(opts, :cache_read_tokens, 0) || 0
+    cache_write_tokens = Keyword.get(opts, :cache_write_tokens, 0) || 0
+
+    # Non-cached input tokens = total input - cache_read - cache_write
+    # cache_write tokens are billed at write price, not regular input
+    regular_input = max(0, input_tokens - cache_read_tokens - cache_write_tokens)
+
+    input_cost = decimal_cost(model.input_price_per_million, regular_input)
+    output_cost = decimal_cost(model.output_price_per_million, output_tokens)
+    cache_read_cost = decimal_cost(model.cache_read_price_per_million, cache_read_tokens)
+    cache_write_cost = decimal_cost(model.cache_write_price_per_million, cache_write_tokens)
 
     Decimal.add(input_cost, output_cost)
+    |> Decimal.add(cache_read_cost)
+    |> Decimal.add(cache_write_cost)
   end
+
+  defp decimal_cost(nil, _tokens), do: Decimal.new(0)
+  defp decimal_cost(_price, 0), do: Decimal.new(0)
+  defp decimal_cost(price, tokens), do: Decimal.mult(price, Decimal.div(tokens, 1_000_000))
 end

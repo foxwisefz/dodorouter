@@ -16,7 +16,7 @@ defmodule DodoRouter.Proxy.Adapters.AnthropicTest do
       step = %RoutingStep{model: "claude-sonnet-4-20250514"}
       body = Anthropic.build_anthropic_request(request, step)
 
-      assert body["system"] == "You are helpful"
+      assert body["system"] == [%{"type" => "text", "text" => "You are helpful"}]
       roles = Enum.map(body["messages"], & &1["role"])
       assert "system" not in roles
     end

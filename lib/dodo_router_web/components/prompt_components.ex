@@ -23,6 +23,8 @@ defmodule DodoRouterWeb.PromptComponents do
   attr :model, :string, default: nil
   attr :provider, :string, default: nil
   attr :tools, :list, default: []
+  attr :cache_read_tokens, :integer, default: nil
+  attr :cache_write_tokens, :integer, default: nil
 
   def conversation(assigns) do
     {system_messages, other_messages} =
@@ -40,11 +42,23 @@ defmodule DodoRouterWeb.PromptComponents do
     # Filter out tool result messages from display - they'll be shown inline
     display_messages = Enum.reject(other_messages, fn msg -> msg.role == "tool" end)
 
+    # Compute which messages are in the cached prefix. We use explicit cache_control
+    # markers (Anthropic-style) when available; otherwise we estimate the boundary
+    # from cache_read_tokens / prompt_tokens using a simple content-length heuristic.
+    all_messages = system_messages ++ display_messages
+
+    cache_info =
+      compute_cache_info(all_messages, assigns.cache_read_tokens, assigns.cache_write_tokens)
+
     assigns =
       assigns
       |> assign(:system_messages, system_messages)
       |> assign(:display_messages, display_messages)
       |> assign(:tool_results, tool_results)
+      |> assign(:cached_indices, cache_info.cached_indices)
+      |> assign(:breakpoint_idx, cache_info.breakpoint_idx)
+      |> assign(:breakpoint_estimated, cache_info.estimated)
+      |> assign(:display_index_offset, length(system_messages))
 
     ~H"""
     <div class="space-y-4">
@@ -56,11 +70,31 @@ defmodule DodoRouterWeb.PromptComponents do
           <%= if @model do %>
             <span class="font-mono text-base-content font-semibold">{@model}</span>
           <% end %>
+          <%= if @cache_read_tokens && @cache_read_tokens > 0 do %>
+            <span class="ml-auto inline-flex items-center gap-1 text-success bg-success/10 px-2 py-0.5 rounded">
+              <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M13 10V3L4 14h7v7l9-11h-7z"
+                />
+              </svg>
+              {@cache_read_tokens} cached tokens
+            </span>
+          <% end %>
         </div>
       <% end %>
 
       <div class="space-y-3">
-        <.collapsed_message_list messages={@system_messages} response={false} tool_results={%{}} />
+        <.collapsed_message_list
+          messages={@system_messages}
+          response={false}
+          tool_results={%{}}
+          cached_indices={@cached_indices}
+          breakpoint_idx={@breakpoint_idx}
+          breakpoint_estimated={@breakpoint_estimated}
+        />
 
         <%= if length(@tools) > 0 do %>
           <.available_tools tools={@tools} />
@@ -70,6 +104,10 @@ defmodule DodoRouterWeb.PromptComponents do
           messages={@display_messages}
           response={@response}
           tool_results={@tool_results}
+          cached_indices={@cached_indices}
+          breakpoint_idx={@breakpoint_idx}
+          breakpoint_estimated={@breakpoint_estimated}
+          index_offset={@display_index_offset}
         />
       </div>
     </div>
@@ -79,6 +117,10 @@ defmodule DodoRouterWeb.PromptComponents do
   attr :messages, :list, required: true
   attr :response, :any, default: nil
   attr :tool_results, :map, default: %{}
+  attr :cached_indices, :any, default: MapSet.new()
+  attr :breakpoint_idx, :integer, default: nil
+  attr :breakpoint_estimated, :boolean, default: false
+  attr :index_offset, :integer, default: 0
 
   defp collapsed_message_list(assigns) do
     segments = build_segments(assigns.messages, assigns.response)
@@ -93,6 +135,7 @@ defmodule DodoRouterWeb.PromptComponents do
         </span>
         <div class="flex-1 border-t border-dashed border-base-300/40"></div>
       </div>
+      <% real_index = if is_integer(seg.index), do: @index_offset + seg.index, else: seg.index %>
       <.message_bubble
         message={seg.message}
         index={seg.index}
@@ -100,8 +143,135 @@ defmodule DodoRouterWeb.PromptComponents do
         next_message={message_at(@segments, idx + 1)}
         prev_message={message_at(@segments, idx - 1)}
         tool_results={@tool_results}
+        cached={is_cached?(real_index, @cached_indices)}
+      />
+      <.cache_breakpoint
+        :if={is_breakpoint_here?(real_index, @breakpoint_idx) or has_cache_control?(seg.message)}
+        estimated={@breakpoint_estimated and not has_cache_control?(seg.message)}
       />
     <% end %>
+    """
+  end
+
+  defp is_cached?(index, _cached_indices) when not is_integer(index), do: false
+  defp is_cached?(index, cached_indices), do: MapSet.member?(cached_indices, index)
+
+  defp has_cache_control?(message), do: Map.get(message, :cache_control) != nil
+
+  defp is_breakpoint_here?(index, breakpoint_idx)
+       when is_integer(index) and is_integer(breakpoint_idx) and index == breakpoint_idx,
+       do: true
+
+  defp is_breakpoint_here?(_, _), do: false
+
+  @approx_chars_per_token 4
+
+  defp compute_cache_info(messages, cache_read_tokens, cache_write_tokens) do
+    explicit_breakpoint_idx =
+      messages
+      |> Enum.with_index()
+      |> Enum.filter(fn {msg, _} -> not is_nil(Map.get(msg, :cache_control)) end)
+      |> Enum.map(fn {_, idx} -> idx end)
+      |> List.last()
+
+    if is_integer(explicit_breakpoint_idx) and (cache_read_tokens || 0) > 0 do
+      %{
+        cached_indices: MapSet.new(0..explicit_breakpoint_idx),
+        breakpoint_idx: explicit_breakpoint_idx,
+        estimated: false
+      }
+    else
+      estimate_cache_boundary(messages, cache_read_tokens, cache_write_tokens)
+    end
+  end
+
+  defp estimate_cache_boundary(_messages, nil, nil),
+    do: %{cached_indices: MapSet.new(), breakpoint_idx: nil, estimated: false}
+
+  defp estimate_cache_boundary(messages, cache_read_tokens, cache_write_tokens) do
+    total_cache = (cache_read_tokens || 0) + (cache_write_tokens || 0)
+
+    if total_cache > 0 do
+      indexed_estimates =
+        Enum.with_index(messages)
+        |> Enum.map(fn {msg, idx} ->
+          {idx, estimate_message_tokens(msg)}
+        end)
+
+      total_prompt_tokens = Enum.sum(Enum.map(indexed_estimates, &elem(&1, 1)))
+
+      # If cached tokens cover the whole prompt, everything is cached.
+      if total_cache >= total_prompt_tokens do
+        %{
+          cached_indices: MapSet.new(0..(length(messages) - 1)),
+          breakpoint_idx: length(messages) - 1,
+          estimated: true
+        }
+      else
+        # Accumulate tokens from the start and find the message that crosses the cache boundary.
+        breakpoint_idx =
+          Enum.reduce_while(indexed_estimates, nil, fn {idx, tokens}, acc ->
+            prev_acc = acc || 0
+            new_acc = prev_acc + tokens
+
+            if new_acc >= total_cache do
+              {:halt, idx}
+            else
+              {:cont, new_acc}
+            end
+          end)
+
+        cached_indices =
+          if is_integer(breakpoint_idx) and breakpoint_idx >= 0 do
+            MapSet.new(0..breakpoint_idx)
+          else
+            MapSet.new()
+          end
+
+        %{cached_indices: cached_indices, breakpoint_idx: breakpoint_idx, estimated: true}
+      end
+    else
+      %{cached_indices: MapSet.new(), breakpoint_idx: nil, estimated: false}
+    end
+  end
+
+  defp estimate_message_tokens(message) do
+    content = message.content || ""
+
+    text =
+      cond do
+        is_binary(content) -> content
+        is_list(content) -> Enum.join(content, " ")
+        true -> ""
+      end
+
+    # Crude approximation: ~4 chars per token on average.
+    max(1, trunc(String.length(text) / @approx_chars_per_token))
+  end
+
+  attr :estimated, :boolean, default: false
+
+  defp cache_breakpoint(assigns) do
+    label = if assigns.estimated, do: "Estimated cache boundary", else: "Cache breakpoint"
+
+    assigns = assign(assigns, :label, label)
+
+    ~H"""
+    <div class="relative flex items-center gap-3 py-2 my-1 px-4">
+      <div class="flex-1 border-t-2 border-dashed border-success/40"></div>
+      <div class="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-success bg-success/10 px-2.5 py-1 rounded-full">
+        <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            stroke-width="2"
+            d="M13 10V3L4 14h7v7l9-11h-7z"
+          />
+        </svg>
+        {@label}
+      </div>
+      <div class="flex-1 border-t-2 border-dashed border-success/40"></div>
+    </div>
     """
   end
 
@@ -174,6 +344,7 @@ defmodule DodoRouterWeb.PromptComponents do
   attr :next_message, :map, default: nil
   attr :prev_message, :map, default: nil
   attr :tool_results, :map, default: %{}
+  attr :cached, :boolean, default: false
 
   defp message_bubble(assigns) do
     role = assigns.message.role
@@ -185,6 +356,7 @@ defmodule DodoRouterWeb.PromptComponents do
       |> assign(:label_class, label_class)
       |> assign(:label, label)
       |> assign(:role, role)
+      |> assign(:has_cache_control, Map.get(assigns.message, :cache_control) != nil)
 
     ~H"""
     <div class={"group flex flex-col gap-1.5 #{align_class(@role)}"}>
@@ -192,6 +364,16 @@ defmodule DodoRouterWeb.PromptComponents do
         <span class={"text-[10px] uppercase tracking-wider font-semibold #{@label_class}"}>
           {@label}
         </span>
+        <%= if @cached do %>
+          <span class="text-[10px] px-1.5 py-0.5 rounded bg-success/10 text-success font-medium">
+            cached
+          </span>
+        <% end %>
+        <%= if @has_cache_control do %>
+          <span class="text-[10px] px-1.5 py-0.5 rounded bg-success/10 text-success font-medium">
+            cache breakpoint
+          </span>
+        <% end %>
         <%= if is_binary(@message.content) && @message.content != "" do %>
           <button
             type="button"

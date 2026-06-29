@@ -255,7 +255,22 @@ defmodule DodoRouterWeb.LogLive.Index do
                 <.call_type_badge type={Map.get(log, :call_type)} />
               </td>
               <td class="px-4 py-2.5 text-sm font-mono text-base-content/50 hidden md:table-cell">
-                {Map.get(log, :total_tokens) || "-"}
+                <div class="flex items-center gap-1.5">
+                  {Map.get(log, :total_tokens) || "-"}
+                  <%= if Map.get(log, :cache_read_tokens) && log.cache_read_tokens > 0 do %>
+                    <span class="inline-flex items-center gap-0.5 text-[10px] text-success bg-success/10 px-1 py-0.5 rounded">
+                      <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                          stroke-width="2"
+                          d="M13 10V3L4 14h7v7l9-11h-7z"
+                        />
+                      </svg>
+                      {cache_pct(log)}
+                    </span>
+                  <% end %>
+                </div>
               </td>
               <td class="px-4 py-2.5 text-sm font-mono text-base-content/50">
                 {if Map.get(log, :latency_ms), do: "#{log.latency_ms}ms", else: "-"}
@@ -334,6 +349,18 @@ defmodule DodoRouterWeb.LogLive.Index do
       String.slice(content, 0, 80) <> "..."
     else
       content
+    end
+  end
+
+  defp cache_pct(log) do
+    cached = log.cache_read_tokens || 0
+    prompt = log.prompt_tokens || 0
+
+    if prompt > 0 do
+      pct = Float.round(cached / prompt * 100, 0)
+      "#{trunc(pct)}%"
+    else
+      ""
     end
   end
 end

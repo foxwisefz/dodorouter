@@ -26,6 +26,28 @@ defmodule DodoRouterWeb.PromptComponentsTest do
       assert html =~ "Hi there"
     end
 
+    test "renders estimated cache boundary with response segment and display messages" do
+      assigns = %{
+        messages: [
+          %{role: "system", content: String.duplicate("x", 400), tool_calls: nil},
+          %{role: "user", content: "ok", tool_calls: nil},
+          %{role: "assistant", content: "got it", tool_calls: nil}
+        ],
+        response: %{role: "assistant", content: "Response", tool_calls: nil},
+        model: "kimi-k2.7",
+        provider: "moonshot",
+        tools: [],
+        cache_read_tokens: 100,
+        cache_write_tokens: 0
+      }
+
+      html = render_component(&PromptComponents.conversation/1, assigns)
+
+      assert html =~ "Estimated cache boundary"
+      assert html =~ "Response"
+      assert html =~ "cached"
+    end
+
     test "renders user messages right-aligned" do
       assigns = %{
         messages: [%{role: "user", content: "Test", tool_calls: nil}],

@@ -17,13 +17,31 @@ defmodule DodoRouterWeb.AnthropicFormat do
           [%{"role" => "system", "content" => system} | messages]
 
         system when is_list(system) ->
-          text =
-            system
-            |> Enum.filter(&(&1["type"] == "text"))
-            |> Enum.map(& &1["text"])
-            |> Enum.join("\n")
+          {text, cache_control} =
+            Enum.reduce(system, {"", nil}, fn block, {acc_text, acc_cc} ->
+              new_text =
+                if block["type"] == "text" do
+                  if acc_text == "", do: block["text"], else: acc_text <> "\n" <> block["text"]
+                else
+                  acc_text
+                end
 
-          if text != "", do: [%{"role" => "system", "content" => text} | messages], else: messages
+              new_cc = block["cache_control"] || acc_cc
+              {new_text, new_cc}
+            end)
+
+          if text != "" do
+            sys_msg = %{"role" => "system", "content" => text}
+
+            sys_msg =
+              if cache_control,
+                do: Map.put(sys_msg, "cache_control", cache_control),
+                else: sys_msg
+
+            [sys_msg | messages]
+          else
+            messages
+          end
       end
 
     %{
@@ -45,6 +63,31 @@ defmodule DodoRouterWeb.AnthropicFormat do
     stop_reason = convert_stop_reason(choice["finish_reason"])
     usage = openai_response["usage"] || %{}
 
+    anthropic_usage = %{
+      "input_tokens" => usage["prompt_tokens"] || 0,
+      "output_tokens" => usage["completion_tokens"] || 0
+    }
+
+    anthropic_usage =
+      if usage["cache_read_input_tokens"] || usage["cache_read_tokens"],
+        do:
+          Map.put(
+            anthropic_usage,
+            "cache_read_input_tokens",
+            usage["cache_read_input_tokens"] || usage["cache_read_tokens"]
+          ),
+        else: anthropic_usage
+
+    anthropic_usage =
+      if usage["cache_creation_input_tokens"] || usage["cache_write_tokens"],
+        do:
+          Map.put(
+            anthropic_usage,
+            "cache_creation_input_tokens",
+            usage["cache_creation_input_tokens"] || usage["cache_write_tokens"]
+          ),
+        else: anthropic_usage
+
     %{
       "id" =>
         "msg_#{:crypto.strong_rand_bytes(16) |> Base.encode16(case: :lower) |> String.slice(0, 24)}",
@@ -54,10 +97,7 @@ defmodule DodoRouterWeb.AnthropicFormat do
       "model" => openai_response["model"] || "",
       "stop_reason" => stop_reason,
       "stop_sequence" => nil,
-      "usage" => %{
-        "input_tokens" => usage["prompt_tokens"] || 0,
-        "output_tokens" => usage["completion_tokens"] || 0
-      }
+      "usage" => anthropic_usage
     }
   end
 
@@ -137,7 +177,15 @@ defmodule DodoRouterWeb.AnthropicFormat do
                   ""
               end
 
-            %{"role" => "tool", "tool_call_id" => block["tool_use_id"], "content" => text}
+            tool_msg = %{
+              "role" => "tool",
+              "tool_call_id" => block["tool_use_id"],
+              "content" => text
+            }
+
+            if block["cache_control"],
+              do: Map.put(tool_msg, "cache_control", block["cache_control"]),
+              else: tool_msg
           end)
 
         text_parts =
@@ -145,20 +193,54 @@ defmodule DodoRouterWeb.AnthropicFormat do
           |> Enum.filter(&(&1["type"] == "text"))
           |> Enum.map(& &1["text"])
 
+        # Preserve cache_control from the last text block that has it
+        cache_control =
+          Enum.find_value(Enum.reverse(other_blocks), fn
+            %{"type" => "text", "cache_control" => cc} when cc != nil -> cc
+            _ -> nil
+          end)
+
         user_messages =
           case text_parts do
-            [] -> []
-            parts -> [%{"role" => "user", "content" => Enum.join(parts, "\n")}]
+            [] ->
+              []
+
+            parts ->
+              user_msg = %{"role" => "user", "content" => Enum.join(parts, "\n")}
+
+              if cache_control,
+                do: [Map.put(user_msg, "cache_control", cache_control)],
+                else: [user_msg]
           end
 
         tool_messages ++ user_messages
 
       %{"role" => "user", "content" => content} ->
-        [%{"role" => "user", "content" => content || ""}]
+        msg = %{"role" => "user", "content" => content || ""}
+
+        if msg["cache_control"],
+          do: Map.put(msg, "cache_control", msg["cache_control"]),
+          else: [msg]
 
       %{"role" => "assistant", "content" => content} ->
         base_msg = %{"role" => "assistant", "content" => extract_text_from_content(content)}
         tool_use_blocks = extract_tool_use_blocks(content)
+
+        # Preserve cache_control from assistant content blocks
+        cache_control =
+          if is_list(content) do
+            Enum.find_value(Enum.reverse(content), fn
+              %{"cache_control" => cc} when cc != nil -> cc
+              _ -> nil
+            end)
+          else
+            msg["cache_control"]
+          end
+
+        base_msg =
+          if cache_control,
+            do: Map.put(base_msg, "cache_control", cache_control),
+            else: base_msg
 
         if tool_use_blocks != [] do
           tool_calls =
@@ -262,7 +344,7 @@ defmodule DodoRouterWeb.AnthropicFormat do
   defp maybe_put_tools(map, tools) do
     openai_tools =
       Enum.map(tools, fn tool ->
-        %{
+        openai_tool = %{
           "type" => "function",
           "function" => %{
             "name" => tool["name"],
@@ -270,6 +352,10 @@ defmodule DodoRouterWeb.AnthropicFormat do
             "parameters" => tool["input_schema"] || %{"type" => "object", "properties" => %{}}
           }
         }
+
+        if tool["cache_control"],
+          do: Map.put(openai_tool, "cache_control", tool["cache_control"]),
+          else: openai_tool
       end)
 
     Map.put(map, "tools", openai_tools)

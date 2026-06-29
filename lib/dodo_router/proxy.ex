@@ -96,6 +96,9 @@ defmodule DodoRouter.Proxy do
     usage = Adapter.extract_usage(result.final_response || %{})
     last_step = List.last(result.attempted_steps)
 
+    # Calculate cost using model pricing if available
+    estimated_cost = calculate_cost(last_step[:provider], last_step[:model], usage)
+
     # Encode request/response for storage (truncate large payloads)
     {truncated_req, req_flags} = truncate_body(request)
     request_body = Jason.encode!(truncated_req)
@@ -126,6 +129,8 @@ defmodule DodoRouter.Proxy do
       prompt_tokens: usage.prompt_tokens,
       completion_tokens: usage.completion_tokens,
       total_tokens: usage.total_tokens,
+      cache_read_tokens: usage.cache_read_tokens,
+      cache_write_tokens: usage.cache_write_tokens,
       latency_ms: latency_ms,
       ttfb_ms: meta["ttfb_ms"],
       upload_ms: meta["upload_ms"],
@@ -137,6 +142,7 @@ defmodule DodoRouter.Proxy do
       session_name: session[:session_name],
       recording_id: recording_id,
       truncation_flags: truncation_flags,
+      estimated_cost_usd: estimated_cost,
       request_headers: encode_redacted_headers(client_headers),
       response_headers: encode_redacted_headers(result.response_headers)
     }
@@ -417,6 +423,24 @@ defmodule DodoRouter.Proxy do
           |> Enum.map(fn {k, v} -> [k, v] end)
 
         Map.put(step, :response_headers, redacted)
+    end
+  end
+
+  defp calculate_cost(nil, _model, _usage), do: nil
+
+  defp calculate_cost(provider, model, usage) do
+    case DodoRouter.Models.get_model_by_id(provider, model) do
+      nil ->
+        nil
+
+      model_struct ->
+        DodoRouter.Models.calculate_cost(
+          model_struct,
+          usage.prompt_tokens || 0,
+          usage.completion_tokens || 0,
+          cache_read_tokens: usage.cache_read_tokens || 0,
+          cache_write_tokens: usage.cache_write_tokens || 0
+        )
     end
   end
 end
