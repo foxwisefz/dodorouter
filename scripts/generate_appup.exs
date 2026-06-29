@@ -17,8 +17,10 @@ end
 
 # Get changed files between versions
 {output, 0} = System.cmd("git", ["diff", "--name-only", range, "--", "lib/"])
+{added_output, 0} = System.cmd("git", ["diff", "--diff-filter=A", "--name-only", range, "--", "lib/"])
 
 changed_files = String.split(output, "\n")
+added_files = String.split(added_output, "\n") |> MapSet.new()
 
 # Extract modules from .ex files
 ex_modules =
@@ -28,7 +30,7 @@ ex_modules =
     case File.read(file) do
       {:ok, content} ->
         Regex.scan(~r/^defmodule\s+([A-Za-z0-9._]+)\s+do/m, content)
-        |> Enum.map(fn [_, mod] -> mod end)
+        |> Enum.map(fn [_, mod] -> {mod, MapSet.member?(added_files, file)} end)
       _ -> []
     end
   end)
@@ -56,14 +58,17 @@ heex_modules =
 
 modules =
   (ex_modules ++ heex_modules)
+  |> Enum.map(fn
+    {mod, added} when is_boolean(added) -> {mod, added}
+    mod -> {mod, false}
+  end)
   |> Enum.sort()
   |> Enum.uniq()
 
-# Detect GenServers/Agents (need {update, ...} instead of {load_module, ...})
+# Categorize: new modules need add_module, changed need load_module/update
 {genserver_modules, regular_modules} =
   modules
-  |> Enum.split_with(fn mod ->
-    # Find the file for this module and check if it uses GenServer or Agent
+  |> Enum.split_with(fn {mod, _added} ->
     file = "lib/#{mod |> String.replace(".", "/") |> Macro.underscore()}.ex"
     case File.read(file) do
       {:ok, content} -> String.contains?(content, "use GenServer") or String.contains?(content, "use Agent")
@@ -72,8 +77,20 @@ modules =
   end)
 
 instructions =
-  Enum.map(regular_modules, fn mod -> "      {:load_module, #{mod}}" end) ++
-  Enum.map(genserver_modules, fn mod -> "      {:update, #{mod}, {:advanced, []}}" end)
+  Enum.map(regular_modules, fn {mod, added} ->
+    if added do
+      "      {:add_module, #{mod}}"
+    else
+      "      {:load_module, #{mod}}"
+    end
+  end) ++
+  Enum.map(genserver_modules, fn {mod, added} ->
+    if added do
+      "      {:add_module, #{mod}}"
+    else
+      "      {:update, #{mod}, {:advanced, []}}"
+    end
+  end)
 
 instructions_str = instructions |> Enum.join(",\n")
 
