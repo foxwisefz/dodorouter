@@ -22,16 +22,24 @@ end
 changed_files = String.split(output, "\n")
 added_files = String.split(added_output, "\n") |> MapSet.new()
 
-# Extract modules from .ex files
-ex_modules =
+# Extract modules from .ex files, keeping file content for stateful classification
+{ex_modules, module_contents} =
   changed_files
   |> Enum.filter(&String.ends_with?(&1, ".ex"))
-  |> Enum.flat_map(fn file ->
+  |> Enum.flat_map_reduce(%{}, fn file, acc ->
     case File.read(file) do
       {:ok, content} ->
-        Regex.scan(~r/^defmodule\s+([A-Za-z0-9._]+)\s+do/m, content)
-        |> Enum.map(fn [_, mod] -> {mod, MapSet.member?(added_files, file)} end)
-      _ -> []
+        mods =
+          Regex.scan(~r/^defmodule\s+([A-Za-z0-9._]+)\s+do/m, content)
+          |> Enum.map(fn [_, mod] -> {mod, MapSet.member?(added_files, file)} end)
+
+        new_acc =
+          Enum.reduce(mods, acc, fn {mod, _}, a -> Map.put(a, mod, content) end)
+
+        {mods, new_acc}
+
+      _ ->
+        {[], acc}
     end
   end)
 
@@ -66,13 +74,18 @@ modules =
   |> Enum.uniq()
 
 # Categorize: new modules need add_module, changed need load_module/update
+# For stateful modules (GenServer, Agent, LiveView), use {update, ..., {advanced, []}}
+# so running processes get code_change/3 and pick up new code.
+# For stateless modules, {load_module} is sufficient.
 {genserver_modules, regular_modules} =
   modules
   |> Enum.split_with(fn {mod, _added} ->
-    file = "lib/#{mod |> String.replace(".", "/") |> Macro.underscore()}.ex"
-    case File.read(file) do
-      {:ok, content} -> String.contains?(content, "use GenServer") or String.contains?(content, "use Agent")
-      _ -> false
+    case Map.get(module_contents, mod) do
+      nil -> false
+      content ->
+        String.contains?(content, "use GenServer") or
+          String.contains?(content, "use Agent") or
+          String.contains?(content, ":live_view")
     end
   end)
 
