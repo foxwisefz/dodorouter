@@ -176,7 +176,7 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
 
   def build_anthropic_request(request, step) do
     messages = request["messages"] || []
-    {system_msg, other_messages} = extract_system_message(messages)
+    {system_msg, system_cache_control, other_messages} = extract_system_message(messages)
 
     anthropic_messages =
       other_messages
@@ -189,7 +189,21 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
       "max_tokens" => request["max_tokens"] || 4096
     }
 
-    body = if system_msg, do: Map.put(body, "system", system_msg), else: body
+    body =
+      if system_msg do
+        system_block = %{"type" => "text", "text" => system_msg}
+
+        system_block =
+          if system_cache_control do
+            Map.put(system_block, "cache_control", system_cache_control)
+          else
+            system_block
+          end
+
+        Map.put(body, "system", [system_block])
+      else
+        body
+      end
 
     # Optional params
     body =
@@ -216,11 +230,19 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
   defp extract_system_message(messages) do
     case Enum.split_with(messages, &(&1["role"] == "system")) do
       {[], other} ->
-        {nil, other}
+        {nil, nil, other}
 
       {system_msgs, other} ->
         system_content = system_msgs |> Enum.map(& &1["content"]) |> Enum.join("\n\n")
-        {system_content, other}
+
+        # Preserve cache_control from the last system message that has it
+        cache_control =
+          Enum.find_value(Enum.reverse(system_msgs), fn
+            %{"cache_control" => cc} when cc != nil -> cc
+            _ -> nil
+          end)
+
+        {system_content, cache_control, other}
     end
   end
 
@@ -247,34 +269,68 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
       ]
       |> Enum.reject(&is_nil/1)
 
-    if content == [] do
-      %{"role" => "assistant", "content" => [%{"type" => "text", "text" => " "}]}
+    content = if content == [], do: [%{"type" => "text", "text" => " "}], else: content
+
+    # Add cache_control to last content block if present
+    content =
+      if msg["cache_control"] do
+        List.update_at(content, -1, &Map.put(&1, "cache_control", msg["cache_control"]))
+      else
+        content
+      end
+
+    %{"role" => "assistant", "content" => content}
+  end
+
+  defp convert_message_to_anthropic(
+         %{
+           "role" => "tool",
+           "tool_call_id" => id,
+           "content" => content
+         } = msg
+       ) do
+    block = %{
+      "type" => "tool_result",
+      "tool_use_id" => id,
+      "content" => content
+    }
+
+    block =
+      if msg["cache_control"],
+        do: Map.put(block, "cache_control", msg["cache_control"]),
+        else: block
+
+    %{"role" => "user", "content" => [block]}
+  end
+
+  defp convert_message_to_anthropic(%{"role" => role, "content" => content} = msg) do
+    if msg["cache_control"] do
+      content_blocks =
+        if is_binary(content) do
+          [%{"type" => "text", "text" => content || " "} | []]
+        else
+          content
+        end
+
+      content_blocks =
+        List.update_at(content_blocks, -1, &Map.put(&1, "cache_control", msg["cache_control"]))
+
+      %{"role" => role, "content" => content_blocks}
     else
-      %{"role" => "assistant", "content" => content}
+      %{"role" => role, "content" => content}
     end
   end
 
-  defp convert_message_to_anthropic(%{
-         "role" => "tool",
-         "tool_call_id" => id,
-         "content" => content
-       }) do
-    %{
-      "role" => "user",
-      "content" => [%{"type" => "tool_result", "tool_use_id" => id, "content" => content}]
-    }
-  end
-
-  defp convert_message_to_anthropic(%{"role" => role, "content" => content}) do
-    %{"role" => role, "content" => content}
-  end
-
-  defp convert_tool_to_anthropic(%{"function" => func}) do
-    %{
+  defp convert_tool_to_anthropic(%{"function" => func} = tool) do
+    anthropic_tool = %{
       "name" => func["name"],
       "description" => func["description"] || "",
       "input_schema" => func["parameters"] || %{"type" => "object", "properties" => %{}}
     }
+
+    if tool["cache_control"],
+      do: Map.put(anthropic_tool, "cache_control", tool["cache_control"]),
+      else: anthropic_tool
   end
 
   defp merge_anthropic_content_blocks(messages) when is_list(messages) do
@@ -336,13 +392,25 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
 
     usage =
       if anthropic_response["usage"] do
-        %{
+        cache_read = anthropic_response["usage"]["cache_read_input_tokens"]
+        cache_write = anthropic_response["usage"]["cache_creation_input_tokens"]
+
+        base = %{
           "prompt_tokens" => anthropic_response["usage"]["input_tokens"],
           "completion_tokens" => anthropic_response["usage"]["output_tokens"],
           "total_tokens" =>
             (anthropic_response["usage"]["input_tokens"] || 0) +
               (anthropic_response["usage"]["output_tokens"] || 0)
         }
+
+        base =
+          if cache_read,
+            do: Map.put(base, "cache_read_tokens", cache_read),
+            else: base
+
+        if cache_write,
+          do: Map.put(base, "cache_write_tokens", cache_write),
+          else: base
       end
 
     response = %{
@@ -403,16 +471,49 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
           usage = event["usage"]
 
           new_acc =
-            if usage,
-              do: %{
-                new_acc
-                | usage: %{
-                    "prompt_tokens" => usage["input_tokens"],
-                    "completion_tokens" => usage["output_tokens"],
-                    "total_tokens" => (usage["input_tokens"] || 0) + (usage["output_tokens"] || 0)
-                  }
-              },
-              else: new_acc
+            if usage do
+              cache_read = usage["cache_read_input_tokens"]
+              cache_write = usage["cache_creation_input_tokens"]
+
+              base = %{
+                "prompt_tokens" =>
+                  usage["input_tokens"] || (acc.usage && acc.usage["prompt_tokens"]),
+                "completion_tokens" =>
+                  usage["output_tokens"] || (acc.usage && acc.usage["completion_tokens"]),
+                "total_tokens" =>
+                  (usage["input_tokens"] || (acc.usage && acc.usage["prompt_tokens"]) || 0) +
+                    (usage["output_tokens"] || (acc.usage && acc.usage["completion_tokens"]) || 0)
+              }
+
+              # Preserve cache fields from previous chunk if new ones aren't provided
+              base =
+                cond do
+                  cache_read ->
+                    Map.put(base, "cache_read_tokens", cache_read)
+
+                  acc.usage && acc.usage["cache_read_tokens"] ->
+                    Map.put(base, "cache_read_tokens", acc.usage["cache_read_tokens"])
+
+                  true ->
+                    base
+                end
+
+              base =
+                cond do
+                  cache_write ->
+                    Map.put(base, "cache_write_tokens", cache_write)
+
+                  acc.usage && acc.usage["cache_write_tokens"] ->
+                    Map.put(base, "cache_write_tokens", acc.usage["cache_write_tokens"])
+
+                  true ->
+                    base
+                end
+
+              %{new_acc | usage: base}
+            else
+              new_acc
+            end
 
           {new_acc, chunks}
 

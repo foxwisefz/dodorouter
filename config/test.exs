@@ -12,8 +12,7 @@ config :dodo_router, DodoRouter.Repo,
   username: System.get_env("DB_USERNAME", "postgres"),
   password: System.get_env("DB_PASSWORD", "postgres"),
   hostname: System.get_env("DB_HOSTNAME", "localhost"),
-  database:
-    System.get_env("DB_NAME", "dodo_router_test") <> "#{System.get_env("MIX_TEST_PARTITION")}",
+  database: "dodo_router_test#{System.get_env("MIX_TEST_PARTITION")}",
   port: String.to_integer(System.get_env("DB_PORT", "5432")),
   pool: Ecto.Adapters.SQL.Sandbox,
   pool_size: System.schedulers_online() * 2

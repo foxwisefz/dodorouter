@@ -53,6 +53,43 @@ defmodule DodoRouterWeb.LogLiveTest do
   end
 
   describe "Show" do
+    test "renders conversation with cache tokens without crashing", %{conn: conn, user: user} do
+      {router, _api_key} = RoutersFixtures.router_fixture(user)
+
+      log =
+        LogsFixtures.log_fixture(router, %{
+          final_provider: "moonshot",
+          final_model: "kimi-k2.7",
+          prompt_tokens: 500,
+          completion_tokens: 50,
+          total_tokens: 550,
+          cache_read_tokens: 400,
+          request_body:
+            Jason.encode!(%{
+              "messages" => [
+                %{"role" => "system", "content" => String.duplicate("x", 1200)},
+                %{"role" => "user", "content" => "hello"},
+                %{"role" => "assistant", "content" => "hi"}
+              ]
+            }),
+          response_body:
+            Jason.encode!(%{
+              "choices" => [%{"message" => %{"role" => "assistant", "content" => "response"}}],
+              "usage" => %{
+                "prompt_tokens" => 500,
+                "completion_tokens" => 50,
+                "total_tokens" => 550,
+                "prompt_tokens_details" => %{"cached_tokens" => 400}
+              }
+            })
+        })
+
+      {:ok, _live, html} = live(conn, ~p"/logs/#{log.request_id}")
+
+      assert html =~ "cached"
+      assert html =~ "response"
+    end
+
     test "renders per-step response body in fallback trace", %{conn: conn, user: user} do
       {router, _api_key} = RoutersFixtures.router_fixture(user)
 

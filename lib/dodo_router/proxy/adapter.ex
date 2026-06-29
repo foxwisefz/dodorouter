@@ -162,17 +162,50 @@ defmodule DodoRouter.Proxy.Adapter do
   def context_overflow?(_, _), do: false
 
   @doc """
-  Extracts usage from response.
+  Extracts usage from response, including cache tokens from providers.
+
+  Providers report cache tokens in different locations:
+  - Anthropic: usage.cache_read_input_tokens, usage.cache_creation_input_tokens
+  - OpenAI/Groq/xAI/Mistral: usage.prompt_tokens_details.cached_tokens
+  - Google: usageMetadata.cachedContentTokenCount
+  - DeepSeek: usage.prompt_cache_hit_tokens
   """
   def extract_usage(%{"usage" => usage}) do
     %{
       prompt_tokens: usage["prompt_tokens"],
       completion_tokens: usage["completion_tokens"],
-      total_tokens: usage["total_tokens"]
+      total_tokens: usage["total_tokens"],
+      cache_read_tokens: extract_cache_read_tokens(usage),
+      cache_write_tokens: extract_cache_write_tokens(usage)
     }
   end
 
-  def extract_usage(_), do: %{prompt_tokens: nil, completion_tokens: nil, total_tokens: nil}
+  def extract_usage(_),
+    do: %{
+      prompt_tokens: nil,
+      completion_tokens: nil,
+      total_tokens: nil,
+      cache_read_tokens: nil,
+      cache_write_tokens: nil
+    }
+
+  defp extract_cache_read_tokens(usage) do
+    # Anthropic: cache_read_input_tokens
+    # OpenAI/Groq/xAI/Mistral: prompt_tokens_details.cached_tokens
+    # DeepSeek: prompt_cache_hit_tokens
+    # Already-normalized by adapter (cache_read_tokens)
+    usage["cache_read_input_tokens"] ||
+      get_in(usage, ["prompt_tokens_details", "cached_tokens"]) ||
+      usage["prompt_cache_hit_tokens"] ||
+      usage["cache_read_tokens"]
+  end
+
+  defp extract_cache_write_tokens(usage) do
+    # Anthropic: cache_creation_input_tokens
+    # Already-normalized by adapter (cache_write_tokens)
+    usage["cache_creation_input_tokens"] ||
+      usage["cache_write_tokens"]
+  end
 
   @doc """
   Detects call type from request and response.
@@ -253,7 +286,7 @@ defmodule DodoRouter.Proxy.Adapter do
       Enum.map(messages, fn msg ->
         msg
         |> Map.take(
-          ~w(role content name tool_calls tool_call_id function_call reasoning_details reasoning_content)
+          ~w(role content name tool_calls tool_call_id function_call reasoning_details reasoning_content cache_control)
         )
         |> normalize_message_content()
         |> migrate_function_call()

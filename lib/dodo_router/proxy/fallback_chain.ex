@@ -68,6 +68,8 @@ defmodule DodoRouter.Proxy.FallbackChain do
 
     case execute_step(step, state) do
       {:ok, response, meta} ->
+        step_usage = Adapter.extract_usage(response)
+
         attempt = %{
           provider: step.provider,
           model: step.model,
@@ -78,6 +80,8 @@ defmodule DodoRouter.Proxy.FallbackChain do
           provider_key_slug: key_slug_for(step),
           status: "success",
           latency_ms: latency(start_time),
+          cache_read_tokens: step_usage.cache_read_tokens,
+          cache_write_tokens: step_usage.cache_write_tokens,
           forwarded_headers: build_forwarded_headers(step),
           outbound_headers: meta[:outbound_headers],
           request_body: state.request,

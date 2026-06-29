@@ -97,7 +97,8 @@ defmodule DodoRouter.Logs.MessageNormalizer do
       tool_calls: msg["tool_calls"],
       tool_call_id: msg["tool_call_id"],
       name: msg["name"],
-      reasoning_content: msg["reasoning_content"]
+      reasoning_content: msg["reasoning_content"],
+      cache_control: msg["cache_control"]
     }
   end
 
@@ -108,7 +109,8 @@ defmodule DodoRouter.Logs.MessageNormalizer do
       tool_calls: msg["tool_calls"],
       tool_call_id: msg["tool_call_id"],
       name: msg["name"],
-      reasoning_content: msg["reasoning_content"]
+      reasoning_content: msg["reasoning_content"],
+      cache_control: msg["cache_control"]
     }
   end
 
@@ -119,7 +121,8 @@ defmodule DodoRouter.Logs.MessageNormalizer do
       tool_calls: nil,
       tool_call_id: nil,
       name: nil,
-      reasoning_content: nil
+      reasoning_content: nil,
+      cache_control: nil
     }
   end
 

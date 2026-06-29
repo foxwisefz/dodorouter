@@ -23,6 +23,7 @@ defmodule DodoRouterWeb.DashboardLive do
       |> assign(:latency_percentiles, %{})
       |> assign(:failure_breakdown, [])
       |> assign(:requests_per_minute, [])
+      |> assign(:cache_stats, nil)
       |> assign(:selected_router_steps, [])
       |> assign(:recent_logs, [])
       |> assign(:loading, false)
@@ -106,6 +107,7 @@ defmodule DodoRouterWeb.DashboardLive do
     |> assign(:latency_percentiles, Logs.latency_percentiles(router, hours: 24))
     |> assign(:failure_breakdown, Logs.failure_breakdown(router, hours: 24))
     |> assign(:requests_per_minute, Logs.requests_per_minute(router, minutes: 60))
+    |> assign(:cache_stats, Logs.cache_stats(router, hours: 24))
     |> assign(:selected_router_steps, Routers.list_routing_steps(router))
     |> assign(:recent_logs, Logs.list_logs(router, limit: 8))
   end
@@ -169,7 +171,7 @@ defmodule DodoRouterWeb.DashboardLive do
           "transition-opacity duration-200",
           @loading && "opacity-50"
         ]}>
-          <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
+          <div class="grid grid-cols-2 lg:grid-cols-5 gap-3 mb-4">
             <div class="rounded-lg border border-base-300/50 bg-base-100 p-3">
               <p class="text-xs font-medium text-base-content/50">Total Requests</p>
               <p class="mt-0.5 text-lg font-semibold text-base-content">
@@ -202,6 +204,20 @@ defmodule DodoRouterWeb.DashboardLive do
               </p>
               <p class="mt-0.5 text-xs text-base-content/40">
                 {format_number(@stats.prompt_tokens)} in / {format_number(@stats.completion_tokens)} out
+              </p>
+            </div>
+            <div class="rounded-lg border border-base-300/50 bg-base-100 p-3">
+              <p class="text-xs font-medium text-base-content/50">Cache Hit Rate</p>
+              <p class="mt-0.5 text-lg font-semibold text-base-content">
+                {if @cache_stats && @cache_stats.hit_rate > 0,
+                  do: "#{@cache_stats.hit_rate}%",
+                  else: "-"}
+              </p>
+              <p class="mt-0.5 text-xs text-base-content/40">
+                {if @cache_stats && @cache_stats.cached_requests > 0,
+                  do:
+                    "#{format_number(@cache_stats.cached_requests)}/#{format_number(@cache_stats.total_requests)} requests",
+                  else: "No cache data"}
               </p>
             </div>
           </div>

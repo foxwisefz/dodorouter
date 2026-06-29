@@ -191,6 +191,33 @@ defmodule DodoRouterWeb.LogLive.Show do
                 <span class="text-base-content/60">Tokens</span>
                 <span class="font-mono">{@log.total_tokens || "-"}</span>
               </div>
+              <%= if @log.cache_read_tokens && @log.cache_read_tokens > 0 do %>
+                <div class="flex justify-between text-success">
+                  <span class="flex items-center gap-1">
+                    <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="2"
+                        d="M13 10V3L4 14h7v7l9-11h-7z"
+                      />
+                    </svg>
+                    Cached
+                  </span>
+                  <span class="font-mono">
+                    {@log.cache_read_tokens}
+                    <span class="text-base-content/40">
+                      ({cache_pct(@log)})
+                    </span>
+                  </span>
+                </div>
+              <% end %>
+              <%= if @log.cache_write_tokens && @log.cache_write_tokens > 0 do %>
+                <div class="flex justify-between text-base-content/40">
+                  <span>Cache write</span>
+                  <span class="font-mono">{@log.cache_write_tokens}</span>
+                </div>
+              <% end %>
               <div class="flex justify-between">
                 <span class="text-base-content/60">Cost</span>
                 <span class="font-mono">
@@ -362,6 +389,8 @@ defmodule DodoRouterWeb.LogLive.Show do
                   model={@log.final_model}
                   provider={@log.final_provider}
                   tools={@available_tools}
+                  cache_read_tokens={@log.cache_read_tokens}
+                  cache_write_tokens={@log.cache_write_tokens}
                 />
               </div>
             <% end %>
@@ -780,4 +809,14 @@ defmodule DodoRouterWeb.LogLive.Show do
   defp format_bytes(bytes) when bytes < 1024, do: "#{bytes} B"
   defp format_bytes(bytes) when bytes < 1024 * 1024, do: "#{Float.round(bytes / 1024, 1)} KB"
   defp format_bytes(bytes), do: "#{Float.round(bytes / 1024 / 1024, 2)} MB"
+
+  defp cache_pct(%{cache_read_tokens: nil}), do: ""
+
+  defp cache_pct(%{cache_read_tokens: cached, prompt_tokens: prompt})
+       when is_integer(cached) and is_integer(prompt) and prompt > 0 do
+    pct = Float.round(cached / prompt * 100, 0)
+    "#{trunc(pct)}%"
+  end
+
+  defp cache_pct(_), do: ""
 end

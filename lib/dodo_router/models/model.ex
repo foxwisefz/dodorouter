@@ -17,6 +17,8 @@ defmodule DodoRouter.Models.Model do
     # Pricing (per 1M tokens)
     field :input_price_per_million, :decimal
     field :output_price_per_million, :decimal
+    field :cache_read_price_per_million, :decimal
+    field :cache_write_price_per_million, :decimal
     field :price_effective_at, :utc_datetime
 
     # Capabilities
@@ -43,6 +45,8 @@ defmodule DodoRouter.Models.Model do
     :max_output_tokens,
     :input_price_per_million,
     :output_price_per_million,
+    :cache_read_price_per_million,
+    :cache_write_price_per_million,
     :price_effective_at,
     :supports_vision,
     :supports_audio_input,

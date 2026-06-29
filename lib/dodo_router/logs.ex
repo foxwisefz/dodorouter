@@ -149,6 +149,8 @@ defmodule DodoRouter.Logs do
           total_tokens: sum(l.total_tokens),
           prompt_tokens: sum(l.prompt_tokens),
           completion_tokens: sum(l.completion_tokens),
+          cache_read_tokens: sum(l.cache_read_tokens),
+          cache_write_tokens: sum(l.cache_write_tokens),
           avg_latency_ms: avg(l.latency_ms),
           total_cost_usd: sum(l.estimated_cost_usd)
         }
@@ -406,8 +408,63 @@ defmodule DodoRouter.Logs do
       total_tokens: 0,
       prompt_tokens: 0,
       completion_tokens: 0,
+      cache_read_tokens: 0,
+      cache_write_tokens: 0,
       avg_latency_ms: nil,
       total_cost_usd: nil
     }
+  end
+
+  @doc """
+  Returns cache-specific stats: total cached tokens, hit rate, estimated savings.
+  """
+  def cache_stats(%Router{} = router, opts \\ []) do
+    hours = Keyword.get(opts, :hours, 24)
+    since = DateTime.add(DateTime.utc_now(), -hours * 3600, :second)
+
+    result =
+      from(l in RequestLog,
+        where:
+          l.router_id == ^router.id and l.inserted_at >= ^since and
+            not is_nil(l.prompt_tokens),
+        select: %{
+          total_prompt_tokens: sum(l.prompt_tokens),
+          cache_read_tokens: sum(l.cache_read_tokens),
+          cache_write_tokens: sum(l.cache_write_tokens),
+          cached_requests: count(fragment("CASE WHEN ? > 0 THEN 1 END", l.cache_read_tokens)),
+          total_requests: count(l.id)
+        }
+      )
+      |> Repo.one()
+
+    case result do
+      nil ->
+        %{
+          hit_rate: 0.0,
+          cache_read_tokens: 0,
+          cache_write_tokens: 0,
+          cached_requests: 0,
+          total_requests: 0
+        }
+
+      stats ->
+        prompt_tokens = stats.total_prompt_tokens || 0
+        cache_read = stats.cache_read_tokens || 0
+
+        hit_rate =
+          if prompt_tokens > 0 do
+            Float.round(cache_read / prompt_tokens * 100, 1)
+          else
+            0.0
+          end
+
+        %{
+          hit_rate: hit_rate,
+          cache_read_tokens: cache_read,
+          cache_write_tokens: stats.cache_write_tokens || 0,
+          cached_requests: stats.cached_requests || 0,
+          total_requests: stats.total_requests || 0
+        }
+    end
   end
 end

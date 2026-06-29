@@ -26,6 +26,8 @@ defmodule DodoRouter.Logs.RequestLog do
     field :prompt_tokens, :integer
     field :completion_tokens, :integer
     field :total_tokens, :integer
+    field :cache_read_tokens, :integer
+    field :cache_write_tokens, :integer
 
     # Timing
     field :latency_ms, :integer
@@ -75,6 +77,8 @@ defmodule DodoRouter.Logs.RequestLog do
       :prompt_tokens,
       :completion_tokens,
       :total_tokens,
+      :cache_read_tokens,
+      :cache_write_tokens,
       :latency_ms,
       :ttfb_ms,
       :upload_ms,
