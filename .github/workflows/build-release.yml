@@ -137,13 +137,6 @@ jobs:
           tar czf "dodo_router-${CURR_VERSION}.tar.gz" dodo_router
           mv "dodo_router-${CURR_VERSION}.tar.gz" ../
 
-      - name: Upload release artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: dodo-router-release-${{ steps.version.outputs.version }}
-          path: _build/prod/dodo_router-${{ steps.version.outputs.version }}.tar.gz
-          retention-days: 7
-
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
         with:
