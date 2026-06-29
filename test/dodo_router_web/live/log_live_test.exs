@@ -3,7 +3,7 @@ defmodule DodoRouterWeb.LogLiveTest do
 
   import Phoenix.LiveViewTest
 
-  alias DodoRouter.RoutersFixtures
+  alias DodoRouter.{Logs, RoutersFixtures}
   alias DodoRouter.LogsFixtures
 
   setup :register_and_log_in_user
@@ -49,6 +49,48 @@ defmodule DodoRouterWeb.LogLiveTest do
 
       assert html =~ "success"
       assert html =~ "error"
+    end
+
+    test "favorites filter shows only favorited logs", %{conn: conn, user: user} do
+      {router, _api_key} = RoutersFixtures.router_fixture(user)
+
+      LogsFixtures.log_fixture(router, %{favorite: true, final_provider: "fav-provider"})
+      LogsFixtures.log_fixture(router, %{favorite: false, final_provider: "other-provider"})
+
+      {:ok, _live, html} = live(conn, ~p"/logs?favorites=true")
+
+      assert html =~ "fav-provider"
+      refute html =~ "other-provider"
+    end
+
+    test "can toggle favorite from index", %{conn: conn, user: user} do
+      {router, _api_key} = RoutersFixtures.router_fixture(user)
+      log = LogsFixtures.log_fixture(router)
+
+      {:ok, live, _html} = live(conn, ~p"/logs")
+
+      live |> render_click("toggle_favorite", %{"id" => log.id})
+
+      assert Logs.get_log!(user, log.id).favorite
+    end
+  end
+
+  describe "Show favorite toggle" do
+    test "can favorite and unfavorite a log", %{conn: conn, user: user} do
+      {router, _api_key} = RoutersFixtures.router_fixture(user)
+      log = LogsFixtures.log_fixture(router)
+
+      {:ok, live, _html} = live(conn, ~p"/logs/#{log.request_id}")
+
+      assert has_element?(live, "#favorite-button[data-favorited='false']")
+
+      live |> element("#favorite-button") |> render_click()
+
+      assert has_element?(live, "#favorite-button[data-favorited='true']")
+
+      live |> element("#favorite-button") |> render_click()
+
+      assert has_element?(live, "#favorite-button[data-favorited='false']")
     end
   end
 

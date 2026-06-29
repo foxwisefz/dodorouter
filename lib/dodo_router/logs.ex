@@ -74,6 +74,7 @@ defmodule DodoRouter.Logs do
     |> maybe_filter_model(opts[:model])
     |> maybe_filter_call_type(opts[:call_type])
     |> maybe_filter_date_range(opts[:from], opts[:to])
+    |> maybe_filter_favorite(opts[:favorites_only])
     |> Repo.all()
   end
 
@@ -95,6 +96,7 @@ defmodule DodoRouter.Logs do
     |> maybe_filter_model(opts[:model])
     |> maybe_filter_call_type(opts[:call_type])
     |> maybe_filter_date_range(opts[:from], opts[:to])
+    |> maybe_filter_favorite(opts[:favorites_only])
     |> Repo.all()
   end
 
@@ -119,16 +121,35 @@ defmodule DodoRouter.Logs do
   end
 
   def get_log_by_request_id!(user, request_id) do
+    case get_log_by_request_id(user, request_id) do
+      nil -> raise Ecto.NoResultsError, queryable: RequestLog
+      log -> log
+    end
+  end
+
+  def get_log_by_request_id(%User{} = user, request_id) do
     query =
       from l in RequestLog,
         join: r in Router,
         on: l.router_id == r.id,
         where: l.request_id == ^request_id and r.user_id == ^user.id
 
-    Repo.one!(query)
+    Repo.one(query)
   end
 
   def get_log_by_request_id(request_id), do: Repo.get_by(RequestLog, request_id: request_id)
+
+  def toggle_favorite(%User{} = user, id_or_request_id) do
+    log = get_log(user, id_or_request_id) || get_log_by_request_id(user, id_or_request_id)
+
+    if log do
+      log
+      |> Ecto.Changeset.change(favorite: !log.favorite)
+      |> Repo.update()
+    else
+      {:error, :not_found}
+    end
+  end
 
   # Public sharing
 
@@ -398,6 +419,9 @@ defmodule DodoRouter.Logs do
   defp maybe_filter_date_range(query, from, to) do
     where(query, [l], l.inserted_at >= ^from and l.inserted_at <= ^to)
   end
+
+  defp maybe_filter_favorite(query, true), do: where(query, [l], l.favorite == true)
+  defp maybe_filter_favorite(query, _), do: query
 
   defp empty_stats do
     %{

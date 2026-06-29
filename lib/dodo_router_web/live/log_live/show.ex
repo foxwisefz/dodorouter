@@ -84,6 +84,16 @@ defmodule DodoRouterWeb.LogLive.Show do
     {:noreply, assign(socket, :expanded_messages, expanded)}
   end
 
+  def handle_event("toggle_favorite", _params, socket) do
+    case Logs.toggle_favorite(socket.assigns.current_user, socket.assigns.log.id) do
+      {:ok, log} ->
+        {:noreply, assign(socket, :log, log)}
+
+      _error ->
+        {:noreply, put_flash(socket, :error, "Could not update favorite")}
+    end
+  end
+
   @impl true
   def handle_params(params, _uri, socket) do
     {:noreply, assign(socket, :return_to, params["return_to"])}
@@ -110,6 +120,22 @@ defmodule DodoRouterWeb.LogLive.Show do
           <h1 class="text-2xl font-bold">Request Details</h1>
           <code class="text-sm text-base-content/60">{@log.request_id}</code>
         </div>
+        <button
+          type="button"
+          id="favorite-button"
+          phx-click="toggle_favorite"
+          data-favorited={to_string(@log.favorite)}
+          class={[
+            "btn btn-ghost btn-sm btn-square",
+            @log.favorite && "text-warning"
+          ]}
+          title={if @log.favorite, do: "Unfavorite", else: "Favorite"}
+        >
+          <.icon
+            name={if @log.favorite, do: "hero-star-solid", else: "hero-star"}
+            class="w-5 h-5"
+          />
+        </button>
       </div>
       
     <!-- Split pane -->

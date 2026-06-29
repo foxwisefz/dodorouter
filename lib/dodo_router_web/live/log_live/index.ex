@@ -18,6 +18,7 @@ defmodule DodoRouterWeb.LogLive.Index do
       |> assign(:selected_router_id, nil)
       |> assign(:selected_router, nil)
       |> assign(:subscribed_all, false)
+      |> assign(:favorites_only, false)
       |> stream(:logs, [])
 
     {:ok, socket}
@@ -41,6 +42,8 @@ defmodule DodoRouterWeb.LogLive.Index do
     router_id = params["router_id"]
     old_router_id = socket.assigns.selected_router_id
     was_all = old_router_id == nil && socket.assigns[:subscribed_all]
+    favorites_only = params["favorites"] == "true"
+    list_opts = [limit: 100, favorites_only: favorites_only]
 
     # Unsubscribe from previous subscriptions
     if connected?(socket) do
@@ -56,8 +59,8 @@ defmodule DodoRouterWeb.LogLive.Index do
     socket =
       if router_id do
         router = Routers.get_router!(socket.assigns.current_user, router_id)
-        logs = Logs.list_logs(router, limit: 100)
 
+        logs = Logs.list_logs(router, list_opts)
         # Subscribe to this router
         if connected?(socket) && old_router_id != router_id do
           Logs.subscribe_to_logs(router_id)
@@ -67,11 +70,12 @@ defmodule DodoRouterWeb.LogLive.Index do
         |> assign(:selected_router_id, router_id)
         |> assign(:selected_router, router)
         |> assign(:subscribed_all, false)
+        |> assign(:favorites_only, favorites_only)
         |> stream(:logs, logs, reset: true)
       else
         # Show all logs across all routers
-        logs = Logs.list_logs_for_user(socket.assigns.current_user, limit: 100)
 
+        logs = Logs.list_logs_for_user(socket.assigns.current_user, list_opts)
         # Subscribe to all routers
         if connected?(socket) && !was_all do
           subscribe_all_routers(socket)
@@ -81,6 +85,7 @@ defmodule DodoRouterWeb.LogLive.Index do
         |> assign(:selected_router_id, nil)
         |> assign(:selected_router, nil)
         |> assign(:subscribed_all, true)
+        |> assign(:favorites_only, favorites_only)
         |> stream(:logs, logs, reset: true)
       end
 
@@ -128,6 +133,32 @@ defmodule DodoRouterWeb.LogLive.Index do
     end
   end
 
+  def handle_event("toggle_favorite", %{"id" => id}, socket) do
+    case Logs.toggle_favorite(socket.assigns.current_user, id) do
+      {:ok, _log} ->
+        {:noreply, reload_logs(socket)}
+
+      _error ->
+        {:noreply, socket}
+    end
+  end
+
+  defp reload_logs(socket) do
+    user = socket.assigns.current_user
+    favorites_only = socket.assigns[:favorites_only]
+    opts = [limit: 100, favorites_only: favorites_only]
+
+    logs =
+      if socket.assigns.selected_router_id do
+        router = Routers.get_router!(user, socket.assigns.selected_router_id)
+        Logs.list_logs(router, opts)
+      else
+        Logs.list_logs_for_user(user, opts)
+      end
+
+    stream(socket, :logs, logs, reset: true)
+  end
+
   @impl true
   def render(assigns) do
     ~H"""
@@ -140,28 +171,53 @@ defmodule DodoRouterWeb.LogLive.Index do
             {@selected_router.name}
           </p>
         </div>
-        <form phx-change="select_router">
-          <select
-            name="router_id"
-            class="py-2 px-3 bg-base-200 border border-base-300/50 rounded-lg text-sm w-full sm:w-48"
+
+        <div class="flex items-center gap-2">
+          <.link
+            patch={favorites_toggle_path(@selected_router_id, @favorites_only)}
+            class={[
+             "btn btn-sm gap-1.5",
+              @favorites_only && "btn-primary",
+              !@favorites_only && "btn-ghost"
+            ]}
           >
-            <option value="">All routers</option>
-            <option
-              :for={r <- @routers}
-              value={r.id}
-              selected={to_string(r.id) == @selected_router_id}
-            >
-              {r.name}
-            </option>
-          </select>
-        </form>
-      </div>
+
+            <.icon
+             name={if @favorites_only, do: "hero-star-solid", else: "hero-star"}
+              class="w-4 h-4"
+            />
+            <span>Favorites</span>
+
+          </.link>
+          <form phx-change="select_router" class="contents">
+           <select
+
+              name="router_id"
+              class="py-2 px-3 bg-base-200 border border-base-300/50 rounded-lg text-sm w-full sm:w-48"
+           >
+
+              <option value="">All routers</option>
+             <option
+                :for={r <- @routers}
+                value={r.id}
+                selected={to_string(r.id) == @selected_router_id}
+              >
+                {r.name}
+              </option>
+
+            </select>
+          </form>
+        </div>
+     </div>
       
     <!-- Logs Table -->
       <div class="rounded-lg border border-base-300/50 bg-base-100 overflow-hidden">
         <table class="w-full text-left">
           <thead>
             <tr class="border-b border-base-300/50 bg-secondary/30">
+              <th class="px-2 py-2.5 text-xs font-medium text-base-content/50 w-10">
+                <span class="sr-only">Favorite</span>
+              </th>
               <th class="px-4 py-2.5 text-xs font-medium text-base-content/50">Time</th>
               <th :if={!@selected_router} class="px-4 py-2.5 text-xs font-medium text-base-content/50">
                 Router
@@ -193,6 +249,24 @@ defmodule DodoRouterWeb.LogLive.Index do
                 log.status != "pending" && "cursor-pointer"
               ]}
             >
+              <td class="px-2 py-2.5">
+                <button
+                  :if={log.status != "pending"}
+                  type="button"
+                  phx-click="toggle_favorite"
+                  phx-value-id={log.id}
+                  class={[
+                    "btn btn-ghost btn-xs btn-square",
+                    Map.get(log, :favorite) && "text-warning"
+                  ]}
+                  title={if Map.get(log, :favorite), do: "Unfavorite", else: "Favorite"}
+                >
+                  <.icon
+                    name={if Map.get(log, :favorite), do: "hero-star-solid", else: "hero-star"}
+                    class="w-4 h-4"
+                  />
+                </button>
+              </td>
               <td class="px-4 py-2.5 text-sm font-mono text-base-content/50">
                 {format_time(log.inserted_at)}
               </td>
@@ -256,8 +330,9 @@ defmodule DodoRouterWeb.LogLive.Index do
               </td>
               <td class="px-4 py-2.5 text-sm font-mono text-base-content/50 hidden md:table-cell">
                 <div class="flex items-center gap-1.5">
-                  {Map.get(log, :total_tokens) || "-"}
-                  <%= if Map.get(log, :cache_read_tokens) && log.cache_read_tokens > 0 do %>
+
+                {Map.get(log, :total_tokens) || "-"}
+                 <%= if Map.get(log, :cache_read_tokens) && log.cache_read_tokens > 0 do %>
                     <span class="inline-flex items-center gap-0.5 text-[10px] text-success bg-success/10 px-1 py-0.5 rounded">
                       <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path
@@ -362,5 +437,19 @@ defmodule DodoRouterWeb.LogLive.Index do
     else
       ""
     end
+  end
+
+    defp favorites_toggle_path(router_id, current?) do
+    params =
+      if router_id,
+        do: %{"router_id" => router_id},
+        else: %{}
+
+    params =
+      if current?,
+        do: Map.delete(params, "favorites"),
+        else: Map.put(params, "favorites", "true")
+
+    ~p"/logs?#{params}"
   end
 end
