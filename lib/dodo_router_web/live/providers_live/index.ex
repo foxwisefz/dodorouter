@@ -496,30 +496,6 @@ defmodule DodoRouterWeb.ProvidersLive.Index do
                             </div>
                           </div>
                         <% end %>
-                        <%= if info.oauth_config do %>
-                          <div>
-                            <a
-                              href={~p"/providers/oauth/authorize/#{provider_slug}"}
-                              class="btn btn-sm btn-primary inline-flex items-center gap-2"
-                            >
-                              <.icon name="hero-arrow-right-on-rectangle" class="w-4 h-4" />
-                              Authorize with {info.name}
-                            </a>
-                            <p class="text-xs text-base-content/50 mt-1">
-                              Sign in via OAuth to automatically generate an API key
-                            </p>
-                          </div>
-                          <div class="relative">
-                            <div class="absolute inset-0 flex items-center">
-                              <div class="w-full border-t border-base-300/40"></div>
-                            </div>
-                            <div class="relative flex justify-center text-xs">
-                              <span class="px-2 bg-base-200/30 text-base-content/50">
-                                or paste manually
-                              </span>
-                            </div>
-                          </div>
-                        <% end %>
                         <%= if info.key_generation_url do %>
                           <div>
                             <a
