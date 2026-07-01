@@ -14,7 +14,10 @@ defmodule DodoRouterWeb.ProvidersLive.Index do
       |> assign(:page_title, "Providers")
       |> assign(:provider_keys, provider_keys)
       |> assign(:provider_info, Registry.provider_info())
-      |> assign(:display_slugs, Enum.reject(ProviderKey.provider_slugs(), &(&1 == "test_provider")))
+      |> assign(
+        :display_slugs,
+        Enum.reject(ProviderKey.provider_slugs(), &(&1 == "test_provider"))
+      )
       |> assign(:adding_to, nil)
       |> assign(:editing_key, nil)
       |> assign(:highlighted_key_id, nil)

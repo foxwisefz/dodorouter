@@ -119,15 +119,20 @@ defmodule DodoRouter.Providers do
   Resolves the usable API key for a provider key.
 
   For OAuth-based providers (e.g. OpenAI Codex), this decodes the stored
-  credentials, refreshes the access token if needed, and returns the bearer
-  token. For regular providers, returns the raw key as-is.
+  credentials, refreshes the access token if needed, and returns the full
+  encoded JSON credentials (so the adapter can extract the access token
+  and account_id). For regular providers, returns the raw key as-is.
   """
   def resolve_api_key(%ProviderKey{provider_slug: "openai-codex"} = provider_key) do
     raw = get_raw_api_key(provider_key)
 
     case DodoRouter.OpenAICodexOAuth.ensure_access_token(provider_key, raw) do
-      {:ok, token, _account_id} -> token
-      _ -> nil
+      {:ok, _token, _account_id} ->
+        # ensure_access_token refreshed and persisted; re-read the updated creds
+        get_raw_api_key(provider_key)
+
+      _ ->
+        nil
     end
   end
 
