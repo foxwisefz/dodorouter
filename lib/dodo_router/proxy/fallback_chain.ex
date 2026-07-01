@@ -219,7 +219,7 @@ defmodule DodoRouter.Proxy.FallbackChain do
 
   # Get API key - prefer provider_key if assigned, fall back to legacy router secrets
   defp get_api_key(%RoutingStep{provider_key: %{} = provider_key}, _router_id) do
-    Providers.get_raw_api_key(provider_key)
+    Providers.resolve_api_key(provider_key)
   end
 
   defp get_api_key(%RoutingStep{provider: "zai"}, router_id) do

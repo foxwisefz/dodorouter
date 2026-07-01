@@ -14,11 +14,14 @@ defmodule DodoRouterWeb.ProvidersLive.Index do
       |> assign(:page_title, "Providers")
       |> assign(:provider_keys, provider_keys)
       |> assign(:provider_info, Registry.provider_info())
+      |> assign(:display_slugs, Enum.reject(ProviderKey.provider_slugs(), &(&1 == "test_provider")))
       |> assign(:adding_to, nil)
       |> assign(:editing_key, nil)
       |> assign(:highlighted_key_id, nil)
       |> assign(:filtered_provider, nil)
       |> assign(:form, nil)
+      |> assign(:codex_device, nil)
+      |> assign(:codex_timer, nil)
 
     {:ok, socket}
   end
@@ -51,7 +54,25 @@ defmodule DodoRouterWeb.ProvidersLive.Index do
   end
 
   def handle_event("cancel_add", _params, socket) do
-    {:noreply, assign(socket, adding_to: nil, form: nil)}
+    if socket.assigns[:codex_timer], do: Process.cancel_timer(socket.assigns.codex_timer)
+    {:noreply, assign(socket, adding_to: nil, form: nil, codex_device: nil, codex_timer: nil)}
+  end
+
+  def handle_event("start_codex_device", _params, socket) do
+    case DodoRouter.OpenAICodexOAuth.start_device_authorization() do
+      {:ok, device} ->
+        timer = Process.send_after(self(), :poll_codex_device, device.interval * 1000)
+        {:noreply, assign(socket, codex_device: device, codex_timer: timer)}
+
+      {:error, _reason} ->
+        {:noreply,
+         put_flash(socket, :error, "Failed to start ChatGPT authorization. Please try again.")}
+    end
+  end
+
+  def handle_event("cancel_codex_device", _params, socket) do
+    if socket.assigns[:codex_timer], do: Process.cancel_timer(socket.assigns.codex_timer)
+    {:noreply, assign(socket, codex_device: nil, codex_timer: nil)}
   end
 
   def handle_event("start_edit", %{"id" => id}, socket) do
@@ -161,6 +182,68 @@ defmodule DodoRouterWeb.ProvidersLive.Index do
   end
 
   @impl true
+  def handle_info(:poll_codex_device, socket) do
+    %{
+      device_auth_id: device_auth_id,
+      user_code: user_code,
+      interval: interval
+    } = socket.assigns.codex_device
+
+    case DodoRouter.OpenAICodexOAuth.complete_device_authorization(device_auth_id, user_code) do
+      {:ok, encoded_credentials} ->
+        existing_keys = Map.get(socket.assigns.provider_keys, "openai-codex", [])
+        label = next_label(existing_keys)
+        attrs = %{provider_slug: "openai-codex", label: label}
+
+        hint =
+          case Jason.decode(encoded_credentials) do
+            {:ok, %{"access" => access}} when is_binary(access) ->
+              Providers.generate_key_hint(access)
+
+            _ ->
+              "OAuth"
+          end
+
+        case Providers.create_provider_key_with_hint(
+               socket.assigns.current_user,
+               attrs,
+               encoded_credentials,
+               hint
+             ) do
+          {:ok, _provider_key} ->
+            provider_keys = Providers.list_provider_keys_grouped(socket.assigns.current_user)
+
+            socket =
+              socket
+              |> assign(:provider_keys, provider_keys)
+              |> assign(:adding_to, nil)
+              |> assign(:form, nil)
+              |> assign(:codex_device, nil)
+              |> assign(:codex_timer, nil)
+              |> put_flash(:info, "ChatGPT connected successfully")
+
+            {:noreply, socket}
+
+          {:error, _reason} ->
+            {:noreply,
+             socket
+             |> assign(codex_device: nil, codex_timer: nil)
+             |> put_flash(:error, "Failed to store credentials")}
+        end
+
+      {:pending, _reason} ->
+        timer = Process.send_after(self(), :poll_codex_device, interval * 1000)
+        {:noreply, assign(socket, codex_timer: timer)}
+
+      {:error, _reason} ->
+        {:noreply,
+         socket
+         |> assign(codex_device: nil, codex_timer: nil)
+         |> put_flash(:error, "ChatGPT authorization failed. Please try again.")}
+    end
+  end
+
+  @impl true
   def render(assigns) do
     ~H"""
     <div class="max-w-2xl">
@@ -183,7 +266,7 @@ defmodule DodoRouterWeb.ProvidersLive.Index do
         >
           All
         </button>
-        <%= for provider_slug <- ProviderKey.provider_slugs() do %>
+        <%= for provider_slug <- @display_slugs do %>
           <% info = @provider_info[provider_slug] %>
           <button
             type="button"
@@ -202,7 +285,7 @@ defmodule DodoRouterWeb.ProvidersLive.Index do
       
     <!-- Provider Cards -->
       <div class="space-y-3">
-        <%= for provider_slug <- ProviderKey.provider_slugs() do %>
+        <%= for provider_slug <- @display_slugs do %>
           <% info = @provider_info[provider_slug] %>
           <% keys = Map.get(@provider_keys, provider_slug, []) %>
           <% key_count = length(keys) %>
@@ -355,32 +438,104 @@ defmodule DodoRouterWeb.ProvidersLive.Index do
                   
     <!-- Add Key Form -->
                   <%= if @adding_to == provider_slug do %>
-                    <.form
-                      for={@form}
-                      phx-submit="save"
-                      class="px-4 py-3"
-                      autocomplete="off"
-                      data-1p-ignore
-                      data-lpignore="true"
-                    >
-                      <div class="flex gap-2">
-                        <input
-                          type="text"
-                          name="provider_key[api_key]"
-                          placeholder="Paste your API key here..."
-                          class="flex-1 px-3 py-2 bg-base-100 border border-base-300/50 rounded-lg text-sm font-mono focus:outline-none focus:border-primary/50"
+                    <div class="px-4 py-3 space-y-3">
+                      <%= if provider_slug == "openai-codex" && @codex_device do %>
+                        <div class="text-center space-y-3 py-2">
+                          <div class="flex items-center gap-2 justify-center text-sm text-base-content/60">
+                            <span class="loading loading-spinner loading-sm"></span>
+                            Waiting for authorization...
+                          </div>
+                          <p class="text-xs text-base-content/50">
+                            Enter this code at the URL below
+                          </p>
+                          <a
+                            href={@codex_device.verification_uri}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            class="text-primary hover:underline text-sm font-medium inline-flex items-center gap-1"
+                          >
+                            {@codex_device.verification_uri}
+                            <.icon name="hero-arrow-top-right-on-square" class="w-3 h-3" />
+                          </a>
+                          <div class="text-2xl font-mono font-bold tracking-widest py-3 px-6 bg-base-100 rounded-lg inline-block border border-base-300/50 select-all">
+                            {@codex_device.user_code}
+                          </div>
+                          <div>
+                            <button
+                              type="button"
+                              phx-click="cancel_codex_device"
+                              class="btn btn-sm btn-ghost"
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        </div>
+                      <% else %>
+                        <%= if provider_slug == "openai-codex" do %>
+                          <div>
+                            <button
+                              type="button"
+                              phx-click="start_codex_device"
+                              class="btn btn-sm btn-primary inline-flex items-center gap-2"
+                            >
+                              <.icon name="hero-arrow-right-on-rectangle" class="w-4 h-4" />
+                              Connect with ChatGPT
+                            </button>
+                            <p class="text-xs text-base-content/50 mt-1">
+                              Authorize via your ChatGPT account (Plus/Pro subscription)
+                            </p>
+                          </div>
+                          <div class="relative">
+                            <div class="absolute inset-0 flex items-center">
+                              <div class="w-full border-t border-base-300/40"></div>
+                            </div>
+                            <div class="relative flex justify-center text-xs">
+                              <span class="px-2 bg-base-200/30 text-base-content/50">
+                                or paste token manually
+                              </span>
+                            </div>
+                          </div>
+                        <% end %>
+                        <%= if info.key_generation_url do %>
+                          <div>
+                            <a
+                              href={info.key_generation_url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              class="text-xs text-primary hover:underline inline-flex items-center gap-1"
+                            >
+                              <.icon name="hero-arrow-top-right-on-square" class="w-3 h-3" />
+                              Get your API key from {info.name}
+                            </a>
+                          </div>
+                        <% end %>
+                        <.form
+                          for={@form}
+                          phx-submit="save"
                           autocomplete="off"
                           data-1p-ignore
                           data-lpignore="true"
-                          spellcheck="false"
-                          autofocus
-                        />
-                        <button type="submit" class="btn btn-sm btn-primary">Save</button>
-                        <button type="button" phx-click="cancel_add" class="btn btn-sm btn-ghost">
-                          Cancel
-                        </button>
-                      </div>
-                    </.form>
+                        >
+                          <div class="flex gap-2">
+                            <input
+                              type="text"
+                              name="provider_key[api_key]"
+                              placeholder="Paste your API key here..."
+                              class="flex-1 px-3 py-2 bg-base-100 border border-base-300/50 rounded-lg text-sm font-mono focus:outline-none focus:border-primary/50"
+                              autocomplete="off"
+                              data-1p-ignore
+                              data-lpignore="true"
+                              spellcheck="false"
+                              autofocus
+                            />
+                            <button type="submit" class="btn btn-sm btn-primary">Save</button>
+                            <button type="button" phx-click="cancel_add" class="btn btn-sm btn-ghost">
+                              Cancel
+                            </button>
+                          </div>
+                        </.form>
+                      <% end %>
+                    </div>
                   <% end %>
                 </div>
               <% end %>

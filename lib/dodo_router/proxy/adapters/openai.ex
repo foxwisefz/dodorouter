@@ -9,6 +9,7 @@ defmodule DodoRouter.Proxy.Adapters.OpenAI do
     slug: "openai",
     display_name: "OpenAI",
     key_slugs: ["openai"],
+    key_generation_url: "https://platform.openai.com/api-keys",
     endpoints: %{
       "openai" => "https://api.openai.com/v1"
     },
