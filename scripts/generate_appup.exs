@@ -105,7 +105,26 @@ instructions =
     end
   end)
 
+# Downgrade instructions: reverse of upgrade
+# add_module -> delete_module, delete_module -> add_module, load_module stays, update stays
+downgrade_instructions =
+  Enum.map(regular_modules, fn {mod, added} ->
+    if added do
+      "      {:delete_module, #{mod}}"
+    else
+      "      {:load_module, #{mod}}"
+    end
+  end) ++
+  Enum.map(genserver_modules, fn {mod, added} ->
+    if added do
+      "      {:delete_module, #{mod}}"
+    else
+      "      {:update, #{mod}, {:advanced, []}}"
+    end
+  end)
+
 instructions_str = instructions |> Enum.join(",\n")
+downgrade_instructions_str = downgrade_instructions |> Enum.join(",\n")
 
 appup = """
 # Auto-generated appup for #{new_vsn} <- #{old_vsn}
@@ -120,7 +139,7 @@ appup = """
   ],
   [
     {~c"#{old_vsn}", [
-#{instructions_str}
+#{downgrade_instructions_str}
     ]}
   ]
 }
