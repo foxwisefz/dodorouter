@@ -14,6 +14,7 @@ defmodule DodoRouterWeb.ProvidersLive.Index do
       |> assign(:page_title, "Providers")
       |> assign(:provider_keys, provider_keys)
       |> assign(:provider_info, Registry.provider_info())
+      |> assign(:display_slugs, Enum.reject(ProviderKey.provider_slugs(), &(&1 == "test_provider")))
       |> assign(:adding_to, nil)
       |> assign(:editing_key, nil)
       |> assign(:highlighted_key_id, nil)
@@ -265,7 +266,7 @@ defmodule DodoRouterWeb.ProvidersLive.Index do
         >
           All
         </button>
-        <%= for provider_slug <- ProviderKey.provider_slugs() do %>
+        <%= for provider_slug <- @display_slugs do %>
           <% info = @provider_info[provider_slug] %>
           <button
             type="button"
@@ -284,7 +285,7 @@ defmodule DodoRouterWeb.ProvidersLive.Index do
       
     <!-- Provider Cards -->
       <div class="space-y-3">
-        <%= for provider_slug <- ProviderKey.provider_slugs() do %>
+        <%= for provider_slug <- @display_slugs do %>
           <% info = @provider_info[provider_slug] %>
           <% keys = Map.get(@provider_keys, provider_slug, []) %>
           <% key_count = length(keys) %>
