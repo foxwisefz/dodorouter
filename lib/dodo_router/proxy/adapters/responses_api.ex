@@ -143,6 +143,24 @@ defmodule DodoRouter.Proxy.Adapters.ResponsesAPI do
     |> maybe_put("temperature", request["temperature"])
     |> maybe_put("top_p", request["top_p"])
     |> maybe_put_tools(request["tools"])
+    |> put_reasoning(request)
+    |> Adapter.inject_reasoning_effort(step.reasoning_effort, :responses)
+  end
+
+  defp put_reasoning(body, %{} = request) do
+    cond do
+      is_map(request["reasoning"]) ->
+        Map.put(body, "reasoning", request["reasoning"])
+
+      request["reasoning_effort"] in [nil, "", "none"] ->
+        body
+
+      is_binary(request["reasoning_effort"]) ->
+        Map.put(body, "reasoning", %{"effort" => request["reasoning_effort"]})
+
+      true ->
+        body
+    end
   end
 
   defp maybe_put(map, _key, nil), do: map

@@ -103,5 +103,59 @@ defmodule DodoRouterWeb.RouterShowLiveTest do
 
       assert html =~ "Add Step" or html =~ "No routing"
     end
+
+    test "model select lists known models", %{conn: conn, router: router} do
+      {:ok, _live, html} = live(conn, ~p"/routers/#{router.id}/routing")
+
+      assert html =~ "Reasoning Effort"
+      assert html =~ "Temperature"
+      assert html =~ "Max Tokens"
+    end
+
+    test "can add a step with a known model", %{conn: conn, router: router} do
+      {:ok, live, _html} = live(conn, ~p"/routers/#{router.id}/routing")
+
+      live
+      |> form("#routing-modal form", %{
+        "step" => %{
+          "provider" => "zai",
+          "model" => "glm-5",
+          "reasoning_effort" => "high"
+        }
+      })
+      |> render_submit()
+
+      steps = DodoRouter.Routers.list_routing_steps(router)
+      assert length(steps) == 1
+      step = hd(steps)
+      assert step.provider == "zai"
+      assert step.model == "glm-5"
+      assert step.reasoning_effort == "high"
+    end
+
+    test "can add a step with a custom model", %{conn: conn, router: router} do
+      {:ok, live, _html} = live(conn, ~p"/routers/#{router.id}/routing")
+
+      live
+      |> form("#routing-modal form", %{"step" => %{"model" => "__custom__"}})
+      |> render_change()
+
+      live
+      |> form("#routing-modal form", %{
+        "step" => %{
+          "model" => "custom-model",
+          "reasoning_effort" => "xhigh"
+        }
+      })
+      |> render_submit()
+
+      step =
+        DodoRouter.Routers.list_routing_steps(router)
+        |> hd()
+
+      assert step.provider == "zai"
+      assert step.model == "custom-model"
+      assert step.reasoning_effort == "xhigh"
+    end
   end
 end

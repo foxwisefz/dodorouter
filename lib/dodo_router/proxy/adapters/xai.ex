@@ -34,6 +34,7 @@ defmodule DodoRouter.Proxy.Adapters.XAI do
     |> transform_request(step.model)
     |> OpenAICompatible.call(step, api_key, @base_url,
       provider: "xai",
+      reasoning_format: :openai,
       client_headers: client_headers
     )
     |> transform_response()
@@ -45,6 +46,7 @@ defmodule DodoRouter.Proxy.Adapters.XAI do
     |> transform_request(step.model)
     |> OpenAICompatible.stream(step, api_key, send_chunk, @base_url,
       provider: "xai",
+      reasoning_format: :openai,
       client_headers: client_headers
     )
     |> transform_response()

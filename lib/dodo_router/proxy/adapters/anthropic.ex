@@ -218,6 +218,15 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
         do: Map.put(body, "stop_sequences", List.wrap(request["stop"])),
         else: body
 
+    # Forward a client-supplied thinking block (if any) so it takes precedence
+    # over the step-level default below.
+    body =
+      if request["thinking"],
+        do: Map.put(body, "thinking", request["thinking"]),
+        else: body
+
+    body = Adapter.inject_reasoning_effort(body, step.reasoning_effort, :anthropic)
+
     # Tools
     if request["tools"] do
       anthropic_tools = Enum.map(request["tools"], &convert_tool_to_anthropic/1)

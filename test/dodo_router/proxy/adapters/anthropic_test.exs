@@ -277,5 +277,28 @@ defmodule DodoRouter.Proxy.Adapters.AnthropicTest do
       assert length(assistant_msg["content"]) == 1
       assert hd(assistant_msg["content"])["type"] == "tool_use"
     end
+
+    test "injects step reasoning_effort as thinking budget" do
+      request = %{"messages" => [%{"role" => "user", "content" => "hi"}]}
+      step = %RoutingStep{model: "claude-sonnet-4-20250514", reasoning_effort: "high"}
+
+      body = Anthropic.build_anthropic_request(request, step)
+
+      assert body["thinking"]["type"] == "enabled"
+      assert body["thinking"]["budget_tokens"] == 16_000
+      assert body["max_tokens"] > 16_000
+    end
+
+    test "preserves client thinking when provided" do
+      request = %{
+        "messages" => [%{"role" => "user", "content" => "hi"}],
+        "thinking" => %{"type" => "enabled", "budget_tokens" => 999}
+      }
+
+      step = %RoutingStep{model: "claude-sonnet-4-20250514", reasoning_effort: "high"}
+      body = Anthropic.build_anthropic_request(request, step)
+
+      assert body["thinking"]["budget_tokens"] == 999
+    end
   end
 end

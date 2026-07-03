@@ -351,6 +351,32 @@ defmodule DodoRouter.Proxy.Adapters.MoonshotTest do
       refute Map.has_key?(body, "thinking")
     end
 
+    test "uses reasoning_effort to disable thinking on kimi-k2" do
+      request = %{"messages" => [%{"role" => "user", "content" => "Hi"}]}
+
+      step = %RoutingStep{
+        provider: "moonshot",
+        model: "kimi-k2.5",
+        reasoning_effort: "none"
+      }
+
+      body = Moonshot.build_request_body(request, step)
+      assert body["thinking"] == %{"type" => "disabled"}
+    end
+
+    test "uses reasoning_effort to enable thinking on kimi-k2" do
+      request = %{"messages" => [%{"role" => "user", "content" => "Hi"}]}
+
+      step = %RoutingStep{
+        provider: "moonshot",
+        model: "kimi-k2.5",
+        reasoning_effort: "high"
+      }
+
+      body = Moonshot.build_request_body(request, step)
+      assert body["thinking"] == %{"type" => "enabled"}
+    end
+
     test "normalizes tool_call arguments from object to JSON string" do
       request = %{
         "messages" => [

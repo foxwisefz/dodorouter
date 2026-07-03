@@ -185,6 +185,7 @@ defmodule DodoRouter.Proxy.Adapters.OpenAI do
     request
     |> Adapter.sanitize_request()
     |> Map.put("model", step.model)
+    |> Adapter.inject_reasoning_effort(step.reasoning_effort, :openai)
   end
 
   defp latency(start_time), do: System.monotonic_time(:millisecond) - start_time

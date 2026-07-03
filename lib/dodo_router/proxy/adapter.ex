@@ -742,4 +742,175 @@ defmodule DodoRouter.Proxy.Adapter do
         response
     end
   end
+
+  # ── Reasoning effort injection ────────────────────────────────────────────
+  #
+  # Step-level `reasoning_effort` is an opt-in default. Adapters call this with
+  # the provider-specific `format` so the same canonical level ("high",
+  # "xhigh", ...) is translated into whatever field the upstream API expects.
+  #
+  # Precedence rules:
+  #   1. A nil/"" effort means "leave the request untouched" — the provider's
+  #      own defaults (or a client-supplied value) apply.
+  #   2. If the body already carries the relevant field (e.g. the client sent
+  #      `reasoning_effort` or `thinking`), that value wins and the step
+  #      default is *not* applied.
+
+  # Anthropic extended-thinking budget_tokens mapped per effort level.
+  @anthropic_thinking_budget %{
+    "minimal" => 1_024,
+    "low" => 4_096,
+    "medium" => 10_000,
+    "high" => 16_000,
+    "xhigh" => 24_000,
+    "max" => 32_000
+  }
+
+  # Gemini thinkingBudget mapped per effort level (Gemini 2.5 accepts 0..24576).
+  @gemini_thinking_budget %{
+    "minimal" => 0,
+    "low" => 2_048,
+    "medium" => 8_192,
+    "high" => 16_384,
+    "xhigh" => 24_576,
+    "max" => 24_576
+  }
+
+  @doc """
+  Injects a step-level reasoning effort default into an upstream request body.
+
+  `format` selects how the canonical effort level is rendered for a provider:
+
+    * `:openai`     — sets top-level `reasoning_effort` (OpenAI, xAI, …)
+    * `:on_off`     — sets `thinking: %{"type" => "enabled"}` (DeepSeek, z.ai,
+                      Moonshot-style providers that only accept on/off)
+    * `:anthropic`  — sets `thinking: %{"type" => "enabled", "budget_tokens" => n}`
+                      and guarantees `max_tokens` exceeds the budget
+    * `:gemini`     — sets `generationConfig.thinkingConfig.thinkingBudget`
+    * `:responses`  — sets `reasoning: %{"effort" => level}` (Responses API)
+    * `:none`       — no-op
+
+  `"none"` is treated as an explicit disable where the provider distinguishes
+  on/off (it sets `thinking: %{"type" => "disabled"}`).
+  """
+  def inject_reasoning_effort(body, effort, format)
+
+  def inject_reasoning_effort(body, nil, _format), do: body
+  def inject_reasoning_effort(body, "", _format), do: body
+  def inject_reasoning_effort(body, _effort, :none), do: body
+
+  # OpenAI-style: top-level `reasoning_effort`. "none" means "don't inject"
+  # (the model defaults to no reasoning). "xhigh"/"max" are clamped to "high"
+  # since OpenAI's documented set is minimal/low/medium/high.
+  def inject_reasoning_effort(body, "none", :openai), do: Map.delete(body, "reasoning_effort")
+
+  def inject_reasoning_effort(body, effort, :openai) do
+    if Map.has_key?(body, "reasoning_effort") do
+      body
+    else
+      value =
+        cond do
+          effort in ~w(minimal low medium high) -> effort
+          effort in ~w(xhigh max) -> "high"
+          true -> nil
+        end
+
+      if value, do: Map.put(body, "reasoning_effort", value), else: body
+    end
+  end
+
+  # On/off providers (DeepSeek, z.ai, Moonshot-style). Only the presence of
+  # reasoning matters, not the level.
+  def inject_reasoning_effort(body, effort, :on_off) do
+    cond do
+      Map.has_key?(body, "thinking") ->
+        body
+
+      effort == "none" ->
+        Map.put(body, "thinking", %{"type" => "disabled"})
+
+      true ->
+        Map.put(body, "thinking", %{"type" => "enabled"})
+    end
+  end
+
+  # Anthropic extended thinking with a token budget.
+  def inject_reasoning_effort(body, "none", :anthropic) do
+    if Map.has_key?(body, "thinking"), do: Map.delete(body, "thinking"), else: body
+  end
+
+  def inject_reasoning_effort(body, effort, :anthropic) do
+    if Map.has_key?(body, "thinking") do
+      body
+    else
+      case Map.get(@anthropic_thinking_budget, effort) do
+        nil ->
+          body
+
+        budget ->
+          # Anthropic requires max_tokens > budget_tokens. Bump max_tokens so
+          # there's still headroom for the actual completion.
+          body
+          |> Map.put("thinking", %{"type" => "enabled", "budget_tokens" => budget})
+          |> ensure_anthropic_max_tokens(budget)
+      end
+    end
+  end
+
+  # Google Gemini thinkingConfig.
+  def inject_reasoning_effort(body, "none", :gemini) do
+    put_gemini_thinking(body, 0)
+  end
+
+  def inject_reasoning_effort(body, effort, :gemini) do
+    case Map.get(@gemini_thinking_budget, effort) do
+      nil -> body
+      budget -> put_gemini_thinking(body, budget)
+    end
+  end
+
+  # OpenAI Responses API (Codex backend). `reasoning.effort`.
+  def inject_reasoning_effort(body, "none", :responses) do
+    if Map.has_key?(body, "reasoning"), do: Map.delete(body, "reasoning"), else: body
+  end
+
+  def inject_reasoning_effort(body, effort, :responses) do
+    if Map.has_key?(body, "reasoning") do
+      body
+    else
+      value =
+        cond do
+          effort in ~w(minimal low medium high) -> effort
+          effort in ~w(xhigh max) -> "high"
+          true -> nil
+        end
+
+      if value, do: Map.put(body, "reasoning", %{"effort" => value}), else: body
+    end
+  end
+
+  defp ensure_anthropic_max_tokens(body, budget) do
+    # Reserve headroom for the visible completion after the thinking budget.
+    min_completion = 4_096
+    required = budget + min_completion
+
+    case body["max_tokens"] do
+      n when is_integer(n) and n > budget -> body
+      _ -> Map.put(body, "max_tokens", required)
+    end
+  end
+
+  defp put_gemini_thinking(body, budget) do
+    gen_config = Map.get(body, "generationConfig", %{})
+    thinking_config = Map.get(gen_config, "thinkingConfig", %{})
+
+    # Respect a client-supplied thinkingBudget.
+    if Map.has_key?(thinking_config, "thinkingBudget") do
+      body
+    else
+      thinking_config = Map.put(thinking_config, "thinkingBudget", budget)
+      gen_config = Map.put(gen_config, "thinkingConfig", thinking_config)
+      Map.put(body, "generationConfig", gen_config)
+    end
+  end
 end

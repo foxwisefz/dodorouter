@@ -532,6 +532,52 @@ When integrating a new provider:
 3. **Normalize in the adapter** — if the adapter converts usage (e.g. `convert_usage/1`), ensure the output satisfies `Adapter.extract_cache_read_tokens/1`. This function checks (in order): `cache_read_input_tokens`, `prompt_tokens_details.cached_tokens`, `prompt_cache_hit_tokens`, `cache_read_tokens`.
 4. **Test the seam** — write a test that pipes `convert_usage/1` output through `Adapter.extract_usage/1` and asserts `cache_read_tokens` is non-nil when cache data is present. Unit-testing each function in isolation is insufficient.
 
+## LLM Provider Reasoning Effort Handling
+
+Reasoning/thinking controls are **not standardized** across LLM providers. The proxy stores a canonical `reasoning_effort` level on each `RoutingStep` and translates it into the provider-native field when building the upstream request.
+
+### The Contract
+
+Every adapter's request builder **must** call `Adapter.inject_reasoning_effort(body, step.reasoning_effort, format)` with the format that matches the upstream API:
+
+* `:openai` — top-level `reasoning_effort`
+* `:responses` — `reasoning.effort` (OpenAI Responses API / Codex backend)
+* `:anthropic` — `thinking.type = "enabled"` plus a `budget_tokens` value, with `max_tokens` bumped to exceed the budget
+* `:gemini` — `generationConfig.thinkingConfig.thinkingBudget`
+* `:on_off` — `thinking.type = "enabled"` or `"disabled"` (DeepSeek, z.ai, Moonshot-style providers)
+* `:none` — no injection
+
+The helper respects **client precedence**: if the incoming request already contains the provider-native field, the step default is not applied. A `reasoning_effort` of `nil` or `""` means "leave the request untouched".
+
+### Canonical Levels
+
+The UI and schema support these effort levels:
+
+```
+none, minimal, low, medium, high, xhigh, max
+```
+
+The helper maps them to provider-specific values:
+
+| Level | Anthropic budget | Gemini budget | OpenAI/xAI/Responses |
+|-------|------------------|---------------|----------------------|
+| none  | omit             | 0             | omit                 |
+| minimal | 1,024          | 0             | "minimal"            |
+| low   | 4,096            | 2,048         | "low"                |
+| medium| 10,000           | 8,192         | "medium"             |
+| high  | 16,000           | 16,384        | "high"               |
+| xhigh | 24,000           | 24,576        | "high"               |
+| max   | 32,000           | 24,576        | "high"               |
+
+### Adding or Modifying an Adapter
+
+When integrating a new provider or changing how an existing one handles reasoning:
+
+1. **Identify the native field** (`reasoning_effort`, `thinking`, `reasoning.effort`, `thinkingConfig.thinkingBudget`, etc.).
+2. **Pick the appropriate format** and call `Adapter.inject_reasoning_effort/3` in the adapter's request builder.
+3. **Document the mapping** in the table above if it differs from existing formats.
+4. **Test the seam** — write a test that builds the adapter's request body with a step that has `reasoning_effort` set and assert the provider-native field appears. Also assert that a client-provided value is preserved.
+
 ## Releases and Deployment
 
 This application is deployed using Elixir releases with **hot upgrades** — code is updated without restarting the BEAM VM or dropping in-flight requests.

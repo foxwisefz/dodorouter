@@ -231,6 +231,7 @@ defmodule DodoRouter.Proxy.Adapters.Zai do
     |> maybe_default("frequency_penalty", nil)
     |> maybe_default("presence_penalty", nil)
     |> maybe_default("stop", nil)
+    |> Adapter.inject_reasoning_effort(step.reasoning_effort, :on_off)
   end
 
   # Only set default if client didn't provide a value

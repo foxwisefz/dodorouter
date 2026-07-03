@@ -29,7 +29,7 @@ defmodule DodoRouter.Proxy.Adapters.Google do
     url =
       "https://generativelanguage.googleapis.com/v1beta/models/#{step.model}:generateContent?key=#{api_key}"
 
-    body = build_gemini_request(request)
+    body = build_gemini_request(request, step)
 
     headers = [{"Content-Type", "application/json"}]
     payload_size_bytes = body |> Jason.encode!() |> byte_size()
@@ -75,7 +75,7 @@ defmodule DodoRouter.Proxy.Adapters.Google do
     url =
       "https://generativelanguage.googleapis.com/v1beta/models/#{step.model}:streamGenerateContent?key=#{api_key}&alt=sse"
 
-    body = build_gemini_request(request)
+    body = build_gemini_request(request, step)
 
     headers = [{"Content-Type", "application/json"}]
     payload_size_bytes = body |> Jason.encode!() |> byte_size()
@@ -149,7 +149,7 @@ defmodule DodoRouter.Proxy.Adapters.Google do
     end
   end
 
-  def build_gemini_request(request) do
+  def build_gemini_request(request, step \\ nil) do
     messages = request["messages"] || []
     {system_instruction, contents} = extract_system_and_contents(messages)
 
@@ -190,6 +190,9 @@ defmodule DodoRouter.Proxy.Adapters.Google do
       else
         body
       end
+
+    body =
+      Adapter.inject_reasoning_effort(body, step && step.reasoning_effort, :gemini)
 
     Map.put(body, "safetySettings", default_safety_settings())
   end

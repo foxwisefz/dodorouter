@@ -16,7 +16,7 @@ defmodule DodoRouter.Proxy.Adapters.OpenAICompatible do
 
   def call(request, %RoutingStep{} = step, api_key, base_url, opts \\ []) do
     url = base_url <> "/chat/completions"
-    body = build_request_body(request, step)
+    body = build_request_body(request, step, opts)
 
     headers = build_headers(api_key, opts)
     payload_size_bytes = body |> Jason.encode!() |> byte_size()
@@ -73,7 +73,7 @@ defmodule DodoRouter.Proxy.Adapters.OpenAICompatible do
       end
 
     body =
-      build_request_body(request, step)
+      build_request_body(request, step, opts)
       |> Map.put("stream", true)
 
     body =
@@ -173,10 +173,14 @@ defmodule DodoRouter.Proxy.Adapters.OpenAICompatible do
     end
   end
 
-  defp build_request_body(request, step) do
+  @doc false
+  def build_request_body(request, step, opts) do
+    format = Keyword.get(opts, :reasoning_format, :none)
+
     request
     |> Adapter.sanitize_request()
     |> Map.put("model", step.model)
+    |> Adapter.inject_reasoning_effort(step.reasoning_effort, format)
   end
 
   defp build_headers(api_key, opts) do

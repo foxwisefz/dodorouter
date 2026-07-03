@@ -370,24 +370,36 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
             when is_binary(model) and
                    (binary_part(model, 0, 7) == "kimi-k2" or model == "kimi-for-coding")
 
-  # kimi thinking models have thinking enabled by default - only disable if explicitly false
-  defp maybe_put_thinking(body, %RoutingStep{model: model, thinking_enabled: false})
-       when is_kimi_thinking_model(model) do
-    Map.put(body, "thinking", %{"type" => "disabled"})
-  end
+  # Effective thinking state for a kimi model, resolving the new
+  # `reasoning_effort` field first and falling back to the legacy
+  # `thinking_enabled` boolean for rows created before the migration.
+  defp kimi_thinking_on?(%RoutingStep{reasoning_effort: effort})
+       when is_binary(effort) and effort != "" and effort != "none",
+       do: true
 
-  defp maybe_put_thinking(body, %RoutingStep{model: model, thinking_enabled: thinking})
-       when is_kimi_thinking_model(model) and thinking != false do
-    Map.put(body, "thinking", %{"type" => "enabled"})
+  defp kimi_thinking_on?(%RoutingStep{reasoning_effort: effort})
+       when is_binary(effort) and effort == "none",
+       do: false
+
+  defp kimi_thinking_on?(%RoutingStep{thinking_enabled: false}), do: false
+  defp kimi_thinking_on?(_step), do: true
+
+  # kimi thinking models have thinking enabled by default - only disable if
+  # explicitly turned off (via reasoning_effort="none" or thinking_enabled=false).
+  defp maybe_put_thinking(body, %RoutingStep{model: model} = step)
+       when is_kimi_thinking_model(model) do
+    if kimi_thinking_on?(step),
+      do: Map.put(body, "thinking", %{"type" => "enabled"}),
+      else: Map.put(body, "thinking", %{"type" => "disabled"})
   end
 
   defp maybe_put_thinking(body, _step), do: body
 
-  defp maybe_transform_kimi_reasoning(body, %RoutingStep{model: model, thinking_enabled: thinking})
+  defp maybe_transform_kimi_reasoning(body, %RoutingStep{model: model} = step)
        when is_binary(model) do
     is_kimi_k2 = String.starts_with?(model, "kimi-k2") or model == "kimi-for-coding"
 
-    if is_kimi_k2 and thinking != false do
+    if is_kimi_k2 and kimi_thinking_on?(step) do
       messages =
         Enum.map(body["messages"] || [], fn msg ->
           case msg["role"] do

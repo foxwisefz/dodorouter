@@ -275,4 +275,109 @@ defmodule DodoRouter.Proxy.AdapterTest do
       assert buffer2 == ""
     end
   end
+
+  describe "inject_reasoning_effort/3" do
+    test "no-op when effort is nil or empty" do
+      body = %{"model" => "x"}
+      assert Adapter.inject_reasoning_effort(body, nil, :openai) == body
+      assert Adapter.inject_reasoning_effort(body, "", :openai) == body
+    end
+
+    test ":none format is always a no-op" do
+      body = %{"model" => "x"}
+      assert Adapter.inject_reasoning_effort(body, "high", :none) == body
+    end
+
+    test ":openai sets top-level reasoning_effort" do
+      body = Adapter.inject_reasoning_effort(%{"model" => "x"}, "high", :openai)
+      assert body["reasoning_effort"] == "high"
+    end
+
+    test ":openai clamps xhigh/max down to high" do
+      assert Adapter.inject_reasoning_effort(%{}, "xhigh", :openai)["reasoning_effort"] == "high"
+      assert Adapter.inject_reasoning_effort(%{}, "max", :openai)["reasoning_effort"] == "high"
+    end
+
+    test ":openai 'none' deletes reasoning_effort" do
+      body = Adapter.inject_reasoning_effort(%{"reasoning_effort" => "high"}, "none", :openai)
+      refute Map.has_key?(body, "reasoning_effort")
+    end
+
+    test ":openai respects a client-supplied reasoning_effort" do
+      body = Adapter.inject_reasoning_effort(%{"reasoning_effort" => "low"}, "high", :openai)
+      assert body["reasoning_effort"] == "low"
+    end
+
+    test ":on_off enables thinking for any non-none level" do
+      body = Adapter.inject_reasoning_effort(%{}, "high", :on_off)
+      assert body["thinking"] == %{"type" => "enabled"}
+    end
+
+    test ":on_off disables thinking for 'none'" do
+      body = Adapter.inject_reasoning_effort(%{}, "none", :on_off)
+      assert body["thinking"] == %{"type" => "disabled"}
+    end
+
+    test ":on_off respects an existing thinking field" do
+      body =
+        Adapter.inject_reasoning_effort(%{"thinking" => %{"type" => "enabled"}}, "none", :on_off)
+
+      assert body["thinking"] == %{"type" => "enabled"}
+    end
+
+    test ":anthropic sets thinking with a token budget" do
+      body = Adapter.inject_reasoning_effort(%{"max_tokens" => 64_000}, "high", :anthropic)
+      assert body["thinking"] == %{"type" => "enabled", "budget_tokens" => 16_000}
+      # Keeps client max_tokens since it exceeds the budget
+      assert body["max_tokens"] == 64_000
+    end
+
+    test ":anthropic bumps max_tokens when it does not exceed the budget" do
+      body = Adapter.inject_reasoning_effort(%{"max_tokens" => 4096}, "high", :anthropic)
+      assert body["max_tokens"] > 16_000
+    end
+
+    test ":anthropic respects an existing thinking field" do
+      body =
+        Adapter.inject_reasoning_effort(
+          %{"thinking" => %{"type" => "disabled"}},
+          "high",
+          :anthropic
+        )
+
+      assert body["thinking"] == %{"type" => "disabled"}
+    end
+
+    test ":gemini sets generationConfig.thinkingConfig.thinkingBudget" do
+      body = Adapter.inject_reasoning_effort(%{}, "high", :gemini)
+      assert get_in(body, ["generationConfig", "thinkingConfig", "thinkingBudget"]) == 16_384
+    end
+
+    test ":gemini preserves an existing client thinkingBudget" do
+      body =
+        Adapter.inject_reasoning_effort(
+          %{"generationConfig" => %{"thinkingConfig" => %{"thinkingBudget" => 1000}}},
+          "high",
+          :gemini
+        )
+
+      assert get_in(body, ["generationConfig", "thinkingConfig", "thinkingBudget"]) == 1000
+    end
+
+    test ":responses sets reasoning.effort" do
+      body = Adapter.inject_reasoning_effort(%{}, "high", :responses)
+      assert body["reasoning"] == %{"effort" => "high"}
+    end
+
+    test ":responses respects an existing reasoning field" do
+      body =
+        Adapter.inject_reasoning_effort(
+          %{"reasoning" => %{"effort" => "low"}},
+          "high",
+          :responses
+        )
+
+      assert body["reasoning"] == %{"effort" => "low"}
+    end
+  end
 end
