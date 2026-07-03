@@ -5,6 +5,9 @@ defmodule DodoRouter.Proxy.Adapters.OpenAICodex do
   Uses the ChatGPT subscription-based backend instead of the OpenAI Platform API.
   Credentials are obtained via OAuth device flow (see DodoRouter.OpenAICodexOAuth)
   or by pasting a bearer token manually.
+
+  The Codex backend uses the Responses API format upstream, so streaming and
+  format conversion are handled by `DodoRouter.Proxy.Adapters.ResponsesAPI`.
   """
 
   use DodoRouter.Proxy.Adapter.Registry,
@@ -12,26 +15,58 @@ defmodule DodoRouter.Proxy.Adapters.OpenAICodex do
     display_name: "OpenAI Codex",
     key_slugs: ["openai-codex"],
     endpoints: %{
-      "openai-codex" => "https://chatgpt.com/backend-api/v1"
+      "openai-codex" => "https://chatgpt.com/backend-api/codex"
     },
-    models: ~w(gpt-4o gpt-4o-mini o3 o3-mini gpt-4.1 gpt-4.1-mini),
+    models: ~w(gpt-5.5 gpt-5.4 gpt-5.4-mini gpt-5.2),
     color: "emerald",
     short_description: "ChatGPT Plus/Pro subscription"
 
-  alias DodoRouter.Proxy.Adapters.OpenAICompatible
+  alias DodoRouter.Proxy.Adapters.ResponsesAPI
   alias DodoRouter.Routers.RoutingStep
 
-  @base_url "https://chatgpt.com/backend-api/v1"
+  @endpoint "https://chatgpt.com/backend-api/codex/responses"
 
   @impl true
   def call(request, %RoutingStep{} = step, api_key, _client_headers \\ []) do
-    OpenAICompatible.call(request, step, api_key, @base_url, provider: "openai-codex")
+    {token, extra_headers} = prepare_auth(api_key)
+
+    ResponsesAPI.call(request, step, token, @endpoint,
+      provider: "openai-codex",
+      extra_headers: extra_headers
+    )
   end
 
   @impl true
   def stream(request, %RoutingStep{} = step, api_key, send_chunk, _client_headers \\ []) do
-    OpenAICompatible.stream(request, step, api_key, send_chunk, @base_url,
-      provider: "openai-codex"
+    {token, extra_headers} = prepare_auth(api_key)
+
+    ResponsesAPI.stream(request, step, token, send_chunk, @endpoint,
+      provider: "openai-codex",
+      extra_headers: extra_headers
     )
+  end
+
+  @doc false
+  def parse_credentials(api_key) do
+    case Jason.decode(api_key) do
+      {:ok, %{"access" => access, "account_id" => account_id}} ->
+        {access, account_id}
+
+      _ ->
+        {api_key, nil}
+    end
+  end
+
+  defp prepare_auth(api_key) do
+    {token, account_id} = parse_credentials(api_key)
+
+    extra_headers =
+      if account_id do
+        [{"ChatGPT-Account-Id", account_id}]
+      else
+        []
+      end
+
+    {token, extra_headers}
   end
 end

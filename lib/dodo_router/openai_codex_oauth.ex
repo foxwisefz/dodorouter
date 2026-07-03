@@ -73,12 +73,18 @@ defmodule DodoRouter.OpenAICodexOAuth do
   Returns a usable access token, refreshing and persisting credentials when needed.
   """
   def ensure_access_token(%ProviderKey{} = provider_key, raw_credentials) do
+    ensure_access_token(provider_key, raw_credentials, &refresh_token/1)
+  end
+
+  @doc false
+  def ensure_access_token(%ProviderKey{} = provider_key, raw_credentials, refresh_fun)
+      when is_function(refresh_fun, 1) do
     case decode_credentials(raw_credentials) do
       {:ok, %{"access" => access} = credentials} ->
         if token_fresh?(credentials) do
           {:ok, access, credentials["account_id"]}
         else
-          refresh_and_store(provider_key, credentials)
+          refresh_and_store(provider_key, credentials, refresh_fun)
         end
 
       {:error, _} ->
@@ -128,6 +134,8 @@ defmodule DodoRouter.OpenAICodexOAuth do
     end
   end
 
+  def decode_credentials(_raw), do: {:error, :invalid_credentials}
+
   defp poll_device_token(device_auth_id, user_code) do
     case Req.post(@device_token_url,
            headers: json_headers(),
@@ -172,8 +180,8 @@ defmodule DodoRouter.OpenAICodexOAuth do
     end
   end
 
-  defp refresh_and_store(%ProviderKey{} = provider_key, %{"refresh" => refresh}) do
-    with {:ok, tokens} <- refresh_token(refresh),
+  defp refresh_and_store(%ProviderKey{} = provider_key, %{"refresh" => refresh}, refresh_fun) do
+    with {:ok, tokens} <- refresh_fun.(refresh),
          encoded <- encode_credentials(tokens),
          :ok <- DodoRouter.Providers.update_provider_key_secret(provider_key, encoded),
          {:ok, credentials} <- decode_credentials(encoded) do
@@ -181,7 +189,8 @@ defmodule DodoRouter.OpenAICodexOAuth do
     end
   end
 
-  defp refresh_and_store(_provider_key, _credentials), do: {:error, :missing_refresh_token}
+  defp refresh_and_store(_provider_key, _credentials, _refresh_fun),
+    do: {:error, :missing_refresh_token}
 
   defp token_fresh?(%{"expires" => expires}) when is_integer(expires) do
     expires > System.system_time(:millisecond) + @refresh_margin_ms

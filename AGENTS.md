@@ -20,6 +20,16 @@ There is also a legacy endpoint at `POST /v1/chat/completions` for backwards com
 - Use the already included and available `:req` (`Req`) library for HTTP requests, **avoid** `:httpoison`, `:tesla`, and `:httpc`. Req is included by default and is the preferred HTTP client for Phoenix apps
 - **Always practice TDD when fixing a bug**: write a failing test that reproduces the bug first, then implement the fix, and only then run the full test suite. Never fix a bug without a corresponding test.
 
+### Adding or modifying LLM provider adapters
+
+Every adapter must satisfy several **cross-cutting contracts** documented in this file. When adding a new adapter or modifying an existing one, you **must**:
+
+1. **Check every cross-cutting section** in this AGENTS.md that applies to adapters. Currently:
+   - [Context Limit Handling](#llm-provider-context-limit-handling) — error detection patterns per provider
+   - [Usage & Cache Token Normalization](#llm-provider-usage--cache-token-normalization) — usage field mapping for cache extraction
+2. **Test the seams** — unit-testing adapter functions in isolation is insufficient. You **must** write at least one test that pipes adapter output through the downstream contract (e.g. `convert_usage/1` → `Adapter.extract_usage/1`) to verify they compose correctly.
+3. **When adding a new cross-cutting concern** (anything all adapters must satisfy), document it as a new section in this file with the same structure: known provider patterns, the contract, and how to test it.
+
 ### Phoenix v1.8 guidelines
 
 - **Always** begin your LiveView templates with `<Layouts.app flash={@flash} ...>` which wraps all inner content
@@ -457,6 +467,70 @@ This matches each provider's native error format so clients (Claude Code, OpenCo
 
 
 <!-- usage-rules-end -->
+
+## LLM Provider Usage & Cache Token Normalization
+
+Cache token reporting is **not standardized** across LLM providers. Each provider returns cache hit/miss data in a different location within the usage object. The proxy normalizes these in `DodoRouter.Proxy.Adapter.extract_usage/1` so the UI and cost tracking can show cache-hit percentages and savings consistently.
+
+### The Contract
+
+Every adapter's final response `usage` map **must** use OpenAI Chat Completions field names. When a provider uses different field names, the adapter's `convert_usage/1` (or equivalent) must rename them so `Adapter.extract_cache_read_tokens/1` finds them.
+
+### Known Provider Patterns
+
+**OpenAI / Groq / xAI / Mistral** — Nested under `prompt_tokens_details`:
+```json
+{
+  "usage": {
+    "prompt_tokens": 100,
+    "prompt_tokens_details": { "cached_tokens": 80 }
+  }
+}
+```
+
+**Anthropic** — Top-level fields:
+```json
+{
+  "usage": {
+    "cache_read_input_tokens": 80,
+    "cache_creation_input_tokens": 20
+  }
+}
+```
+
+**DeepSeek** — Top-level field:
+```json
+{
+  "usage": { "prompt_cache_hit_tokens": 80 }
+}
+```
+
+**Google (Gemini)** — Nested in `usageMetadata`:
+```json
+{
+  "usageMetadata": { "cachedContentTokenCount": 80 }
+}
+```
+
+**OpenAI Responses API (Codex)** — Nested under `input_tokens_details`:
+```json
+{
+  "usage": {
+    "input_tokens": 100,
+    "input_tokens_details": { "cached_tokens": 80 }
+  }
+}
+```
+The `ResponsesAPI.convert_usage/1` must rename `input_tokens_details` → `prompt_tokens_details` so the existing extraction works.
+
+### Adding a New Adapter
+
+When integrating a new provider:
+
+1. **Test with a cache-enabled request** — send a request that should trigger cache hit/miss and observe the raw usage object in the provider's response.
+2. **Document the pattern** — add the observed usage field locations to this section.
+3. **Normalize in the adapter** — if the adapter converts usage (e.g. `convert_usage/1`), ensure the output satisfies `Adapter.extract_cache_read_tokens/1`. This function checks (in order): `cache_read_input_tokens`, `prompt_tokens_details.cached_tokens`, `prompt_cache_hit_tokens`, `cache_read_tokens`.
+4. **Test the seam** — write a test that pipes `convert_usage/1` output through `Adapter.extract_usage/1` and asserts `cache_read_tokens` is non-nil when cache data is present. Unit-testing each function in isolation is insufficient.
 
 ## Releases and Deployment
 
