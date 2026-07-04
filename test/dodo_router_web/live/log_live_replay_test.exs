@@ -104,6 +104,71 @@ defmodule DodoRouterWeb.LogLiveReplayTest do
     end
   end
 
+  describe "reasoning effort" do
+    test "offers catalog efforts for a known model", %{conn: conn, source: source} do
+      {:ok, _model} =
+        DodoRouter.Models.create_model(%{
+          provider_slug: "test_provider",
+          model_id: "test-model",
+          display_name: "Test Model",
+          reasoning_efforts: ["low", "high"]
+        })
+
+      {:ok, view, _html} = live(conn, ~p"/logs/#{source.id}/replay")
+
+      html =
+        view
+        |> form("#replay-form")
+        |> render_change(%{replay: %{model: "test-model"}})
+
+      assert has_element?(view, "#replay-effort")
+      assert html =~ ~s(<option value="low")
+      assert html =~ ~s(<option value="high")
+      refute html =~ ~s(<option value="xhigh")
+      assert html =~ "As original"
+    end
+
+    test "falls back to the generic effort set for unknown models", %{conn: conn, source: source} do
+      {:ok, view, _html} = live(conn, ~p"/logs/#{source.id}/replay")
+
+      html =
+        view
+        |> form("#replay-form")
+        |> render_change(%{replay: %{model: "some-custom-model"}})
+
+      assert html =~ ~s(<option value="minimal")
+      assert html =~ ~s(<option value="xhigh")
+    end
+
+    test "replaying with an effort shows it on the comparison", %{
+      conn: conn,
+      source: source,
+      provider_key: provider_key
+    } do
+      {:ok, view, _html} = live(conn, ~p"/logs/#{source.id}/replay")
+
+      view
+      |> form("#replay-form",
+        replay: %{
+          provider_key_id: provider_key.id,
+          model: "test-model",
+          reasoning_effort: "high"
+        }
+      )
+      |> render_submit()
+
+      render_async(view)
+
+      [replay] = Logs.list_replays(source)
+      assert_patch(view, ~p"/logs/#{source.id}/replay?replay=#{replay.id}")
+      render_async(view)
+
+      assert [step] = replay.attempted_steps
+      assert step["reasoning_effort"] == "high"
+      assert has_element?(view, "#compare-replay", "high")
+    end
+  end
+
   describe "existing replays" do
     setup %{router: router, source: source} do
       response = fn content ->
@@ -132,13 +197,61 @@ defmodule DodoRouterWeb.LogLiveReplayTest do
       %{first: first, second: second}
     end
 
-    test "auto-selects the latest replay", %{conn: conn, source: source} do
+    test "arriving shows the candidates overview, not a single comparison", %{
+      conn: conn,
+      source: source
+    } do
       {:ok, view, _html} = live(conn, ~p"/logs/#{source.id}/replay")
+
+      assert has_element?(view, "#candidates-table")
+      assert has_element?(view, "#candidate-row-original", "original-model")
+      assert has_element?(view, "#candidate-row-1", "model-a")
+      assert has_element?(view, "#candidate-row-2", "model-b")
+      refute has_element?(view, "#compare-replay")
+    end
+
+    test "clicking a candidate row opens its comparison", %{
+      conn: conn,
+      source: source,
+      first: first
+    } do
+      {:ok, view, _html} = live(conn, ~p"/logs/#{source.id}/replay")
+
+      view |> element("#candidate-row-1") |> render_click()
+      assert_patch(view, ~p"/logs/#{source.id}/replay?replay=#{first.id}")
       render_async(view)
 
-      assert has_element?(view, "#compare-replay", "model-b")
-      assert has_element?(view, "#replay-chip-1", "model-a")
-      assert has_element?(view, "#replay-chip-2", "model-b")
+      assert has_element?(view, "#compare-replay", "model-a")
+    end
+
+    test "the All replays link returns to the overview", %{
+      conn: conn,
+      source: source,
+      first: first
+    } do
+      {:ok, view, _html} = live(conn, ~p"/logs/#{source.id}/replay?replay=#{first.id}")
+      render_async(view)
+
+      view |> element("#all-replays-link") |> render_click()
+      assert_patch(view, ~p"/logs/#{source.id}/replay")
+
+      assert has_element?(view, "#candidates-table")
+      refute has_element?(view, "#compare-replay")
+    end
+
+    test "the Replay button on the log page shows the candidate count", %{
+      conn: conn,
+      source: source
+    } do
+      {:ok, view, _html} = live(conn, ~p"/logs/#{source.id}")
+
+      assert has_element?(view, "#replay-button", "2")
+    end
+
+    test "the logs index shows replay counts on originals", %{conn: conn, source: source} do
+      {:ok, view, _html} = live(conn, ~p"/logs")
+
+      assert has_element?(view, ~s(#logs-#{source.id} [title="Has 2 replays"]))
     end
 
     test "?replay= selects a specific replay and switcher patches between them", %{
@@ -168,14 +281,29 @@ defmodule DodoRouterWeb.LogLiveReplayTest do
       assert has_element?(view, "#content-diff ins")
     end
 
-    test "raw view shows both response bodies", %{conn: conn, source: source} do
-      {:ok, view, _html} = live(conn, ~p"/logs/#{source.id}/replay")
+    test "raw view shows both response bodies", %{conn: conn, source: source, second: second} do
+      {:ok, view, _html} = live(conn, ~p"/logs/#{source.id}/replay?replay=#{second.id}")
       render_async(view)
 
       view |> element("#diff-view-raw") |> render_click()
 
       assert has_element?(view, "#compare-raw-pane")
       assert render(view) =~ "quick brown fox"
+    end
+  end
+
+  describe "root anchoring" do
+    test "visiting a replay's page redirects to the root hub with it selected", %{
+      conn: conn,
+      router: router,
+      source: source
+    } do
+      replay_log = LogsFixtures.log_fixture(router, %{replayed_from_id: source.id})
+
+      assert {:error, {:live_redirect, %{to: to}}} =
+               live(conn, ~p"/logs/#{replay_log.id}/replay")
+
+      assert to == "/logs/#{source.id}/replay?replay=#{replay_log.id}"
     end
   end
 
@@ -187,7 +315,7 @@ defmodule DodoRouterWeb.LogLiveReplayTest do
       refute has_element?(view, "#replay-of-link")
     end
 
-    test "a replay log links back to its original comparison", %{
+    test "a replay log links back to its original comparison and offers no Replay action", %{
       conn: conn,
       router: router,
       source: source
@@ -197,6 +325,7 @@ defmodule DodoRouterWeb.LogLiveReplayTest do
       {:ok, view, _html} = live(conn, ~p"/logs/#{replay.id}")
 
       assert has_element?(view, "#replay-of-link")
+      refute has_element?(view, "#replay-button")
     end
 
     test "logs index badges replay rows", %{conn: conn, router: router, source: source} do

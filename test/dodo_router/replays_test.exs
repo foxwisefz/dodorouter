@@ -146,6 +146,105 @@ defmodule DodoRouter.ReplaysTest do
     end
   end
 
+  describe "replay/3 with reasoning effort" do
+    setup ctx do
+      source =
+        LogsFixtures.log_fixture(ctx.router, %{
+          request_body:
+            Jason.encode!(%{
+              "model" => "original-model",
+              "reasoning_effort" => "low",
+              "thinking" => %{"type" => "enabled", "budget_tokens" => 1024},
+              "messages" => [%{"role" => "user", "content" => "hi"}]
+            })
+        })
+
+      %{reasoning_source: source}
+    end
+
+    test "explicit effort lands on the step and strips the body's own reasoning params", ctx do
+      assert {:ok, replay} =
+               Replays.replay(ctx.user, ctx.reasoning_source, %{
+                 provider_key_id: ctx.provider_key.id,
+                 model: "test-model",
+                 reasoning_effort: "high"
+               })
+
+      request = Jason.decode!(replay.request_body)
+      refute Map.has_key?(request, "reasoning_effort")
+      refute Map.has_key?(request, "thinking")
+
+      assert [step] = replay.attempted_steps
+      assert step["reasoning_effort"] == "high"
+    end
+
+    test "no effort keeps the original body's reasoning params (faithful replay)", ctx do
+      assert {:ok, replay} =
+               Replays.replay(ctx.user, ctx.reasoning_source, target(ctx))
+
+      request = Jason.decode!(replay.request_body)
+      assert request["reasoning_effort"] == "low"
+      assert request["thinking"] == %{"type" => "enabled", "budget_tokens" => 1024}
+
+      assert [step] = replay.attempted_steps
+      assert step["reasoning_effort"] == nil
+    end
+
+    test "blank effort behaves as as-original", ctx do
+      assert {:ok, replay} =
+               Replays.replay(ctx.user, ctx.reasoning_source, %{
+                 provider_key_id: ctx.provider_key.id,
+                 model: "test-model",
+                 reasoning_effort: ""
+               })
+
+      request = Jason.decode!(replay.request_body)
+      assert request["reasoning_effort"] == "low"
+      assert [step] = replay.attempted_steps
+      assert step["reasoning_effort"] == nil
+    end
+
+    test "rejects an overlong effort value", ctx do
+      assert {:error, :invalid_reasoning_effort} =
+               Replays.replay(ctx.user, ctx.reasoning_source, %{
+                 provider_key_id: ctx.provider_key.id,
+                 model: "test-model",
+                 reasoning_effort: String.duplicate("x", 33)
+               })
+    end
+  end
+
+  describe "replay/3 root anchoring" do
+    test "replaying a replay anchors to the root and re-runs the root's request", ctx do
+      # the chained log's body has drifted — the dispatched request must
+      # come from the root so all candidates stay comparable
+      child =
+        LogsFixtures.log_fixture(ctx.router, %{
+          replayed_from_id: ctx.source.id,
+          request_body:
+            Jason.encode!(%{"messages" => [%{"role" => "user", "content" => "drifted"}]})
+        })
+
+      assert {:ok, replay} = Replays.replay(ctx.user, child, target(ctx))
+
+      assert replay.replayed_from_id == ctx.source.id
+
+      request = Jason.decode!(replay.request_body)
+      assert request["messages"] == [%{"role" => "user", "content" => "hi"}]
+      assert request["temperature"] == 0.7
+    end
+
+    test "blockers are evaluated on the root, not the chained log", ctx do
+      broken_child =
+        LogsFixtures.log_fixture(ctx.router, %{
+          replayed_from_id: ctx.source.id,
+          request_body: "not json"
+        })
+
+      assert {:ok, %RequestLog{}} = Replays.replay(ctx.user, broken_child, target(ctx))
+    end
+  end
+
   describe "replay_blocker/1" do
     test "returns nil for a replayable log", ctx do
       assert Replays.replay_blocker(ctx.source) == nil

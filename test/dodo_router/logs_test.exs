@@ -197,6 +197,36 @@ defmodule DodoRouter.LogsTest do
     end
   end
 
+  describe "replay lineage" do
+    test "root_of/1 returns the log itself when it isn't a replay" do
+      {router, _api_key} = RoutersFixtures.router_fixture()
+      log = LogsFixtures.log_fixture(router)
+
+      assert Logs.root_of(log).id == log.id
+    end
+
+    test "root_of/1 walks a chain up to the root" do
+      {router, _api_key} = RoutersFixtures.router_fixture()
+      root = LogsFixtures.log_fixture(router)
+      child = LogsFixtures.log_fixture(router, %{replayed_from_id: root.id})
+      grandchild = LogsFixtures.log_fixture(router, %{replayed_from_id: child.id})
+
+      assert Logs.root_of(grandchild).id == root.id
+      assert Logs.root_of(child).id == root.id
+    end
+
+    test "replay_counts/1 maps log ids to their replay counts" do
+      {router, _api_key} = RoutersFixtures.router_fixture()
+      replayed = LogsFixtures.log_fixture(router)
+      bare = LogsFixtures.log_fixture(router)
+
+      LogsFixtures.log_fixture(router, %{replayed_from_id: replayed.id})
+      LogsFixtures.log_fixture(router, %{replayed_from_id: replayed.id})
+
+      assert Logs.replay_counts([replayed.id, bare.id]) == %{replayed.id => 2}
+    end
+  end
+
   describe "list_logs_for_recording/2" do
     test "returns logs for specific recording" do
       {router, _api_key} = RoutersFixtures.router_fixture()

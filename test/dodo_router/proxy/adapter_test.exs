@@ -325,7 +325,9 @@ defmodule DodoRouter.Proxy.AdapterTest do
       assert Adapter.inject_reasoning_effort(%{}, "xhigh", :openai)["reasoning_effort"] == "xhigh"
       assert Adapter.inject_reasoning_effort(%{}, "max", :openai)["reasoning_effort"] == "max"
       assert Adapter.inject_reasoning_effort(%{}, "none", :openai)["reasoning_effort"] == "none"
-      assert Adapter.inject_reasoning_effort(%{}, "default", :openai)["reasoning_effort"] == "default"
+
+      assert Adapter.inject_reasoning_effort(%{}, "default", :openai)["reasoning_effort"] ==
+               "default"
     end
 
     test ":openai respects a client-supplied reasoning_effort" do

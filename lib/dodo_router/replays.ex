@@ -35,21 +35,30 @@ defmodule DodoRouter.Replays do
   `:invalid_request_body`, `:missing_messages`, `:invalid_model`,
   `:provider_key_not_found`, `:log_not_persisted`).
   """
-  def replay(%User{} = user, %RequestLog{} = source, %{provider_key_id: key_id, model: model}) do
-    source = Repo.preload(source, :router)
+  def replay(
+        %User{} = user,
+        %RequestLog{} = source,
+        %{provider_key_id: key_id, model: model} = target
+      ) do
+    # Replays always anchor to the chain's root: every candidate re-runs the
+    # same original request and lands as a sibling in one comparison hub,
+    # rather than growing replay-of-replay chains.
+    root = source |> Logs.root_of() |> Repo.preload(:router)
+    effort = normalize_effort(target[:reasoning_effort])
 
-    with {:ok, request} <- prepare_request(source, model),
-         {:ok, step} <- build_step(user, source.router_id, key_id, model) do
+    with :ok <- validate_effort(effort),
+         {:ok, request} <- prepare_request(root, model, effort),
+         {:ok, step} <- build_step(user, root.router_id, key_id, model, effort) do
       request_id = Ecto.UUID.generate()
 
       opts = [
         steps: [step],
         log_mode: :sync,
-        replayed_from_id: source.id,
+        replayed_from_id: root.id,
         request_id: request_id
       ]
 
-      case Proxy.dispatch(source.router, request, opts) do
+      case Proxy.dispatch(root.router, request, opts) do
         {:ok, _response, %{log: %RequestLog{} = log}} -> {:ok, log}
         {:ok, _response, _meta} -> fetch_persisted(request_id)
         {:error, :all_providers_failed, _attempts} -> fetch_persisted(request_id)
@@ -60,8 +69,13 @@ defmodule DodoRouter.Replays do
 
   @doc """
   Decodes and sanitizes the stored request body for re-dispatch.
+
+  When an explicit `reasoning_effort` is chosen for the target, the body's
+  own `reasoning_effort`/`thinking` params are stripped — the step-level
+  effort is only an opt-in default at the adapter layer, so a leftover body
+  value would silently win over the user's choice.
   """
-  def prepare_request(%RequestLog{} = source, target_model) do
+  def prepare_request(%RequestLog{} = source, target_model, reasoning_effort \\ nil) do
     with :ok <- validate_model(target_model),
          {:ok, decoded} <- decode_body(source.request_body),
          :ok <- ensure_messages(decoded),
@@ -69,6 +83,7 @@ defmodule DodoRouter.Replays do
       request =
         decoded
         |> Map.drop(@strip_fields)
+        |> drop_reasoning_params(reasoning_effort)
         |> Map.put("model", target_model)
 
       {:ok, request}
@@ -90,8 +105,9 @@ defmodule DodoRouter.Replays do
 
   Sampling params (`temperature`, `max_tokens`, `thinking_enabled`) are left
   nil so the replayed request body's own values pass through untouched.
+  `reasoning_effort` is set only when the user explicitly chose one.
   """
-  def build_step(%User{} = user, router_id, provider_key_id, model) do
+  def build_step(%User{} = user, router_id, provider_key_id, model, reasoning_effort \\ nil) do
     case Providers.get_provider_key(user, provider_key_id) do
       nil ->
         {:error, :provider_key_not_found}
@@ -105,6 +121,7 @@ defmodule DodoRouter.Replays do
            provider: Registry.adapter_provider(provider_key.provider_slug),
            model: model,
            plan_type: plan_type_for(provider_key),
+           reasoning_effort: reasoning_effort,
            provider_key: provider_key,
            provider_key_id: provider_key.id
          }}
@@ -167,6 +184,22 @@ defmodule DodoRouter.Replays do
 
   defp validate_model(model) when is_binary(model) and model != "", do: :ok
   defp validate_model(_model), do: {:error, :invalid_model}
+
+  defp normalize_effort(nil), do: nil
+  defp normalize_effort(""), do: nil
+  defp normalize_effort(effort) when is_binary(effort), do: String.trim(effort)
+  defp normalize_effort(_effort), do: :invalid
+
+  # Mirrors RoutingStep's validation (length only — models.dev knows efforts
+  # the static list doesn't, so membership isn't enforced)
+  defp validate_effort(nil), do: :ok
+  defp validate_effort(effort) when is_binary(effort) and byte_size(effort) <= 32, do: :ok
+  defp validate_effort(_effort), do: {:error, :invalid_reasoning_effort}
+
+  defp drop_reasoning_params(request, nil), do: request
+
+  defp drop_reasoning_params(request, _effort),
+    do: Map.drop(request, ["reasoning_effort", "thinking"])
 
   defp decode_body(body) when is_binary(body) do
     case Jason.decode(body) do

@@ -151,6 +151,40 @@ defmodule DodoRouter.Logs do
     |> Repo.all()
   end
 
+  @doc """
+  Map of log id => number of replays, for the given log ids.
+  Ids without replays are absent from the result.
+  """
+  def replay_counts(log_ids) when is_list(log_ids) do
+    from(l in RequestLog,
+      where: l.replayed_from_id in ^log_ids,
+      group_by: l.replayed_from_id,
+      select: {l.replayed_from_id, count(l.id)}
+    )
+    |> Repo.all()
+    |> Map.new()
+  end
+
+  # Chains can't realistically get deep, but a cycle or corrupt data must
+  # not loop forever
+  @max_replay_depth 20
+
+  @doc """
+  Walks `replayed_from_id` up to the original log the given one descends
+  from. Returns the log itself when it isn't a replay.
+  """
+  def root_of(%RequestLog{} = log), do: walk_to_root(log, @max_replay_depth)
+
+  defp walk_to_root(%RequestLog{replayed_from_id: nil} = log, _depth), do: log
+  defp walk_to_root(log, 0), do: log
+
+  defp walk_to_root(%RequestLog{replayed_from_id: parent_id} = log, depth) do
+    case Repo.get(RequestLog, parent_id) do
+      nil -> log
+      parent -> walk_to_root(parent, depth - 1)
+    end
+  end
+
   def toggle_favorite(%User{} = user, id_or_request_id) do
     log = get_log(user, id_or_request_id) || get_log_by_request_id(user, id_or_request_id)
 

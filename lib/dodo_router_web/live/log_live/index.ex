@@ -19,6 +19,7 @@ defmodule DodoRouterWeb.LogLive.Index do
       |> assign(:selected_router, nil)
       |> assign(:subscribed_all, false)
       |> assign(:favorites_only, false)
+      |> assign(:replay_counts, %{})
       |> stream(:logs, [])
 
     {:ok, socket}
@@ -71,6 +72,7 @@ defmodule DodoRouterWeb.LogLive.Index do
         |> assign(:selected_router, router)
         |> assign(:subscribed_all, false)
         |> assign(:favorites_only, favorites_only)
+        |> assign(:replay_counts, Logs.replay_counts(Enum.map(logs, & &1.id)))
         |> stream(:logs, logs, reset: true)
       else
         # Show all logs across all routers
@@ -86,6 +88,7 @@ defmodule DodoRouterWeb.LogLive.Index do
         |> assign(:selected_router, nil)
         |> assign(:subscribed_all, true)
         |> assign(:favorites_only, favorites_only)
+        |> assign(:replay_counts, Logs.replay_counts(Enum.map(logs, & &1.id)))
         |> stream(:logs, logs, reset: true)
       end
 
@@ -283,6 +286,14 @@ defmodule DodoRouterWeb.LogLive.Index do
                     title="Created by replaying another log"
                   >
                     <.icon name="hero-arrow-path" class="w-2.5 h-2.5" /> replay
+                  </span>
+                  <span
+                    :if={Map.get(@replay_counts, Map.get(log, :id))}
+                    class="badge badge-ghost badge-xs gap-0.5"
+                    title={"Has #{Map.get(@replay_counts, Map.get(log, :id))} replays"}
+                  >
+                    <.icon name="hero-arrow-path" class="w-2.5 h-2.5" />
+                    {Map.get(@replay_counts, Map.get(log, :id))}
                   </span>
                 </div>
               </td>

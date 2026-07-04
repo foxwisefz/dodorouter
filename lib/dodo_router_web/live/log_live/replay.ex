@@ -3,17 +3,32 @@ defmodule DodoRouterWeb.LogLive.Replay do
 
   alias DodoRouter.Logs
   alias DodoRouter.Logs.MessageNormalizer
+  alias DodoRouter.Models
   alias DodoRouter.Replays
+  alias DodoRouter.Routers.RoutingStep
   alias DodoRouter.TextDiff
 
   @impl true
-  def mount(%{"id" => id}, _session, socket) do
+  def mount(%{"id" => id} = params, _session, socket) do
     log =
       case Logs.get_log(socket.assigns.current_user, id) do
         nil -> Logs.get_log_by_request_id!(socket.assigns.current_user, id)
         log -> log
       end
 
+    case Logs.root_of(log) do
+      %{id: root_id} when root_id != log.id ->
+        # Comparison hubs live on the chain's root; a replay's page
+        # normalizes there with the visited replay selected
+        selected = params["replay"] || log.id
+        {:ok, push_navigate(socket, to: ~p"/logs/#{root_id}/replay?replay=#{selected}")}
+
+      _root ->
+        {:ok, assign_hub(socket, log)}
+    end
+  end
+
+  defp assign_hub(socket, log) do
     targets = Replays.list_targets(socket.assigns.current_user)
 
     socket =
@@ -25,7 +40,14 @@ defmodule DodoRouterWeb.LogLive.Replay do
       |> assign(:targets, targets)
       |> assign(
         :target_form,
-        to_form(%{"provider_key_id" => default_key_id(targets), "model" => ""}, as: :replay)
+        to_form(
+          %{
+            "provider_key_id" => default_key_id(targets),
+            "model" => "",
+            "reasoning_effort" => ""
+          },
+          as: :replay
+        )
       )
       |> assign(:replays, Logs.list_replays(log))
       |> assign(:running?, false)
@@ -33,15 +55,18 @@ defmodule DodoRouterWeb.LogLive.Replay do
       |> assign(:selected, nil)
       |> assign(:diff, nil)
 
-    {:ok, socket}
+    socket
   end
 
   @impl true
   def handle_params(params, _uri, socket) do
-    replays = socket.assigns.replays
-
+    # No auto-selection: without ?replay= the hub shows the candidates
+    # overview rather than crowning an arbitrary comparison
     selected =
-      Enum.find(replays, &(&1.id == params["replay"])) || List.last(replays)
+      case params["replay"] do
+        nil -> nil
+        id -> Enum.find(socket.assigns.replays, &(&1.id == id))
+      end
 
     {:noreply, select_replay(socket, selected)}
   end
@@ -56,7 +81,8 @@ defmodule DodoRouterWeb.LogLive.Replay do
 
     target = %{
       provider_key_id: params["provider_key_id"],
-      model: String.trim(params["model"] || "")
+      model: String.trim(params["model"] || ""),
+      reasoning_effort: params["reasoning_effort"]
     }
 
     socket =
@@ -111,7 +137,20 @@ defmodule DodoRouterWeb.LogLive.Replay do
   end
 
   defp select_replay(socket, nil) do
-    socket |> assign(:selected, nil) |> assign(:diff, nil) |> assign(:deltas, [])
+    candidates =
+      Enum.map(socket.assigns.replays, fn replay ->
+        %{
+          log: replay,
+          effort: step_effort(replay),
+          deltas: Replays.deltas(socket.assigns.source, replay) |> Map.new(&{&1.key, &1})
+        }
+      end)
+
+    socket
+    |> assign(:selected, nil)
+    |> assign(:diff, nil)
+    |> assign(:deltas, [])
+    |> assign(:candidates, candidates)
   end
 
   defp select_replay(socket, replay_log) do
@@ -164,10 +203,11 @@ defmodule DodoRouterWeb.LogLive.Replay do
         <.link
           :if={@source.replayed_from_id}
           navigate={~p"/logs/#{@source.replayed_from_id}/replay?replay=#{@source.id}"}
-          class="badge badge-ghost gap-1"
+          class="btn btn-ghost btn-sm gap-2"
           id="source-is-replay-link"
+          title="This log was produced by a replay — open its comparison against the log it came from"
         >
-          <.icon name="hero-arrow-uturn-left" class="w-3 h-3" /> this log is itself a replay
+          <.icon name="hero-scale" class="w-4 h-4" /> Compare with original
         </.link>
       </div>
       
@@ -244,6 +284,24 @@ defmodule DodoRouterWeb.LogLive.Replay do
             </p>
           </div>
 
+          <div class="w-full sm:w-44">
+            <label class="text-xs font-medium text-base-content/50 block mb-1">Reasoning</label>
+            <select
+              name={@target_form[:reasoning_effort].name}
+              id="replay-effort"
+              class="select select-sm w-full"
+            >
+              {Phoenix.HTML.Form.options_for_select(
+                effort_options(
+                  @targets,
+                  @target_form[:provider_key_id].value,
+                  @target_form[:model].value
+                ),
+                @target_form[:reasoning_effort].value
+              )}
+            </select>
+          </div>
+
           <button
             type="submit"
             id="run-replay-button"
@@ -260,9 +318,19 @@ defmodule DodoRouterWeb.LogLive.Replay do
         </p>
       </div>
       
-    <!-- Replay switcher -->
-      <div :if={@replays != []} class="flex items-center gap-2 mb-4 flex-wrap" id="replay-switcher">
-        <span class="text-xs font-medium text-base-content/50">Replays:</span>
+    <!-- Replay switcher (compare state) -->
+      <div
+        :if={@replays != [] and @selected}
+        class="flex items-center gap-2 mb-4 flex-wrap"
+        id="replay-switcher"
+      >
+        <.link
+          patch={~p"/logs/#{@source.id}/replay"}
+          class="badge badge-ghost gap-1 hover:badge-secondary"
+          id="all-replays-link"
+        >
+          <.icon name="hero-squares-2x2" class="w-3 h-3" /> All replays
+        </.link>
         <.link
           :for={{r, idx} <- Enum.with_index(@replays, 1)}
           patch={~p"/logs/#{@source.id}/replay?replay=#{r.id}"}
@@ -275,12 +343,102 @@ defmodule DodoRouterWeb.LogLive.Replay do
         >
           <span class={["w-1.5 h-1.5 rounded-full", replay_dot(r.status)]}></span>
           {r.final_model || "unknown"}
+          <span :if={step_effort(r)} class="opacity-70">· {step_effort(r)}</span>
         </.link>
+      </div>
+      
+    <!-- Candidates overview -->
+      <div
+        :if={@selected == nil and @replays != []}
+        class="rounded-lg border border-base-300/50 bg-base-100 overflow-hidden"
+        id="candidates-table"
+      >
+        <table class="w-full text-left">
+          <thead>
+            <tr class="border-b border-base-300/50 bg-secondary/30">
+              <th class="px-4 py-2.5 text-xs font-medium text-base-content/50">Candidate</th>
+              <th class="px-4 py-2.5 text-xs font-medium text-base-content/50">Status</th>
+              <th class="px-4 py-2.5 text-xs font-medium text-base-content/50">Latency</th>
+              <th class="px-4 py-2.5 text-xs font-medium text-base-content/50 hidden sm:table-cell">
+                Tokens
+              </th>
+              <th class="px-4 py-2.5 text-xs font-medium text-base-content/50">Cost</th>
+              <th class="px-4 py-2.5 text-xs font-medium text-base-content/50 hidden md:table-cell">
+                When
+              </th>
+              <th class="w-8"><span class="sr-only">Compare</span></th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-base-300/30">
+            <tr id="candidate-row-original" class="bg-base-200/40">
+              <td class="px-4 py-2.5">
+                <div class="flex items-center gap-2">
+                  <.provider_logo
+                    slug={normalize_slug(@source.final_provider || "unknown")}
+                    class="w-4 h-4"
+                  />
+                  <span class="font-semibold text-sm">{@source.final_model || "unknown"}</span>
+                  <span :if={step_effort(@source)} class="badge badge-ghost badge-xs">
+                    {step_effort(@source)}
+                  </span>
+                  <span class="badge badge-primary badge-xs">original</span>
+                </div>
+              </td>
+              <td class="px-4 py-2.5"><.status_badge status={@source.status} /></td>
+              <td class="px-4 py-2.5 text-sm font-mono">
+                {format_metric(:latency_ms, @source.latency_ms)}
+              </td>
+              <td class="px-4 py-2.5 text-sm font-mono hidden sm:table-cell">
+                {format_metric(:total_tokens, @source.total_tokens)}
+              </td>
+              <td class="px-4 py-2.5 text-sm font-mono">
+                {format_metric(:estimated_cost_usd, @source.estimated_cost_usd)}
+              </td>
+              <td class="px-4 py-2.5 text-xs text-base-content/40 hidden md:table-cell">
+                {format_when(@source.inserted_at)}
+              </td>
+              <td></td>
+            </tr>
+            <tr
+              :for={{candidate, idx} <- Enum.with_index(@candidates, 1)}
+              id={"candidate-row-#{idx}"}
+              phx-click={JS.patch(~p"/logs/#{@source.id}/replay?replay=#{candidate.log.id}")}
+              class="hover:bg-secondary/20 transition-colors cursor-pointer"
+            >
+              <td class="px-4 py-2.5">
+                <div class="flex items-center gap-2">
+                  <.provider_logo
+                    slug={normalize_slug(candidate.log.final_provider || "unknown")}
+                    class="w-4 h-4"
+                  />
+                  <span class="font-medium text-sm">{candidate.log.final_model || "unknown"}</span>
+                  <span :if={candidate.effort} class="badge badge-ghost badge-xs">
+                    {candidate.effort}
+                  </span>
+                </div>
+              </td>
+              <td class="px-4 py-2.5"><.status_badge status={candidate.log.status} /></td>
+              <td class="px-4 py-2.5"><.metric_cell metric={candidate.deltas[:latency_ms]} /></td>
+              <td class="px-4 py-2.5 hidden sm:table-cell">
+                <.metric_cell metric={candidate.deltas[:total_tokens]} />
+              </td>
+              <td class="px-4 py-2.5">
+                <.metric_cell metric={candidate.deltas[:estimated_cost_usd]} />
+              </td>
+              <td class="px-4 py-2.5 text-xs text-base-content/40 hidden md:table-cell">
+                {format_when(candidate.log.inserted_at)}
+              </td>
+              <td class="px-2 py-2.5 text-base-content/30">
+                <.icon name="hero-chevron-right" class="w-4 h-4" />
+              </td>
+            </tr>
+          </tbody>
+        </table>
       </div>
       
     <!-- Empty state -->
       <div
-        :if={@selected == nil and !@running? and !@blocker}
+        :if={@replays == [] and !@running? and !@blocker}
         class="empty-state card-bordered py-16 text-center"
         id="replay-empty-state"
       >
@@ -293,7 +451,7 @@ defmodule DodoRouterWeb.LogLive.Replay do
       
     <!-- Running skeleton (first run) -->
       <div
-        :if={@selected == nil and @running?}
+        :if={@replays == [] and @running?}
         class="card-bordered py-12"
         id="replay-running-skeleton"
       >
@@ -492,7 +650,12 @@ defmodule DodoRouterWeb.LogLive.Replay do
       </div>
       <div class="min-w-0 flex-1">
         <div class="text-xs font-medium text-base-content/50">{@label}</div>
-        <div class="font-semibold text-base-content truncate">{@log.final_model || "unknown"}</div>
+        <div class="font-semibold text-base-content truncate">
+          {@log.final_model || "unknown"}
+          <span :if={step_effort(@log)} class="badge badge-ghost badge-sm align-middle">
+            {step_effort(@log)}
+          </span>
+        </div>
         <div class="text-xs text-base-content/40">{@log.final_provider}</div>
       </div>
       <.status_badge status={@log.status} />
@@ -591,6 +754,17 @@ defmodule DodoRouterWeb.LogLive.Replay do
     """
   end
 
+  attr :metric, :map, required: true
+
+  defp metric_cell(assigns) do
+    ~H"""
+    <span class="text-sm font-mono">{format_metric(@metric.key, @metric.replay)}</span>
+    <span :if={@metric.delta_pct} class={["text-xs ml-1", delta_color(@metric.direction)]}>
+      {delta_chip(@metric)}
+    </span>
+    """
+  end
+
   defp status_badge(assigns) do
     class =
       case assigns.status do
@@ -662,6 +836,31 @@ defmodule DodoRouterWeb.LogLive.Replay do
   defp replay_dot("success"), do: "bg-success"
   defp replay_dot("fallback"), do: "bg-warning"
   defp replay_dot(_status), do: "bg-error"
+
+  # Efforts the catalog knows for the typed model; generic set otherwise
+  # (mirrors the routing-step editor)
+  defp effort_options(targets, provider_key_id, model) do
+    known =
+      case selected_target(targets, provider_key_id) do
+        %{provider: provider} when is_binary(model) and model != "" ->
+          Models.reasoning_efforts_for(provider, model)
+
+        _target ->
+          []
+      end
+
+    efforts = if known == [], do: RoutingStep.reasoning_efforts(), else: known
+    [{"As original", ""} | Enum.map(efforts, &{&1, &1})]
+  end
+
+  defp step_effort(%{attempted_steps: [_ | _] = steps}) do
+    steps |> List.last() |> Map.get("reasoning_effort")
+  end
+
+  defp step_effort(_log), do: nil
+
+  defp format_when(nil), do: ""
+  defp format_when(datetime), do: Calendar.strftime(datetime, "%b %d, %H:%M")
 
   defp message_text(nil), do: nil
 

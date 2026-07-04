@@ -41,6 +41,7 @@ defmodule DodoRouterWeb.LogLive.Show do
       |> assign(:show_resp_headers, false)
       |> assign(:expanded_messages, MapSet.new())
       |> assign(:truncation_flags, log.truncation_flags || [])
+      |> assign(:replay_count, Logs.replay_counts([log.id]) |> Map.get(log.id, 0))
 
     {:ok, socket}
   end
@@ -124,17 +125,19 @@ defmodule DodoRouterWeb.LogLive.Show do
           :if={@log.replayed_from_id}
           id="replay-of-link"
           navigate={~p"/logs/#{@log.replayed_from_id}/replay?replay=#{@log.id}"}
-          class="badge badge-ghost gap-1"
-          title="This log is a replay — compare it with its original"
+          class="btn btn-ghost btn-sm gap-2"
+          title="This log was produced by a replay — open the side-by-side comparison with its original"
         >
-          <.icon name="hero-arrow-uturn-left" class="w-3 h-3" /> replay
+          <.icon name="hero-scale" class="w-4 h-4" /> Compare with original
         </.link>
         <.link
+          :if={!@log.replayed_from_id}
           id="replay-button"
           navigate={~p"/logs/#{@log.id}/replay"}
           class="btn btn-primary btn-soft btn-sm gap-2"
         >
           <.icon name="hero-arrow-path" class="w-4 h-4" /> Replay
+          <span :if={@replay_count > 0} class="badge badge-sm">{@replay_count}</span>
         </.link>
         <button
           type="button"
@@ -608,7 +611,10 @@ defmodule DodoRouterWeb.LogLive.Show do
                           <span class="badge badge-sm">{attempt["plan_type"]}</span>
                         <% end %>
                         <%= if effort = attempt_effort(attempt) do %>
-                          <span class="badge badge-sm badge-accent badge-outline" title="Reasoning effort">
+                          <span
+                            class="badge badge-sm badge-accent badge-outline"
+                            title="Reasoning effort"
+                          >
                             effort: {effort}
                           </span>
                         <% end %>

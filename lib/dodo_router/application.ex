@@ -10,6 +10,11 @@ defmodule DodoRouter.Application do
     # Attach Finch telemetry handlers for request timing
     DodoRouter.Proxy.FinchTelemetry.attach()
 
+    # Own the secrets cache table from a process that lives as long as the
+    # app — created lazily it belongs to the first process that touches it
+    # and vanishes (with all cached secrets) when that process exits.
+    DodoRouter.Secrets.init_cache()
+
     children = [
       DodoRouter.ShutdownListener,
       DodoRouterWeb.Telemetry,
