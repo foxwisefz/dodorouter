@@ -276,6 +276,34 @@ defmodule DodoRouter.Proxy.AdapterTest do
     end
   end
 
+  describe "capture_streamed_error/2 and streamed_error_body/1" do
+    test "accumulates chunks and decodes JSON error bodies" do
+      resp = Req.Response.new(status: 400)
+
+      {:cont, {_req, resp}} =
+        Adapter.capture_streamed_error({:data, ~s({"error": {"message":)}, {:req, resp})
+
+      {:cont, {_req, resp}} =
+        Adapter.capture_streamed_error({:data, ~s( "bad effort"}})}, {:req, resp})
+
+      assert Adapter.streamed_error_body(resp) == %{
+               "error" => %{"message" => "bad effort"}
+             }
+    end
+
+    test "returns raw string when body is not JSON" do
+      resp = Req.Response.new(status: 502)
+      {:cont, {_req, resp}} = Adapter.capture_streamed_error({:data, "Bad Gateway"}, {:req, resp})
+
+      assert Adapter.streamed_error_body(resp) == "Bad Gateway"
+    end
+
+    test "falls back to Req.Response body when nothing was captured" do
+      resp = Req.Response.new(status: 400, body: "plain")
+      assert Adapter.streamed_error_body(resp) == "plain"
+    end
+  end
+
   describe "inject_reasoning_effort/3" do
     test "no-op when effort is nil or empty" do
       body = %{"model" => "x"}
@@ -293,14 +321,11 @@ defmodule DodoRouter.Proxy.AdapterTest do
       assert body["reasoning_effort"] == "high"
     end
 
-    test ":openai clamps xhigh/max down to high" do
-      assert Adapter.inject_reasoning_effort(%{}, "xhigh", :openai)["reasoning_effort"] == "high"
-      assert Adapter.inject_reasoning_effort(%{}, "max", :openai)["reasoning_effort"] == "high"
-    end
-
-    test ":openai 'none' deletes reasoning_effort" do
-      body = Adapter.inject_reasoning_effort(%{"reasoning_effort" => "high"}, "none", :openai)
-      refute Map.has_key?(body, "reasoning_effort")
+    test ":openai passes any effort through verbatim (no clamping)" do
+      assert Adapter.inject_reasoning_effort(%{}, "xhigh", :openai)["reasoning_effort"] == "xhigh"
+      assert Adapter.inject_reasoning_effort(%{}, "max", :openai)["reasoning_effort"] == "max"
+      assert Adapter.inject_reasoning_effort(%{}, "none", :openai)["reasoning_effort"] == "none"
+      assert Adapter.inject_reasoning_effort(%{}, "default", :openai)["reasoning_effort"] == "default"
     end
 
     test ":openai respects a client-supplied reasoning_effort" do
@@ -378,6 +403,17 @@ defmodule DodoRouter.Proxy.AdapterTest do
         )
 
       assert body["reasoning"] == %{"effort" => "low"}
+    end
+
+    test ":responses passes any effort through verbatim (no clamping)" do
+      assert Adapter.inject_reasoning_effort(%{}, "xhigh", :responses)["reasoning"] ==
+               %{"effort" => "xhigh"}
+
+      assert Adapter.inject_reasoning_effort(%{}, "max", :responses)["reasoning"] ==
+               %{"effort" => "max"}
+
+      assert Adapter.inject_reasoning_effort(%{}, "none", :responses)["reasoning"] ==
+               %{"effort" => "none"}
     end
   end
 end

@@ -32,6 +32,10 @@ defmodule DodoRouter.Models.Model do
     field :supports_reasoning, :boolean, default: false
     field :supports_prompt_caching, :boolean, default: false
 
+    # Reasoning effort levels the model accepts (from models.dev
+    # reasoning_options). Empty when unknown or not applicable.
+    field :reasoning_efforts, {:array, :string}, default: []
+
     # Metadata
     field :deprecation_date, :date
     field :metadata, :map, default: %{}
@@ -57,6 +61,7 @@ defmodule DodoRouter.Models.Model do
     :supports_response_schema,
     :supports_reasoning,
     :supports_prompt_caching,
+    :reasoning_efforts,
     :deprecation_date,
     :metadata
   ]

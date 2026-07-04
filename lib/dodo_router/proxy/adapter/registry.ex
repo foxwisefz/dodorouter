@@ -44,6 +44,7 @@ defmodule DodoRouter.Proxy.Adapter.Registry do
           key_generation_url: String.t() | nil,
           oauth_config: oauth_config() | nil,
           endpoints: %{String.t() => String.t()},
+          endpoint_path: String.t(),
           models: [String.t()],
           color: String.t(),
           short_description: String.t()
@@ -68,6 +69,9 @@ defmodule DodoRouter.Proxy.Adapter.Registry do
           key_generation_url: unquote(opts[:key_generation_url]),
           oauth_config: unquote(opts[:oauth_config]),
           endpoints: unquote(opts[:endpoints]),
+          # Request path appended to the endpoint base URL; used for display
+          # in logs ("{model}" is replaced with the step's model).
+          endpoint_path: unquote(opts[:endpoint_path]) || "/chat/completions",
           models: unquote(opts[:models]),
           color: unquote(opts[:color]),
           short_description: unquote(opts[:short_description])

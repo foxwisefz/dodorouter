@@ -9,9 +9,12 @@ defmodule DodoRouter.Routers.RoutingStep do
 
   @plan_types ~w(standard coding)
 
-  # Canonical reasoning effort levels supported by the UI/proxy.
+  # Canonical reasoning effort levels offered by the UI when the model's
+  # actual supported set is unknown (see Models.reasoning_efforts_for/2).
   # nil (unset) means "don't inject any reasoning control" — providers use
   # their own defaults or honor a client-supplied value instead.
+  # Any string is accepted and forwarded verbatim; this list is not a
+  # validation whitelist.
   @reasoning_efforts ~w(none minimal low medium high xhigh max)
 
   schema "routing_steps" do
@@ -50,7 +53,7 @@ defmodule DodoRouter.Routers.RoutingStep do
     |> validate_number(:position, greater_than_or_equal_to: 0)
     |> validate_number(:temperature, greater_than_or_equal_to: 0.0, less_than_or_equal_to: 2.0)
     |> validate_number(:max_tokens, greater_than: 0)
-    |> validate_inclusion(:reasoning_effort, reasoning_efforts())
+    |> validate_length(:reasoning_effort, max: 32)
     |> foreign_key_constraint(:router_id)
     |> foreign_key_constraint(:provider_key_id)
     |> unique_constraint([:router_id, :position])

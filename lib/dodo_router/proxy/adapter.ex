@@ -256,6 +256,37 @@ defmodule DodoRouter.Proxy.Adapter do
 
   def sanitize_request(request), do: request
 
+  @doc """
+  Accumulates raw response data while streaming a non-200 response.
+
+  Streaming adapters consume the response with `Req` `into:` functions that
+  parse SSE events. On an error status the provider sends a plain JSON error
+  body instead of SSE — parsing it as SSE silently discards it. Adapters call
+  this from their `into:` function when `resp.status != 200` so the error
+  body is preserved for logging (see `streamed_error_body/1`).
+  """
+  def capture_streamed_error({:data, data}, {req, resp}) do
+    buffered = (resp.private[:error_body] || "") <> data
+    {:cont, {req, Req.Response.put_private(resp, :error_body, buffered)}}
+  end
+
+  @doc """
+  Returns the error body captured by `capture_streamed_error/2`, decoded as
+  JSON when possible, falling back to the raw string or `Req.Response.body`.
+  """
+  def streamed_error_body(%Req.Response{} = resp) do
+    case resp.private[:error_body] do
+      nil ->
+        resp.body
+
+      raw ->
+        case Jason.decode(raw) do
+          {:ok, decoded} -> decoded
+          {:error, _} -> raw
+        end
+    end
+  end
+
   # OpenAI introduced max_completion_tokens as a replacement for max_tokens.
   # Some providers only accept max_tokens, so normalize if only the newer key is present.
   defp normalize_max_completion_tokens(request) do
@@ -790,8 +821,10 @@ defmodule DodoRouter.Proxy.Adapter do
     * `:responses`  — sets `reasoning: %{"effort" => level}` (Responses API)
     * `:none`       — no-op
 
-  `"none"` is treated as an explicit disable where the provider distinguishes
-  on/off (it sets `thinking: %{"type" => "disabled"}`).
+  For `:openai` and `:responses` the effort string is forwarded verbatim —
+  never clamped or rewritten. `"none"` is treated as an explicit disable where
+  the provider only distinguishes on/off (it sets
+  `thinking: %{"type" => "disabled"}`).
   """
   def inject_reasoning_effort(body, effort, format)
 
@@ -799,23 +832,16 @@ defmodule DodoRouter.Proxy.Adapter do
   def inject_reasoning_effort(body, "", _format), do: body
   def inject_reasoning_effort(body, _effort, :none), do: body
 
-  # OpenAI-style: top-level `reasoning_effort`. "none" means "don't inject"
-  # (the model defaults to no reasoning). "xhigh"/"max" are clamped to "high"
-  # since OpenAI's documented set is minimal/low/medium/high.
-  def inject_reasoning_effort(body, "none", :openai), do: Map.delete(body, "reasoning_effort")
-
+  # OpenAI-style: top-level `reasoning_effort`. The configured value is sent
+  # verbatim — no clamping or rewriting. Which levels a model accepts is the
+  # step author's choice (the UI offers the model's supported set from
+  # models.dev when known); an unsupported level surfaces as a provider error
+  # in the logs rather than being silently downgraded.
   def inject_reasoning_effort(body, effort, :openai) do
     if Map.has_key?(body, "reasoning_effort") do
       body
     else
-      value =
-        cond do
-          effort in ~w(minimal low medium high) -> effort
-          effort in ~w(xhigh max) -> "high"
-          true -> nil
-        end
-
-      if value, do: Map.put(body, "reasoning_effort", value), else: body
+      Map.put(body, "reasoning_effort", effort)
     end
   end
 
@@ -869,23 +895,13 @@ defmodule DodoRouter.Proxy.Adapter do
     end
   end
 
-  # OpenAI Responses API (Codex backend). `reasoning.effort`.
-  def inject_reasoning_effort(body, "none", :responses) do
-    if Map.has_key?(body, "reasoning"), do: Map.delete(body, "reasoning"), else: body
-  end
-
+  # OpenAI Responses API (Codex backend). `reasoning.effort`, sent verbatim —
+  # same no-clamping policy as :openai above.
   def inject_reasoning_effort(body, effort, :responses) do
     if Map.has_key?(body, "reasoning") do
       body
     else
-      value =
-        cond do
-          effort in ~w(minimal low medium high) -> effort
-          effort in ~w(xhigh max) -> "high"
-          true -> nil
-        end
-
-      if value, do: Map.put(body, "reasoning", %{"effort" => value}), else: body
+      Map.put(body, "reasoning", %{"effort" => effort})
     end
   end
 

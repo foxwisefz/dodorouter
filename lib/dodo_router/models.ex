@@ -23,6 +23,24 @@ defmodule DodoRouter.Models do
 
   def get_model!(id), do: Repo.get!(Model, id)
 
+  @doc """
+  Returns the reasoning effort levels a model is known to accept (synced from
+  models.dev), or `[]` when the model is unknown or has no effort-style
+  reasoning control.
+
+  Router provider slugs that front another provider's models are normalized
+  to the models.dev provider (e.g. "openai-codex" serves OpenAI models).
+  """
+  def reasoning_efforts_for(provider_slug, model_id) do
+    case get_model_by_id(normalize_provider_slug(provider_slug), model_id) do
+      %Model{reasoning_efforts: efforts} when is_list(efforts) -> efforts
+      _ -> []
+    end
+  end
+
+  defp normalize_provider_slug("openai-codex"), do: "openai"
+  defp normalize_provider_slug(slug), do: slug
+
   def create_model(attrs \\ %{}) do
     %Model{}
     |> Model.changeset(attrs)

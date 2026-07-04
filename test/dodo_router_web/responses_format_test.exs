@@ -79,6 +79,32 @@ defmodule DodoRouterWeb.ResponsesFormatTest do
 
       assert result["messages"] == []
     end
+
+    test "preserves client reasoning effort" do
+      responses = %{
+        "model" => "gpt-5.5",
+        "input" => "Hello",
+        "reasoning" => %{"effort" => "high", "summary" => "auto"}
+      }
+
+      result = ResponsesFormat.to_openai_params(responses)
+
+      assert result["reasoning_effort"] == "high"
+    end
+
+    test "omits reasoning_effort when client sends none" do
+      result = ResponsesFormat.to_openai_params(%{"model" => "gpt-5.5", "input" => "Hello"})
+      refute Map.has_key?(result, "reasoning_effort")
+
+      result =
+        ResponsesFormat.to_openai_params(%{
+          "model" => "gpt-5.5",
+          "input" => "Hello",
+          "reasoning" => %{"effort" => nil}
+        })
+
+      refute Map.has_key?(result, "reasoning_effort")
+    end
   end
 
   describe "from_openai_response/2" do

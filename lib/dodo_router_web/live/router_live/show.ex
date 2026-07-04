@@ -3,6 +3,7 @@ defmodule DodoRouterWeb.RouterLive.Show do
 
   require Logger
 
+  alias DodoRouter.Models
   alias DodoRouter.Routers
   alias DodoRouter.Routers.RoutingStep
   alias DodoRouter.Logs
@@ -59,9 +60,46 @@ defmodule DodoRouterWeb.RouterLive.Show do
     socket
     |> assign(:page_title, "Routing - #{socket.assigns.router.name}")
     |> assign(:new_step, %RoutingStep{})
+    |> assign(:editing_step, nil)
     |> assign(:step_provider, "zai")
     |> assign(:step_model, "")
     |> assign(:step_model_custom, false)
+    |> assign_step_efforts()
+  end
+
+  defp apply_action(socket, :edit_step, %{"step_id" => step_id}) do
+    step = Routers.get_routing_step!(socket.assigns.router, step_id)
+    custom? = step.model not in Registry.available_models(step.provider)
+
+    socket
+    |> assign(:page_title, "Edit Step - #{socket.assigns.router.name}")
+    |> assign(:editing_step, step)
+    |> assign(:step_provider, step.provider)
+    |> assign(:step_model, step.model)
+    |> assign(:step_model_custom, custom?)
+    |> assign_step_efforts()
+  end
+
+  # Effort levels offered in the step form: the model's supported set from
+  # models.dev when known, otherwise the canonical list. A step's saved effort
+  # is always included so editing never silently drops it.
+  defp assign_step_efforts(socket) do
+    known =
+      Models.reasoning_efforts_for(socket.assigns.step_provider, socket.assigns.step_model)
+
+    base = if known == [], do: RoutingStep.reasoning_efforts(), else: known
+
+    current =
+      case socket.assigns.editing_step do
+        %RoutingStep{reasoning_effort: effort} -> effort
+        _ -> nil
+      end
+
+    efforts = if current && current not in base, do: base ++ [current], else: base
+
+    socket
+    |> assign(:step_efforts, efforts)
+    |> assign(:step_efforts_known, known != [])
   end
 
   @impl true
@@ -137,7 +175,8 @@ defmodule DodoRouterWeb.RouterLive.Show do
      socket
      |> assign(:step_provider, provider)
      |> assign(:step_model, model)
-     |> assign(:step_model_custom, custom?)}
+     |> assign(:step_model_custom, custom?)
+     |> assign_step_efforts()}
   end
 
   def handle_event("update_step_form", _params, socket) do
@@ -164,6 +203,32 @@ defmodule DodoRouterWeb.RouterLive.Show do
         errors = Ecto.Changeset.traverse_errors(changeset, fn {msg, _opts} -> msg end)
         Logger.error("Failed to add routing step: #{inspect(errors)}")
         {:noreply, put_flash(socket, :error, "Failed to add step: #{inspect(errors)}")}
+    end
+  end
+
+  def handle_event("update_step", %{"step" => step_params}, socket) do
+    step = Routers.get_routing_step!(socket.assigns.router, socket.assigns.editing_step.id)
+
+    # Keep empty strings: Ecto casts "" to nil, which is how optional
+    # overrides (reasoning_effort, temperature, max_tokens) get cleared.
+    # Providers without a plan-type selector don't submit the field, so
+    # reset it rather than carrying over a stale "coding" value.
+    step_params = Map.put_new(step_params, "plan_type", "standard")
+
+    case Routers.update_routing_step(step, step_params) do
+      {:ok, updated_step} ->
+        updated_step = DodoRouter.Repo.preload(updated_step, :provider_key)
+
+        {:noreply,
+         socket
+         |> stream_insert(:routing_steps, updated_step)
+         |> put_flash(:info, "Step updated")
+         |> push_patch(to: ~p"/routers/#{socket.assigns.router}")}
+
+      {:error, changeset} ->
+        errors = Ecto.Changeset.traverse_errors(changeset, fn {msg, _opts} -> msg end)
+        Logger.error("Failed to update routing step: #{inspect(errors)}")
+        {:noreply, put_flash(socket, :error, "Failed to update step: #{inspect(errors)}")}
     end
   end
 
@@ -702,6 +767,13 @@ defmodule DodoRouterWeb.RouterLive.Show do
                     </svg>
                   </button>
                 </div>
+                <.link
+                  patch={~p"/routers/#{@router}/routing/#{step.id}/edit"}
+                  class="p-2 rounded-lg hover:bg-base-300 text-base-content/40 hover:text-base-content transition-colors"
+                  title="Edit step"
+                >
+                  <.icon name="hero-pencil" class="size-4" />
+                </.link>
                 <button
                   phx-click="delete_step"
                   phx-value-id={step.id}
@@ -857,13 +929,19 @@ defmodule DodoRouterWeb.RouterLive.Show do
         
     <!-- Routing Modal -->
         <.modal
-          :if={@live_action == :routing}
+          :if={@live_action in [:routing, :edit_step]}
           id="routing-modal"
           show
           on_cancel={JS.patch(~p"/routers/#{@router}")}
         >
-          <h3 class="text-lg font-semibold mb-6">Add Routing Step</h3>
-          <form phx-submit="add_step" phx-change="update_step_form" class="space-y-5">
+          <h3 class="text-lg font-semibold mb-6">
+            {if @editing_step, do: "Edit Routing Step", else: "Add Routing Step"}
+          </h3>
+          <form
+            phx-submit={if @editing_step, do: "update_step", else: "add_step"}
+            phx-change="update_step_form"
+            class="space-y-5"
+          >
             <div>
               <label class="block text-sm font-medium text-base-content/70 mb-2">Provider</label>
               <select
@@ -919,13 +997,26 @@ defmodule DodoRouterWeb.RouterLive.Show do
                 name="step[reasoning_effort]"
                 class="w-full py-2.5 px-3 bg-base-200 border border-base-300/50 rounded-lg"
               >
-                <option value="" selected>Default (provider decides)</option>
-                <%= for effort <- RoutingStep.reasoning_efforts() do %>
-                  <option value={effort}>{effort_label(effort)}</option>
+                <option
+                  value=""
+                  selected={is_nil(@editing_step) or is_nil(@editing_step.reasoning_effort)}
+                >
+                  Default (provider decides)
+                </option>
+                <%= for effort <- @step_efforts do %>
+                  <option
+                    value={effort}
+                    selected={@editing_step && @editing_step.reasoning_effort == effort}
+                  >
+                    {effort_label(effort)}
+                  </option>
                 <% end %>
               </select>
-              <p class="text-xs text-base-content/50 mt-1.5">
-                Controls extended thinking / reasoning depth. Leave unset to honor the client request or provider default. "None" explicitly disables it.
+              <p :if={@step_efforts_known} class="text-xs text-base-content/50 mt-1.5">
+                Levels this model supports (from models.dev), sent to the provider as-is. Leave unset to honor the client request or provider default.
+              </p>
+              <p :if={!@step_efforts_known} class="text-xs text-base-content/50 mt-1.5">
+                Supported levels unknown for this model — the value is sent to the provider as-is; unsupported levels will error visibly in the logs. Leave unset to honor the client request or provider default.
               </p>
             </div>
             <%!-- z.ai specific options --%>
@@ -936,7 +1027,12 @@ defmodule DodoRouterWeb.RouterLive.Show do
                 class="w-full py-2.5 px-3 bg-base-200 border border-base-300/50 rounded-lg"
               >
                 <option value="standard">Standard (/api/paas/v4)</option>
-                <option value="coding">Coding Plan (/api/coding/paas/v4)</option>
+                <option
+                  value="coding"
+                  selected={@editing_step && @editing_step.plan_type == "coding"}
+                >
+                  Coding Plan (/api/coding/paas/v4)
+                </option>
               </select>
               <p class="text-xs text-base-content/50 mt-1.5">
                 Select based on your z.ai subscription
@@ -950,14 +1046,22 @@ defmodule DodoRouterWeb.RouterLive.Show do
                 class="w-full py-2.5 px-3 bg-base-200 border border-base-300/50 rounded-lg"
               >
                 <option value="standard">Standard (api.moonshot.ai/v1)</option>
-                <option value="coding">Kimi Code (api.kimi.com/coding/v1)</option>
+                <option
+                  value="coding"
+                  selected={@editing_step && @editing_step.plan_type == "coding"}
+                >
+                  Kimi Code (api.kimi.com/coding/v1)
+                </option>
               </select>
               <p class="text-xs text-base-content/50 mt-1.5">
                 Select the Kimi coding endpoint for code-optimized models
               </p>
             </div>
 
-            <details class="group rounded-lg border border-base-300/40 bg-base-200/30">
+            <details
+              class="group rounded-lg border border-base-300/40 bg-base-200/30"
+              open={@editing_step && (@editing_step.temperature || @editing_step.max_tokens)}
+            >
               <summary class="cursor-pointer list-none px-4 py-3 flex items-center justify-between text-sm font-medium text-base-content/70 select-none">
                 Advanced
                 <svg
@@ -987,6 +1091,7 @@ defmodule DodoRouterWeb.RouterLive.Show do
                     min="0"
                     max="2"
                     placeholder="Optional"
+                    value={@editing_step && @editing_step.temperature}
                     class="w-full py-2.5 px-3 bg-base-200 border border-base-300/50 rounded-lg"
                   />
                 </div>
@@ -999,6 +1104,7 @@ defmodule DodoRouterWeb.RouterLive.Show do
                     name="step[max_tokens]"
                     min="1"
                     placeholder="Optional"
+                    value={@editing_step && @editing_step.max_tokens}
                     class="w-full py-2.5 px-3 bg-base-200 border border-base-300/50 rounded-lg"
                   />
                 </div>
@@ -1015,7 +1121,9 @@ defmodule DodoRouterWeb.RouterLive.Show do
               >
                 Cancel
               </button>
-              <button type="submit" class="btn btn-primary">Add Step</button>
+              <button type="submit" class="btn btn-primary">
+                {if @editing_step, do: "Save Changes", else: "Add Step"}
+              </button>
             </div>
           </form>
         </.modal>

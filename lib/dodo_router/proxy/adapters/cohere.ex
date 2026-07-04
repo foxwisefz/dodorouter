@@ -90,33 +90,37 @@ defmodule DodoRouter.Proxy.Adapters.Cohere do
     payload_size_bytes = body |> Jason.encode!() |> byte_size()
     start_time = FinchTelemetry.mark_request_start()
 
-    into_fun = fn {:data, data}, {req, resp} ->
-      resp =
-        if resp.private[:stream_acc] == nil do
-          ttfb = System.monotonic_time(:millisecond) - start_time
-          initial_acc = %{content: "", usage: nil, first_chunk_time: ttfb, sse_buffer: ""}
-          Req.Response.put_private(resp, :stream_acc, initial_acc)
-        else
-          resp
+    into_fun = fn
+      {:data, data}, {req, resp} when resp.status != 200 ->
+        Adapter.capture_streamed_error({:data, data}, {req, resp})
+
+      {:data, data}, {req, resp} ->
+        resp =
+          if resp.private[:stream_acc] == nil do
+            ttfb = System.monotonic_time(:millisecond) - start_time
+            initial_acc = %{content: "", usage: nil, first_chunk_time: ttfb, sse_buffer: ""}
+            Req.Response.put_private(resp, :stream_acc, initial_acc)
+          else
+            resp
+          end
+
+        acc = resp.private.stream_acc
+
+        case parse_cohere_sse(data, acc.sse_buffer) do
+          {{:events, events}, buffer} ->
+            {new_acc, openai_chunks} = process_cohere_events(acc, events)
+            Enum.each(openai_chunks, &send_chunk.(&1))
+            new_acc = %{new_acc | sse_buffer: buffer}
+            {:cont, {req, Req.Response.put_private(resp, :stream_acc, new_acc)}}
+
+          {:done, _buffer} ->
+            send_chunk.("data: [DONE]\n\n")
+            {:halt, {req, resp}}
+
+          {:skip, buffer} ->
+            acc = %{acc | sse_buffer: buffer}
+            {:cont, {req, Req.Response.put_private(resp, :stream_acc, acc)}}
         end
-
-      acc = resp.private.stream_acc
-
-      case parse_cohere_sse(data, acc.sse_buffer) do
-        {{:events, events}, buffer} ->
-          {new_acc, openai_chunks} = process_cohere_events(acc, events)
-          Enum.each(openai_chunks, &send_chunk.(&1))
-          new_acc = %{new_acc | sse_buffer: buffer}
-          {:cont, {req, Req.Response.put_private(resp, :stream_acc, new_acc)}}
-
-        {:done, _buffer} ->
-          send_chunk.("data: [DONE]\n\n")
-          {:halt, {req, resp}}
-
-        {:skip, buffer} ->
-          acc = %{acc | sse_buffer: buffer}
-          {:cont, {req, Req.Response.put_private(resp, :stream_acc, acc)}}
-      end
     end
 
     result =
@@ -136,7 +140,8 @@ defmodule DodoRouter.Proxy.Adapters.Cohere do
 
         {:ok, build_final_response(acc, timing_meta), %{headers: resp.headers}}
 
-      {:ok, %Req.Response{status: status, body: response_body, headers: resp_headers}} ->
+      {:ok, %Req.Response{status: status, headers: resp_headers} = resp} ->
+        response_body = Adapter.streamed_error_body(resp)
         reason = Adapter.categorize_error(status, response_body)
 
         {:error, reason,
