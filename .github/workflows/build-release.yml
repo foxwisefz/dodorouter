@@ -24,11 +24,21 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           fetch-depth: 0
 
+      # OTP/Elixir MUST be pinned to exact versions. Hot upgrades can only be
+      # installed when the new release's ERTS matches the running node's; a
+      # floating version ("27") resolves to the latest patch at build time,
+      # so an upstream OTP patch release silently makes the next hot upgrade
+      # impossible (relup gets restart_new_emulator, which we don't support).
+      # If you bump these, the first deploy afterwards must be a full install
+      # (Deploy workflow with full_install=true).
       - name: Set up Elixir
         uses: erlef/setup-beam@v1
         with:
-          elixir-version: "1.18"
-          otp-version: "27"
+          elixir-version: "1.18.4"
+          # ERTS 15.2.7.10 — matches the v0.1.82 build (see that run's
+          # "Set up Elixir" step). The running node must be on this ERTS
+          # for hot upgrades to install.
+          otp-version: "27.3.4.14"
 
       - name: Bump version
         run: |

@@ -30,6 +30,11 @@ defmodule DodoRouter.Upgrade do
     new_rel = Path.join([src, "releases", "#{version}.rel"])
     if File.exists?(old_rel), do: File.rename!(old_rel, new_rel)
 
+    # Fail fast (before touching release_handler state) when the new release
+    # was built with a different ERTS. Installing it would need an emulator
+    # restart via the heart daemon, which this deployment doesn't run.
+    check_erts_compatibility!(new_rel, version)
+
     # Use OS tar to avoid OTP erl_tar compressed create bug
     System.cmd("tar", ["czf", tarball, "-C", src | File.ls!(src)])
     File.rm_rf!(tmp)
@@ -94,6 +99,35 @@ defmodule DodoRouter.Upgrade do
 
     IO.puts("Successfully upgraded to #{version}")
     IO.puts("Hot upgrade complete at #{DateTime.utc_now()}")
+  end
+
+  defp check_erts_compatibility!(rel_file, version) do
+    with true <- File.exists?(rel_file),
+         {:ok, [{:release, _rel, {:erts, new_erts}, _apps}]} <-
+           :file.consult(to_charlist(rel_file)) do
+      new_erts = to_string(new_erts)
+      running_erts = to_string(:erlang.system_info(:version))
+
+      if new_erts != running_erts do
+        raise """
+        Hot upgrade to #{version} is not possible: the new release was built \
+        with ERTS #{new_erts} but the running node uses ERTS #{running_erts}.
+
+        Upgrading across ERTS versions requires an emulator restart (OTP's \
+        restart_new_emulator via the heart daemon), which this deployment \
+        does not support. Deploy this version with a full restart instead \
+        (run the Deploy workflow with full_install=true), and keep the build \
+        workflow's otp-version pinned to an exact release so ERTS doesn't \
+        drift between builds.
+        """
+      end
+
+      :ok
+    else
+      # Missing or unparseable .rel — let install_release surface any real
+      # problem rather than blocking on the preflight.
+      _ -> :ok
+    end
   end
 
   defp extract_lib(tarball, root, version) do
