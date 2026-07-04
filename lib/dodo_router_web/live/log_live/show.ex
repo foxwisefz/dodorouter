@@ -19,7 +19,13 @@ defmodule DodoRouterWeb.LogLive.Show do
       end
 
     {req_messages, req_params} = MessageNormalizer.parse_request_body(log.request_body)
-    req_messages = annotate_provenance(log, socket.assigns.current_user, req_messages)
+
+    req_messages =
+      log
+      |> annotate_provenance(socket.assigns.current_user, req_messages)
+      |> Enum.with_index()
+      |> Enum.map(fn {message, index} -> Map.put(message, :abs_index, index) end)
+
     resp_message = MessageNormalizer.parse_response_body(log.response_body)
     req_headers = parse_headers(log.request_headers)
     resp_headers = parse_headers(log.response_headers)
@@ -448,6 +454,7 @@ defmodule DodoRouterWeb.LogLive.Show do
                   tools={@available_tools}
                   cache_read_tokens={@log.cache_read_tokens}
                   cache_write_tokens={@log.cache_write_tokens}
+                  replay_base={if(@log.replayed_from_id, do: nil, else: ~p"/logs/#{@log.id}/replay")}
                 />
               </div>
             <% end %>

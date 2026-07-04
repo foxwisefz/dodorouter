@@ -45,9 +45,10 @@ defmodule DodoRouter.Replays do
     # rather than growing replay-of-replay chains.
     root = source |> Logs.root_of() |> Repo.preload(:router)
     effort = normalize_effort(target[:reasoning_effort])
+    message_index = target[:message_index]
 
     with :ok <- validate_effort(effort),
-         {:ok, request} <- prepare_request(root, model, effort),
+         {:ok, request} <- prepare_request(root, model, effort, message_index),
          {:ok, step} <- build_step(user, root.router_id, key_id, model, effort) do
       request_id = Ecto.UUID.generate()
 
@@ -75,10 +76,13 @@ defmodule DodoRouter.Replays do
   effort is only an opt-in default at the adapter layer, so a leftover body
   value would silently win over the user's choice.
   """
-  def prepare_request(%RequestLog{} = source, target_model, reasoning_effort \\ nil) do
+  def prepare_request(source, target_model, reasoning_effort \\ nil, message_index \\ nil)
+
+  def prepare_request(%RequestLog{} = source, target_model, reasoning_effort, message_index) do
     with :ok <- validate_model(target_model),
          {:ok, decoded} <- decode_body(source.request_body),
          :ok <- ensure_messages(decoded),
+         {:ok, decoded} <- truncate_at(decoded, message_index),
          :ok <- ensure_not_truncated(decoded) do
       request =
         decoded
@@ -89,6 +93,24 @@ defmodule DodoRouter.Replays do
       {:ok, request}
     end
   end
+
+  # Cut the history at the chosen user message (inclusive) so the replay
+  # asks "what would this model have answered at that exchange". Runs
+  # before the storage-truncation check so markers after the cut don't
+  # block a partial replay.
+  defp truncate_at(decoded, nil), do: {:ok, decoded}
+
+  defp truncate_at(%{"messages" => messages} = decoded, index) when is_integer(index) do
+    case Enum.at(messages, index) do
+      %{"role" => "user"} when index >= 0 ->
+        {:ok, Map.put(decoded, "messages", Enum.take(messages, index + 1))}
+
+      _other ->
+        {:error, :invalid_message_index}
+    end
+  end
+
+  defp truncate_at(_decoded, _index), do: {:error, :invalid_message_index}
 
   @doc """
   Returns the reason the given log can't be replayed, or nil when it can.

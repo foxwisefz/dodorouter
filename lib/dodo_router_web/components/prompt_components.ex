@@ -26,6 +26,7 @@ defmodule DodoRouterWeb.PromptComponents do
   attr :tools, :list, default: []
   attr :cache_read_tokens, :integer, default: nil
   attr :cache_write_tokens, :integer, default: nil
+  attr :replay_base, :string, default: nil
 
   def conversation(assigns) do
     {system_messages, other_messages} =
@@ -109,6 +110,7 @@ defmodule DodoRouterWeb.PromptComponents do
           breakpoint_idx={@breakpoint_idx}
           breakpoint_estimated={@breakpoint_estimated}
           index_offset={@display_index_offset}
+          replay_base={@replay_base}
         />
       </div>
     </div>
@@ -122,6 +124,7 @@ defmodule DodoRouterWeb.PromptComponents do
   attr :breakpoint_idx, :integer, default: nil
   attr :breakpoint_estimated, :boolean, default: false
   attr :index_offset, :integer, default: 0
+  attr :replay_base, :string, default: nil
 
   defp collapsed_message_list(assigns) do
     segments = build_segments(assigns.messages, assigns.response)
@@ -145,6 +148,7 @@ defmodule DodoRouterWeb.PromptComponents do
         prev_message={message_at(@segments, idx - 1)}
         tool_results={@tool_results}
         cached={is_cached?(real_index, @cached_indices)}
+        replay_base={@replay_base}
       />
       <.cache_breakpoint
         :if={is_breakpoint_here?(real_index, @breakpoint_idx) or has_cache_control?(seg.message)}
@@ -346,6 +350,7 @@ defmodule DodoRouterWeb.PromptComponents do
   attr :prev_message, :map, default: nil
   attr :tool_results, :map, default: %{}
   attr :cached, :boolean, default: false
+  attr :replay_base, :string, default: nil
 
   defp message_bubble(assigns) do
     role = assigns.message.role
@@ -391,12 +396,20 @@ defmodule DodoRouterWeb.PromptComponents do
             id={"copy-#{@index}"}
             phx-hook="CopyButton"
             data-copy={@message.content}
-            class="text-[10px] text-base-content/30 hover:text-primary opacity-0 group-hover:opacity-100 transition"
+            class="text-base-content/25 hover:text-primary transition-colors"
             title="Copy raw message"
           >
-            copy raw
+            <.icon name="hero-clipboard-document" class="w-3 h-3" />
           </button>
         <% end %>
+        <.link
+          :if={@replay_base && @role == "user" && Map.get(@message, :abs_index)}
+          navigate={"#{@replay_base}?from=#{@message.abs_index}"}
+          class="text-base-content/25 hover:text-primary transition-colors"
+          title="Replay the conversation from this message with another model"
+        >
+          <.icon name="hero-arrow-path" class="w-3 h-3" />
+        </.link>
       </div>
 
       <div class={"max-w-[85%] rounded-2xl px-4 py-3 shadow-sm #{@bubble_class}"}>

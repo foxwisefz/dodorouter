@@ -292,6 +292,91 @@ defmodule DodoRouterWeb.LogLiveReplayTest do
     end
   end
 
+  describe "replay from a specific message" do
+    setup %{router: router} do
+      multi_turn =
+        LogsFixtures.log_fixture(router, %{
+          final_provider: "test_provider",
+          final_model: "original-model",
+          request_body:
+            Jason.encode!(%{
+              "model" => "original-model",
+              "messages" => [
+                %{"role" => "user", "content" => "first question"},
+                %{"role" => "assistant", "content" => "the failing crud answer"},
+                %{"role" => "user", "content" => "second question"}
+              ]
+            }),
+          response_body:
+            Jason.encode!(%{
+              "choices" => [
+                %{"message" => %{"role" => "assistant", "content" => "the final answer"}}
+              ]
+            })
+        })
+
+      %{multi_turn: multi_turn}
+    end
+
+    test "user messages on the log page offer replay-from-here", %{
+      conn: conn,
+      multi_turn: multi_turn
+    } do
+      {:ok, view, _html} = live(conn, ~p"/logs/#{multi_turn.id}")
+
+      assert has_element?(view, ~s(a[href="/logs/#{multi_turn.id}/replay?from=0"]))
+      assert has_element?(view, ~s(a[href="/logs/#{multi_turn.id}/replay?from=2"]))
+      refute has_element?(view, ~s(a[href="/logs/#{multi_turn.id}/replay?from=1"]))
+    end
+
+    test "the hub banners the cut point and the partial replay compares against the exchange answer",
+         %{conn: conn, multi_turn: multi_turn, provider_key: provider_key} do
+      {:ok, view, _html} = live(conn, ~p"/logs/#{multi_turn.id}/replay?from=0")
+
+      assert has_element?(view, "#replay-from-banner", "first question")
+
+      view
+      |> form("#replay-form", replay: %{provider_key_id: provider_key.id, model: "test-model"})
+      |> render_submit()
+
+      render_async(view)
+
+      [replay] = Logs.list_replays(multi_turn)
+      assert_patch(view, ~p"/logs/#{multi_turn.id}/replay?replay=#{replay.id}")
+      html = render_async(view)
+
+      assert Jason.decode!(replay.request_body)["messages"] ==
+               [%{"role" => "user", "content" => "first question"}]
+
+      assert has_element?(view, "#partial-replay-banner")
+      refute has_element?(view, "#delta-strip")
+      # diff runs against the original answer at that exchange, not the final response
+      assert html =~ "crud"
+      refute has_element?(view, "#content-diff", "the final answer")
+    end
+
+    test "the candidates table labels partial replays with their cut point", %{
+      conn: conn,
+      multi_turn: multi_turn
+    } do
+      _partial =
+        LogsFixtures.log_fixture(router_of(multi_turn), %{
+          replayed_from_id: multi_turn.id,
+          final_model: "model-partial",
+          request_body:
+            Jason.encode!(%{
+              "messages" => [%{"role" => "user", "content" => "first question"}]
+            })
+        })
+
+      {:ok, view, _html} = live(conn, ~p"/logs/#{multi_turn.id}/replay")
+
+      assert has_element?(view, "#candidate-row-1", "from #1")
+    end
+  end
+
+  defp router_of(log), do: %DodoRouter.Routers.Router{id: log.router_id}
+
   describe "root anchoring" do
     test "visiting a replay's page redirects to the root hub with it selected", %{
       conn: conn,

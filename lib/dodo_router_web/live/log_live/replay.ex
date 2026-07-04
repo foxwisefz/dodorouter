@@ -30,11 +30,13 @@ defmodule DodoRouterWeb.LogLive.Replay do
 
   defp assign_hub(socket, log) do
     targets = Replays.list_targets(socket.assigns.current_user)
+    {source_messages, _params} = MessageNormalizer.parse_request_body(log.request_body)
 
     socket =
       socket
       |> assign(:page_title, "Replay #{String.slice(log.request_id, 0, 8)}...")
       |> assign(:source, log)
+      |> assign(:source_messages, source_messages)
       |> assign(:source_msg, MessageNormalizer.parse_response_body(log.response_body))
       |> assign(:blocker, Replays.replay_blocker(log))
       |> assign(:targets, targets)
@@ -68,7 +70,21 @@ defmodule DodoRouterWeb.LogLive.Replay do
         id -> Enum.find(socket.assigns.replays, &(&1.id == id))
       end
 
+    socket =
+      assign(socket, :from_index, parse_from(params["from"], socket.assigns.source_messages))
+
     {:noreply, select_replay(socket, selected)}
+  end
+
+  defp parse_from(nil, _messages), do: nil
+
+  defp parse_from(value, messages) when is_binary(value) do
+    with {index, ""} when index >= 0 <- Integer.parse(value),
+         %{role: "user"} <- Enum.at(messages, index) do
+      index
+    else
+      _other -> nil
+    end
   end
 
   @impl true
@@ -82,7 +98,8 @@ defmodule DodoRouterWeb.LogLive.Replay do
     target = %{
       provider_key_id: params["provider_key_id"],
       model: String.trim(params["model"] || ""),
-      reasoning_effort: params["reasoning_effort"]
+      reasoning_effort: params["reasoning_effort"],
+      message_index: socket.assigns.from_index
     }
 
     socket =
@@ -137,11 +154,14 @@ defmodule DodoRouterWeb.LogLive.Replay do
   end
 
   defp select_replay(socket, nil) do
+    source_count = length(socket.assigns.source_messages)
+
     candidates =
       Enum.map(socket.assigns.replays, fn replay ->
         %{
           log: replay,
           effort: step_effort(replay),
+          from: candidate_from(replay, source_count),
           deltas: Replays.deltas(socket.assigns.source, replay) |> Map.new(&{&1.key, &1})
         }
       end)
@@ -150,28 +170,49 @@ defmodule DodoRouterWeb.LogLive.Replay do
     |> assign(:selected, nil)
     |> assign(:diff, nil)
     |> assign(:deltas, [])
+    |> assign(:partial?, false)
+    |> assign(:cut, nil)
+    |> assign(:baseline_msg, nil)
     |> assign(:candidates, candidates)
   end
 
   defp select_replay(socket, replay_log) do
-    source_msg = socket.assigns.source_msg
     replay_msg = MessageNormalizer.parse_response_body(replay_log.response_body)
+    source_messages = socket.assigns.source_messages
+    {replay_messages, _params} = MessageNormalizer.parse_request_body(replay_log.request_body)
+    cut = length(replay_messages)
+    partial? = cut > 0 and cut < length(source_messages)
+
+    # A replay's messages are an exact prefix of the root's, so the honest
+    # comparison baseline for a partial replay is the assistant answer that
+    # originally followed the cut point — not the root's final response.
+    baseline_msg =
+      if partial? do
+        source_messages |> Enum.drop(cut) |> Enum.find(&(&1.role == "assistant"))
+      else
+        socket.assigns.source_msg
+      end
+
+    deltas = if partial?, do: [], else: Replays.deltas(socket.assigns.source, replay_log)
 
     socket =
       socket
       |> assign(:selected, replay_log)
       |> assign(:replay_msg, replay_msg)
-      |> assign(:deltas, Replays.deltas(socket.assigns.source, replay_log))
+      |> assign(:baseline_msg, baseline_msg)
+      |> assign(:partial?, partial?)
+      |> assign(:cut, cut)
+      |> assign(:deltas, deltas)
       |> assign(:diff, nil)
 
     if replay_log.status == "error" do
       socket
     else
-      orig_text = message_text(source_msg)
+      orig_text = message_text(baseline_msg)
       repl_text = message_text(replay_msg)
-      orig_reasoning = message_reasoning(source_msg)
+      orig_reasoning = message_reasoning(baseline_msg)
       repl_reasoning = message_reasoning(replay_msg)
-      orig_args = single_tool_args(source_msg)
+      orig_args = single_tool_args(baseline_msg)
       repl_args = single_tool_args(replay_msg)
 
       start_async(socket, :compute_diff, fn ->
@@ -236,6 +277,29 @@ defmodule DodoRouterWeb.LogLive.Replay do
               </span>
             </p>
           </div>
+        </div>
+
+        <div
+          :if={@from_index}
+          id="replay-from-banner"
+          class="mb-3 flex items-start gap-2 rounded-lg border border-info/20 bg-info/5 px-3 py-2"
+        >
+          <.icon name="hero-scissors" class="w-4 h-4 text-info shrink-0 mt-0.5" />
+          <p class="text-sm flex-1">
+            Replaying from message {@from_index + 1}:
+            <span class="text-base-content/60 italic">
+              "{from_preview(@source_messages, @from_index)}"
+            </span>
+            — later turns will be dropped.
+          </p>
+          <.link
+            patch={~p"/logs/#{@source.id}/replay"}
+            id="clear-from-link"
+            class="btn btn-ghost btn-xs btn-square"
+            title="Replay the full conversation instead"
+          >
+            <.icon name="hero-x-mark" class="w-3 h-3" />
+          </.link>
         </div>
 
         <.form
@@ -415,6 +479,13 @@ defmodule DodoRouterWeb.LogLive.Replay do
                   <span :if={candidate.effort} class="badge badge-ghost badge-xs">
                     {candidate.effort}
                   </span>
+                  <span
+                    :if={candidate.from}
+                    class="badge badge-ghost badge-xs gap-0.5"
+                    title="Partial replay — conversation cut at this message"
+                  >
+                    <.icon name="hero-scissors" class="w-2.5 h-2.5" /> from #{candidate.from}
+                  </span>
                 </div>
               </td>
               <td class="px-4 py-2.5"><.status_badge status={candidate.log.status} /></td>
@@ -463,14 +534,37 @@ defmodule DodoRouterWeb.LogLive.Replay do
       </div>
 
       <%= if @selected do %>
-        <!-- Identity band -->
+        <!-- Partial replay banner -->
+        <div
+          :if={@partial?}
+          id="partial-replay-banner"
+          class="card-bordered mb-4 flex items-start gap-3 border-info/30 bg-info/5"
+        >
+          <.icon name="hero-scissors" class="w-5 h-5 text-info shrink-0 mt-0.5" />
+          <p class="text-sm">
+            <span class="font-medium">Partial replay</span>
+            — conversation cut at message {@cut} of {length(@source_messages)}. The diff compares
+            against the original answer at that exchange; metric deltas are hidden because the
+            contexts differ in length.
+          </p>
+        </div>
+        
+    <!-- Identity band -->
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4" id="compare-identity">
-          <.identity_card id="compare-original" label="Original" log={@source} />
+          <.identity_card
+            id="compare-original"
+            label={if @partial?, do: "Original · at message #{@cut}", else: "Original"}
+            log={@source}
+          />
           <.identity_card id="compare-replay" label="Replay" log={@selected} />
         </div>
         
     <!-- Delta strip -->
-        <div class="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3 mb-6" id="delta-strip">
+        <div
+          :if={@deltas != []}
+          class="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3 mb-6"
+          id="delta-strip"
+        >
           <div
             :for={delta <- @deltas}
             class="rounded-lg border border-base-300/50 bg-base-100 p-3"
@@ -552,7 +646,7 @@ defmodule DodoRouterWeb.LogLive.Replay do
                 @diff.content.granularity == :none and @diff.content.reason in [:too_large, :empty]
               }>
                 <.side_by_side
-                  source_msg={@source_msg}
+                  source_msg={@baseline_msg}
                   replay_msg={@replay_msg}
                   source={@source}
                   selected={@selected}
@@ -598,7 +692,7 @@ defmodule DodoRouterWeb.LogLive.Replay do
     <!-- Side by side view -->
           <div :if={@diff_view == "side"} id="compare-side-pane">
             <.side_by_side
-              source_msg={@source_msg}
+              source_msg={@baseline_msg}
               replay_msg={@replay_msg}
               source={@source}
               selected={@selected}
@@ -861,6 +955,22 @@ defmodule DodoRouterWeb.LogLive.Replay do
 
   defp format_when(nil), do: ""
   defp format_when(datetime), do: Calendar.strftime(datetime, "%b %d, %H:%M")
+
+  # Cut position of a partial replay (its messages are a prefix of the
+  # root's), or nil for a full replay
+  defp candidate_from(replay, source_count) do
+    {messages, _params} = MessageNormalizer.parse_request_body(replay.request_body)
+    cut = length(messages)
+
+    if cut > 0 and cut < source_count, do: cut, else: nil
+  end
+
+  defp from_preview(messages, index) do
+    case Enum.at(messages, index) do
+      %{content: content} when is_binary(content) -> String.slice(content, 0, 90)
+      _message -> ""
+    end
+  end
 
   defp message_text(nil), do: nil
 

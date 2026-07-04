@@ -214,6 +214,83 @@ defmodule DodoRouter.ReplaysTest do
     end
   end
 
+  describe "replay/3 from a specific message" do
+    setup ctx do
+      multi_turn =
+        LogsFixtures.log_fixture(ctx.router, %{
+          request_body:
+            Jason.encode!(%{
+              "model" => "original-model",
+              "messages" => [
+                %{"role" => "user", "content" => "first question"},
+                %{"role" => "assistant", "content" => "the failing crud answer"},
+                %{"role" => "user", "content" => "second question"}
+              ]
+            })
+        })
+
+      %{multi_turn: multi_turn}
+    end
+
+    test "truncates the history at the chosen user message (inclusive)", ctx do
+      assert {:ok, replay} =
+               Replays.replay(ctx.user, ctx.multi_turn, %{
+                 provider_key_id: ctx.provider_key.id,
+                 model: "test-model",
+                 message_index: 0
+               })
+
+      assert replay.replayed_from_id == ctx.multi_turn.id
+
+      request = Jason.decode!(replay.request_body)
+      assert request["messages"] == [%{"role" => "user", "content" => "first question"}]
+    end
+
+    test "rejects an index that isn't a user message", ctx do
+      assert {:error, :invalid_message_index} =
+               Replays.replay(ctx.user, ctx.multi_turn, %{
+                 provider_key_id: ctx.provider_key.id,
+                 model: "test-model",
+                 message_index: 1
+               })
+    end
+
+    test "rejects an out-of-range index", ctx do
+      assert {:error, :invalid_message_index} =
+               Replays.replay(ctx.user, ctx.multi_turn, %{
+                 provider_key_id: ctx.provider_key.id,
+                 model: "test-model",
+                 message_index: 99
+               })
+    end
+
+    test "storage-truncation markers after the cut don't block a partial replay", ctx do
+      log =
+        LogsFixtures.log_fixture(ctx.router, %{
+          request_body:
+            Jason.encode!(%{
+              "messages" => [
+                %{"role" => "user", "content" => "clean question"},
+                %{"role" => "assistant", "content" => "big answer\n\n... [truncated]"},
+                %{"role" => "user", "content" => "follow-up"}
+              ]
+            })
+        })
+
+      assert {:error, :truncated} = Replays.replay(ctx.user, log, target(ctx))
+
+      assert {:ok, replay} =
+               Replays.replay(ctx.user, log, %{
+                 provider_key_id: ctx.provider_key.id,
+                 model: "test-model",
+                 message_index: 0
+               })
+
+      request = Jason.decode!(replay.request_body)
+      assert [%{"content" => "clean question"}] = request["messages"]
+    end
+  end
+
   describe "replay/3 root anchoring" do
     test "replaying a replay anchors to the root and re-runs the root's request", ctx do
       # the chained log's body has drifted — the dispatched request must
