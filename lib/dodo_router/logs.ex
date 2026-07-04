@@ -139,6 +139,73 @@ defmodule DodoRouter.Logs do
 
   def get_log_by_request_id(request_id), do: Repo.get_by(RequestLog, request_id: request_id)
 
+  @doc """
+  Lists logs produced by replaying the given log, oldest first.
+  """
+  def list_replays(%RequestLog{id: id}) do
+    from(l in RequestLog,
+      where: l.replayed_from_id == ^id,
+      order_by: [asc: l.inserted_at],
+      preload: [:router]
+    )
+    |> Repo.all()
+  end
+
+  @doc """
+  Lean per-log response info for a session, oldest first — enough for
+  `Logs.Provenance` matching without loading request bodies.
+  """
+  def list_session_responses(%User{} = user, session_id) do
+    from(l in RequestLog,
+      join: r in Router,
+      on: l.router_id == r.id,
+      where: l.session_id == ^session_id and r.user_id == ^user.id,
+      order_by: [asc: l.inserted_at],
+      select: %{
+        id: l.id,
+        final_provider: l.final_provider,
+        final_model: l.final_model,
+        response_body: l.response_body,
+        inserted_at: l.inserted_at
+      }
+    )
+    |> Repo.all()
+  end
+
+  @doc """
+  Map of log id => number of replays, for the given log ids.
+  Ids without replays are absent from the result.
+  """
+  def replay_counts(log_ids) when is_list(log_ids) do
+    from(l in RequestLog,
+      where: l.replayed_from_id in ^log_ids,
+      group_by: l.replayed_from_id,
+      select: {l.replayed_from_id, count(l.id)}
+    )
+    |> Repo.all()
+    |> Map.new()
+  end
+
+  # Chains can't realistically get deep, but a cycle or corrupt data must
+  # not loop forever
+  @max_replay_depth 20
+
+  @doc """
+  Walks `replayed_from_id` up to the original log the given one descends
+  from. Returns the log itself when it isn't a replay.
+  """
+  def root_of(%RequestLog{} = log), do: walk_to_root(log, @max_replay_depth)
+
+  defp walk_to_root(%RequestLog{replayed_from_id: nil} = log, _depth), do: log
+  defp walk_to_root(log, 0), do: log
+
+  defp walk_to_root(%RequestLog{replayed_from_id: parent_id} = log, depth) do
+    case Repo.get(RequestLog, parent_id) do
+      nil -> log
+      parent -> walk_to_root(parent, depth - 1)
+    end
+  end
+
   def toggle_favorite(%User{} = user, id_or_request_id) do
     log = get_log(user, id_or_request_id) || get_log_by_request_id(user, id_or_request_id)
 

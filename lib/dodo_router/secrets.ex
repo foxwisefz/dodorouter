@@ -467,6 +467,18 @@ defmodule DodoRouter.Secrets do
 
   # Cache (simple ETS)
 
+  @doc """
+  Creates the secrets cache table.
+
+  Called from `DodoRouter.Application.start/2` so the table is owned by a
+  process that lives for the whole app lifetime. The lazy `ensure_cache_table/0`
+  fallbacks remain, but relying on them ties the table's lifetime to whatever
+  transient process happened to touch it first.
+  """
+  def init_cache do
+    ensure_cache_table()
+  end
+
   defp cache_table, do: :dodo_secrets_cache
 
   defp ensure_cache_table do

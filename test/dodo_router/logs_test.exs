@@ -141,6 +141,120 @@ defmodule DodoRouter.LogsTest do
     end
   end
 
+  describe "replay linkage" do
+    test "create_log/1 persists replayed_from_id" do
+      {router, _api_key} = RoutersFixtures.router_fixture()
+      original = LogsFixtures.log_fixture(router)
+
+      {:ok, replay} =
+        Logs.create_log(%{
+          router_id: router.id,
+          request_id: Ecto.UUID.generate(),
+          status: "success",
+          final_provider: "test_provider",
+          final_model: "other-model",
+          replayed_from_id: original.id
+        })
+
+      assert replay.replayed_from_id == original.id
+    end
+
+    test "create_log/1 rejects a replayed_from_id that doesn't exist" do
+      {router, _api_key} = RoutersFixtures.router_fixture()
+
+      assert {:error, changeset} =
+               Logs.create_log(%{
+                 router_id: router.id,
+                 request_id: Ecto.UUID.generate(),
+                 status: "success",
+                 replayed_from_id: Ecto.UUID.generate()
+               })
+
+      assert %{replayed_from_id: ["does not exist"]} = errors_on(changeset)
+    end
+
+    test "list_replays/1 returns replays of a log, oldest first" do
+      {router, _api_key} = RoutersFixtures.router_fixture()
+      original = LogsFixtures.log_fixture(router)
+      other = LogsFixtures.log_fixture(router)
+
+      first =
+        LogsFixtures.log_fixture(router, %{
+          replayed_from_id: original.id,
+          final_model: "model-a",
+          inserted_at: DateTime.add(DateTime.utc_now(), -60, :second)
+        })
+
+      second =
+        LogsFixtures.log_fixture(router, %{
+          replayed_from_id: original.id,
+          final_model: "model-b"
+        })
+
+      _unrelated = LogsFixtures.log_fixture(router, %{replayed_from_id: other.id})
+
+      assert Logs.list_replays(original) |> Enum.map(& &1.id) == [first.id, second.id]
+    end
+  end
+
+  describe "replay lineage" do
+    test "root_of/1 returns the log itself when it isn't a replay" do
+      {router, _api_key} = RoutersFixtures.router_fixture()
+      log = LogsFixtures.log_fixture(router)
+
+      assert Logs.root_of(log).id == log.id
+    end
+
+    test "root_of/1 walks a chain up to the root" do
+      {router, _api_key} = RoutersFixtures.router_fixture()
+      root = LogsFixtures.log_fixture(router)
+      child = LogsFixtures.log_fixture(router, %{replayed_from_id: root.id})
+      grandchild = LogsFixtures.log_fixture(router, %{replayed_from_id: child.id})
+
+      assert Logs.root_of(grandchild).id == root.id
+      assert Logs.root_of(child).id == root.id
+    end
+
+    test "list_session_responses/2 returns lean maps for the user's session, oldest first" do
+      user = AccountsFixtures.user_fixture()
+      {router, _api_key} = RoutersFixtures.router_fixture(user)
+      session_id = "sess-#{System.unique_integer([:positive])}"
+
+      older =
+        LogsFixtures.log_fixture(router, %{
+          session_id: session_id,
+          inserted_at: DateTime.add(DateTime.utc_now(), -60, :second)
+        })
+
+      newer = LogsFixtures.log_fixture(router, %{session_id: session_id})
+      _other_session = LogsFixtures.log_fixture(router, %{session_id: "other"})
+
+      other_user = AccountsFixtures.user_fixture()
+      {other_router, _} = RoutersFixtures.router_fixture(other_user)
+      _other_users_log = LogsFixtures.log_fixture(other_router, %{session_id: session_id})
+
+      responses = Logs.list_session_responses(user, session_id)
+
+      assert Enum.map(responses, & &1.id) == [older.id, newer.id]
+
+      assert %{final_provider: _, final_model: _, response_body: _, inserted_at: _} =
+               hd(responses)
+
+      refute Map.has_key?(hd(responses), :request_body)
+    end
+
+    test "replay_counts/1 maps log ids to their replay counts" do
+      {router, _api_key} = RoutersFixtures.router_fixture()
+      replayed = LogsFixtures.log_fixture(router)
+      bare = LogsFixtures.log_fixture(router)
+
+      LogsFixtures.log_fixture(router, %{replayed_from_id: replayed.id})
+      LogsFixtures.log_fixture(router, %{replayed_from_id: replayed.id})
+
+      assert Logs.replay_counts([replayed.id, bare.id]) == %{replayed.id => 2}
+    end
+  end
+
   describe "list_logs_for_recording/2" do
     test "returns logs for specific recording" do
       {router, _api_key} = RoutersFixtures.router_fixture()

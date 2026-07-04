@@ -1,5 +1,16 @@
 This is a web application written using the Phoenix web framework. It is an LLM proxy/router that accepts requests from OpenAI-compatible and Anthropic-compatible clients and routes them to configured providers with automatic fallbacks.
 
+## Orchestration workflow  
+You (Fable) are the orchestrator, when available. Plan, decompose, synthesize.  
+Reasoning-heavy phases → deep-reasoner  
+Mechanical work → fast-worker  
+Codex (/codex:rescue --background) is a cracked engineer on par with deep-reasoner, from a different perspective. Treat as a peer, not a reviewer.  
+High-stakes decisions: task Opus + Codex on the same problem in parallel, synthesize the best of both, without showing either the other's answer. Keep your own context lean.
+
+## Version control
+
+We use `jj` (jujutsu) for version control when possible. 
+
 ## Proxy API Endpoints
 
 The proxy supports both **OpenAI** and **Anthropic** API formats. Both endpoints are per-router (scoped under `/r/:router_slug/v1/`):

@@ -3,6 +3,7 @@ defmodule DodoRouterWeb.LogLive.Show do
 
   alias DodoRouter.Logs
   alias DodoRouter.Logs.MessageNormalizer
+  alias DodoRouter.Logs.Provenance
   alias DodoRouter.Proxy.Adapter.Registry
   alias DodoRouterWeb.MarkdownRenderer
 
@@ -18,6 +19,13 @@ defmodule DodoRouterWeb.LogLive.Show do
       end
 
     {req_messages, req_params} = MessageNormalizer.parse_request_body(log.request_body)
+
+    req_messages =
+      log
+      |> annotate_provenance(socket.assigns.current_user, req_messages)
+      |> Enum.with_index()
+      |> Enum.map(fn {message, index} -> Map.put(message, :abs_index, index) end)
+
     resp_message = MessageNormalizer.parse_response_body(log.response_body)
     req_headers = parse_headers(log.request_headers)
     resp_headers = parse_headers(log.response_headers)
@@ -41,6 +49,7 @@ defmodule DodoRouterWeb.LogLive.Show do
       |> assign(:show_resp_headers, false)
       |> assign(:expanded_messages, MapSet.new())
       |> assign(:truncation_flags, log.truncation_flags || [])
+      |> assign(:replay_count, Logs.replay_counts([log.id]) |> Map.get(log.id, 0))
 
     {:ok, socket}
   end
@@ -120,6 +129,24 @@ defmodule DodoRouterWeb.LogLive.Show do
           <h1 class="text-2xl font-bold">Request Details</h1>
           <code class="text-sm text-base-content/60">{@log.request_id}</code>
         </div>
+        <.link
+          :if={@log.replayed_from_id}
+          id="replay-of-link"
+          navigate={~p"/logs/#{@log.replayed_from_id}/replay?replay=#{@log.id}"}
+          class="btn btn-ghost btn-sm gap-2"
+          title="This log was produced by a replay — open the side-by-side comparison with its original"
+        >
+          <.icon name="hero-scale" class="w-4 h-4" /> Compare with original
+        </.link>
+        <.link
+          :if={!@log.replayed_from_id}
+          id="replay-button"
+          navigate={~p"/logs/#{@log.id}/replay"}
+          class="btn btn-primary btn-soft btn-sm gap-2"
+        >
+          <.icon name="hero-arrow-path" class="w-4 h-4" /> Replay
+          <span :if={@replay_count > 0} class="badge badge-sm">{@replay_count}</span>
+        </.link>
         <button
           type="button"
           id="favorite-button"
@@ -427,6 +454,7 @@ defmodule DodoRouterWeb.LogLive.Show do
                   tools={@available_tools}
                   cache_read_tokens={@log.cache_read_tokens}
                   cache_write_tokens={@log.cache_write_tokens}
+                  replay_base={if(@log.replayed_from_id, do: nil, else: ~p"/logs/#{@log.id}/replay")}
                 />
               </div>
             <% end %>
@@ -592,7 +620,10 @@ defmodule DodoRouterWeb.LogLive.Show do
                           <span class="badge badge-sm">{attempt["plan_type"]}</span>
                         <% end %>
                         <%= if effort = attempt_effort(attempt) do %>
-                          <span class="badge badge-sm badge-accent badge-outline" title="Reasoning effort">
+                          <span
+                            class="badge badge-sm badge-accent badge-outline"
+                            title="Reasoning effort"
+                          >
                             effort: {effort}
                           </span>
                         <% end %>
@@ -779,6 +810,13 @@ defmodule DodoRouterWeb.LogLive.Show do
       </.modal>
     </div>
     """
+  end
+
+  defp annotate_provenance(%{session_id: nil}, _user, messages), do: messages
+
+  defp annotate_provenance(log, user, messages) do
+    siblings = Logs.list_session_responses(user, log.session_id)
+    Provenance.annotate(messages, siblings)
   end
 
   defp status_badge(assigns) do
