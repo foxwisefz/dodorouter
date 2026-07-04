@@ -9,6 +9,11 @@ on:
         description: 'Version to deploy (e.g., 0.1.1)'
         required: true
         type: string
+      full_install:
+        description: 'Force full install (stop, replace, restart) instead of hot upgrade. Required when the release was built with a different OTP/ERTS than the running node.'
+        required: false
+        type: boolean
+        default: false
 
 concurrency:
   group: deploy-production
@@ -45,7 +50,14 @@ jobs:
         run: |
           TARGET_VERSION="${{ steps.version.outputs.version }}"
           REPO="${{ github.repository }}"
-          
+
+          if [ "${{ inputs.full_install }}" = "true" ]; then
+            echo "Full install forced via workflow input"
+            echo "deploy_versions=$TARGET_VERSION" >> $GITHUB_OUTPUT
+            echo "full_install=true" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
           # Get currently running version from server
           CURRENT_VERSION=$(ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 \
             ${{ secrets.APP_DEPLOY_USER }}@${{ secrets.APP_DEPLOY_HOST }} \
