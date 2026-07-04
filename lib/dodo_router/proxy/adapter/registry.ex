@@ -71,7 +71,7 @@ defmodule DodoRouter.Proxy.Adapter.Registry do
           endpoints: unquote(opts[:endpoints]),
           # Request path appended to the endpoint base URL; used for display
           # in logs ("{model}" is replaced with the step's model).
-          endpoint_path: unquote(opts[:endpoint_path]) || "/chat/completions",
+          endpoint_path: unquote(opts[:endpoint_path] || "/chat/completions"),
           models: unquote(opts[:models]),
           color: unquote(opts[:color]),
           short_description: unquote(opts[:short_description])
