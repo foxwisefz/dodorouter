@@ -201,6 +201,16 @@ defmodule DodoRouterWeb.LogLive.Show do
               </div>
               <div class="text-xs text-base-content/60">{@log.final_provider}</div>
             </div>
+            <%= if effort = attempt_effort(List.last(@log.attempted_steps)) do %>
+              <div class="mt-1.5">
+                <span
+                  class="px-1.5 py-0.5 rounded text-xs bg-accent/20 text-accent"
+                  title="Reasoning effort configured on the routing step at request time"
+                >
+                  effort: {effort}
+                </span>
+              </div>
+            <% end %>
           </div>
           
     <!-- Usage -->
@@ -581,6 +591,11 @@ defmodule DodoRouterWeb.LogLive.Show do
                         <%= if attempt["plan_type"] do %>
                           <span class="badge badge-sm">{attempt["plan_type"]}</span>
                         <% end %>
+                        <%= if effort = attempt_effort(attempt) do %>
+                          <span class="badge badge-sm badge-accent badge-outline" title="Reasoning effort">
+                            effort: {effort}
+                          </span>
+                        <% end %>
                         <%= if attempt["status"] == "success" do %>
                           <span class="text-success font-medium">Success</span>
                         <% else %>
@@ -842,6 +857,13 @@ defmodule DodoRouterWeb.LogLive.Show do
   end
 
   defp deep_parse_json_strings(other), do: other
+
+  # Reasoning effort snapshotted into the attempt at request time.
+  # Old logs (before the snapshot included it) return nil.
+  defp attempt_effort(%{"reasoning_effort" => effort}) when is_binary(effort) and effort != "",
+    do: effort
+
+  defp attempt_effort(_), do: nil
 
   defp provider_time(%{attempted_steps: steps}) when is_list(steps) do
     steps
