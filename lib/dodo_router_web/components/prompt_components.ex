@@ -5,6 +5,7 @@ defmodule DodoRouterWeb.PromptComponents do
   use Phoenix.Component
 
   import DodoRouterWeb.CoreComponents
+  import DodoRouterWeb.ProviderIcons
 
   alias DodoRouterWeb.MarkdownRenderer
 
@@ -357,6 +358,7 @@ defmodule DodoRouterWeb.PromptComponents do
       |> assign(:label, label)
       |> assign(:role, role)
       |> assign(:has_cache_control, Map.get(assigns.message, :cache_control) != nil)
+      |> assign(:producer, Map.get(assigns.message, :producer))
 
     ~H"""
     <div class={"group flex flex-col gap-1.5 #{align_class(@role)}"}>
@@ -364,6 +366,15 @@ defmodule DodoRouterWeb.PromptComponents do
         <span class={"text-[10px] uppercase tracking-wider font-semibold #{@label_class}"}>
           {@label}
         </span>
+        <.link
+          :if={@producer}
+          navigate={"/logs/#{@producer.log_id}"}
+          class="text-[10px] px-1.5 py-0.5 rounded bg-secondary/40 text-base-content/50 hover:text-primary font-medium inline-flex items-center gap-1 transition-colors"
+          title={"Produced by #{@producer.provider}/#{@producer.model}"}
+        >
+          <.provider_logo slug={normalize_slug(@producer.provider || "unknown")} class="w-2.5 h-2.5" />
+          {@producer.model}
+        </.link>
         <%= if @cached do %>
           <span class="text-[10px] px-1.5 py-0.5 rounded bg-success/10 text-success font-medium">
             cached

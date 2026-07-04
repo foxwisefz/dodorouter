@@ -152,6 +152,27 @@ defmodule DodoRouter.Logs do
   end
 
   @doc """
+  Lean per-log response info for a session, oldest first — enough for
+  `Logs.Provenance` matching without loading request bodies.
+  """
+  def list_session_responses(%User{} = user, session_id) do
+    from(l in RequestLog,
+      join: r in Router,
+      on: l.router_id == r.id,
+      where: l.session_id == ^session_id and r.user_id == ^user.id,
+      order_by: [asc: l.inserted_at],
+      select: %{
+        id: l.id,
+        final_provider: l.final_provider,
+        final_model: l.final_model,
+        response_body: l.response_body,
+        inserted_at: l.inserted_at
+      }
+    )
+    |> Repo.all()
+  end
+
+  @doc """
   Map of log id => number of replays, for the given log ids.
   Ids without replays are absent from the result.
   """

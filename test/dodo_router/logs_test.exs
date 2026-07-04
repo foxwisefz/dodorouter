@@ -215,6 +215,34 @@ defmodule DodoRouter.LogsTest do
       assert Logs.root_of(child).id == root.id
     end
 
+    test "list_session_responses/2 returns lean maps for the user's session, oldest first" do
+      user = AccountsFixtures.user_fixture()
+      {router, _api_key} = RoutersFixtures.router_fixture(user)
+      session_id = "sess-#{System.unique_integer([:positive])}"
+
+      older =
+        LogsFixtures.log_fixture(router, %{
+          session_id: session_id,
+          inserted_at: DateTime.add(DateTime.utc_now(), -60, :second)
+        })
+
+      newer = LogsFixtures.log_fixture(router, %{session_id: session_id})
+      _other_session = LogsFixtures.log_fixture(router, %{session_id: "other"})
+
+      other_user = AccountsFixtures.user_fixture()
+      {other_router, _} = RoutersFixtures.router_fixture(other_user)
+      _other_users_log = LogsFixtures.log_fixture(other_router, %{session_id: session_id})
+
+      responses = Logs.list_session_responses(user, session_id)
+
+      assert Enum.map(responses, & &1.id) == [older.id, newer.id]
+
+      assert %{final_provider: _, final_model: _, response_body: _, inserted_at: _} =
+               hd(responses)
+
+      refute Map.has_key?(hd(responses), :request_body)
+    end
+
     test "replay_counts/1 maps log ids to their replay counts" do
       {router, _api_key} = RoutersFixtures.router_fixture()
       replayed = LogsFixtures.log_fixture(router)

@@ -3,6 +3,7 @@ defmodule DodoRouterWeb.LogLive.Show do
 
   alias DodoRouter.Logs
   alias DodoRouter.Logs.MessageNormalizer
+  alias DodoRouter.Logs.Provenance
   alias DodoRouter.Proxy.Adapter.Registry
   alias DodoRouterWeb.MarkdownRenderer
 
@@ -18,6 +19,7 @@ defmodule DodoRouterWeb.LogLive.Show do
       end
 
     {req_messages, req_params} = MessageNormalizer.parse_request_body(log.request_body)
+    req_messages = annotate_provenance(log, socket.assigns.current_user, req_messages)
     resp_message = MessageNormalizer.parse_response_body(log.response_body)
     req_headers = parse_headers(log.request_headers)
     resp_headers = parse_headers(log.response_headers)
@@ -801,6 +803,13 @@ defmodule DodoRouterWeb.LogLive.Show do
       </.modal>
     </div>
     """
+  end
+
+  defp annotate_provenance(%{session_id: nil}, _user, messages), do: messages
+
+  defp annotate_provenance(log, user, messages) do
+    siblings = Logs.list_session_responses(user, log.session_id)
+    Provenance.annotate(messages, siblings)
   end
 
   defp status_badge(assigns) do
