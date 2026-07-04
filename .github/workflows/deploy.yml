@@ -162,6 +162,18 @@ jobs:
               ${{ secrets.APP_DEPLOY_USER }}@${{ secrets.APP_DEPLOY_HOST }} \
               "systemctl --user stop dodo-router && rm -rf ~/dodorouter/current/* && cd ~/dodorouter/current && tar xzf /tmp/dodo_router-${VERSION}.tar.gz"
             
+            # Castle generates sys.config from runtime.exs on `start`, so a
+            # freshly extracted release has none yet and `eval` cannot boot.
+            # Generate it explicitly (booting off build.config, with the
+            # service env loaded) before running migrations.
+            echo "Generating sys.config for fresh install..."
+            ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 \
+              ${{ secrets.APP_DEPLOY_USER }}@${{ secrets.APP_DEPLOY_HOST }} \
+              "set -a; . ~/dodorouter/.env; set +a; RELEASE_SYS_CONFIG=\$HOME/dodorouter/current/dodo_router/releases/${VERSION}/build ~/dodorouter/current/dodo_router/bin/dodo_router eval 'Castle.generate(~s(${VERSION}))'" || {
+              echo "ERROR: sys.config generation failed"
+              exit 1
+            }
+
             # Run migrations using the NEW release before starting
             echo "Running database migrations with new release..."
             ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 \
