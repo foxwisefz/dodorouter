@@ -103,5 +103,153 @@ defmodule DodoRouterWeb.RouterShowLiveTest do
 
       assert html =~ "Add Step" or html =~ "No routing"
     end
+
+    test "model select lists known models", %{conn: conn, router: router} do
+      {:ok, _live, html} = live(conn, ~p"/routers/#{router.id}/routing")
+
+      assert html =~ "Reasoning Effort"
+      assert html =~ "Temperature"
+      assert html =~ "Max Tokens"
+    end
+
+    test "can add a step with a known model", %{conn: conn, router: router} do
+      {:ok, live, _html} = live(conn, ~p"/routers/#{router.id}/routing")
+
+      live
+      |> form("#routing-modal form", %{
+        "step" => %{
+          "provider" => "zai",
+          "model" => "glm-5",
+          "reasoning_effort" => "high"
+        }
+      })
+      |> render_submit()
+
+      steps = DodoRouter.Routers.list_routing_steps(router)
+      assert length(steps) == 1
+      step = hd(steps)
+      assert step.provider == "zai"
+      assert step.model == "glm-5"
+      assert step.reasoning_effort == "high"
+    end
+
+    test "effort options come from synced model data when available", %{
+      conn: conn,
+      router: router
+    } do
+      {:ok, _} =
+        DodoRouter.Models.create_model(%{
+          provider_slug: "zai",
+          model_id: "glm-5",
+          display_name: "GLM 5",
+          reasoning_efforts: ["high", "max"]
+        })
+
+      {:ok, live, _html} = live(conn, ~p"/routers/#{router.id}/routing")
+
+      html =
+        live
+        |> form("#routing-modal form", %{"step" => %{"provider" => "zai", "model" => "glm-5"}})
+        |> render_change()
+
+      assert html =~ "Levels this model supports"
+      # Model-specific list replaces the canonical one
+      refute html =~ "Minimal"
+    end
+
+    test "can edit a step's reasoning effort", %{conn: conn, router: router} do
+      {:ok, step} =
+        DodoRouter.Routers.create_routing_step(router, %{
+          "provider" => "zai",
+          "model" => "glm-5",
+          "reasoning_effort" => "high"
+        })
+
+      {:ok, live, html} = live(conn, ~p"/routers/#{router.id}/routing/#{step.id}/edit")
+
+      assert html =~ "Edit Routing Step"
+      assert html =~ "Save Changes"
+
+      live
+      |> form("#routing-modal form", %{
+        "step" => %{
+          "provider" => "zai",
+          "model" => "glm-5",
+          "reasoning_effort" => "medium"
+        }
+      })
+      |> render_submit()
+
+      updated = DodoRouter.Routers.get_routing_step!(router, step.id)
+      assert updated.reasoning_effort == "medium"
+      assert updated.model == "glm-5"
+      assert updated.position == step.position
+    end
+
+    test "editing can clear optional overrides", %{conn: conn, router: router} do
+      {:ok, step} =
+        DodoRouter.Routers.create_routing_step(router, %{
+          "provider" => "zai",
+          "model" => "glm-5",
+          "reasoning_effort" => "high",
+          "temperature" => 0.7
+        })
+
+      {:ok, live, _html} = live(conn, ~p"/routers/#{router.id}/routing/#{step.id}/edit")
+
+      live
+      |> form("#routing-modal form", %{
+        "step" => %{
+          "provider" => "zai",
+          "model" => "glm-5",
+          "reasoning_effort" => "",
+          "temperature" => ""
+        }
+      })
+      |> render_submit()
+
+      updated = DodoRouter.Routers.get_routing_step!(router, step.id)
+      assert updated.reasoning_effort == nil
+      assert updated.temperature == nil
+    end
+
+    test "cannot edit a step belonging to another user's router", %{conn: conn, router: router} do
+      {other_router, _} = DodoRouter.RoutersFixtures.router_fixture()
+
+      {:ok, other_step} =
+        DodoRouter.Routers.create_routing_step(other_router, %{
+          "provider" => "zai",
+          "model" => "glm-5"
+        })
+
+      assert_raise Ecto.NoResultsError, fn ->
+        live(conn, ~p"/routers/#{router.id}/routing/#{other_step.id}/edit")
+      end
+    end
+
+    test "can add a step with a custom model", %{conn: conn, router: router} do
+      {:ok, live, _html} = live(conn, ~p"/routers/#{router.id}/routing")
+
+      live
+      |> form("#routing-modal form", %{"step" => %{"model" => "__custom__"}})
+      |> render_change()
+
+      live
+      |> form("#routing-modal form", %{
+        "step" => %{
+          "model" => "custom-model",
+          "reasoning_effort" => "xhigh"
+        }
+      })
+      |> render_submit()
+
+      step =
+        DodoRouter.Routers.list_routing_steps(router)
+        |> hd()
+
+      assert step.provider == "zai"
+      assert step.model == "custom-model"
+      assert step.reasoning_effort == "xhigh"
+    end
   end
 end

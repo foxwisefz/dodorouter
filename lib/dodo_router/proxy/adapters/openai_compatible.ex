@@ -16,7 +16,7 @@ defmodule DodoRouter.Proxy.Adapters.OpenAICompatible do
 
   def call(request, %RoutingStep{} = step, api_key, base_url, opts \\ []) do
     url = base_url <> "/chat/completions"
-    body = build_request_body(request, step)
+    body = build_request_body(request, step, opts)
 
     headers = build_headers(api_key, opts)
     payload_size_bytes = body |> Jason.encode!() |> byte_size()
@@ -73,7 +73,7 @@ defmodule DodoRouter.Proxy.Adapters.OpenAICompatible do
       end
 
     body =
-      build_request_body(request, step)
+      build_request_body(request, step, opts)
       |> Map.put("stream", true)
 
     body =
@@ -87,48 +87,52 @@ defmodule DodoRouter.Proxy.Adapters.OpenAICompatible do
     provider = Keyword.get(opts, :provider, "unknown")
     Process.delete(:"__#{provider}_stream_acc__")
 
-    into_fun = fn {:data, data}, {req, resp} ->
-      resp =
-        if resp.private[:stream_acc] == nil do
-          ttfb = System.monotonic_time(:millisecond) - start_time
+    into_fun = fn
+      {:data, data}, {req, resp} when resp.status != 200 ->
+        Adapter.capture_streamed_error({:data, data}, {req, resp})
 
-          initial_acc = %{
-            content: "",
-            tool_calls: %{},
-            usage: nil,
-            finish_reason: nil,
-            first_chunk_time: ttfb,
-            sse_buffer: ""
-          }
+      {:data, data}, {req, resp} ->
+        resp =
+          if resp.private[:stream_acc] == nil do
+            ttfb = System.monotonic_time(:millisecond) - start_time
 
-          Req.Response.put_private(resp, :stream_acc, initial_acc)
-        else
-          resp
+            initial_acc = %{
+              content: "",
+              tool_calls: %{},
+              usage: nil,
+              finish_reason: nil,
+              first_chunk_time: ttfb,
+              sse_buffer: ""
+            }
+
+            Req.Response.put_private(resp, :stream_acc, initial_acc)
+          else
+            resp
+          end
+
+        acc = resp.private.stream_acc
+
+        case parse_sse_chunk(data, acc.sse_buffer) do
+          {{:chunks, chunks}, buffer} ->
+            send_chunk.(data)
+            acc = Enum.reduce(chunks, acc, &accumulate_chunk(&2, &1))
+            acc = %{acc | sse_buffer: buffer}
+            {:cont, {req, Req.Response.put_private(resp, :stream_acc, acc)}}
+
+          {{:chunks_then_done, chunks}, _buffer} ->
+            send_chunk.(data)
+            acc = Enum.reduce(chunks, acc, &accumulate_chunk(&2, &1))
+            acc = %{acc | sse_buffer: ""}
+            {:halt, {req, Req.Response.put_private(resp, :stream_acc, acc)}}
+
+          {:done, _buffer} ->
+            send_chunk.("data: [DONE]\n\n")
+            {:halt, {req, resp}}
+
+          {:skip, buffer} ->
+            acc = %{acc | sse_buffer: buffer}
+            {:cont, {req, Req.Response.put_private(resp, :stream_acc, acc)}}
         end
-
-      acc = resp.private.stream_acc
-
-      case parse_sse_chunk(data, acc.sse_buffer) do
-        {{:chunks, chunks}, buffer} ->
-          send_chunk.(data)
-          acc = Enum.reduce(chunks, acc, &accumulate_chunk(&2, &1))
-          acc = %{acc | sse_buffer: buffer}
-          {:cont, {req, Req.Response.put_private(resp, :stream_acc, acc)}}
-
-        {{:chunks_then_done, chunks}, _buffer} ->
-          send_chunk.(data)
-          acc = Enum.reduce(chunks, acc, &accumulate_chunk(&2, &1))
-          acc = %{acc | sse_buffer: ""}
-          {:halt, {req, Req.Response.put_private(resp, :stream_acc, acc)}}
-
-        {:done, _buffer} ->
-          send_chunk.("data: [DONE]\n\n")
-          {:halt, {req, resp}}
-
-        {:skip, buffer} ->
-          acc = %{acc | sse_buffer: buffer}
-          {:cont, {req, Req.Response.put_private(resp, :stream_acc, acc)}}
-      end
     end
 
     result =
@@ -159,11 +163,17 @@ defmodule DodoRouter.Proxy.Adapters.OpenAICompatible do
 
         {:ok, build_final_response(acc, timing_meta), %{headers: resp.headers}}
 
-      {:ok, %Req.Response{status: status, body: body, headers: resp_headers}} ->
-        reason = Adapter.categorize_error(status, body)
+      {:ok, %Req.Response{status: status, headers: resp_headers} = resp} ->
+        error_body = Adapter.streamed_error_body(resp)
+        reason = Adapter.categorize_error(status, error_body)
 
         {:error, reason,
-         %{status: status, body: body, latency_ms: latency(start_time), headers: resp_headers}}
+         %{
+           status: status,
+           body: error_body,
+           latency_ms: latency(start_time),
+           headers: resp_headers
+         }}
 
       {:error, %Req.TransportError{reason: :timeout}} ->
         {:error, :timeout, %{latency_ms: latency(start_time)}}
@@ -173,10 +183,14 @@ defmodule DodoRouter.Proxy.Adapters.OpenAICompatible do
     end
   end
 
-  defp build_request_body(request, step) do
+  @doc false
+  def build_request_body(request, step, opts) do
+    format = Keyword.get(opts, :reasoning_format, :none)
+
     request
     |> Adapter.sanitize_request()
     |> Map.put("model", step.model)
+    |> Adapter.inject_reasoning_effort(step.reasoning_effort, format)
   end
 
   defp build_headers(api_key, opts) do

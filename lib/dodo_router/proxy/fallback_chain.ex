@@ -71,10 +71,16 @@ defmodule DodoRouter.Proxy.FallbackChain do
         step_usage = Adapter.extract_usage(response)
 
         attempt = %{
+          step_id: step.id,
+          position: step.position,
           provider: step.provider,
           model: step.model,
           endpoint: endpoint,
           plan_type: step.plan_type,
+          reasoning_effort: step.reasoning_effort,
+          temperature: step.temperature,
+          max_tokens: step.max_tokens,
+          thinking_enabled: step.thinking_enabled,
           provider_key_id: key_id_for(step),
           provider_key_label: key_label_for(step),
           provider_key_slug: key_slug_for(step),
@@ -84,6 +90,7 @@ defmodule DodoRouter.Proxy.FallbackChain do
           cache_write_tokens: step_usage.cache_write_tokens,
           forwarded_headers: build_forwarded_headers(step),
           outbound_headers: meta[:outbound_headers],
+          outbound_body: meta[:outbound_body],
           request_body: state.request,
           response_body: response,
           response_headers: meta[:headers]
@@ -111,10 +118,16 @@ defmodule DodoRouter.Proxy.FallbackChain do
         streamed_to_client = details[:chunks_sent] == true and is_binary(partial_content)
 
         attempt = %{
+          step_id: step.id,
+          position: step.position,
           provider: step.provider,
           model: step.model,
           endpoint: endpoint,
           plan_type: step.plan_type,
+          reasoning_effort: step.reasoning_effort,
+          temperature: step.temperature,
+          max_tokens: step.max_tokens,
+          thinking_enabled: step.thinking_enabled,
           provider_key_id: key_id_for(step),
           provider_key_label: key_label_for(step),
           provider_key_slug: key_slug_for(step),
@@ -130,6 +143,7 @@ defmodule DodoRouter.Proxy.FallbackChain do
             if(is_binary(partial_content), do: String.length(partial_content), else: nil),
           forwarded_headers: build_forwarded_headers(step),
           outbound_headers: details[:outbound_headers],
+          outbound_body: details[:outbound_body],
           request_body: state.request,
           response_headers: details[:headers]
         }
@@ -233,18 +247,23 @@ defmodule DodoRouter.Proxy.FallbackChain do
   defp get_api_key(_step, _router_id), do: nil
 
   defp endpoint_for(%RoutingStep{provider: provider} = step) do
-    base =
-      case Registry.all_adapters()[provider] do
-        %{endpoints: endpoints} ->
-          # Find the endpoint matching the plan_type, or fall back to first
-          key_slug = Registry.to_key_slug(provider, step.plan_type || "standard")
-          Map.get(endpoints, key_slug) || endpoints |> Map.values() |> List.first()
+    case Registry.all_adapters()[provider] do
+      %{endpoints: endpoints} = config ->
+        # Find the endpoint matching the plan_type, or fall back to first
+        key_slug = Registry.to_key_slug(provider, step.plan_type || "standard")
+        base = Map.get(endpoints, key_slug) || endpoints |> Map.values() |> List.first()
 
-        nil ->
-          nil
-      end
+        if base do
+          path =
+            (config[:endpoint_path] || "/chat/completions")
+            |> String.replace("{model}", step.model || "")
 
-    if base, do: base <> "/chat/completions", else: nil
+          base <> path
+        end
+
+      nil ->
+        nil
+    end
   end
 
   @doc false

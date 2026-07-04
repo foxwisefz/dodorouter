@@ -67,7 +67,7 @@ defmodule DodoRouter.ProxyTest do
   describe "truncate_body/1" do
     test "handles large text content truncation" do
       # Use text with spaces so it doesn't match base64 pattern
-      large_content = String.duplicate("hello world ", 6_000)
+      large_content = String.duplicate("hello world ", 20_000)
 
       request = %{
         "messages" => [
@@ -78,7 +78,19 @@ defmodule DodoRouter.ProxyTest do
       {truncated, flags} = Proxy.truncate_body(request)
 
       assert "request_text_truncated" in flags
-      assert String.length(truncated["messages"] |> hd() |> Map.get("content")) < 60_000
+      assert String.length(truncated["messages"] |> hd() |> Map.get("content")) < 210_000
+    end
+
+    test "keeps large agent system prompts intact below the cap" do
+      # Coding-agent system prompts routinely run 50-100KB; they must survive
+      content = String.duplicate("agent instructions ", 5_000)
+
+      request = %{"messages" => [%{"role" => "system", "content" => content}]}
+
+      {truncated, flags} = Proxy.truncate_body(request)
+
+      assert flags == []
+      assert truncated["messages"] |> hd() |> Map.get("content") == content
     end
 
     test "handles base64 content truncation" do

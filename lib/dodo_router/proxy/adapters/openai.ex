@@ -92,50 +92,54 @@ defmodule DodoRouter.Proxy.Adapters.OpenAI do
     start_time = FinchTelemetry.mark_request_start()
     Process.delete(:__openai_stream_acc__)
 
-    into_fun = fn {:data, data}, {req, resp} ->
-      resp =
-        if resp.private[:stream_acc] == nil do
-          ttfb = System.monotonic_time(:millisecond) - start_time
+    into_fun = fn
+      {:data, data}, {req, resp} when resp.status != 200 ->
+        Adapter.capture_streamed_error({:data, data}, {req, resp})
 
-          initial_acc = %{
-            content: "",
-            tool_calls: %{},
-            usage: nil,
-            finish_reason: nil,
-            first_chunk_time: ttfb,
-            sse_buffer: ""
-          }
+      {:data, data}, {req, resp} ->
+        resp =
+          if resp.private[:stream_acc] == nil do
+            ttfb = System.monotonic_time(:millisecond) - start_time
 
-          Req.Response.put_private(resp, :stream_acc, initial_acc)
-        else
-          resp
+            initial_acc = %{
+              content: "",
+              tool_calls: %{},
+              usage: nil,
+              finish_reason: nil,
+              first_chunk_time: ttfb,
+              sse_buffer: ""
+            }
+
+            Req.Response.put_private(resp, :stream_acc, initial_acc)
+          else
+            resp
+          end
+
+        acc = resp.private.stream_acc
+
+        case Adapter.parse_sse_chunk(data, acc.sse_buffer) do
+          {{:chunks, chunks}, buffer} ->
+            send_chunk.(data)
+            acc = Enum.reduce(chunks, acc, &accumulate_chunk(&2, &1))
+            acc = %{acc | sse_buffer: buffer}
+            Process.put(:__openai_stream_acc__, acc)
+            {:cont, {req, Req.Response.put_private(resp, :stream_acc, acc)}}
+
+          {{:chunks_then_done, chunks}, _buffer} ->
+            send_chunk.(data)
+            acc = Enum.reduce(chunks, acc, &accumulate_chunk(&2, &1))
+            acc = %{acc | sse_buffer: ""}
+            Process.put(:__openai_stream_acc__, acc)
+            {:halt, {req, Req.Response.put_private(resp, :stream_acc, acc)}}
+
+          {:done, _buffer} ->
+            send_chunk.("data: [DONE]\n\n")
+            {:halt, {req, resp}}
+
+          {:skip, buffer} ->
+            acc = %{acc | sse_buffer: buffer}
+            {:cont, {req, Req.Response.put_private(resp, :stream_acc, acc)}}
         end
-
-      acc = resp.private.stream_acc
-
-      case Adapter.parse_sse_chunk(data, acc.sse_buffer) do
-        {{:chunks, chunks}, buffer} ->
-          send_chunk.(data)
-          acc = Enum.reduce(chunks, acc, &accumulate_chunk(&2, &1))
-          acc = %{acc | sse_buffer: buffer}
-          Process.put(:__openai_stream_acc__, acc)
-          {:cont, {req, Req.Response.put_private(resp, :stream_acc, acc)}}
-
-        {{:chunks_then_done, chunks}, _buffer} ->
-          send_chunk.(data)
-          acc = Enum.reduce(chunks, acc, &accumulate_chunk(&2, &1))
-          acc = %{acc | sse_buffer: ""}
-          Process.put(:__openai_stream_acc__, acc)
-          {:halt, {req, Req.Response.put_private(resp, :stream_acc, acc)}}
-
-        {:done, _buffer} ->
-          send_chunk.("data: [DONE]\n\n")
-          {:halt, {req, resp}}
-
-        {:skip, buffer} ->
-          acc = %{acc | sse_buffer: buffer}
-          {:cont, {req, Req.Response.put_private(resp, :stream_acc, acc)}}
-      end
     end
 
     result =
@@ -166,7 +170,8 @@ defmodule DodoRouter.Proxy.Adapters.OpenAI do
 
         {:ok, build_final_response(acc, timing_meta), %{headers: resp.headers}}
 
-      {:ok, %Req.Response{status: status, body: body, headers: resp_headers}} ->
+      {:ok, %Req.Response{status: status, headers: resp_headers} = resp} ->
+        body = Adapter.streamed_error_body(resp)
         reason = Adapter.categorize_error(status, body)
 
         {:error, reason,
@@ -185,6 +190,7 @@ defmodule DodoRouter.Proxy.Adapters.OpenAI do
     request
     |> Adapter.sanitize_request()
     |> Map.put("model", step.model)
+    |> Adapter.inject_reasoning_effort(step.reasoning_effort, :openai)
   end
 
   defp latency(start_time), do: System.monotonic_time(:millisecond) - start_time

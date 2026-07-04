@@ -2,7 +2,6 @@ defmodule DodoRouter.Proxy.Adapters.XAITest do
   use ExUnit.Case, async: true
 
   alias DodoRouter.Proxy.Adapters.XAI
-  alias DodoRouter.Proxy.Adapter
 
   describe "transform_request/2" do
     test "strips name from all messages" do
@@ -80,6 +79,27 @@ defmodule DodoRouter.Proxy.Adapters.XAITest do
     test "passes through error tuples" do
       error = {:error, :timeout, %{latency_ms: 100}}
       assert XAI.transform_response(error) == error
+    end
+  end
+
+  describe "OpenAICompatible.build_request_body via xAI" do
+    alias DodoRouter.Proxy.Adapters.OpenAICompatible
+    alias DodoRouter.Routers.RoutingStep
+
+    test "injects step reasoning_effort as top-level reasoning_effort" do
+      request = %{"messages" => [%{"role" => "user", "content" => "hi"}]}
+      step = %RoutingStep{model: "grok-3-mini", reasoning_effort: "high"}
+
+      body = OpenAICompatible.build_request_body(request, step, reasoning_format: :openai)
+      assert body["reasoning_effort"] == "high"
+    end
+
+    test "does not override client reasoning_effort" do
+      request = %{"messages" => [], "reasoning_effort" => "low"}
+      step = %RoutingStep{model: "grok-3-mini", reasoning_effort: "high"}
+
+      body = OpenAICompatible.build_request_body(request, step, reasoning_format: :openai)
+      assert body["reasoning_effort"] == "low"
     end
   end
 end

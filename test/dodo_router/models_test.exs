@@ -29,6 +29,38 @@ defmodule DodoRouter.ModelsTest do
     end
   end
 
+  describe "reasoning_efforts_for/2" do
+    test "returns the model's effort list" do
+      {:ok, _} =
+        Models.create_model(%{
+          provider_slug: "openai",
+          model_id: "gpt-effort-test",
+          display_name: "Effort Test",
+          reasoning_efforts: ["low", "high", "xhigh"]
+        })
+
+      assert Models.reasoning_efforts_for("openai", "gpt-effort-test") ==
+               ["low", "high", "xhigh"]
+    end
+
+    test "normalizes openai-codex to openai models" do
+      {:ok, _} =
+        Models.create_model(%{
+          provider_slug: "openai",
+          model_id: "gpt-codex-effort-test",
+          display_name: "Codex Effort Test",
+          reasoning_efforts: ["none", "xhigh"]
+        })
+
+      assert Models.reasoning_efforts_for("openai-codex", "gpt-codex-effort-test") ==
+               ["none", "xhigh"]
+    end
+
+    test "returns [] for unknown models" do
+      assert Models.reasoning_efforts_for("openai", "does-not-exist") == []
+    end
+  end
+
   describe "upsert_model/1" do
     test "inserts new model" do
       attrs = %{provider_slug: "anthropic", model_id: "claude-3", display_name: "Claude 3"}

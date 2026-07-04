@@ -275,4 +275,145 @@ defmodule DodoRouter.Proxy.AdapterTest do
       assert buffer2 == ""
     end
   end
+
+  describe "capture_streamed_error/2 and streamed_error_body/1" do
+    test "accumulates chunks and decodes JSON error bodies" do
+      resp = Req.Response.new(status: 400)
+
+      {:cont, {_req, resp}} =
+        Adapter.capture_streamed_error({:data, ~s({"error": {"message":)}, {:req, resp})
+
+      {:cont, {_req, resp}} =
+        Adapter.capture_streamed_error({:data, ~s( "bad effort"}})}, {:req, resp})
+
+      assert Adapter.streamed_error_body(resp) == %{
+               "error" => %{"message" => "bad effort"}
+             }
+    end
+
+    test "returns raw string when body is not JSON" do
+      resp = Req.Response.new(status: 502)
+      {:cont, {_req, resp}} = Adapter.capture_streamed_error({:data, "Bad Gateway"}, {:req, resp})
+
+      assert Adapter.streamed_error_body(resp) == "Bad Gateway"
+    end
+
+    test "falls back to Req.Response body when nothing was captured" do
+      resp = Req.Response.new(status: 400, body: "plain")
+      assert Adapter.streamed_error_body(resp) == "plain"
+    end
+  end
+
+  describe "inject_reasoning_effort/3" do
+    test "no-op when effort is nil or empty" do
+      body = %{"model" => "x"}
+      assert Adapter.inject_reasoning_effort(body, nil, :openai) == body
+      assert Adapter.inject_reasoning_effort(body, "", :openai) == body
+    end
+
+    test ":none format is always a no-op" do
+      body = %{"model" => "x"}
+      assert Adapter.inject_reasoning_effort(body, "high", :none) == body
+    end
+
+    test ":openai sets top-level reasoning_effort" do
+      body = Adapter.inject_reasoning_effort(%{"model" => "x"}, "high", :openai)
+      assert body["reasoning_effort"] == "high"
+    end
+
+    test ":openai passes any effort through verbatim (no clamping)" do
+      assert Adapter.inject_reasoning_effort(%{}, "xhigh", :openai)["reasoning_effort"] == "xhigh"
+      assert Adapter.inject_reasoning_effort(%{}, "max", :openai)["reasoning_effort"] == "max"
+      assert Adapter.inject_reasoning_effort(%{}, "none", :openai)["reasoning_effort"] == "none"
+      assert Adapter.inject_reasoning_effort(%{}, "default", :openai)["reasoning_effort"] == "default"
+    end
+
+    test ":openai respects a client-supplied reasoning_effort" do
+      body = Adapter.inject_reasoning_effort(%{"reasoning_effort" => "low"}, "high", :openai)
+      assert body["reasoning_effort"] == "low"
+    end
+
+    test ":on_off enables thinking for any non-none level" do
+      body = Adapter.inject_reasoning_effort(%{}, "high", :on_off)
+      assert body["thinking"] == %{"type" => "enabled"}
+    end
+
+    test ":on_off disables thinking for 'none'" do
+      body = Adapter.inject_reasoning_effort(%{}, "none", :on_off)
+      assert body["thinking"] == %{"type" => "disabled"}
+    end
+
+    test ":on_off respects an existing thinking field" do
+      body =
+        Adapter.inject_reasoning_effort(%{"thinking" => %{"type" => "enabled"}}, "none", :on_off)
+
+      assert body["thinking"] == %{"type" => "enabled"}
+    end
+
+    test ":anthropic sets thinking with a token budget" do
+      body = Adapter.inject_reasoning_effort(%{"max_tokens" => 64_000}, "high", :anthropic)
+      assert body["thinking"] == %{"type" => "enabled", "budget_tokens" => 16_000}
+      # Keeps client max_tokens since it exceeds the budget
+      assert body["max_tokens"] == 64_000
+    end
+
+    test ":anthropic bumps max_tokens when it does not exceed the budget" do
+      body = Adapter.inject_reasoning_effort(%{"max_tokens" => 4096}, "high", :anthropic)
+      assert body["max_tokens"] > 16_000
+    end
+
+    test ":anthropic respects an existing thinking field" do
+      body =
+        Adapter.inject_reasoning_effort(
+          %{"thinking" => %{"type" => "disabled"}},
+          "high",
+          :anthropic
+        )
+
+      assert body["thinking"] == %{"type" => "disabled"}
+    end
+
+    test ":gemini sets generationConfig.thinkingConfig.thinkingBudget" do
+      body = Adapter.inject_reasoning_effort(%{}, "high", :gemini)
+      assert get_in(body, ["generationConfig", "thinkingConfig", "thinkingBudget"]) == 16_384
+    end
+
+    test ":gemini preserves an existing client thinkingBudget" do
+      body =
+        Adapter.inject_reasoning_effort(
+          %{"generationConfig" => %{"thinkingConfig" => %{"thinkingBudget" => 1000}}},
+          "high",
+          :gemini
+        )
+
+      assert get_in(body, ["generationConfig", "thinkingConfig", "thinkingBudget"]) == 1000
+    end
+
+    test ":responses sets reasoning.effort" do
+      body = Adapter.inject_reasoning_effort(%{}, "high", :responses)
+      assert body["reasoning"] == %{"effort" => "high"}
+    end
+
+    test ":responses respects an existing reasoning field" do
+      body =
+        Adapter.inject_reasoning_effort(
+          %{"reasoning" => %{"effort" => "low"}},
+          "high",
+          :responses
+        )
+
+      assert body["reasoning"] == %{"effort" => "low"}
+    end
+
+    test ":responses passes any effort through verbatim (no clamping)" do
+      assert Adapter.inject_reasoning_effort(%{}, "xhigh", :responses)["reasoning"] ==
+               %{"effort" => "xhigh"}
+
+      assert Adapter.inject_reasoning_effort(%{}, "max", :responses)["reasoning"] ==
+               %{"effort" => "max"}
+
+      assert Adapter.inject_reasoning_effort(%{}, "none", :responses)["reasoning"] ==
+               %{"effort" => "none"}
+    end
+  end
 end

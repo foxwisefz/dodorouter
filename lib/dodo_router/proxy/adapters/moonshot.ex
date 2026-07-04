@@ -131,53 +131,57 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
     Process.delete(:__moonshot_stream_raw__)
     start_time = FinchTelemetry.mark_request_start()
 
-    into_fun = fn {:data, data}, {req, resp} ->
-      raw = Process.get(:__moonshot_stream_raw__, "")
-      Process.put(:__moonshot_stream_raw__, raw <> data)
+    into_fun = fn
+      {:data, data}, {req, resp} when resp.status != 200 ->
+        Adapter.capture_streamed_error({:data, data}, {req, resp})
 
-      resp =
-        if resp.private[:stream_acc] == nil do
-          ttfb = System.monotonic_time(:millisecond) - start_time
+      {:data, data}, {req, resp} ->
+        raw = Process.get(:__moonshot_stream_raw__, "")
+        Process.put(:__moonshot_stream_raw__, raw <> data)
 
-          initial_acc = %{
-            content: "",
-            tool_calls: %{},
-            usage: nil,
-            finish_reason: nil,
-            first_chunk_time: ttfb,
-            sse_buffer: ""
-          }
+        resp =
+          if resp.private[:stream_acc] == nil do
+            ttfb = System.monotonic_time(:millisecond) - start_time
 
-          Req.Response.put_private(resp, :stream_acc, initial_acc)
-        else
-          resp
+            initial_acc = %{
+              content: "",
+              tool_calls: %{},
+              usage: nil,
+              finish_reason: nil,
+              first_chunk_time: ttfb,
+              sse_buffer: ""
+            }
+
+            Req.Response.put_private(resp, :stream_acc, initial_acc)
+          else
+            resp
+          end
+
+        acc = resp.private.stream_acc
+
+        case Adapter.parse_sse_chunk(data, acc.sse_buffer) do
+          {{:chunks, chunks}, buffer} ->
+            reframe_and_send_chunks(send_chunk, chunks)
+            acc = Enum.reduce(chunks, acc, &accumulate_chunk(&2, &1))
+            acc = %{acc | sse_buffer: buffer}
+            Process.put(:__moonshot_stream_acc__, acc)
+            {:cont, {req, Req.Response.put_private(resp, :stream_acc, acc)}}
+
+          {{:chunks_then_done, chunks}, _buffer} ->
+            reframe_and_send_chunks(send_chunk, chunks)
+            acc = Enum.reduce(chunks, acc, &accumulate_chunk(&2, &1))
+            acc = %{acc | sse_buffer: ""}
+            Process.put(:__moonshot_stream_acc__, acc)
+            {:halt, {req, Req.Response.put_private(resp, :stream_acc, acc)}}
+
+          {:done, _buffer} ->
+            send_chunk.("data: [DONE]\n\n")
+            {:halt, {req, resp}}
+
+          {:skip, buffer} ->
+            acc = %{acc | sse_buffer: buffer}
+            {:cont, {req, Req.Response.put_private(resp, :stream_acc, acc)}}
         end
-
-      acc = resp.private.stream_acc
-
-      case Adapter.parse_sse_chunk(data, acc.sse_buffer) do
-        {{:chunks, chunks}, buffer} ->
-          reframe_and_send_chunks(send_chunk, chunks)
-          acc = Enum.reduce(chunks, acc, &accumulate_chunk(&2, &1))
-          acc = %{acc | sse_buffer: buffer}
-          Process.put(:__moonshot_stream_acc__, acc)
-          {:cont, {req, Req.Response.put_private(resp, :stream_acc, acc)}}
-
-        {{:chunks_then_done, chunks}, _buffer} ->
-          reframe_and_send_chunks(send_chunk, chunks)
-          acc = Enum.reduce(chunks, acc, &accumulate_chunk(&2, &1))
-          acc = %{acc | sse_buffer: ""}
-          Process.put(:__moonshot_stream_acc__, acc)
-          {:halt, {req, Req.Response.put_private(resp, :stream_acc, acc)}}
-
-        {:done, _buffer} ->
-          send_chunk.("data: [DONE]\n\n")
-          {:halt, {req, resp}}
-
-        {:skip, buffer} ->
-          acc = %{acc | sse_buffer: buffer}
-          {:cont, {req, Req.Response.put_private(resp, :stream_acc, acc)}}
-      end
     end
 
     result =
@@ -210,7 +214,8 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
         {:ok, build_final_response(acc, timing_meta),
          %{headers: resp_headers, outbound_headers: headers}}
 
-      {:ok, %Req.Response{status: status, body: body, headers: resp_headers}} ->
+      {:ok, %Req.Response{status: status, headers: resp_headers} = resp} ->
+        body = Adapter.streamed_error_body(resp)
         error_body = if body in ["", nil], do: parse_raw_error(raw_error), else: body
         Logger.error("[Moonshot] Stream error: status=#{status} body=#{inspect(error_body)}")
 
@@ -370,24 +375,36 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
             when is_binary(model) and
                    (binary_part(model, 0, 7) == "kimi-k2" or model == "kimi-for-coding")
 
-  # kimi thinking models have thinking enabled by default - only disable if explicitly false
-  defp maybe_put_thinking(body, %RoutingStep{model: model, thinking_enabled: false})
-       when is_kimi_thinking_model(model) do
-    Map.put(body, "thinking", %{"type" => "disabled"})
-  end
+  # Effective thinking state for a kimi model, resolving the new
+  # `reasoning_effort` field first and falling back to the legacy
+  # `thinking_enabled` boolean for rows created before the migration.
+  defp kimi_thinking_on?(%RoutingStep{reasoning_effort: effort})
+       when is_binary(effort) and effort != "" and effort != "none",
+       do: true
 
-  defp maybe_put_thinking(body, %RoutingStep{model: model, thinking_enabled: thinking})
-       when is_kimi_thinking_model(model) and thinking != false do
-    Map.put(body, "thinking", %{"type" => "enabled"})
+  defp kimi_thinking_on?(%RoutingStep{reasoning_effort: effort})
+       when is_binary(effort) and effort == "none",
+       do: false
+
+  defp kimi_thinking_on?(%RoutingStep{thinking_enabled: false}), do: false
+  defp kimi_thinking_on?(_step), do: true
+
+  # kimi thinking models have thinking enabled by default - only disable if
+  # explicitly turned off (via reasoning_effort="none" or thinking_enabled=false).
+  defp maybe_put_thinking(body, %RoutingStep{model: model} = step)
+       when is_kimi_thinking_model(model) do
+    if kimi_thinking_on?(step),
+      do: Map.put(body, "thinking", %{"type" => "enabled"}),
+      else: Map.put(body, "thinking", %{"type" => "disabled"})
   end
 
   defp maybe_put_thinking(body, _step), do: body
 
-  defp maybe_transform_kimi_reasoning(body, %RoutingStep{model: model, thinking_enabled: thinking})
+  defp maybe_transform_kimi_reasoning(body, %RoutingStep{model: model} = step)
        when is_binary(model) do
     is_kimi_k2 = String.starts_with?(model, "kimi-k2") or model == "kimi-for-coding"
 
-    if is_kimi_k2 and thinking != false do
+    if is_kimi_k2 and kimi_thinking_on?(step) do
       messages =
         Enum.map(body["messages"] || [], fn msg ->
           case msg["role"] do

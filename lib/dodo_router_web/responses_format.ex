@@ -28,7 +28,17 @@ defmodule DodoRouterWeb.ResponsesFormat do
     |> maybe_put("tool_choice", responses_params["tool_choice"])
     |> maybe_put("parallel_tool_calls", responses_params["parallel_tool_calls"])
     |> maybe_put("metadata", responses_params["metadata"])
+    |> maybe_put("reasoning_effort", client_reasoning_effort(responses_params))
   end
+
+  # Preserve the client's requested reasoning effort so it survives the
+  # round-trip through the internal chat-completions format. Adapters treat a
+  # client-supplied effort as taking precedence over the step default.
+  defp client_reasoning_effort(%{"reasoning" => %{"effort" => effort}})
+       when is_binary(effort) and effort != "",
+       do: effort
+
+  defp client_reasoning_effort(_), do: nil
 
   def from_openai_response(openai_response, request_id) do
     choice = get_in(openai_response, ["choices", Access.at(0)]) || %{}

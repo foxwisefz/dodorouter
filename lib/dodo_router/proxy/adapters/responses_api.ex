@@ -45,42 +45,46 @@ defmodule DodoRouter.Proxy.Adapters.ResponsesAPI do
     payload_size_bytes = body |> Jason.encode!() |> byte_size()
     start_time = System.monotonic_time(:millisecond)
 
-    into_fun = fn {:data, data}, {req, resp} ->
-      resp =
-        if resp.private[:stream_acc] == nil do
-          ttfb = System.monotonic_time(:millisecond) - start_time
+    into_fun = fn
+      {:data, data}, {req, resp} when resp.status != 200 ->
+        Adapter.capture_streamed_error({:data, data}, {req, resp})
 
-          initial_acc = %{
-            model: step.model,
-            content: "",
-            tool_calls: %{},
-            usage: nil,
-            finish_reason: nil,
-            first_chunk_time: ttfb,
-            sse_buffer: ""
-          }
+      {:data, data}, {req, resp} ->
+        resp =
+          if resp.private[:stream_acc] == nil do
+            ttfb = System.monotonic_time(:millisecond) - start_time
 
-          Req.Response.put_private(resp, :stream_acc, initial_acc)
-        else
-          resp
+            initial_acc = %{
+              model: step.model,
+              content: "",
+              tool_calls: %{},
+              usage: nil,
+              finish_reason: nil,
+              first_chunk_time: ttfb,
+              sse_buffer: ""
+            }
+
+            Req.Response.put_private(resp, :stream_acc, initial_acc)
+          else
+            resp
+          end
+
+        sacc = resp.private.stream_acc
+        combined = sacc.sse_buffer <> data
+
+        case parse_sse_events(combined) do
+          {:events, events, buffer} ->
+            {sacc, openai_chunks} = process_events(sacc, events)
+
+            Enum.each(openai_chunks, &send_chunk.(&1))
+
+            sacc = %{sacc | sse_buffer: buffer}
+            {:cont, {req, Req.Response.put_private(resp, :stream_acc, sacc)}}
+
+          {:incomplete, buffer} ->
+            sacc = %{sacc | sse_buffer: buffer}
+            {:cont, {req, Req.Response.put_private(resp, :stream_acc, sacc)}}
         end
-
-      sacc = resp.private.stream_acc
-      combined = sacc.sse_buffer <> data
-
-      case parse_sse_events(combined) do
-        {:events, events, buffer} ->
-          {sacc, openai_chunks} = process_events(sacc, events)
-
-          Enum.each(openai_chunks, &send_chunk.(&1))
-
-          sacc = %{sacc | sse_buffer: buffer}
-          {:cont, {req, Req.Response.put_private(resp, :stream_acc, sacc)}}
-
-        {:incomplete, buffer} ->
-          sacc = %{sacc | sse_buffer: buffer}
-          {:cont, {req, Req.Response.put_private(resp, :stream_acc, sacc)}}
-      end
     end
 
     result =
@@ -113,14 +117,23 @@ defmodule DodoRouter.Proxy.Adapters.ResponsesAPI do
           "provider_processing_ms" => nil
         }
 
-        {:ok, build_final_response(acc, meta), %{headers: resp.headers}}
+        {:ok, build_final_response(acc, meta),
+         %{headers: resp.headers, outbound_headers: headers, outbound_body: body}}
 
-      {:ok, %Req.Response{status: status, body: body, headers: resp_headers}} ->
-        Logger.error("[#{provider}] Non-200: status=#{status} body=#{inspect(body)}")
-        reason = Adapter.categorize_error(status, body)
+      {:ok, %Req.Response{status: status, headers: resp_headers} = resp} ->
+        resp_body = Adapter.streamed_error_body(resp)
+        Logger.error("[#{provider}] Non-200: status=#{status} body=#{inspect(resp_body)}")
+        reason = Adapter.categorize_error(status, resp_body)
 
         {:error, reason,
-         %{status: status, body: body, latency_ms: latency(start_time), headers: resp_headers}}
+         %{
+           status: status,
+           body: resp_body,
+           latency_ms: latency(start_time),
+           headers: resp_headers,
+           outbound_headers: headers,
+           outbound_body: body
+         }}
 
       {:error, %Req.TransportError{reason: :timeout}} ->
         {:error, :timeout, %{latency_ms: latency(start_time)}}
@@ -143,6 +156,24 @@ defmodule DodoRouter.Proxy.Adapters.ResponsesAPI do
     |> maybe_put("temperature", request["temperature"])
     |> maybe_put("top_p", request["top_p"])
     |> maybe_put_tools(request["tools"])
+    |> put_reasoning(request)
+    |> Adapter.inject_reasoning_effort(step.reasoning_effort, :responses)
+  end
+
+  defp put_reasoning(body, %{} = request) do
+    cond do
+      is_map(request["reasoning"]) ->
+        Map.put(body, "reasoning", request["reasoning"])
+
+      request["reasoning_effort"] in [nil, "", "none"] ->
+        body
+
+      is_binary(request["reasoning_effort"]) ->
+        Map.put(body, "reasoning", %{"effort" => request["reasoning_effort"]})
+
+      true ->
+        body
+    end
   end
 
   defp maybe_put(map, _key, nil), do: map

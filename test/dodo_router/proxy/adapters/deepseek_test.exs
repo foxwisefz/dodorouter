@@ -59,4 +59,25 @@ defmodule DodoRouter.Proxy.Adapters.DeepSeekTest do
       refute Map.has_key?(result, "reasoning_effort")
     end
   end
+
+  describe "OpenAICompatible.build_request_body via DeepSeek" do
+    alias DodoRouter.Proxy.Adapters.OpenAICompatible
+    alias DodoRouter.Routers.RoutingStep
+
+    test "injects step reasoning_effort as on/off thinking flag" do
+      request = %{"messages" => [%{"role" => "user", "content" => "hi"}]}
+      step = %RoutingStep{model: "deepseek-reasoner", reasoning_effort: "high"}
+
+      body = OpenAICompatible.build_request_body(request, step, reasoning_format: :on_off)
+      assert body["thinking"] == %{"type" => "enabled"}
+    end
+
+    test "respects client thinking" do
+      request = %{"messages" => [], "thinking" => %{"type" => "enabled"}}
+      step = %RoutingStep{model: "deepseek-reasoner", reasoning_effort: "none"}
+
+      body = OpenAICompatible.build_request_body(request, step, reasoning_format: :on_off)
+      assert body["thinking"] == %{"type" => "enabled"}
+    end
+  end
 end

@@ -17,6 +17,7 @@ defmodule DodoRouter.Proxy.Adapters.OpenAICodex do
     endpoints: %{
       "openai-codex" => "https://chatgpt.com/backend-api/codex"
     },
+    endpoint_path: "/responses",
     models: ~w(gpt-5.5 gpt-5.4 gpt-5.4-mini gpt-5.2),
     color: "emerald",
     short_description: "ChatGPT Plus/Pro subscription"

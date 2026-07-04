@@ -12,6 +12,7 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
     endpoints: %{
       "anthropic" => "https://api.anthropic.com/v1"
     },
+    endpoint_path: "/messages",
     models:
       ~w(claude-sonnet-4-20250514 claude-opus-4-20250514 claude-3-5-sonnet-20241022 claude-3-5-haiku-20241022 claude-3-opus-20240229),
     color: "orange",
@@ -94,44 +95,48 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
     start_time = FinchTelemetry.mark_request_start()
     Process.delete(:__anthropic_stream_acc__)
 
-    into_fun = fn {:data, data}, {req, resp} ->
-      resp =
-        if resp.private[:stream_acc] == nil do
-          ttfb = System.monotonic_time(:millisecond) - start_time
+    into_fun = fn
+      {:data, data}, {req, resp} when resp.status != 200 ->
+        Adapter.capture_streamed_error({:data, data}, {req, resp})
 
-          initial_acc = %{
-            content: "",
-            tool_calls: [],
-            usage: nil,
-            stop_reason: nil,
-            first_chunk_time: ttfb,
-            sse_buffer: ""
-          }
+      {:data, data}, {req, resp} ->
+        resp =
+          if resp.private[:stream_acc] == nil do
+            ttfb = System.monotonic_time(:millisecond) - start_time
 
-          Req.Response.put_private(resp, :stream_acc, initial_acc)
-        else
-          resp
+            initial_acc = %{
+              content: "",
+              tool_calls: [],
+              usage: nil,
+              stop_reason: nil,
+              first_chunk_time: ttfb,
+              sse_buffer: ""
+            }
+
+            Req.Response.put_private(resp, :stream_acc, initial_acc)
+          else
+            resp
+          end
+
+        acc = resp.private.stream_acc
+
+        case parse_anthropic_sse(data, acc.sse_buffer) do
+          {{:events, events}, buffer} ->
+            # Convert and forward as OpenAI format
+            {acc, openai_chunks} = process_anthropic_events(acc, events)
+            Enum.each(openai_chunks, &send_chunk.(&1))
+            acc = %{acc | sse_buffer: buffer}
+            Process.put(:__anthropic_stream_acc__, acc)
+            {:cont, {req, Req.Response.put_private(resp, :stream_acc, acc)}}
+
+          {:done, _buffer} ->
+            send_chunk.("data: [DONE]\n\n")
+            {:halt, {req, resp}}
+
+          {:skip, buffer} ->
+            acc = %{acc | sse_buffer: buffer}
+            {:cont, {req, Req.Response.put_private(resp, :stream_acc, acc)}}
         end
-
-      acc = resp.private.stream_acc
-
-      case parse_anthropic_sse(data, acc.sse_buffer) do
-        {{:events, events}, buffer} ->
-          # Convert and forward as OpenAI format
-          {acc, openai_chunks} = process_anthropic_events(acc, events)
-          Enum.each(openai_chunks, &send_chunk.(&1))
-          acc = %{acc | sse_buffer: buffer}
-          Process.put(:__anthropic_stream_acc__, acc)
-          {:cont, {req, Req.Response.put_private(resp, :stream_acc, acc)}}
-
-        {:done, _buffer} ->
-          send_chunk.("data: [DONE]\n\n")
-          {:halt, {req, resp}}
-
-        {:skip, buffer} ->
-          acc = %{acc | sse_buffer: buffer}
-          {:cont, {req, Req.Response.put_private(resp, :stream_acc, acc)}}
-      end
     end
 
     result =
@@ -160,7 +165,8 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
 
         {:ok, build_final_openai_response(acc, timing_meta), %{headers: resp.headers}}
 
-      {:ok, %Req.Response{status: status, body: body, headers: resp_headers}} ->
+      {:ok, %Req.Response{status: status, headers: resp_headers} = resp} ->
+        body = Adapter.streamed_error_body(resp)
         reason = Adapter.categorize_error(status, body)
 
         {:error, reason,
@@ -217,6 +223,15 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
       if request["stop"],
         do: Map.put(body, "stop_sequences", List.wrap(request["stop"])),
         else: body
+
+    # Forward a client-supplied thinking block (if any) so it takes precedence
+    # over the step-level default below.
+    body =
+      if request["thinking"],
+        do: Map.put(body, "thinking", request["thinking"]),
+        else: body
+
+    body = Adapter.inject_reasoning_effort(body, step.reasoning_effort, :anthropic)
 
     # Tools
     if request["tools"] do

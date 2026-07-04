@@ -211,9 +211,10 @@ defmodule DodoRouter.Proxy do
       base64?(content) and byte_size(content) > 1000 ->
         {"[base64 data: #{byte_size(content)} bytes truncated]", true, "request_base64_truncated"}
 
-      # Regular text: generous limit
-      byte_size(content) > 50_000 ->
-        {String.slice(content, 0, 50_000) <> "\n\n... [truncated]", true,
+      # Regular text: generous limit — coding-agent system prompts routinely
+      # run 50-100KB+, so the cap only guards against megabyte-scale pastes.
+      byte_size(content) > 200_000 ->
+        {String.slice(content, 0, 200_000) <> "\n\n... [truncated]", true,
          "request_text_truncated"}
 
       true ->
@@ -379,6 +380,7 @@ defmodule DodoRouter.Proxy do
     step
     |> maybe_truncate_step_field(:response_body)
     |> maybe_truncate_step_field(:request_body)
+    |> maybe_truncate_step_field(:outbound_body)
     |> maybe_redact_step_headers()
   end
 
@@ -397,14 +399,14 @@ defmodule DodoRouter.Proxy do
     end
   end
 
-  defp maybe_truncate_step_field(step, :request_body) do
-    case Map.get(step, :request_body) do
+  defp maybe_truncate_step_field(step, field) when field in [:request_body, :outbound_body] do
+    case Map.get(step, field) do
       nil ->
         step
 
       body when is_map(body) ->
         {truncated, _flags} = truncate_body(body)
-        Map.put(step, :request_body, Jason.encode!(truncated))
+        Map.put(step, field, Jason.encode!(truncated))
 
       body when is_binary(body) ->
         step
@@ -412,7 +414,13 @@ defmodule DodoRouter.Proxy do
   end
 
   defp maybe_redact_step_headers(step) do
-    case Map.get(step, :response_headers) do
+    step
+    |> redact_step_header_field(:response_headers)
+    |> redact_step_header_field(:outbound_headers)
+  end
+
+  defp redact_step_header_field(step, field) do
+    case Map.get(step, field) do
       nil ->
         step
 
@@ -422,7 +430,7 @@ defmodule DodoRouter.Proxy do
           |> Redact.redact_headers()
           |> Enum.map(fn {k, v} -> [k, v] end)
 
-        Map.put(step, :response_headers, redacted)
+        Map.put(step, field, redacted)
     end
   end
 

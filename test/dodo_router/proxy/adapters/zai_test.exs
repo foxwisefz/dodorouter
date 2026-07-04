@@ -138,6 +138,25 @@ defmodule DodoRouter.Proxy.Adapters.ZaiTest do
       body = Zai.build_request_body(request, step)
       refute Map.has_key?(body, "stream_options")
     end
+
+    test "injects reasoning effort as on/off thinking flag" do
+      request = %{"messages" => [%{"role" => "user", "content" => "hi"}]}
+      step = %RoutingStep{provider: "zai", model: "glm-5", reasoning_effort: "high"}
+
+      body = Zai.build_request_body(request, step)
+      assert body["thinking"] == %{"type" => "enabled"}
+    end
+
+    test "does not override client thinking" do
+      request = %{
+        "messages" => [%{"role" => "user", "content" => "hi"}],
+        "thinking" => %{"type" => "enabled"}
+      }
+
+      step = %RoutingStep{provider: "zai", model: "glm-5", reasoning_effort: "none"}
+      body = Zai.build_request_body(request, step)
+      assert body["thinking"] == %{"type" => "enabled"}
+    end
   end
 
   describe "build_final_response/2" do

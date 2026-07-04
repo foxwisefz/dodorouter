@@ -472,6 +472,22 @@ defmodule DodoRouterWeb.LogLive.Show do
                         </div>
                       </div>
                     <% end %>
+                    <%= if final_attempt["outbound_body"] do %>
+                      <div>
+                        <button
+                          type="button"
+                          phx-click={JS.toggle(to: "#original-outbound-body")}
+                          class="text-[10px] uppercase tracking-wider text-primary hover:underline font-semibold"
+                        >
+                          Outbound Request (sent to provider)
+                        </button>
+                        <div id="original-outbound-body" class="hidden">
+                          <div class="mt-2 mockup-code text-xs max-h-64 overflow-auto">
+                            <pre><code><%= format_json(final_attempt["outbound_body"]) %></code></pre>
+                          </div>
+                        </div>
+                      </div>
+                    <% end %>
                   </div>
                 <% end %>
                 <%= if @req_headers do %>
@@ -647,6 +663,23 @@ defmodule DodoRouterWeb.LogLive.Show do
                           <div id={"step-request-#{idx}"} class="hidden">
                             <div class="mockup-code text-xs max-h-64 overflow-auto">
                               <pre><code><%= format_json(attempt["request_body"]) %></code></pre>
+                            </div>
+                          </div>
+                        </div>
+                      <% end %>
+
+                      <%= if attempt["outbound_body"] do %>
+                        <div>
+                          <button
+                            type="button"
+                            phx-click={JS.toggle(to: "#step-outbound-body-#{idx}")}
+                            class="text-[10px] uppercase tracking-wider text-primary hover:underline font-semibold mb-1"
+                          >
+                            Outbound Request (sent to provider)
+                          </button>
+                          <div id={"step-outbound-body-#{idx}"} class="hidden">
+                            <div class="mockup-code text-xs max-h-64 overflow-auto">
+                              <pre><code><%= format_json(attempt["outbound_body"]) %></code></pre>
                             </div>
                           </div>
                         </div>

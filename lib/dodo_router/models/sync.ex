@@ -106,9 +106,26 @@ defmodule DodoRouter.Models.Sync do
       supports_system_messages: true,
       supports_reasoning: data["reasoning"] == true,
       supports_response_schema: data["structured_output"] == true,
-      supports_prompt_caching: cost["cache_read"] != nil || cost["cache_write"] != nil
+      supports_prompt_caching: cost["cache_read"] != nil || cost["cache_write"] != nil,
+      reasoning_efforts: parse_reasoning_efforts(data["reasoning_options"])
     }
   end
+
+  # reasoning_options is a list of option specs, e.g.
+  #   [%{"type" => "effort", "values" => ["low", "high", "xhigh"]}]
+  # possibly alongside "toggle" / "budget_tokens" entries. We only extract the
+  # effort values; other option types don't map to a step-level effort list.
+  defp parse_reasoning_efforts(options) when is_list(options) do
+    Enum.find_value(options, [], fn
+      %{"type" => "effort", "values" => values} when is_list(values) ->
+        Enum.filter(values, &is_binary/1)
+
+      _ ->
+        nil
+    end)
+  end
+
+  defp parse_reasoning_efforts(_), do: []
 
   defp to_decimal(nil), do: nil
   defp to_decimal(number) when is_number(number), do: Decimal.new("#{number}")

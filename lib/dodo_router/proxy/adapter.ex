@@ -256,6 +256,37 @@ defmodule DodoRouter.Proxy.Adapter do
 
   def sanitize_request(request), do: request
 
+  @doc """
+  Accumulates raw response data while streaming a non-200 response.
+
+  Streaming adapters consume the response with `Req` `into:` functions that
+  parse SSE events. On an error status the provider sends a plain JSON error
+  body instead of SSE — parsing it as SSE silently discards it. Adapters call
+  this from their `into:` function when `resp.status != 200` so the error
+  body is preserved for logging (see `streamed_error_body/1`).
+  """
+  def capture_streamed_error({:data, data}, {req, resp}) do
+    buffered = (resp.private[:error_body] || "") <> data
+    {:cont, {req, Req.Response.put_private(resp, :error_body, buffered)}}
+  end
+
+  @doc """
+  Returns the error body captured by `capture_streamed_error/2`, decoded as
+  JSON when possible, falling back to the raw string or `Req.Response.body`.
+  """
+  def streamed_error_body(%Req.Response{} = resp) do
+    case resp.private[:error_body] do
+      nil ->
+        resp.body
+
+      raw ->
+        case Jason.decode(raw) do
+          {:ok, decoded} -> decoded
+          {:error, _} -> raw
+        end
+    end
+  end
+
   # OpenAI introduced max_completion_tokens as a replacement for max_tokens.
   # Some providers only accept max_tokens, so normalize if only the newer key is present.
   defp normalize_max_completion_tokens(request) do
@@ -740,6 +771,162 @@ defmodule DodoRouter.Proxy.Adapter do
 
       _ ->
         response
+    end
+  end
+
+  # ── Reasoning effort injection ────────────────────────────────────────────
+  #
+  # Step-level `reasoning_effort` is an opt-in default. Adapters call this with
+  # the provider-specific `format` so the same canonical level ("high",
+  # "xhigh", ...) is translated into whatever field the upstream API expects.
+  #
+  # Precedence rules:
+  #   1. A nil/"" effort means "leave the request untouched" — the provider's
+  #      own defaults (or a client-supplied value) apply.
+  #   2. If the body already carries the relevant field (e.g. the client sent
+  #      `reasoning_effort` or `thinking`), that value wins and the step
+  #      default is *not* applied.
+
+  # Anthropic extended-thinking budget_tokens mapped per effort level.
+  @anthropic_thinking_budget %{
+    "minimal" => 1_024,
+    "low" => 4_096,
+    "medium" => 10_000,
+    "high" => 16_000,
+    "xhigh" => 24_000,
+    "max" => 32_000
+  }
+
+  # Gemini thinkingBudget mapped per effort level (Gemini 2.5 accepts 0..24576).
+  @gemini_thinking_budget %{
+    "minimal" => 0,
+    "low" => 2_048,
+    "medium" => 8_192,
+    "high" => 16_384,
+    "xhigh" => 24_576,
+    "max" => 24_576
+  }
+
+  @doc """
+  Injects a step-level reasoning effort default into an upstream request body.
+
+  `format` selects how the canonical effort level is rendered for a provider:
+
+    * `:openai`     — sets top-level `reasoning_effort` (OpenAI, xAI, …)
+    * `:on_off`     — sets `thinking: %{"type" => "enabled"}` (DeepSeek, z.ai,
+                      Moonshot-style providers that only accept on/off)
+    * `:anthropic`  — sets `thinking: %{"type" => "enabled", "budget_tokens" => n}`
+                      and guarantees `max_tokens` exceeds the budget
+    * `:gemini`     — sets `generationConfig.thinkingConfig.thinkingBudget`
+    * `:responses`  — sets `reasoning: %{"effort" => level}` (Responses API)
+    * `:none`       — no-op
+
+  For `:openai` and `:responses` the effort string is forwarded verbatim —
+  never clamped or rewritten. `"none"` is treated as an explicit disable where
+  the provider only distinguishes on/off (it sets
+  `thinking: %{"type" => "disabled"}`).
+  """
+  def inject_reasoning_effort(body, effort, format)
+
+  def inject_reasoning_effort(body, nil, _format), do: body
+  def inject_reasoning_effort(body, "", _format), do: body
+  def inject_reasoning_effort(body, _effort, :none), do: body
+
+  # OpenAI-style: top-level `reasoning_effort`. The configured value is sent
+  # verbatim — no clamping or rewriting. Which levels a model accepts is the
+  # step author's choice (the UI offers the model's supported set from
+  # models.dev when known); an unsupported level surfaces as a provider error
+  # in the logs rather than being silently downgraded.
+  def inject_reasoning_effort(body, effort, :openai) do
+    if Map.has_key?(body, "reasoning_effort") do
+      body
+    else
+      Map.put(body, "reasoning_effort", effort)
+    end
+  end
+
+  # On/off providers (DeepSeek, z.ai, Moonshot-style). Only the presence of
+  # reasoning matters, not the level.
+  def inject_reasoning_effort(body, effort, :on_off) do
+    cond do
+      Map.has_key?(body, "thinking") ->
+        body
+
+      effort == "none" ->
+        Map.put(body, "thinking", %{"type" => "disabled"})
+
+      true ->
+        Map.put(body, "thinking", %{"type" => "enabled"})
+    end
+  end
+
+  # Anthropic extended thinking with a token budget.
+  def inject_reasoning_effort(body, "none", :anthropic) do
+    if Map.has_key?(body, "thinking"), do: Map.delete(body, "thinking"), else: body
+  end
+
+  def inject_reasoning_effort(body, effort, :anthropic) do
+    if Map.has_key?(body, "thinking") do
+      body
+    else
+      case Map.get(@anthropic_thinking_budget, effort) do
+        nil ->
+          body
+
+        budget ->
+          # Anthropic requires max_tokens > budget_tokens. Bump max_tokens so
+          # there's still headroom for the actual completion.
+          body
+          |> Map.put("thinking", %{"type" => "enabled", "budget_tokens" => budget})
+          |> ensure_anthropic_max_tokens(budget)
+      end
+    end
+  end
+
+  # Google Gemini thinkingConfig.
+  def inject_reasoning_effort(body, "none", :gemini) do
+    put_gemini_thinking(body, 0)
+  end
+
+  def inject_reasoning_effort(body, effort, :gemini) do
+    case Map.get(@gemini_thinking_budget, effort) do
+      nil -> body
+      budget -> put_gemini_thinking(body, budget)
+    end
+  end
+
+  # OpenAI Responses API (Codex backend). `reasoning.effort`, sent verbatim —
+  # same no-clamping policy as :openai above.
+  def inject_reasoning_effort(body, effort, :responses) do
+    if Map.has_key?(body, "reasoning") do
+      body
+    else
+      Map.put(body, "reasoning", %{"effort" => effort})
+    end
+  end
+
+  defp ensure_anthropic_max_tokens(body, budget) do
+    # Reserve headroom for the visible completion after the thinking budget.
+    min_completion = 4_096
+    required = budget + min_completion
+
+    case body["max_tokens"] do
+      n when is_integer(n) and n > budget -> body
+      _ -> Map.put(body, "max_tokens", required)
+    end
+  end
+
+  defp put_gemini_thinking(body, budget) do
+    gen_config = Map.get(body, "generationConfig", %{})
+    thinking_config = Map.get(gen_config, "thinkingConfig", %{})
+
+    # Respect a client-supplied thinkingBudget.
+    if Map.has_key?(thinking_config, "thinkingBudget") do
+      body
+    else
+      thinking_config = Map.put(thinking_config, "thinkingBudget", budget)
+      gen_config = Map.put(gen_config, "thinkingConfig", thinking_config)
+      Map.put(body, "generationConfig", gen_config)
     end
   end
 end

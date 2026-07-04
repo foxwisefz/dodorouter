@@ -77,6 +77,7 @@ defmodule DodoRouterWeb.Router do
       live "/routers/:id", RouterLive.Show, :show
       live "/routers/:id/edit", RouterLive.Show, :edit
       live "/routers/:id/routing", RouterLive.Show, :routing
+      live "/routers/:id/routing/:step_id/edit", RouterLive.Show, :edit_step
 
       live "/providers", ProvidersLive.Index, :index
       live "/api-keys", ApiKeysLive.Index, :index

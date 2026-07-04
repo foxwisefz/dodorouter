@@ -105,53 +105,57 @@ defmodule DodoRouter.Proxy.Adapters.Zai do
     Process.delete(:__zai_stream_raw__)
     start_time = FinchTelemetry.mark_request_start()
 
-    into_fun = fn {:data, data}, {req, resp} ->
-      raw = Process.get(:__zai_stream_raw__, "")
-      Process.put(:__zai_stream_raw__, raw <> data)
+    into_fun = fn
+      {:data, data}, {req, resp} when resp.status != 200 ->
+        Adapter.capture_streamed_error({:data, data}, {req, resp})
 
-      resp =
-        if resp.private[:stream_acc] == nil do
-          ttfb = System.monotonic_time(:millisecond) - start_time
+      {:data, data}, {req, resp} ->
+        raw = Process.get(:__zai_stream_raw__, "")
+        Process.put(:__zai_stream_raw__, raw <> data)
 
-          initial_acc = %{
-            content: "",
-            tool_calls: %{},
-            usage: nil,
-            finish_reason: nil,
-            first_chunk_time: ttfb,
-            sse_buffer: ""
-          }
+        resp =
+          if resp.private[:stream_acc] == nil do
+            ttfb = System.monotonic_time(:millisecond) - start_time
 
-          Req.Response.put_private(resp, :stream_acc, initial_acc)
-        else
-          resp
+            initial_acc = %{
+              content: "",
+              tool_calls: %{},
+              usage: nil,
+              finish_reason: nil,
+              first_chunk_time: ttfb,
+              sse_buffer: ""
+            }
+
+            Req.Response.put_private(resp, :stream_acc, initial_acc)
+          else
+            resp
+          end
+
+        acc = resp.private.stream_acc
+
+        case Adapter.parse_sse_chunk(data, acc.sse_buffer) do
+          {{:chunks, chunks}, buffer} ->
+            reframe_and_send_chunks(send_chunk, chunks)
+            acc = Enum.reduce(chunks, acc, &accumulate_chunk(&2, &1))
+            acc = %{acc | sse_buffer: buffer}
+            Process.put(:__zai_stream_acc__, acc)
+            {:cont, {req, Req.Response.put_private(resp, :stream_acc, acc)}}
+
+          {{:chunks_then_done, chunks}, _buffer} ->
+            reframe_and_send_chunks(send_chunk, chunks)
+            acc = Enum.reduce(chunks, acc, &accumulate_chunk(&2, &1))
+            acc = %{acc | sse_buffer: ""}
+            Process.put(:__zai_stream_acc__, acc)
+            {:halt, {req, Req.Response.put_private(resp, :stream_acc, acc)}}
+
+          {:done, _buffer} ->
+            send_chunk.("data: [DONE]\n\n")
+            {:halt, {req, resp}}
+
+          {:skip, buffer} ->
+            acc = %{acc | sse_buffer: buffer}
+            {:cont, {req, Req.Response.put_private(resp, :stream_acc, acc)}}
         end
-
-      acc = resp.private.stream_acc
-
-      case Adapter.parse_sse_chunk(data, acc.sse_buffer) do
-        {{:chunks, chunks}, buffer} ->
-          reframe_and_send_chunks(send_chunk, chunks)
-          acc = Enum.reduce(chunks, acc, &accumulate_chunk(&2, &1))
-          acc = %{acc | sse_buffer: buffer}
-          Process.put(:__zai_stream_acc__, acc)
-          {:cont, {req, Req.Response.put_private(resp, :stream_acc, acc)}}
-
-        {{:chunks_then_done, chunks}, _buffer} ->
-          reframe_and_send_chunks(send_chunk, chunks)
-          acc = Enum.reduce(chunks, acc, &accumulate_chunk(&2, &1))
-          acc = %{acc | sse_buffer: ""}
-          Process.put(:__zai_stream_acc__, acc)
-          {:halt, {req, Req.Response.put_private(resp, :stream_acc, acc)}}
-
-        {:done, _buffer} ->
-          send_chunk.("data: [DONE]\n\n")
-          {:halt, {req, resp}}
-
-        {:skip, buffer} ->
-          acc = %{acc | sse_buffer: buffer}
-          {:cont, {req, Req.Response.put_private(resp, :stream_acc, acc)}}
-      end
     end
 
     result =
@@ -194,7 +198,8 @@ defmodule DodoRouter.Proxy.Adapters.Zai do
           {:ok, build_final_response(acc, timing_meta), %{headers: resp_headers}}
         end
 
-      {:ok, %Req.Response{status: status, body: body, headers: resp_headers}} ->
+      {:ok, %Req.Response{status: status, headers: resp_headers} = resp} ->
+        body = Adapter.streamed_error_body(resp)
         error_body = if body in ["", nil], do: parse_raw_error(raw_error), else: body
         reason = Adapter.categorize_error(status, error_body)
 
@@ -231,6 +236,7 @@ defmodule DodoRouter.Proxy.Adapters.Zai do
     |> maybe_default("frequency_penalty", nil)
     |> maybe_default("presence_penalty", nil)
     |> maybe_default("stop", nil)
+    |> Adapter.inject_reasoning_effort(step.reasoning_effort, :on_off)
   end
 
   # Only set default if client didn't provide a value

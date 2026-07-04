@@ -12,6 +12,7 @@ defmodule DodoRouter.Proxy.Adapters.Google do
     endpoints: %{
       "google" => "https://generativelanguage.googleapis.com/v1beta"
     },
+    endpoint_path: "/models/{model}",
     models: ~w(gemini-2.0-flash gemini-2.5-pro gemini-2.5-flash gemini-1.5-pro gemini-1.5-flash),
     color: "blue",
     short_description: "Gemini 2.0, 2.5, 1.5 models"
@@ -29,7 +30,7 @@ defmodule DodoRouter.Proxy.Adapters.Google do
     url =
       "https://generativelanguage.googleapis.com/v1beta/models/#{step.model}:generateContent?key=#{api_key}"
 
-    body = build_gemini_request(request)
+    body = build_gemini_request(request, step)
 
     headers = [{"Content-Type", "application/json"}]
     payload_size_bytes = body |> Jason.encode!() |> byte_size()
@@ -75,45 +76,49 @@ defmodule DodoRouter.Proxy.Adapters.Google do
     url =
       "https://generativelanguage.googleapis.com/v1beta/models/#{step.model}:streamGenerateContent?key=#{api_key}&alt=sse"
 
-    body = build_gemini_request(request)
+    body = build_gemini_request(request, step)
 
     headers = [{"Content-Type", "application/json"}]
     payload_size_bytes = body |> Jason.encode!() |> byte_size()
     start_time = FinchTelemetry.mark_request_start()
     Process.delete(:__google_stream_acc__)
 
-    into_fun = fn {:data, data}, {req, resp} ->
-      resp =
-        if resp.private[:stream_acc] == nil do
-          ttfb = System.monotonic_time(:millisecond) - start_time
+    into_fun = fn
+      {:data, data}, {req, resp} when resp.status != 200 ->
+        Adapter.capture_streamed_error({:data, data}, {req, resp})
 
-          initial_acc = %{
-            content: "",
-            usage: nil,
-            finish_reason: nil,
-            first_chunk_time: ttfb,
-            sse_buffer: ""
-          }
+      {:data, data}, {req, resp} ->
+        resp =
+          if resp.private[:stream_acc] == nil do
+            ttfb = System.monotonic_time(:millisecond) - start_time
 
-          Req.Response.put_private(resp, :stream_acc, initial_acc)
-        else
-          resp
+            initial_acc = %{
+              content: "",
+              usage: nil,
+              finish_reason: nil,
+              first_chunk_time: ttfb,
+              sse_buffer: ""
+            }
+
+            Req.Response.put_private(resp, :stream_acc, initial_acc)
+          else
+            resp
+          end
+
+        acc = resp.private.stream_acc
+
+        case parse_gemini_sse(data, acc.sse_buffer) do
+          {{:chunks, chunks}, buffer} ->
+            {new_acc, openai_chunks} = process_gemini_chunks(acc, chunks)
+            Enum.each(openai_chunks, &send_chunk.(&1))
+            new_acc = %{new_acc | sse_buffer: buffer}
+            Process.put(:__google_stream_acc__, new_acc)
+            {:cont, {req, Req.Response.put_private(resp, :stream_acc, new_acc)}}
+
+          {:skip, buffer} ->
+            acc = %{acc | sse_buffer: buffer}
+            {:cont, {req, Req.Response.put_private(resp, :stream_acc, acc)}}
         end
-
-      acc = resp.private.stream_acc
-
-      case parse_gemini_sse(data, acc.sse_buffer) do
-        {{:chunks, chunks}, buffer} ->
-          {new_acc, openai_chunks} = process_gemini_chunks(acc, chunks)
-          Enum.each(openai_chunks, &send_chunk.(&1))
-          new_acc = %{new_acc | sse_buffer: buffer}
-          Process.put(:__google_stream_acc__, new_acc)
-          {:cont, {req, Req.Response.put_private(resp, :stream_acc, new_acc)}}
-
-        {:skip, buffer} ->
-          acc = %{acc | sse_buffer: buffer}
-          {:cont, {req, Req.Response.put_private(resp, :stream_acc, acc)}}
-      end
     end
 
     result =
@@ -135,7 +140,8 @@ defmodule DodoRouter.Proxy.Adapters.Google do
 
         {:ok, build_final_response(acc, timing_meta), %{headers: resp.headers}}
 
-      {:ok, %Req.Response{status: status, body: body, headers: resp_headers}} ->
+      {:ok, %Req.Response{status: status, headers: resp_headers} = resp} ->
+        body = Adapter.streamed_error_body(resp)
         reason = Adapter.categorize_error(status, body)
 
         {:error, reason,
@@ -149,7 +155,7 @@ defmodule DodoRouter.Proxy.Adapters.Google do
     end
   end
 
-  def build_gemini_request(request) do
+  def build_gemini_request(request, step \\ nil) do
     messages = request["messages"] || []
     {system_instruction, contents} = extract_system_and_contents(messages)
 
@@ -190,6 +196,9 @@ defmodule DodoRouter.Proxy.Adapters.Google do
       else
         body
       end
+
+    body =
+      Adapter.inject_reasoning_effort(body, step && step.reasoning_effort, :gemini)
 
     Map.put(body, "safetySettings", default_safety_settings())
   end

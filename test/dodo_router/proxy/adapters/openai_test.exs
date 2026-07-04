@@ -35,5 +35,21 @@ defmodule DodoRouter.Proxy.Adapters.OpenAITest do
       assert body["max_tokens"] == 100
       refute Map.has_key?(body, "max_completion_tokens")
     end
+
+    test "injects reasoning_effort from routing step" do
+      request = %{"messages" => [%{"role" => "user", "content" => "hi"}]}
+      step = %RoutingStep{model: "o3-mini", reasoning_effort: "high"}
+
+      body = OpenAI.build_request_body(request, step)
+      assert body["reasoning_effort"] == "high"
+    end
+
+    test "does not override client reasoning_effort" do
+      request = %{"messages" => [], "reasoning_effort" => "low"}
+      step = %RoutingStep{model: "o3-mini", reasoning_effort: "high"}
+
+      body = OpenAI.build_request_body(request, step)
+      assert body["reasoning_effort"] == "low"
+    end
   end
 end

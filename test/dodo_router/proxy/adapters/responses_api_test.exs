@@ -88,6 +88,32 @@ defmodule DodoRouter.Proxy.Adapters.ResponsesAPITest do
       assert function_output["output"] == "Sunny, 72F"
     end
 
+    test "injects reasoning.effort from routing step" do
+      request = %{"messages" => [%{"role" => "user", "content" => "Hi"}]}
+      step = %RoutingStep{model: "gpt-5.5", reasoning_effort: "high"}
+
+      body = ResponsesAPI.build_request_body(request, step)
+      assert body["reasoning"] == %{"effort" => "high"}
+    end
+
+    test "does not override client reasoning" do
+      request = %{"messages" => [], "reasoning" => %{"effort" => "low"}}
+      step = %RoutingStep{model: "gpt-5.5", reasoning_effort: "high"}
+
+      body = ResponsesAPI.build_request_body(request, step)
+      assert body["reasoning"] == %{"effort" => "low"}
+    end
+
+    test "client reasoning_effort (from Responses inbound conversion) wins over step default" do
+      request = %{"messages" => [], "reasoning_effort" => "low"}
+      step = %RoutingStep{model: "gpt-5.5", reasoning_effort: "high"}
+
+      body = ResponsesAPI.build_request_body(request, step)
+      assert body["reasoning"] == %{"effort" => "low"}
+    end
+  end
+
+  describe "tool/function calling" do
     test "converts tools to Responses API format" do
       request = %{
         "messages" => [%{"role" => "user", "content" => "Hi"}],

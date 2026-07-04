@@ -9,6 +9,14 @@ defmodule DodoRouter.Routers.RoutingStep do
 
   @plan_types ~w(standard coding)
 
+  # Canonical reasoning effort levels offered by the UI when the model's
+  # actual supported set is unknown (see Models.reasoning_efforts_for/2).
+  # nil (unset) means "don't inject any reasoning control" — providers use
+  # their own defaults or honor a client-supplied value instead.
+  # Any string is accepted and forwarded verbatim; this list is not a
+  # validation whitelist.
+  @reasoning_efforts ~w(none minimal low medium high xhigh max)
+
   schema "routing_steps" do
     field :position, :integer
     field :provider, :string
@@ -17,6 +25,7 @@ defmodule DodoRouter.Routers.RoutingStep do
     field :temperature, :float
     field :max_tokens, :integer
     field :thinking_enabled, :boolean
+    field :reasoning_effort, :string
 
     belongs_to :router, DodoRouter.Routers.Router
     belongs_to :provider_key, DodoRouter.Providers.ProviderKey
@@ -34,6 +43,7 @@ defmodule DodoRouter.Routers.RoutingStep do
       :temperature,
       :max_tokens,
       :thinking_enabled,
+      :reasoning_effort,
       :router_id,
       :provider_key_id
     ])
@@ -43,6 +53,7 @@ defmodule DodoRouter.Routers.RoutingStep do
     |> validate_number(:position, greater_than_or_equal_to: 0)
     |> validate_number(:temperature, greater_than_or_equal_to: 0.0, less_than_or_equal_to: 2.0)
     |> validate_number(:max_tokens, greater_than: 0)
+    |> validate_length(:reasoning_effort, max: 32)
     |> foreign_key_constraint(:router_id)
     |> foreign_key_constraint(:provider_key_id)
     |> unique_constraint([:router_id, :position])
@@ -58,6 +69,7 @@ defmodule DodoRouter.Routers.RoutingStep do
 
   def providers, do: Registry.providers()
   def plan_types, do: @plan_types
+  def reasoning_efforts, do: @reasoning_efforts
 
   def available_models(provider), do: Registry.available_models(provider)
 end
