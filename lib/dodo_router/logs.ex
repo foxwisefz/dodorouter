@@ -139,6 +139,18 @@ defmodule DodoRouter.Logs do
 
   def get_log_by_request_id(request_id), do: Repo.get_by(RequestLog, request_id: request_id)
 
+  @doc """
+  Lists logs produced by replaying the given log, oldest first.
+  """
+  def list_replays(%RequestLog{id: id}) do
+    from(l in RequestLog,
+      where: l.replayed_from_id == ^id,
+      order_by: [asc: l.inserted_at],
+      preload: [:router]
+    )
+    |> Repo.all()
+  end
+
   def toggle_favorite(%User{} = user, id_or_request_id) do
     log = get_log(user, id_or_request_id) || get_log_by_request_id(user, id_or_request_id)
 

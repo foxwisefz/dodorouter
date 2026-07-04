@@ -16,13 +16,12 @@ defmodule DodoRouter.Proxy do
   """
   def dispatch(%Router{} = router, request, opts \\ []) do
     request_id = Keyword.get(opts, :request_id, Ecto.UUID.generate())
-    session = Keyword.get(opts, :session, %{})
-    recording_id = Keyword.get(opts, :recording_id)
     start_time = System.monotonic_time(:millisecond)
     streaming = Keyword.get(opts, :stream, false)
     client_headers = Keyword.get(opts, :client_headers, [])
 
-    steps = Routers.list_routing_steps(router)
+    # Replay and other server-initiated dispatches inject their own steps
+    steps = Keyword.get(opts, :steps) || Routers.list_routing_steps(router)
 
     if Enum.empty?(steps) do
       {:error, :no_routing_configured}
@@ -42,16 +41,7 @@ defmodule DodoRouter.Proxy do
           |> Keyword.put(:fail_on_context_overflow, router.fail_on_context_overflow)
         )
 
-      log_request(
-        router,
-        request,
-        result,
-        request_id,
-        start_time,
-        session,
-        recording_id,
-        client_headers
-      )
+      log = log_request(router, request, result, request_id, start_time, opts)
 
       broadcast_event(router, result, request_id)
 
@@ -60,7 +50,7 @@ defmodule DodoRouter.Proxy do
 
       case result.status do
         status when status in [:success, :fallback] ->
-          {:ok, result.final_response, %{provider_ms: provider_ms}}
+          {:ok, result.final_response, %{provider_ms: provider_ms, log: log}}
 
         :error ->
           {:error, :all_providers_failed, result.attempted_steps}
@@ -75,16 +65,10 @@ defmodule DodoRouter.Proxy do
     dispatch(router, request, Keyword.merge(opts, stream: true, send_chunk: send_chunk))
   end
 
-  defp log_request(
-         router,
-         request,
-         result,
-         request_id,
-         start_time,
-         session,
-         recording_id,
-         client_headers
-       ) do
+  defp log_request(router, request, result, request_id, start_time, opts) do
+    session = Keyword.get(opts, :session, %{})
+    recording_id = Keyword.get(opts, :recording_id)
+    client_headers = Keyword.get(opts, :client_headers, [])
     latency_ms = System.monotonic_time(:millisecond) - start_time
 
     {call_type, tools_invoked} =
@@ -144,10 +128,22 @@ defmodule DodoRouter.Proxy do
       truncation_flags: truncation_flags,
       estimated_cost_usd: estimated_cost,
       request_headers: encode_redacted_headers(client_headers),
-      response_headers: encode_redacted_headers(result.response_headers)
+      response_headers: encode_redacted_headers(result.response_headers),
+      replayed_from_id: Keyword.get(opts, :replayed_from_id)
     }
 
-    Logs.create_log_async(log_attrs)
+    # :sync callers (e.g. replay) need the persisted row back before returning
+    case Keyword.get(opts, :log_mode, :async) do
+      :sync ->
+        case Logs.create_log(log_attrs) do
+          {:ok, log} -> log
+          {:error, _changeset} -> nil
+        end
+
+      _ ->
+        _ = Logs.create_log_async(log_attrs)
+        nil
+    end
   end
 
   @doc false
@@ -157,8 +153,8 @@ defmodule DodoRouter.Proxy do
     cond do
       is_binary(last_error) ->
         case Jason.decode(last_error) do
-          {:ok, decoded} -> decoded |> clean_response() |> truncate_body()
-          {:error, _} -> {%{"_raw_error" => last_error}, []}
+          {:ok, decoded} when is_map(decoded) -> decoded |> clean_response() |> truncate_body()
+          _ -> {%{"_raw_error" => last_error}, []}
         end
 
       is_map(last_error) ->

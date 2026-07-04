@@ -275,7 +275,16 @@ defmodule DodoRouterWeb.LogLive.Index do
                 </.link>
               </td>
               <td class="px-4 py-2.5">
-                <.status_badge status={log.status} />
+                <div class="flex items-center gap-1.5">
+                  <.status_badge status={log.status} />
+                  <span
+                    :if={Map.get(log, :replayed_from_id)}
+                    class="badge badge-ghost badge-xs gap-0.5"
+                    title="Created by replaying another log"
+                  >
+                    <.icon name="hero-arrow-path" class="w-2.5 h-2.5" /> replay
+                  </span>
+                </div>
               </td>
               <td class="px-4 py-2.5 text-sm hidden sm:table-cell">
                 <%= if is_list(Map.get(log, :attempted_steps)) and length(log.attempted_steps) > 1 do %>

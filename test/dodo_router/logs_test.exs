@@ -141,6 +141,62 @@ defmodule DodoRouter.LogsTest do
     end
   end
 
+  describe "replay linkage" do
+    test "create_log/1 persists replayed_from_id" do
+      {router, _api_key} = RoutersFixtures.router_fixture()
+      original = LogsFixtures.log_fixture(router)
+
+      {:ok, replay} =
+        Logs.create_log(%{
+          router_id: router.id,
+          request_id: Ecto.UUID.generate(),
+          status: "success",
+          final_provider: "test_provider",
+          final_model: "other-model",
+          replayed_from_id: original.id
+        })
+
+      assert replay.replayed_from_id == original.id
+    end
+
+    test "create_log/1 rejects a replayed_from_id that doesn't exist" do
+      {router, _api_key} = RoutersFixtures.router_fixture()
+
+      assert {:error, changeset} =
+               Logs.create_log(%{
+                 router_id: router.id,
+                 request_id: Ecto.UUID.generate(),
+                 status: "success",
+                 replayed_from_id: Ecto.UUID.generate()
+               })
+
+      assert %{replayed_from_id: ["does not exist"]} = errors_on(changeset)
+    end
+
+    test "list_replays/1 returns replays of a log, oldest first" do
+      {router, _api_key} = RoutersFixtures.router_fixture()
+      original = LogsFixtures.log_fixture(router)
+      other = LogsFixtures.log_fixture(router)
+
+      first =
+        LogsFixtures.log_fixture(router, %{
+          replayed_from_id: original.id,
+          final_model: "model-a",
+          inserted_at: DateTime.add(DateTime.utc_now(), -60, :second)
+        })
+
+      second =
+        LogsFixtures.log_fixture(router, %{
+          replayed_from_id: original.id,
+          final_model: "model-b"
+        })
+
+      _unrelated = LogsFixtures.log_fixture(router, %{replayed_from_id: other.id})
+
+      assert Logs.list_replays(original) |> Enum.map(& &1.id) == [first.id, second.id]
+    end
+  end
+
   describe "list_logs_for_recording/2" do
     test "returns logs for specific recording" do
       {router, _api_key} = RoutersFixtures.router_fixture()

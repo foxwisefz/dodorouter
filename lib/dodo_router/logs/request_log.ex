@@ -62,6 +62,10 @@ defmodule DodoRouter.Logs.RequestLog do
 
     belongs_to :router, DodoRouter.Routers.Router
 
+    # Replay linkage: set when this log was produced by re-running another log
+    belongs_to :replayed_from, __MODULE__
+    has_many :replays, __MODULE__, foreign_key: :replayed_from_id
+
     field :inserted_at, :utc_datetime_usec
   end
 
@@ -97,7 +101,8 @@ defmodule DodoRouter.Logs.RequestLog do
       :session_name,
       :recording_id,
       :truncation_flags,
-      :favorite
+      :favorite,
+      :replayed_from_id
     ])
     |> validate_required([:router_id, :request_id, :status, :inserted_at])
     |> validate_inclusion(:status, @statuses)
@@ -105,6 +110,7 @@ defmodule DodoRouter.Logs.RequestLog do
     |> validate_length(:session_id, max: 255)
     |> validate_length(:session_name, max: 255)
     |> foreign_key_constraint(:router_id)
+    |> foreign_key_constraint(:replayed_from_id)
     |> unique_constraint(:request_id)
   end
 

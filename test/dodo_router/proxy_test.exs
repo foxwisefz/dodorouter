@@ -1,7 +1,95 @@
 defmodule DodoRouter.ProxyTest do
   use DodoRouter.DataCase, async: true
 
+  alias DodoRouter.Logs
+  alias DodoRouter.Logs.RequestLog
   alias DodoRouter.Proxy
+  alias DodoRouter.Routers.RoutingStep
+  alias DodoRouter.AccountsFixtures
+  alias DodoRouter.LogsFixtures
+  alias DodoRouter.ProvidersFixtures
+  alias DodoRouter.RoutersFixtures
+
+  describe "dispatch/3 with :steps override and :log_mode :sync" do
+    setup do
+      user = AccountsFixtures.user_fixture()
+      {router, _api_key} = RoutersFixtures.router_fixture(user)
+      provider_key = ProvidersFixtures.provider_key_fixture(user)
+
+      step = %RoutingStep{
+        id: Ecto.UUID.generate(),
+        router_id: router.id,
+        position: 0,
+        provider: "test_provider",
+        model: "test-model",
+        plan_type: "standard",
+        provider_key: provider_key,
+        provider_key_id: provider_key.id
+      }
+
+      request = %{
+        "model" => "ignored-by-routing",
+        "messages" => [%{"role" => "user", "content" => "hi"}]
+      }
+
+      %{user: user, router: router, step: step, request: request}
+    end
+
+    test "without override the router has no routing configured", ctx do
+      assert {:error, :no_routing_configured} = Proxy.dispatch(ctx.router, ctx.request)
+    end
+
+    test "dispatches through the provided steps instead of the router chain", ctx do
+      assert {:ok, response, _meta} =
+               Proxy.dispatch(ctx.router, ctx.request, steps: [ctx.step])
+
+      assert get_in(response, ["choices", Access.at(0), "message", "content"]) ==
+               "Hello from test-model"
+    end
+
+    test "meta log is nil unless log_mode is :sync", ctx do
+      assert {:ok, _response, meta} = Proxy.dispatch(ctx.router, ctx.request, steps: [ctx.step])
+      assert meta.log == nil
+    end
+
+    test "log_mode :sync returns the persisted log in dispatch meta", ctx do
+      assert {:ok, _response, %{log: %RequestLog{} = log}} =
+               Proxy.dispatch(ctx.router, ctx.request, steps: [ctx.step], log_mode: :sync)
+
+      assert log.final_model == "test-model"
+      assert log.status == "success"
+      assert Repo.get!(RequestLog, log.id)
+    end
+
+    test "threads replayed_from_id into the persisted log", ctx do
+      original = LogsFixtures.log_fixture(ctx.router)
+
+      assert {:ok, _response, %{log: %RequestLog{} = log}} =
+               Proxy.dispatch(ctx.router, ctx.request,
+                 steps: [ctx.step],
+                 log_mode: :sync,
+                 replayed_from_id: original.id
+               )
+
+      assert log.replayed_from_id == original.id
+      assert Logs.list_replays(original) |> Enum.map(& &1.id) == [log.id]
+    end
+
+    test "sync logging persists an error log retrievable by request_id when the step fails",
+         ctx do
+      keyless_step = %{ctx.step | provider_key: nil, provider_key_id: nil}
+      request_id = Ecto.UUID.generate()
+
+      assert {:error, :all_providers_failed, _attempts} =
+               Proxy.dispatch(ctx.router, ctx.request,
+                 steps: [keyless_step],
+                 log_mode: :sync,
+                 request_id: request_id
+               )
+
+      assert %RequestLog{status: "error"} = Logs.get_log_by_request_id(request_id)
+    end
+  end
 
   describe "error_response/1" do
     test "returns 400 with standardized context overflow error" do

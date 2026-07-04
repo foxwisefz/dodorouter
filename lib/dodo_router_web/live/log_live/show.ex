@@ -120,6 +120,22 @@ defmodule DodoRouterWeb.LogLive.Show do
           <h1 class="text-2xl font-bold">Request Details</h1>
           <code class="text-sm text-base-content/60">{@log.request_id}</code>
         </div>
+        <.link
+          :if={@log.replayed_from_id}
+          id="replay-of-link"
+          navigate={~p"/logs/#{@log.replayed_from_id}/replay?replay=#{@log.id}"}
+          class="badge badge-ghost gap-1"
+          title="This log is a replay — compare it with its original"
+        >
+          <.icon name="hero-arrow-uturn-left" class="w-3 h-3" /> replay
+        </.link>
+        <.link
+          id="replay-button"
+          navigate={~p"/logs/#{@log.id}/replay"}
+          class="btn btn-primary btn-soft btn-sm gap-2"
+        >
+          <.icon name="hero-arrow-path" class="w-4 h-4" /> Replay
+        </.link>
         <button
           type="button"
           id="favorite-button"
