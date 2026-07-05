@@ -22,15 +22,66 @@ defmodule DodoRouterWeb.RouterShowLiveTest do
     end
 
     test "shows API usage snippet", %{conn: conn, router: router} do
-      {:ok, live, _html} = live(conn, ~p"/routers/#{router.id}")
-
-      html =
-        live
-        |> element("button[phx-click=\"toggle_connect\"]")
-        |> render_click()
+      # Connect is expanded by default on a router with no traffic yet
+      {:ok, _live, html} = live(conn, ~p"/routers/#{router.id}")
 
       assert html =~ "curl"
       assert html =~ router.slug
+    end
+
+    test "fresh router shows the getting-started checklist and open Connect panel", %{
+      conn: conn,
+      router: router
+    } do
+      {:ok, live, html} = live(conn, ~p"/routers/#{router.id}")
+
+      assert has_element?(live, "#setup-checklist")
+      assert html =~ "0/4 done"
+      # Connect must be expanded for a router with no traffic — the first
+      # code snippet is the next thing a new user needs.
+      assert html =~ "curl"
+    end
+
+    test "checklist tracks progress and disappears once the router is live", %{
+      conn: conn,
+      router: router,
+      user: user
+    } do
+      key =
+        DodoRouter.ProvidersFixtures.provider_key_fixture(user, %{
+          "provider_slug" => "zai_standard"
+        })
+
+      {:ok, step} =
+        DodoRouter.Routers.create_routing_step(router, %{
+          "provider" => "zai",
+          "model" => "glm-4.7"
+        })
+
+      {:ok, _step} = DodoRouter.Routers.update_routing_step(step, %{provider_key_id: key.id})
+
+      {:ok, live, html} = live(conn, ~p"/routers/#{router.id}")
+      assert html =~ "3/4 done"
+
+      LogsFixtures.log_fixture(router, %{status: "success"})
+
+      # The already-open page hears the new log over PubSub and completes live
+      refute render(live) =~ "setup-checklist"
+
+      {:ok, live2, _html} = live(conn, ~p"/routers/#{router.id}")
+      refute has_element?(live2, "#setup-checklist")
+    end
+
+    test "add-step modal preselects the provider the user has a key for", %{
+      conn: conn,
+      router: router,
+      user: user
+    } do
+      DodoRouter.ProvidersFixtures.provider_key_fixture(user, %{"provider_slug" => "moonshot"})
+
+      {:ok, _live, html} = live(conn, ~p"/routers/#{router.id}/routing")
+
+      assert html =~ ~r/<option[^>]*value="moonshot"[^>]*selected/
     end
 
     test "add-step modal warns when the user has no keys for the provider", %{
@@ -65,12 +116,8 @@ defmodule DodoRouterWeb.RouterShowLiveTest do
     end
 
     test "can switch code language and format", %{conn: conn, router: router} do
+      # Connect starts expanded for a router with no traffic
       {:ok, live, _html} = live(conn, ~p"/routers/#{router.id}")
-
-      # Expand Connect section first
-      live
-      |> element("button[phx-click=\"toggle_connect\"]")
-      |> render_click()
 
       # Switch to Python
       html =

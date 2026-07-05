@@ -35,8 +35,9 @@ defmodule DodoRouterWeb.RouterLive.Show do
       |> assign(:has_logs, length(recent_logs) > 0)
       |> assign(:api_format, "openai_chat")
       |> assign(:code_language, "curl")
-      |> assign(:connect_collapsed, true)
+      |> assign(:connect_collapsed, length(recent_logs) > 0)
       |> assign(:provider_keys, provider_keys)
+      |> assign(:steps_list, router.routing_steps)
       |> stream(:routing_steps, router.routing_steps)
       |> stream(:recent_logs, recent_logs)
 
@@ -61,7 +62,7 @@ defmodule DodoRouterWeb.RouterLive.Show do
     |> assign(:page_title, "Routing - #{socket.assigns.router.name}")
     |> assign(:new_step, %RoutingStep{})
     |> assign(:editing_step, nil)
-    |> assign(:step_provider, "zai")
+    |> assign(:step_provider, default_step_provider(socket.assigns.provider_keys))
     |> assign(:step_model, "")
     |> assign(:step_model_custom, false)
     |> assign_step_efforts()
@@ -196,6 +197,7 @@ defmodule DodoRouterWeb.RouterLive.Show do
          socket
          |> stream_insert(:routing_steps, step)
          |> assign(:has_routing_steps, true)
+         |> assign(:steps_list, Routers.list_routing_steps(socket.assigns.router))
          |> put_flash(:info, "Step added")
          |> push_patch(to: ~p"/routers/#{socket.assigns.router}")}
 
@@ -241,6 +243,7 @@ defmodule DodoRouterWeb.RouterLive.Show do
     {:noreply,
      socket
      |> stream_delete(:routing_steps, step)
+     |> assign(:steps_list, remaining)
      |> assign(:has_routing_steps, length(remaining) > 0)}
   end
 
@@ -257,7 +260,10 @@ defmodule DodoRouterWeb.RouterLive.Show do
       Routers.reorder_routing_steps(socket.assigns.router, new_order)
       updated_steps = Routers.list_routing_steps(socket.assigns.router)
 
-      {:noreply, stream(socket, :routing_steps, updated_steps, reset: true)}
+      {:noreply,
+       socket
+       |> assign(:steps_list, updated_steps)
+       |> stream(:routing_steps, updated_steps, reset: true)}
     else
       {:noreply, socket}
     end
@@ -276,7 +282,10 @@ defmodule DodoRouterWeb.RouterLive.Show do
       Routers.reorder_routing_steps(socket.assigns.router, new_order)
       updated_steps = Routers.list_routing_steps(socket.assigns.router)
 
-      {:noreply, stream(socket, :routing_steps, updated_steps, reset: true)}
+      {:noreply,
+       socket
+       |> assign(:steps_list, updated_steps)
+       |> stream(:routing_steps, updated_steps, reset: true)}
     else
       {:noreply, socket}
     end
@@ -289,7 +298,11 @@ defmodule DodoRouterWeb.RouterLive.Show do
     case Routers.update_routing_step(step, %{provider_key_id: provider_key_id}) do
       {:ok, _updated_step} ->
         updated_steps = Routers.list_routing_steps(socket.assigns.router)
-        {:noreply, stream(socket, :routing_steps, updated_steps, reset: true)}
+
+        {:noreply,
+         socket
+         |> assign(:steps_list, updated_steps)
+         |> stream(:routing_steps, updated_steps, reset: true)}
 
       {:error, _} ->
         {:noreply, put_flash(socket, :error, "Failed to assign API key")}
@@ -494,6 +507,59 @@ defmodule DodoRouterWeb.RouterLive.Show do
           </div>
         </div>
         
+    <!-- Getting started checklist -->
+        <% setup = setup_state(assigns) %>
+        <div :if={not setup_complete?(setup)} id="setup-checklist" class="card-bordered mb-8 p-5">
+          <div class="flex items-center justify-between mb-3">
+            <h2 class="text-sm font-semibold text-base-content">
+              Get this router serving requests
+            </h2>
+            <span class="text-xs text-base-content/50">
+              {Enum.count([setup.keys, setup.steps, setup.assigned, setup.request], & &1)}/4 done
+            </span>
+          </div>
+          <ol class="space-y-1">
+            <.setup_item n={1} done={setup.keys} label="Add a provider API key">
+              <:action>
+                <.link
+                  navigate={~p"/providers"}
+                  class="text-xs font-medium text-primary hover:underline"
+                >
+                  Open Providers →
+                </.link>
+              </:action>
+            </.setup_item>
+            <.setup_item n={2} done={setup.steps} label="Add a routing step (provider + model)">
+              <:action>
+                <.link
+                  patch={~p"/routers/#{@router}/routing"}
+                  class="text-xs font-medium text-primary hover:underline"
+                >
+                  Add step →
+                </.link>
+              </:action>
+            </.setup_item>
+            <.setup_item n={3} done={setup.assigned} label="Assign an API key to every step">
+              <:action>
+                <a
+                  :if={setup.steps}
+                  href="#routing-chain-container"
+                  class="text-xs font-medium text-primary hover:underline"
+                >
+                  Go to chain →
+                </a>
+              </:action>
+            </.setup_item>
+            <.setup_item n={4} done={setup.request} label="Send your first request">
+              <:action>
+                <a href="#connect" class="text-xs font-medium text-primary hover:underline">
+                  See code snippets →
+                </a>
+              </:action>
+            </.setup_item>
+          </ol>
+        </div>
+        
     <!-- Stats -->
         <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-8">
           <div class="stat-card">
@@ -515,7 +581,7 @@ defmodule DodoRouterWeb.RouterLive.Show do
         </div>
         
     <!-- Connect -->
-        <div class="card-bordered mb-8">
+        <div id="connect" class="card-bordered mb-8">
           <div class="flex items-center justify-between mb-0">
             <button
               phx-click="toggle_connect"
@@ -1446,6 +1512,49 @@ defmodule DodoRouterWeb.RouterLive.Show do
       messages: [{ role: 'user', content: 'Hello!' }]
     });
     console.log(response.content[0].text);
+    """
+  end
+
+  # New users get the provider they already added a key for preselected.
+  defp default_step_provider([]), do: "zai"
+  defp default_step_provider([key | _]), do: Registry.adapter_provider(key.provider_slug)
+
+  defp setup_state(assigns) do
+    steps = assigns.steps_list
+
+    %{
+      keys: assigns.provider_keys != [],
+      steps: steps != [],
+      assigned: steps != [] and Enum.all?(steps, & &1.provider_key_id),
+      request: assigns.has_logs or assigns.stats.total_requests > 0
+    }
+  end
+
+  defp setup_complete?(setup) do
+    setup.keys and setup.steps and setup.assigned and setup.request
+  end
+
+  attr :n, :integer, required: true
+  attr :done, :boolean, required: true
+  attr :label, :string, required: true
+  slot :action
+
+  defp setup_item(assigns) do
+    ~H"""
+    <li class="flex items-center gap-2.5 text-sm py-1">
+      <span class={[
+        "flex h-5 w-5 items-center justify-center rounded-full shrink-0",
+        @done && "bg-go/15 text-go",
+        !@done && "border border-base-300 text-base-content/40"
+      ]}>
+        <.icon :if={@done} name="hero-check" class="size-3" />
+        <span :if={!@done} class="text-[10px] font-bold">{@n}</span>
+      </span>
+      <span class={[@done && "text-base-content/40 line-through"]}>{@label}</span>
+      <span :if={@action != [] and not @done} class="ml-auto">
+        {render_slot(@action)}
+      </span>
+    </li>
     """
   end
 
