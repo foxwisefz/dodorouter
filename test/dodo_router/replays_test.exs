@@ -379,6 +379,35 @@ defmodule DodoRouter.ReplaysTest do
       assert Enum.any?(models, &(&1.id == "test-model"))
     end
 
+    test "coding-plan keys offer their plan catalog alongside the provider's", ctx do
+      {:ok, _} =
+        DodoRouter.Models.create_model(%{
+          provider_slug: "moonshot_coding",
+          model_id: "k2p6",
+          display_name: "Kimi K2.6 (coding plan)"
+        })
+
+      {:ok, _} =
+        DodoRouter.Models.create_model(%{
+          provider_slug: "moonshot",
+          model_id: "kimi-k2.6",
+          display_name: "Kimi K2.6"
+        })
+
+      coding_key =
+        ProvidersFixtures.provider_key_fixture(ctx.user, %{provider_slug: "moonshot_coding"})
+
+      target =
+        ctx.user
+        |> Replays.list_targets()
+        |> Enum.find(&(&1.provider_key.id == coding_key.id))
+
+      assert target.provider == "moonshot"
+      model_ids = Enum.map(target.models, & &1.id)
+      assert "k2p6" in model_ids
+      assert "kimi-k2.6" in model_ids
+    end
+
     test "returns no targets for a user without keys", _ctx do
       keyless_user = AccountsFixtures.user_fixture()
       assert Replays.list_targets(keyless_user) == []
