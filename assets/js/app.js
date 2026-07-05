@@ -26,6 +26,7 @@ import {hooks as colocatedHooks} from "phoenix-colocated/dodo_router"
 import {RequestFlowAnimation} from "./request_flow_animation"
 import {LogEntryAnimations} from "./log_entry_animations"
 import {CopyButton} from "./copy_button"
+import {ScrollRail} from "./scroll_rail"
 
 const ScrollIntoView = {
   mounted() {
@@ -38,7 +39,7 @@ const csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute
 const liveSocket = new LiveSocket("/live", Socket, {
   longPollFallbackMs: 2500,
   params: {_csrf_token: csrfToken},
-  hooks: {...colocatedHooks, RequestFlowAnimation, LogEntryAnimations, CopyButton, ScrollIntoView},
+  hooks: {...colocatedHooks, RequestFlowAnimation, LogEntryAnimations, CopyButton, ScrollIntoView, ScrollRail},
 })
 
 // Show progress bar on live navigation and form submits

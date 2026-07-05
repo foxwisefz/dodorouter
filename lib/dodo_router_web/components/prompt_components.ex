@@ -439,8 +439,10 @@ defmodule DodoRouterWeb.PromptComponents do
 
   defp role_styles("user", _), do: {"bg-primary text-primary-content", "text-primary/70", "you"}
 
+  # NB: text-secondary is invisible here — `secondary` is a surface tint in
+  # this design system (96% white / 14% black), not a text accent
   defp role_styles("assistant", true),
-    do: {"bg-base-200 border border-base-300/40", "text-secondary", "assistant"}
+    do: {"bg-base-200 border border-base-300/40", "text-base-content/70", "assistant"}
 
   defp role_styles("assistant", false),
     do: {"bg-base-200/60 border border-base-300/30", "text-base-content/50", "assistant"}

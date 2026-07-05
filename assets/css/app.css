@@ -126,6 +126,12 @@ details[open] > summary .md-arrow {
    DodoRouter Design System
    ============================================ */
 
+/* Rail dash for the message currently in view (toggled by the ScrollRail hook) */
+.scroll-rail-active {
+  transform: scaleX(1.8);
+  background-color: var(--color-primary) !important;
+}
+
 /* Card - minimal, for content sections that need containment */
 .card-bordered {
   @apply rounded-xl p-5 bg-base-100 border border-base-300/50;

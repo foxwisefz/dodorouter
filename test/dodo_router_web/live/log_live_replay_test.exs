@@ -583,8 +583,32 @@ defmodule DodoRouterWeb.LogLiveReplayTest do
 
       assert has_element?(view, "#message-0")
       assert has_element?(view, "#message-4")
-      assert has_element?(view, "#scroll-rail")
-      assert has_element?(view, ~s(#scroll-rail a[href="#message-2"]))
+      assert has_element?(view, ~s(#scroll-rail[phx-hook="ScrollRail"]))
+      assert has_element?(view, ~s(#scroll-rail a[href="#message-2"][data-from="2"][data-to="2"]))
+    end
+
+    test "long conversations bucket the rail instead of overflowing", %{
+      conn: conn,
+      router: router
+    } do
+      messages =
+        Enum.map(0..119, fn i ->
+          role = if rem(i, 4) == 0, do: "user", else: "assistant"
+          %{"role" => role, "content" => "message number #{i}"}
+        end)
+
+      long =
+        LogsFixtures.log_fixture(router, %{request_body: Jason.encode!(%{"messages" => messages})})
+
+      {:ok, view, _html} = live(conn, ~p"/logs/#{long.id}")
+
+      rail = view |> element("#scroll-rail") |> render()
+      dash_count = length(Regex.scan(~r/id="rail-msg-/, rail))
+
+      assert dash_count <= 48
+      assert rail =~ ~s(data-from="0")
+      # ranged tooltip on a multi-message bucket
+      assert rail =~ "–#"
     end
 
     test "?message=N scrolls to and highlights the message", %{

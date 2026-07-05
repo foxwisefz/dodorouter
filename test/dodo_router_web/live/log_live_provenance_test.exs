@@ -53,6 +53,29 @@ defmodule DodoRouterWeb.LogLiveProvenanceTest do
     assert view |> element(chip) |> render() =~ "/logs/#{first.id}"
   end
 
+  test "the response bubble is attributed to this log's own model", %{
+    conn: conn,
+    router: router
+  } do
+    log =
+      LogsFixtures.log_fixture(router, %{
+        final_provider: "test_provider",
+        final_model: "original-model",
+        response_body:
+          Jason.encode!(%{
+            "choices" => [%{"message" => %{"role" => "assistant", "content" => "the answer"}}]
+          })
+      })
+
+    {:ok, view, _html} = live(conn, ~p"/logs/#{log.id}")
+
+    assert has_element?(
+             view,
+             ~s([title="Produced by test_provider/original-model"]),
+             "original-model"
+           )
+  end
+
   test "assistant history without a session gets no attribution", %{conn: conn, router: router} do
     log =
       LogsFixtures.log_fixture(router, %{

@@ -242,7 +242,20 @@ jobs:
               ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 \
                 ${{ secrets.APP_DEPLOY_USER }}@${{ secrets.APP_DEPLOY_HOST }} \
                 "rsync -a ~/dodorouter/current/dodo_router/lib/dodo_router-${VERSION}/priv/static/ ~/lobsterfarm-backend/web_files/dodorouter-static/"
-              
+
+              # Phoenix memoizes each resolved static path in the endpoint's
+              # config cache (Phoenix.Config.cache is get-or-compute), so the
+              # digests memoized at cold boot survive hot upgrades AND a plain
+              # endpoint warmup — pages keep linking the boot-era assets.
+              # Clear the memos first, then re-warm from this release's
+              # cache_manifest.json.
+              echo "Refreshing static asset cache on the running node..."
+              ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 \
+                ${{ secrets.APP_DEPLOY_USER }}@${{ secrets.APP_DEPLOY_HOST }} \
+                "~/dodorouter/current/dodo_router/bin/dodo_router rpc 'Phoenix.Config.clear_cache(DodoRouterWeb.Endpoint); Phoenix.Endpoint.Supervisor.warmup(DodoRouterWeb.Endpoint)'" || {
+                echo "WARNING: static cache refresh failed — assets may reference the previous version until a full restart"
+              }
+
               # Verify upgrade succeeded by checking version
               CURRENT_VERSION=$(ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 \
                 ${{ secrets.APP_DEPLOY_USER }}@${{ secrets.APP_DEPLOY_HOST }} \
