@@ -74,7 +74,9 @@ defmodule DodoRouter.Proxy.Adapter.Registry do
           endpoint_path: unquote(opts[:endpoint_path] || "/chat/completions"),
           models: unquote(opts[:models]),
           color: unquote(opts[:color]),
-          short_description: unquote(opts[:short_description])
+          short_description: unquote(opts[:short_description]),
+          # Optional per-key-slug descriptions; falls back to short_description
+          key_short_descriptions: unquote(opts[:key_short_descriptions])
         }
       end
     end
@@ -199,10 +201,13 @@ defmodule DodoRouter.Proxy.Adapter.Registry do
       for key_slug <- config.key_slugs do
         name = Map.get(config.key_display_names || %{}, key_slug, config.display_name)
 
+        short =
+          Map.get(config[:key_short_descriptions] || %{}, key_slug, config.short_description)
+
         {key_slug,
          %{
            name: name,
-           short: config.short_description,
+           short: short,
            endpoint: Map.get(config.endpoints, key_slug),
            color: config.color,
            key_generation_url: config.key_generation_url,

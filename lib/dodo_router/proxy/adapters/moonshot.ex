@@ -19,7 +19,11 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
     },
     models: ~w(kimi-k2.5 kimi-k2 moonshot-v1-8k moonshot-v1-32k moonshot-v1-128k),
     color: "amber",
-    short_description: "Kimi K2 models"
+    short_description: "Kimi K2 models",
+    key_short_descriptions: %{
+      "moonshot" => "Kimi models, pay-as-you-go platform API",
+      "moonshot_coding" => "Kimi models via a Kimi Code subscription"
+    }
 
   require Logger
 

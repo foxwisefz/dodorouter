@@ -21,7 +21,11 @@ defmodule DodoRouter.Proxy.Adapters.Zai do
     },
     models: ~w(glm-5.1 glm-5 glm-5-turbo glm-4.7 glm-4.6 glm-4.5),
     color: "emerald",
-    short_description: "GLM models for general use"
+    short_description: "GLM models for general use",
+    key_short_descriptions: %{
+      "zai_standard" => "GLM models, pay-as-you-go API",
+      "zai_coding" => "GLM models via a z.ai Coding subscription"
+    }
 
   alias DodoRouter.Proxy.Adapter
   alias DodoRouter.Proxy.FinchTelemetry
