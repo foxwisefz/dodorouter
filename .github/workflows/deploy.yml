@@ -156,7 +156,20 @@ jobs:
             scp -o StrictHostKeyChecking=no -o ConnectTimeout=10 \
               /tmp/release/dodo_router-${VERSION}.tar.gz \
               ${{ secrets.APP_DEPLOY_USER }}@${{ secrets.APP_DEPLOY_HOST }}:/tmp/dodo_router-${VERSION}.tar.gz
-            
+
+            # Run the new release's migrations BEFORE stopping the old one:
+            # just the migration .exs files from the tarball, executed through
+            # the still-running release, so a failure leaves it serving. The
+            # in-place migrate below then re-runs as a no-op.
+            echo "Running v${VERSION} migrations before install..."
+            MIGRATIONS_DIR="/tmp/dodo_migrations/dodo_router/lib/dodo_router-${VERSION}/priv/repo/migrations"
+            ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 \
+              ${{ secrets.APP_DEPLOY_USER }}@${{ secrets.APP_DEPLOY_HOST }} \
+              "rm -rf /tmp/dodo_migrations && mkdir -p /tmp/dodo_migrations && tar xzf /tmp/dodo_router-${VERSION}.tar.gz -C /tmp/dodo_migrations dodo_router/lib/dodo_router-${VERSION}/priv/repo/migrations && ~/dodorouter/current/dodo_router/bin/dodo_router eval 'Ecto.Migrator.with_repo(DodoRouter.Repo, fn repo -> Ecto.Migrator.run(repo, ~s(${MIGRATIONS_DIR}), :up, all: true) end)' && rm -rf /tmp/dodo_migrations" || {
+              echo "ERROR: Database migration failed — aborting before install (old version untouched)"
+              exit 1
+            }
+
             # Stop current version, extract new version
             ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 \
               ${{ secrets.APP_DEPLOY_USER }}@${{ secrets.APP_DEPLOY_HOST }} \
@@ -200,21 +213,29 @@ jobs:
               scp -o StrictHostKeyChecking=no -o ConnectTimeout=10 \
                 /tmp/release/dodo_router-${VERSION}.tar.gz \
                 ${{ secrets.APP_DEPLOY_USER }}@${{ secrets.APP_DEPLOY_HOST }}:/tmp/dodo_router-${VERSION}.tar.gz
-              
+
+              # Run the NEW release's migrations BEFORE installing it. Migrations
+              # are .exs sources compiled at runtime and Ecto.Migrator.run/4
+              # takes an explicit path — so extract just the migration files
+              # from the tarball (a few KB, no full unpack) and run them through
+              # the currently installed release. The old code keeps serving and
+              # a failure aborts the deploy with the running version untouched.
+              echo "Running v${VERSION} migrations before upgrade..."
+              MIGRATIONS_DIR="/tmp/dodo_migrations/dodo_router/lib/dodo_router-${VERSION}/priv/repo/migrations"
+              ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 \
+                ${{ secrets.APP_DEPLOY_USER }}@${{ secrets.APP_DEPLOY_HOST }} \
+                "rm -rf /tmp/dodo_migrations && mkdir -p /tmp/dodo_migrations && tar xzf /tmp/dodo_router-${VERSION}.tar.gz -C /tmp/dodo_migrations dodo_router/lib/dodo_router-${VERSION}/priv/repo/migrations && ~/dodorouter/current/dodo_router/bin/dodo_router eval 'Ecto.Migrator.with_repo(DodoRouter.Repo, fn repo -> Ecto.Migrator.run(repo, ~s(${MIGRATIONS_DIR}), :up, all: true) end)' && rm -rf /tmp/dodo_migrations" || {
+                echo "ERROR: Database migration failed — aborting before upgrade (old version untouched)"
+                exit 1
+              }
+
               # Run upgrade but don't fail immediately - the RPC process gets killed after make_permanent
               ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 \
                 ${{ secrets.APP_DEPLOY_USER }}@${{ secrets.APP_DEPLOY_HOST }} \
                 "cp /tmp/dodo_router-${VERSION}.tar.gz ~/dodorouter/current/dodo_router/releases/${VERSION}.tar.gz && ~/dodorouter/current/dodo_router/bin/upgrade ${VERSION}" || true
-              
-              # Run migrations using the newly upgraded release
-              echo "Running database migrations after hot upgrade..."
+
+              # Give the upgraded node a moment to settle before verification
               sleep 3
-              ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 \
-                ${{ secrets.APP_DEPLOY_USER }}@${{ secrets.APP_DEPLOY_HOST }} \
-                "~/dodorouter/current/dodo_router/bin/dodo_router eval DodoRouter.Release.migrate" || {
-                echo "ERROR: Database migration failed"
-                exit 1
-              }
               
               # Sync static assets to Caddy
               echo "Syncing static assets to Caddy..."
