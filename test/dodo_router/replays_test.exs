@@ -331,6 +331,24 @@ defmodule DodoRouter.ReplaysTest do
       broken = LogsFixtures.log_fixture(ctx.router, %{request_body: "not json"})
       assert Replays.replay_blocker(broken) == :invalid_request_body
     end
+
+    test "a cut point before the truncated content unblocks the replay", ctx do
+      log =
+        LogsFixtures.log_fixture(ctx.router, %{
+          request_body:
+            Jason.encode!(%{
+              "messages" => [
+                %{"role" => "user", "content" => "clean question"},
+                %{"role" => "assistant", "content" => "big answer\n\n... [truncated]"},
+                %{"role" => "user", "content" => "follow-up"}
+              ]
+            })
+        })
+
+      assert Replays.replay_blocker(log) == :truncated
+      assert Replays.replay_blocker(log, 0) == nil
+      assert Replays.replay_blocker(log, 2) == :truncated
+    end
   end
 
   describe "list_targets/1" do

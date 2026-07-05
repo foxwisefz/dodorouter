@@ -355,7 +355,7 @@ defmodule DodoRouterWeb.LogLiveReplayTest do
       refute has_element?(view, "#content-diff", "the final answer")
     end
 
-    test "the candidates table labels partial replays with their cut point", %{
+    test "the candidates table labels partial replays with their cut point and message", %{
       conn: conn,
       multi_turn: multi_turn
     } do
@@ -372,6 +372,142 @@ defmodule DodoRouterWeb.LogLiveReplayTest do
       {:ok, view, _html} = live(conn, ~p"/logs/#{multi_turn.id}/replay")
 
       assert has_element?(view, "#candidate-row-1", "from #1")
+      assert has_element?(view, ~s(#candidate-row-1 [title*="first question"]))
+    end
+
+    test "the partial comparison shows which message anchored the replay", %{
+      conn: conn,
+      multi_turn: multi_turn
+    } do
+      partial =
+        LogsFixtures.log_fixture(router_of(multi_turn), %{
+          replayed_from_id: multi_turn.id,
+          final_model: "model-partial",
+          request_body:
+            Jason.encode!(%{
+              "messages" => [%{"role" => "user", "content" => "first question"}]
+            })
+        })
+
+      {:ok, view, _html} = live(conn, ~p"/logs/#{multi_turn.id}/replay?replay=#{partial.id}")
+      render_async(view)
+
+      assert has_element?(view, "#partial-replay-banner", "first question")
+    end
+
+    test "viewing a partial replay adopts its cut point for the next run", %{
+      conn: conn,
+      multi_turn: multi_turn,
+      provider_key: provider_key
+    } do
+      partial =
+        LogsFixtures.log_fixture(router_of(multi_turn), %{
+          replayed_from_id: multi_turn.id,
+          final_model: "model-partial",
+          request_body:
+            Jason.encode!(%{
+              "messages" => [%{"role" => "user", "content" => "first question"}]
+            })
+        })
+
+      {:ok, view, _html} = live(conn, ~p"/logs/#{multi_turn.id}/replay?replay=#{partial.id}")
+      render_async(view)
+
+      # the picker shows the adopted cut point
+      assert has_element?(view, "#replay-from-banner", "first question")
+
+      # running with another model repeats the same exchange
+      view
+      |> form("#replay-form", replay: %{provider_key_id: provider_key.id, model: "test-model"})
+      |> render_submit()
+
+      render_async(view)
+
+      replays = Logs.list_replays(multi_turn)
+      new_replay = Enum.find(replays, &(&1.final_model == "test-model"))
+
+      assert Jason.decode!(new_replay.request_body)["messages"] ==
+               [%{"role" => "user", "content" => "first question"}]
+    end
+  end
+
+  describe "thread section" do
+    setup %{router: router} do
+      multi_turn =
+        LogsFixtures.log_fixture(router, %{
+          request_body:
+            Jason.encode!(%{
+              "messages" => [
+                %{"role" => "user", "content" => "first question"},
+                %{"role" => "assistant", "content" => "the failing crud answer"},
+                %{"role" => "user", "content" => "second question"}
+              ]
+            })
+        })
+
+      %{multi_turn: multi_turn}
+    end
+
+    test "the hub shows the thread with from-here pickers on user messages", %{
+      conn: conn,
+      multi_turn: multi_turn
+    } do
+      {:ok, view, _html} = live(conn, ~p"/logs/#{multi_turn.id}/replay")
+
+      assert has_element?(view, "#thread-section", "first question")
+      assert has_element?(view, "#thread-section", "second question")
+      assert has_element?(view, "#thread-from-0")
+      assert has_element?(view, "#thread-from-2")
+      refute has_element?(view, "#thread-from-1")
+
+      view |> element("#thread-from-0") |> render_click()
+      assert_patch(view, ~p"/logs/#{multi_turn.id}/replay?from=0")
+      assert has_element?(view, "#replay-from-banner", "first question")
+    end
+
+    test "a truncation-blocked thread still offers partial replays", %{
+      conn: conn,
+      router: router
+    } do
+      blocked_root =
+        LogsFixtures.log_fixture(router, %{
+          request_body:
+            Jason.encode!(%{
+              "messages" => [
+                %{"role" => "user", "content" => "clean question"},
+                %{"role" => "assistant", "content" => "big answer\n\n... [truncated]"},
+                %{"role" => "user", "content" => "follow-up"}
+              ]
+            })
+        })
+
+      partial =
+        LogsFixtures.log_fixture(router, %{
+          replayed_from_id: blocked_root.id,
+          final_model: "model-partial",
+          request_body:
+            Jason.encode!(%{"messages" => [%{"role" => "user", "content" => "clean question"}]})
+        })
+
+      # whole-thread mode: blocked, but the thread is browsable
+      {:ok, view, _html} = live(conn, ~p"/logs/#{blocked_root.id}/replay")
+      assert has_element?(view, "#replay-blocker")
+      refute has_element?(view, "#replay-form")
+      assert has_element?(view, "#thread-section")
+
+      # picking a clean cut point unblocks the picker
+      view |> element("#thread-from-0") |> render_click()
+      assert has_element?(view, "#replay-form")
+      refute has_element?(view, "#replay-blocker")
+
+      # viewing the existing partial adopts its cut and offers the picker too
+      {:ok, view, _html} =
+        live(conn, ~p"/logs/#{blocked_root.id}/replay?replay=#{partial.id}")
+
+      render_async(view)
+      assert has_element?(view, "#replay-form")
+      assert has_element?(view, "#replay-from-banner", "clean question")
+      refute has_element?(view, "#replay-blocker")
     end
   end
 

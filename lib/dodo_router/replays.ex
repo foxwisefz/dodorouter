@@ -114,9 +114,13 @@ defmodule DodoRouter.Replays do
 
   @doc """
   Returns the reason the given log can't be replayed, or nil when it can.
+
+  With a `message_index`, checks replayability of just the history up to
+  that message — storage truncation after the cut doesn't block a partial
+  replay.
   """
-  def replay_blocker(%RequestLog{} = source) do
-    case prepare_request(source, "replay-probe") do
+  def replay_blocker(%RequestLog{} = source, message_index \\ nil) do
+    case prepare_request(source, "replay-probe", nil, message_index) do
       {:ok, _request} -> nil
       {:error, reason} -> reason
     end
