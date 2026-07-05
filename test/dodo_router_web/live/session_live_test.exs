@@ -32,6 +32,20 @@ defmodule DodoRouterWeb.SessionLiveTest do
       assert html =~ "X-Session-Id"
     end
 
+    test "pluralizes counts correctly with a single session and request", %{
+      conn: conn,
+      router: router
+    } do
+      LogsFixtures.log_with_session(router, "solo-session")
+
+      {:ok, _live, html} = live(conn, ~p"/routers/#{router.id}/sessions")
+
+      assert html =~ "1 session"
+      refute html =~ "1 sessions"
+      assert html =~ "1 request"
+      refute html =~ "1 requests"
+    end
+
     test "shows request count per session", %{conn: conn, router: router} do
       session_id = "test-session"
       LogsFixtures.log_with_session(router, session_id)

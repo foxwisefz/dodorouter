@@ -307,7 +307,7 @@ defmodule DodoRouterWeb.LogLive.Index do
                   <span
                     :if={Map.get(@replay_counts, Map.get(log, :id))}
                     class="badge badge-ghost badge-xs gap-0.5"
-                    title={"Has #{Map.get(@replay_counts, Map.get(log, :id))} replays"}
+                    title={"Has #{pluralize(Map.get(@replay_counts, Map.get(log, :id)), "replay")}"}
                   >
                     <.icon name="hero-arrow-path" class="w-2.5 h-2.5" />
                     {Map.get(@replay_counts, Map.get(log, :id))}

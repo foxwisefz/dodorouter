@@ -94,7 +94,7 @@ defmodule DodoRouterWeb.RecordingLive.Index do
       <div class="flex items-center justify-between mb-6">
         <h1 class="text-2xl font-bold">Recordings</h1>
         <div class="flex items-center gap-3">
-          <span class="text-sm text-base-content/60">{length(@recordings)} recordings</span>
+          <span class="text-sm text-base-content/60">{pluralize(length(@recordings), "recording")}</span>
           <%= if @active_recording do %>
             <button
               phx-click="stop_recording"
