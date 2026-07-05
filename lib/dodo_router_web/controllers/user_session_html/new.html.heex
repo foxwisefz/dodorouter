@@ -6,7 +6,7 @@
         <p>Log in</p>
         <:subtitle>
           <%= if @current_scope do %>
-            You need to reauthenticate to perform sensitive actions on your account.
+            Log in again to continue as {@current_scope.user.email}.
           <% else %>
             Don't have an account? <.link
               navigate={~p"/users/register"}
