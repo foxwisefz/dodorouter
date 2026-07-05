@@ -8,9 +8,14 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
   use DodoRouter.Proxy.Adapter.Registry,
     slug: "anthropic",
     display_name: "Anthropic",
-    key_slugs: ["anthropic"],
+    key_slugs: ["anthropic", "anthropic_oauth"],
+    key_display_names: %{
+      "anthropic" => "Anthropic API",
+      "anthropic_oauth" => "Claude subscription (setup-token)"
+    },
     endpoints: %{
-      "anthropic" => "https://api.anthropic.com/v1"
+      "anthropic" => "https://api.anthropic.com/v1",
+      "anthropic_oauth" => "https://api.anthropic.com/v1"
     },
     endpoint_path: "/messages",
     models:
@@ -28,16 +33,32 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
   @timeout_ms 120_000
   @api_version "2023-06-01"
 
-  @impl true
-  def call(request, %RoutingStep{} = step, api_key, _client_headers \\ []) do
-    url = @base_url <> "/messages"
-    body = build_anthropic_request(request, step)
+  @doc """
+  OAuth tokens from `claude setup-token` (prefix `sk-ant-oat`) authenticate
+  with a Bearer header plus the oauth beta flag; API keys use `x-api-key`.
+  """
+  def auth_headers("sk-ant-oat" <> _rest = token) do
+    [
+      {"authorization", "Bearer " <> token},
+      {"anthropic-beta", "oauth-2025-04-20"},
+      {"anthropic-version", @api_version},
+      {"Content-Type", "application/json"}
+    ]
+  end
 
-    headers = [
+  def auth_headers(api_key) do
+    [
       {"x-api-key", api_key},
       {"anthropic-version", @api_version},
       {"Content-Type", "application/json"}
     ]
+  end
+
+  @impl true
+  def call(request, %RoutingStep{} = step, api_key, _client_headers \\ []) do
+    url = @base_url <> "/messages"
+    body = build_anthropic_request(request, step)
+    headers = auth_headers(api_key)
 
     payload_size_bytes = body |> Jason.encode!() |> byte_size()
     start_time = FinchTelemetry.mark_request_start()
@@ -84,12 +105,7 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
   def stream(request, %RoutingStep{} = step, api_key, send_chunk, _client_headers \\ []) do
     url = @base_url <> "/messages"
     body = build_anthropic_request(request, step) |> Map.put("stream", true)
-
-    headers = [
-      {"x-api-key", api_key},
-      {"anthropic-version", @api_version},
-      {"Content-Type", "application/json"}
-    ]
+    headers = auth_headers(api_key)
 
     payload_size_bytes = body |> Jason.encode!() |> byte_size()
     start_time = FinchTelemetry.mark_request_start()

@@ -121,7 +121,7 @@ defmodule DodoRouter.ProxyTest do
 
       request = %{"messages" => [%{"role" => "user", "content" => "hi"}]}
 
-      %{router: router, step: step, request: request}
+      %{user: user, router: router, step: step, request: request}
     end
 
     test "a plan catalog row wins over the provider's platform pricing", ctx do
@@ -145,6 +145,18 @@ defmodule DodoRouter.ProxyTest do
                Proxy.dispatch(ctx.router, ctx.request, steps: [ctx.step], log_mode: :sync)
 
       assert Decimal.compare(log.estimated_cost_usd, Decimal.new(0)) == :gt
+    end
+
+    test "subscription key slugs report zero cost even when platform pricing exists", ctx do
+      oauth_key =
+        ProvidersFixtures.provider_key_fixture(ctx.user, %{provider_slug: "anthropic_oauth"})
+
+      step = %{ctx.step | provider_key: oauth_key, provider_key_id: oauth_key.id}
+
+      assert {:ok, _resp, %{log: log}} =
+               Proxy.dispatch(ctx.router, ctx.request, steps: [step], log_mode: :sync)
+
+      assert Decimal.eq?(log.estimated_cost_usd, Decimal.new(0))
     end
   end
 

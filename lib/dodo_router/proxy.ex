@@ -431,6 +431,10 @@ defmodule DodoRouter.Proxy do
     end
   end
 
+  # Subscription surfaces without a models.dev plan catalog: traffic is
+  # covered by the flat plan fee, so marginal per-token cost is zero
+  @subscription_key_slugs ~w(openai-codex anthropic_oauth)
+
   defp calculate_cost(nil, _usage), do: nil
 
   defp calculate_cost(last_step, usage) do
@@ -440,23 +444,31 @@ defmodule DodoRouter.Proxy do
 
     # Plan-specific catalogs (e.g. moonshot_coding, priced $0 — subscription
     # traffic has no marginal per-token cost) win over platform pricing
-    model_struct =
-      (key_slug != provider && lookup_model(key_slug, model)) ||
-        lookup_model(provider, model)
+    plan_row = key_slug != provider && lookup_model(key_slug, model)
 
-    case model_struct do
-      nil ->
-        nil
+    cond do
+      match?(%{}, plan_row) ->
+        cost_from_model(plan_row, usage)
 
-      model_struct ->
-        DodoRouter.Models.calculate_cost(
-          model_struct,
-          usage.prompt_tokens || 0,
-          usage.completion_tokens || 0,
-          cache_read_tokens: usage.cache_read_tokens || 0,
-          cache_write_tokens: usage.cache_write_tokens || 0
-        )
+      key_slug in @subscription_key_slugs ->
+        Decimal.new(0)
+
+      true ->
+        case lookup_model(provider, model) do
+          nil -> nil
+          model_struct -> cost_from_model(model_struct, usage)
+        end
     end
+  end
+
+  defp cost_from_model(model_struct, usage) do
+    DodoRouter.Models.calculate_cost(
+      model_struct,
+      usage.prompt_tokens || 0,
+      usage.completion_tokens || 0,
+      cache_read_tokens: usage.cache_read_tokens || 0,
+      cache_write_tokens: usage.cache_write_tokens || 0
+    )
   end
 
   defp lookup_model(nil, _model), do: nil
