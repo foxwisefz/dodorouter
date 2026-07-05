@@ -283,9 +283,10 @@ defmodule DodoRouterWeb.LogLive.Index do
                   <span
                     :if={Map.get(log, :replayed_from_id)}
                     class="badge badge-ghost badge-xs gap-0.5"
-                    title="Created by replaying another log"
+                    title={replay_badge_title(log)}
                   >
-                    <.icon name="hero-arrow-path" class="w-2.5 h-2.5" /> replay
+                    <.icon name="hero-arrow-path" class="w-2.5 h-2.5" />
+                    {replay_badge_label(log)}
                   </span>
                   <span
                     :if={Map.get(@replay_counts, Map.get(log, :id))}
@@ -409,6 +410,20 @@ defmodule DodoRouterWeb.LogLive.Index do
 
   defp format_time(dt) do
     Calendar.strftime(dt, "%H:%M:%S")
+  end
+
+  defp replay_badge_label(log) do
+    case Map.get(log, :replay_from_index) do
+      index when is_integer(index) -> "rerun · ##{index + 1}"
+      _other -> "rerun"
+    end
+  end
+
+  defp replay_badge_title(log) do
+    case Map.get(log, :replay_from_index) do
+      index when is_integer(index) -> "Replay of another log — from message #{index + 1}"
+      _other -> "Replay of another log (full thread)"
+    end
   end
 
   defp message_preview(log) do

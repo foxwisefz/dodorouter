@@ -695,8 +695,32 @@ defmodule DodoRouterWeb.LogLiveReplayTest do
 
       {:ok, view, _html} = live(conn, ~p"/logs")
 
-      assert has_element?(view, "#logs-#{replay.id}", "replay")
-      refute has_element?(view, "#logs-#{source.id} .badge", "replay")
+      assert has_element?(view, "#logs-#{replay.id}", "rerun")
+
+      assert has_element?(
+               view,
+               ~s{#logs-#{replay.id} [title="Replay of another log (full thread)"]}
+             )
+
+      refute has_element?(view, "#logs-#{source.id} .badge", "rerun")
+    end
+
+    test "logs index shows the anchor on message-anchored replays", %{
+      conn: conn,
+      router: router,
+      source: source
+    } do
+      anchored =
+        LogsFixtures.log_fixture(router, %{replayed_from_id: source.id, replay_from_index: 3})
+
+      {:ok, view, _html} = live(conn, ~p"/logs")
+
+      assert has_element?(view, "#logs-#{anchored.id}", "#4")
+
+      assert has_element?(
+               view,
+               ~s(#logs-#{anchored.id} [title="Replay of another log — from message 4"])
+             )
     end
   end
 end
