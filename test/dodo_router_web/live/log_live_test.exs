@@ -19,12 +19,14 @@ defmodule DodoRouterWeb.LogLiveTest do
       assert html =~ log.final_provider
     end
 
-    test "shows empty table when no logs", %{conn: conn, user: user} do
+    test "shows empty state when no logs", %{conn: conn, user: user} do
       {_router, _api_key} = RoutersFixtures.router_fixture(user)
 
-      {:ok, _live, html} = live(conn, ~p"/logs")
+      {:ok, live, html} = live(conn, ~p"/logs")
 
       assert html =~ "Request Logs"
+      assert has_element?(live, "#logs-empty")
+      assert render(live) =~ "No requests yet"
     end
 
     test "can filter by router", %{conn: conn, user: user} do

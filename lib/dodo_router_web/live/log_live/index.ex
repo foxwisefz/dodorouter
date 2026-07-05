@@ -237,6 +237,22 @@ defmodule DodoRouterWeb.LogLive.Index do
             </tr>
           </thead>
           <tbody id="logs" phx-update="stream" class="divide-y divide-base-300/30">
+            <tr id="logs-empty" class="hidden only:table-row">
+              <td colspan="9" class="px-4 py-16 text-center">
+                <div class="flex flex-col items-center gap-2">
+                  <.icon name="hero-clock" class="size-8 text-base-content/20" />
+                  <p class="text-sm font-medium text-base-content/60">
+                    {if @favorites_only, do: "No favorite requests yet", else: "No requests yet"}
+                  </p>
+                  <p :if={!@favorites_only} class="text-sm text-base-content/40">
+                    Send a request to a router and it will show up here in real time.
+                    <.link navigate={~p"/routers"} class="text-primary hover:underline">
+                      View your routers
+                    </.link>
+                  </p>
+                </div>
+              </td>
+            </tr>
             <tr
               :for={{dom_id, log} <- @streams.logs}
               id={dom_id}
