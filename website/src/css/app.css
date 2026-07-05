@@ -243,6 +243,34 @@
 @utility ft-agent { animation: ft-agent 9s linear infinite; }
 @utility ft-log { animation: ft-log 9s linear infinite; opacity: 0; }
 
+/* — Hero: canvas background + terminal log — */
+
+@utility hero-canvas {
+  background-image:
+    radial-gradient(ellipse 55% 45% at 72% 18%, hsl(239, 84%, 67%, 0.09), transparent 70%),
+    radial-gradient(ellipse 40% 35% at 15% 85%, hsl(38, 92%, 50%, 0.05), transparent 70%),
+    linear-gradient(to right, hsl(210, 14%, 17%, 0.035) 1px, transparent 1px),
+    linear-gradient(to bottom, hsl(210, 14%, 17%, 0.035) 1px, transparent 1px);
+  background-size: 100% 100%, 100% 100%, 44px 44px, 44px 44px;
+  mask-image: linear-gradient(to bottom, black 0%, black 78%, transparent 100%);
+}
+
+@keyframes term-line {
+  0%   { opacity: 0; transform: translateY(4px); }
+  4%   { opacity: 1; transform: translateY(0); }
+  86%  { opacity: 1; }
+  94%, 100% { opacity: 0; transform: translateY(0); }
+}
+
+@utility term-line {
+  opacity: 0;
+  animation: term-line 11s linear infinite;
+  animation-delay: var(--td, 0s);
+}
+
+@keyframes caret-blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+@utility term-caret { animation: caret-blink 1.1s step-end infinite; }
+
 /* — Bento scene 1: mid-stream recovery — */
 
 @keyframes ms-line1 { /* first chunk types out then stalls */

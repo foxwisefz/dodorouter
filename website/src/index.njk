@@ -1,392 +1,74 @@
 ---
 layout: base.njk
-title: Dodo Router - Stop Losing Users to LLM Provider Outages
-description: One line of code protects your agents from provider outages, rate limits, and context window errors. Automatic fallback across 8+ providers. Free to start.
+title: DodoRouter — The LLM proxy with automatic fallback
+description: Drop-in OpenAI- and Anthropic-compatible proxy. Chain providers, fall back automatically on rate limits, outages, and context overflows, and see every request. Free to start.
 ---
 
-<section class="relative h-[70vh] min-h-[550px] flex flex-col bg-background overflow-hidden">
+<section class="hero-canvas relative overflow-hidden bg-background">
+  <div class="mx-auto max-w-6xl px-6 md:px-12 lg:px-20 pt-16 pb-20 md:pt-24 md:pb-28">
+    <div class="grid items-center gap-12 lg:grid-cols-2 lg:gap-16">
 
-  {# Background Video #}
-  <video class="absolute inset-0 w-full h-full object-cover z-0" autoplay muted loop playsinline>
-    <source src="https://assets.dodorouter.com/dallendyshe2.mp4" type="video/mp4" />
-  </video>
+      {# — Copy — #}
+      <div>
+        <div class="animate-fade-up inline-flex items-center gap-2 rounded-full border border-border bg-background px-4 py-1.5 text-sm text-muted-foreground font-body" style="--fade-y: 10px; --fade-duration: 0.5s;">
+          <span class="relative flex h-2 w-2">
+            <span class="absolute inline-flex h-full w-full animate-ping rounded-full bg-go opacity-75"></span>
+            <span class="relative inline-flex h-2 w-2 rounded-full bg-go"></span>
+          </span>
+          Open source · OpenAI &amp; Anthropic compatible
+        </div>
 
-  {# Gradient overlay: solid white at top, fades to transparent at bottom #}
-  <div class="absolute inset-0 z-[1] bg-gradient-to-b from-white via-white/90 via-[55%] to-transparent"></div>
-  <div class="absolute bottom-0 left-0 w-full h-[30%] z-[1] bg-gradient-to-t from-white/90 to-transparent"></div>
+        <h1 class="animate-fade-up mt-6 font-display text-5xl md:text-6xl lg:text-[4.75rem] leading-[0.95] tracking-tight text-foreground" style="--fade-y: 16px; --fade-duration: 0.6s; --fade-delay: 0.1s;">
+          One base URL.<br />
+          <em>Every model.<br />No outages.</em>
+        </h1>
 
-  {# All content above video #}
-  <div class="relative z-10 flex flex-col items-center w-full flex-1">
+        <p class="animate-fade-up mt-6 text-base md:text-lg text-muted-foreground leading-relaxed font-body max-w-xl" style="--fade-y: 16px; --fade-duration: 0.6s; --fade-delay: 0.2s;">
+          DodoRouter is a drop-in proxy for the OpenAI and Anthropic APIs. Point your agent
+          at your router, chain providers in the order you trust them, and failures fall
+          through automatically — every request logged, replayable, and comparable.
+        </p>
 
-    {# 1. Badge #}
-    <div class="animate-fade-up mt-6 inline-flex items-center gap-1.5 rounded-full border border-border bg-background px-4 py-1.5 text-sm text-muted-foreground font-body" style="--fade-y: 10px; --fade-duration: 0.5s; --fade-delay: 0s;">
-      <span class="relative flex h-2 w-2">
-        <span class="absolute inline-flex h-full w-full animate-ping rounded-full bg-go opacity-75"></span>
-        <span class="relative inline-flex h-2 w-2 rounded-full bg-go"></span>
-      </span>
-      🚨 Production agents are failing right now because providers are unreliable
-    </div>
+        <div class="animate-fade-up mt-8 flex flex-wrap items-center gap-3" style="--fade-y: 16px; --fade-duration: 0.6s; --fade-delay: 0.3s;">
+          <a href="https://api.dodorouter.com/users/register" class="rounded-full bg-primary px-6 py-3 text-sm font-medium font-body text-primary-foreground transition-all hover:opacity-90">
+            Get started free →
+          </a>
+          <a href="https://github.com/foxwise-ai/dodorouter" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-2 rounded-full border border-border bg-background px-5 py-3 text-sm font-medium font-body text-foreground transition-colors hover:bg-secondary">
+            <svg class="h-4 w-4 fill-foreground" viewBox="0 0 24 24"><path d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"/></svg>
+            Star on GitHub
+          </a>
+        </div>
 
-    {# 2. Headline #}
-    <h1 class="animate-fade-up mt-6 text-center font-display text-5xl md:text-6xl lg:text-[5.5rem] leading-[0.95] tracking-tight text-foreground max-w-3xl drop-shadow-sm" style="--fade-y: 16px; --fade-duration: 0.6s; --fade-delay: 0.1s;">
-      Your agents are one provider outage away from disaster
-    </h1>
+        <p class="animate-fade-up mt-8 text-xs uppercase tracking-wider text-muted-foreground/80 font-body" style="--fade-y: 10px; --fade-duration: 0.6s; --fade-delay: 0.4s;">
+          Routes across
+          <span class="text-foreground/70 font-semibold">OpenAI · Anthropic · Google · Moonshot · z.ai · DeepSeek · Groq · Mistral · xAI</span>
+        </p>
+      </div>
 
-    {# 3. Subheadline #}
-    <p class="animate-fade-up mt-4 text-center text-base md:text-lg text-foreground/90 max-w-[700px] leading-relaxed font-body drop-shadow-sm" style="--fade-y: 16px; --fade-duration: 0.6s; --fade-delay: 0.2s;">
-      Dodo Router is the reliability layer your agents are missing. One line of code gives you automatic fallback across 8+ providers, full request observability, and zero-downtime provider switching. When OpenAI fails, Anthropic takes over. When context windows overflow, you fall back to a bigger model. Your users never see an error.
-    </p>
-
-    {# 4. CTA Buttons #}
-    <div class="animate-fade-up mt-5 flex items-center gap-3" style="--fade-y: 16px; --fade-duration: 0.6s; --fade-delay: 0.3s;">
-      <a href="https://api.dodorouter.com/users/register" class="rounded-full bg-primary px-6 py-3 text-sm font-medium font-body text-primary-foreground transition-all hover:opacity-90">
-        Get Bulletproof Agents Free →
-      </a>
-      <a href="https://github.com/foxwise-ai/dodorouter" target="_blank" rel="noopener noreferrer" class="flex h-11 w-11 items-center justify-center rounded-full border-0 bg-background shadow-[0_2px_12px_rgba(0,0,0,0.08)] transition-all hover:bg-background/80">
-        <svg class="h-4 w-4 fill-foreground" viewBox="0 0 24 24"><path d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"/></svg>
-      </a>
-    </div>
-
-    {# 5. Dashboard Preview — custom coded, NOT an image #}
-    <div class="animate-fade-up mt-8 w-full max-w-5xl px-4 md:px-6" style="--fade-y: 30px; --fade-duration: 0.8s; --fade-delay: 0.5s;">
-      <div class="frosted-glass rounded-2xl overflow-hidden p-3 md:p-4">
-        <div class="dashboard-mockup rounded-xl bg-white/90 overflow-hidden">
-
-          {# Body: Sidebar + Main #}
-          <div class="flex">
-
-            {# Sidebar #}
-            <div class="hidden w-40 shrink-0 border-r border-border p-3 sm:block">
-              <div class="space-y-0.5">
-                <div class="flex items-center gap-2 rounded-md bg-accent/10 px-2.5 py-1.5 text-[10px] font-semibold text-accent">
-                  <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" /></svg>
-                  Dashboard
-                </div>
-                <div class="flex items-center justify-between rounded-md px-2.5 py-1.5 text-[10px] text-muted-foreground hover:bg-secondary">
-                  <div class="flex items-center gap-2">
-                    <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                    Requests
-                  </div>
-                  <span class="rounded-full bg-accent/10 px-1.5 py-0.5 text-[9px] font-bold text-accent">1.2K</span>
-                </div>
-                <div class="flex items-center gap-2 rounded-md px-2.5 py-1.5 text-[10px] text-muted-foreground hover:bg-secondary">
-                  <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M10.5 6h9.75M10.5 6a1.5 1.5 0 11-3 0m3 0a1.5 1.5 0 10-3 0M3.75 6H7.5m3 12h9.75m-9.75 0a1.5 1.5 0 01-3 0m3 0a1.5 1.5 0 00-3 0m-3.75 0H7.5m9-6h3.75m-3.75 0a1.5 1.5 0 01-3 0m3 0a1.5 1.5 0 00-3 0m-9.75 0h9.75" /></svg>
-                  Routers
-                </div>
-                <div class="flex items-center gap-2 rounded-md px-2.5 py-1.5 text-[10px] text-muted-foreground hover:bg-secondary">
-                  <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M2.25 18.75a60.07 60.07 0 0115.797 2.101c.727.198 1.453-.342 1.453-1.096V18.75M3.75 4.5v.75A.75.75 0 013 6h-.75m0 0v-.375c0-.621.504-1.125 1.125-1.125H20.25M2.25 6v9m18-10.5v.75c0 .414.336.75.75.75h.75m-1.5-1.5h.375c.621 0 1.125.504 1.125 1.125v9.75c0 .621-.504 1.125-1.125 1.125h-.375m1.5-1.5H21a.75.75 0 00-.75.75v.75m0 0H3.75m0 0h-.375a1.125 1.125 0 01-1.125-1.125V15m1.5 1.5v-.75A.75.75 0 003 15h-.75M15 10.5a3 3 0 11-6 0 3 3 0 016 0zm3 0h.008v.008H18V10.5zm-12 0h.008v.008H6V10.5z" /></svg>
-                  Costs
-                </div>
-                <div class="flex items-center gap-2 rounded-md px-2.5 py-1.5 text-[10px] text-muted-foreground hover:bg-secondary">
-                  <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 5.25a3 3 0 013 3m3 0a6 6 0 01-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25v2.25H6v2.25H2.25v-2.818c0-.597.237-1.17.659-1.591l6.499-6.499c.404-.404.527-1 .43-1.563A6 6 0 1121.75 8.25z" /></svg>
-                  API Keys
-                </div>
-              </div>
-              <div class="mt-4">
-                <p class="mb-1 px-2.5 text-[9px] font-semibold uppercase tracking-wider text-muted-foreground">Providers</p>
-                <div class="space-y-0.5">
-                  <div class="flex items-center gap-2 rounded-md px-2.5 py-1.5 text-[10px] text-muted-foreground hover:bg-secondary">
-                    <svg class="h-3.5 w-3.5 shrink-0" viewBox="0 0 24 24" fill="currentColor" fill-rule="evenodd"><title>OpenAI</title><path d="M9.205 8.658v-2.26c0-.19.072-.333.238-.428l4.543-2.616c.619-.357 1.356-.523 2.117-.523 2.854 0 4.662 2.212 4.662 4.566 0 .167 0 .357-.024.547l-4.71-2.759a.797.797 0 00-.856 0l-5.97 3.473zm10.609 8.8V12.06c0-.333-.143-.57-.429-.737l-5.97-3.473 1.95-1.118a.433.433 0 01.476 0l4.543 2.617c1.309.76 2.189 2.378 2.189 3.948 0 1.808-1.07 3.473-2.76 4.163zM7.802 12.703l-1.95-1.142c-.167-.095-.239-.238-.239-.428V5.899c0-2.545 1.95-4.472 4.591-4.472 1 0 1.927.333 2.712.928L8.23 5.067c-.285.166-.428.404-.428.737v6.898zM12 15.128l-2.795-1.57v-3.33L12 8.658l2.795 1.57v3.33L12 15.128zm1.796 7.23c-1 0-1.927-.332-2.712-.927l4.686-2.712c.285-.166.428-.404.428-.737v-6.898l1.974 1.142c.167.095.238.238.238.428v5.233c0 2.545-1.974 4.472-4.614 4.472zm-5.637-5.303l-4.544-2.617c-1.308-.761-2.188-2.378-2.188-3.948A4.482 4.482 0 014.21 6.327v5.423c0 .333.143.571.428.738l5.947 3.449-1.95 1.118a.432.432 0 01-.476 0zm-.262 3.9c-2.688 0-4.662-2.021-4.662-4.519 0-.19.024-.38.047-.57l4.686 2.71c.286.167.571.167.856 0l5.97-3.448v2.26c0 .19-.07.333-.237.428l-4.543 2.616c-.619.357-1.356.523-2.117.523zm5.899 2.83a5.947 5.947 0 005.827-4.756C22.287 18.339 24 15.84 24 13.296c0-1.665-.713-3.282-1.998-4.448.119-.5.19-.999.19-1.498 0-3.401-2.759-5.947-5.946-5.947-.642 0-1.26.095-1.88.31A5.962 5.962 0 0010.205 0a5.947 5.947 0 00-5.827 4.757C1.713 5.447 0 7.945 0 10.49c0 1.666.713 3.283 1.998 4.448-.119.5-.19 1-.19 1.499 0 3.401 2.759 5.946 5.946 5.946.642 0 1.26-.095 1.88-.309a5.96 5.96 0 004.162 1.713z"/></svg>
-                    OpenAI
-                  </div>
-                  <div class="flex items-center gap-2 rounded-md px-2.5 py-1.5 text-[10px] text-muted-foreground hover:bg-secondary">
-                    <svg class="h-3.5 w-3.5 shrink-0" viewBox="0 0 24 24" fill="currentColor" fill-rule="evenodd"><title>Anthropic</title><path d="M13.827 3.52h3.603L24 20h-3.603l-6.57-16.48zm-7.258 0h3.767L16.906 20h-3.674l-1.343-3.461H5.017l-1.344 3.46H0L6.57 3.522zm4.132 9.959L8.453 7.687 6.205 13.48H10.7z"/></svg>
-                    Anthropic
-                  </div>
-                  <div class="flex items-center gap-2 rounded-md px-2.5 py-1.5 text-[10px] text-muted-foreground hover:bg-secondary">
-                    <svg class="h-3.5 w-3.5 shrink-0" viewBox="0 0 24 24" fill="currentColor" fill-rule="evenodd"><title>MoonshotAI</title><path d="M1.052 16.916l9.539 2.552a21.007 21.007 0 00.06 2.033l5.956 1.593a11.997 11.997 0 01-5.586.865l-.18-.016-.044-.004-.084-.009-.094-.01a11.605 11.605 0 01-.157-.02l-.107-.014-.11-.016a11.962 11.962 0 01-.32-.051l-.042-.008-.075-.013-.107-.02-.07-.015-.093-.019-.075-.016-.095-.02-.097-.023-.094-.022-.068-.017-.088-.022-.09-.024-.095-.025-.082-.023-.109-.03-.062-.02-.084-.025-.093-.028-.105-.034-.058-.019-.08-.026-.09-.031-.066-.024a6.293 6.293 0 01-.044-.015l-.068-.025-.101-.037-.057-.022-.08-.03-.087-.035-.088-.035-.079-.032-.095-.04-.063-.028-.063-.027a5.655 5.655 0 01-.041-.018l-.066-.03-.103-.047-.052-.024-.096-.046-.062-.03-.084-.04-.086-.044-.093-.047-.052-.027-.103-.055-.057-.03-.058-.032a6.49 6.49 0 01-.046-.026l-.094-.053-.06-.034-.051-.03-.072-.041-.082-.05-.093-.056-.052-.032-.084-.053-.061-.039-.079-.05-.07-.047-.053-.035a7.785 7.785 0 01-.054-.036l-.044-.03-.044-.03a6.066 6.066 0 01-.04-.028l-.057-.04-.076-.054-.069-.05-.074-.054-.056-.042-.076-.057-.076-.059-.086-.067-.045-.035-.064-.052-.074-.06-.089-.073-.046-.039-.046-.039a7.516 7.516 0 01-.043-.037l-.045-.04-.061-.053-.07-.062-.068-.06-.062-.058-.067-.062-.053-.05-.088-.084a13.28 13.28 0 01-.099-.097l-.029-.028-.041-.042-.069-.07-.05-.051-.05-.053a6.457 6.457 0 01-.168-.179l-.08-.088-.062-.07-.071-.08-.042-.049-.053-.062-.058-.068-.046-.056a7.175 7.175 0 01-.027-.033l-.045-.055-.066-.082-.041-.052-.05-.064-.02-.025a11.99 11.99 0 01-1.44-2.402zm-1.02-5.794l11.353 3.037a20.468 20.468 0 00-.469 2.011l10.817 2.894a12.076 12.076 0 01-1.845 2.005L.657 15.923l-.016-.046-.035-.104a11.965 11.965 0 01-.05-.153l-.007-.023a11.896 11.896 0 01-.207-.741l-.03-.126-.018-.08-.021-.097-.018-.081-.018-.09-.017-.084-.018-.094c-.026-.141-.05-.283-.071-.426l-.017-.118-.011-.083-.013-.102a12.01 12.01 0 01-.019-.161l-.005-.047a12.12 12.12 0 01-.034-2.145zm1.593-5.15l11.948 3.196c-.368.605-.705 1.231-1.01 1.875l11.295 3.022c-.142.82-.368 1.612-.668 2.365l-11.55-3.09L.124 10.26l.015-.1.008-.049.01-.067.015-.087.018-.098c.026-.148.056-.295.088-.442l.028-.124.02-.085.024-.097c.022-.09.045-.18.07-.268l.028-.102.023-.083.03-.1.025-.082.03-.096.026-.082.031-.095a11.896 11.896 0 011.01-2.232zm4.442-4.4L17.352 4.59a20.77 20.77 0 00-1.688 1.721l7.823 2.093c.267.852.442 1.744.513 2.665L2.106 5.213l.045-.065.027-.04.04-.055.046-.065.055-.076.054-.072.064-.086.05-.065.057-.073.055-.07.06-.074.055-.069.065-.077.054-.066.066-.077.053-.06.072-.082.053-.06.067-.074.054-.058.073-.078.058-.06.063-.067.168-.17.1-.098.059-.056.076-.071a12.084 12.084 0 012.272-1.677zM12.017 0h.097l.082.001.069.001.054.002.068.002.046.001.076.003.047.002.06.003.054.002.087.005.105.007.144.011.088.007.044.004.077.008.082.008.047.005.102.012.05.006.108.014.081.01.042.006.065.01.207.032.07.012.065.011.14.026.092.018.11.022.046.01.075.016.041.01L14.7.3l.042.01.065.015.049.012.071.017.096.024.112.03.113.03.113.032.05.015.07.02.078.024.073.023.05.016.05.016.076.025.099.033.102.036.048.017.064.023.093.034.11.041.116.045.1.04.047.02.06.024.041.018.063.026.04.018.057.025.11.048.1.046.074.035.075.036.06.028.092.046.091.045.102.052.053.028.049.026.046.024.06.033.041.022.052.029.088.05.106.06.087.051.057.034.053.032.096.059.088.055.098.062.036.024.064.041.084.056.04.027.062.042.062.043.023.017c.054.037.108.075.161.114l.083.06.065.048.056.043.086.065.082.064.04.03.05.041.086.069.079.065.085.071c.712.6 1.353 1.283 1.909 2.031L7.222.994l.062-.027.065-.028.081-.034.086-.035c.113-.045.227-.09.341-.131l.096-.035.093-.033.084-.03.096-.031c.087-.03.176-.058.264-.085l.091-.027.086-.025.102-.03.085-.023.1-.026L9.04.37l.09-.023.091-.022.095-.022.09-.02.098-.021.091-.02.095-.018.092-.018.1-.018.091-.016.098-.017.092-.014.097-.015.092-.013.102-.013.091-.012.105-.012.09-.01.105-.01c.093-.01.186-.018.28-.024l.106-.008.09-.005.11-.006.093-.004.1-.004.097-.002.099-.002.197-.002z"/></svg>
-                    Moonshot
-                  </div>
-                </div>
-              </div>
-              <div class="mt-4">
-                <p class="mb-1 px-2.5 text-[9px] font-semibold uppercase tracking-wider text-muted-foreground">Settings</p>
-                <div class="space-y-0.5">
-                  <div class="flex items-center gap-2 rounded-md px-2.5 py-1.5 text-[10px] text-muted-foreground hover:bg-secondary">
-                    <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.324.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 011.37.49l1.296 2.247a1.125 1.125 0 01-.26 1.431l-1.003.827c-.293.24-.438.613-.431.992a6.759 6.759 0 010 .255c-.007.378.138.75.43.99l1.005.828c.424.35.534.954.26 1.43l-1.298 2.247a1.125 1.125 0 01-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.57 6.57 0 01-.22.128c-.331.183-.581.495-.644.869l-.213 1.28c-.09.543-.56.941-1.11.941h-2.594c-.55 0-1.02-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 01-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 01-1.369-.49l-1.297-2.247a1.125 1.125 0 01.26-1.431l1.004-.827c.292-.24.437-.613.43-.992a6.932 6.932 0 010-.255c.007-.378-.138-.75-.43-.99l-1.004-.828a1.125 1.125 0 01-.26-1.43l1.297-2.247a1.125 1.125 0 011.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.087.22-.128.332-.183.582-.495.644-.869l.214-1.281z" /><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
-                    Settings
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {# Main content #}
-            <div class="flex-1 bg-secondary/30 p-4">
-
-              {# Stats row #}
-              <div class="mb-4 flex items-center justify-between">
-                <div>
-                  <p class="text-xs font-semibold text-foreground">Router Overview</p>
-                  <p class="text-[10px] text-muted-foreground">my-production-router</p>
-                </div>
-                <div class="flex items-center gap-2">
-                  <span class="flex items-center gap-1 rounded-full bg-green-50 px-2 py-0.5 text-[9px] font-semibold text-go">
-                    <span class="h-1.5 w-1.5 rounded-full bg-go"></span>
-                    Live
-                  </span>
-                </div>
-              </div>
-
-              {# Stat cards #}
-              <div class="grid grid-cols-2 gap-3 md:grid-cols-4">
-                <div class="rounded-lg border border-border bg-background p-3">
-                  <p class="text-[9px] font-medium text-muted-foreground">Total Requests</p>
-                  <p class="mt-0.5 text-sm font-semibold text-foreground">12,847</p>
-                  <p class="mt-0.5 text-[9px] font-medium text-go">+14.2%</p>
-                </div>
-                <div class="rounded-lg border border-border bg-background p-3">
-                  <p class="text-[9px] font-medium text-muted-foreground">Success Rate</p>
-                  <p class="mt-0.5 text-sm font-semibold text-foreground">99.7%</p>
-                  <p class="mt-0.5 text-[9px] font-medium text-muted-foreground">23 fallbacks recovered</p>
-                </div>
-                <div class="rounded-lg border border-border bg-background p-3">
-                  <p class="text-[9px] font-medium text-muted-foreground">p95 Latency</p>
-                  <p class="mt-0.5 text-sm font-semibold text-foreground">340ms</p>
-                  <p class="mt-0.5 text-[9px] font-medium text-go">-8%</p>
-                </div>
-                <div class="rounded-lg border border-border bg-background p-3">
-                  <p class="text-[9px] font-medium text-muted-foreground">Total Cost</p>
-                  <p class="mt-0.5 text-sm font-semibold text-foreground">$12.84</p>
-                  <p class="mt-0.5 text-[9px] font-medium text-muted-foreground">4.2M tokens</p>
-                </div>
-              </div>
-
-              {# Two cards side by side: Chart + Routing Chain #}
-              <div class="mt-3 flex gap-3">
-                {# Chart card #}
-                <div class="flex-1 basis-0 rounded-lg border border-border bg-background p-3">
-                  <div class="flex items-center justify-between">
-                    <p class="text-[10px] font-semibold text-foreground">Request Volume</p>
-                    <p class="text-[9px] text-muted-foreground">Last 24h</p>
-                  </div>
-                  <div class="mt-2">
-                    <svg viewBox="0 0 200 60" class="h-16 w-full" preserveAspectRatio="none">
-                      <defs>
-                        <linearGradient id="chartFill" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="0%" stop-color="hsl(239, 84%, 67%)" stop-opacity="0.15" />
-                          <stop offset="100%" stop-color="hsl(239, 84%, 67%)" stop-opacity="0" />
-                        </linearGradient>
-                      </defs>
-                      <path d="M0,45 C20,42 30,35 50,30 C70,25 80,38 100,28 C120,18 130,22 150,15 C170,8 180,12 200,5 L200,60 L0,60 Z" fill="url(#chartFill)" />
-                      <path d="M0,45 C20,42 30,35 50,30 C70,25 80,38 100,28 C120,18 130,22 150,15 C170,8 180,12 200,5" fill="none" stroke="hsl(239, 84%, 67%)" stroke-width="1.5" />
-                    </svg>
-                  </div>
-                </div>
-
-                {# Routing Chain card #}
-                <div class="flex-1 basis-0 rounded-lg border border-border bg-background p-3">
-                  <div class="flex items-center justify-between">
-                    <p class="text-[10px] font-semibold text-foreground">Routing Chain</p>
-                    <p class="text-[9px] text-muted-foreground">3 steps</p>
-                  </div>
-                  <div class="mt-2 space-y-1.5">
-                    <div class="flex items-center justify-between rounded-md bg-accent/5 px-2 py-1.5 border-l-2 border-accent">
-                      <div class="flex items-center gap-1.5">
-                        <svg class="h-3.5 w-3.5 shrink-0" viewBox="0 0 24 24" fill="currentColor" fill-rule="evenodd"><title>OpenAI</title><path d="M9.205 8.658v-2.26c0-.19.072-.333.238-.428l4.543-2.616c.619-.357 1.356-.523 2.117-.523 2.854 0 4.662 2.212 4.662 4.566 0 .167 0 .357-.024.547l-4.71-2.759a.797.797 0 00-.856 0l-5.97 3.473zm10.609 8.8V12.06c0-.333-.143-.57-.429-.737l-5.97-3.473 1.95-1.118a.433.433 0 01.476 0l4.543 2.617c1.309.76 2.189 2.378 2.189 3.948 0 1.808-1.07 3.473-2.76 4.163zM7.802 12.703l-1.95-1.142c-.167-.095-.239-.238-.239-.428V5.899c0-2.545 1.95-4.472 4.591-4.472 1 0 1.927.333 2.712.928L8.23 5.067c-.285.166-.428.404-.428.737v6.898zM12 15.128l-2.795-1.57v-3.33L12 8.658l2.795 1.57v3.33L12 15.128zm1.796 7.23c-1 0-1.927-.332-2.712-.927l4.686-2.712c.285-.166.428-.404.428-.737v-6.898l1.974 1.142c.167.095.238.238.238.428v5.233c0 2.545-1.974 4.472-4.614 4.472zm-5.637-5.303l-4.544-2.617c-1.308-.761-2.188-2.378-2.188-3.948A4.482 4.482 0 014.21 6.327v5.423c0 .333.143.571.428.738l5.947 3.449-1.95 1.118a.432.432 0 01-.476 0zm-.262 3.9c-2.688 0-4.662-2.021-4.662-4.519 0-.19.024-.38.047-.57l4.686 2.71c.286.167.571.167.856 0l5.97-3.448v2.26c0 .19-.07.333-.237.428l-4.543 2.616c-.619.357-1.356.523-2.117.523zm5.899 2.83a5.947 5.947 0 005.827-4.756C22.287 18.339 24 15.84 24 13.296c0-1.665-.713-3.282-1.998-4.448.119-.5.19-.999.19-1.498 0-3.401-2.759-5.947-5.946-5.947-.642 0-1.26.095-1.88.31A5.962 5.962 0 0010.205 0a5.947 5.947 0 00-5.827 4.757C1.713 5.447 0 7.945 0 10.49c0 1.666.713 3.283 1.998 4.448-.119.5-.19 1-.19 1.499 0 3.401 2.759 5.946 5.946 5.946.642 0 1.26-.095 1.88-.309a5.96 5.96 0 004.162 1.713z"/></svg>
-                        <span class="text-[10px] font-medium text-foreground">OpenAI / GPT-5.5</span>
-                      </div>
-                      <span class="rounded-full bg-green-50 px-1.5 py-0.5 text-[8px] font-semibold text-go">Primary</span>
-                    </div>
-                    <div class="flex items-center justify-between rounded-md bg-secondary px-2 py-1.5">
-                      <div class="flex items-center gap-1.5">
-                        <svg class="h-3.5 w-3.5 shrink-0" viewBox="0 0 24 24" fill="currentColor" fill-rule="evenodd"><title>Anthropic</title><path d="M13.827 3.52h3.603L24 20h-3.603l-6.57-16.48zm-7.258 0h3.767L16.906 20h-3.674l-1.343-3.461H5.017l-1.344 3.46H0L6.57 3.522zm4.132 9.959L8.453 7.687 6.205 13.48H10.7z"/></svg>
-                        <span class="text-[10px] font-medium text-foreground">Anthropic / Opus 4.7</span>
-                      </div>
-                      <span class="rounded-full bg-amber-50 px-1.5 py-0.5 text-[8px] font-semibold text-warn">Fallback</span>
-                    </div>
-                    <div class="flex items-center justify-between rounded-md bg-secondary px-2 py-1.5">
-                      <div class="flex items-center gap-1.5">
-                        <svg class="h-3.5 w-3.5 shrink-0" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><title>Gemini</title><path d="M20.616 10.835a14.147 14.147 0 01-4.45-3.001 14.111 14.111 0 01-3.678-6.452.503.503 0 00-.975 0 14.134 14.134 0 01-3.679 6.452 14.155 14.155 0 01-4.45 3.001c-.65.28-1.318.505-2.002.678a.502.502 0 000 .975c.684.172 1.35.397 2.002.677a14.147 14.147 0 014.45 3.001 14.112 14.112 0 013.679 6.453.502.502 0 00.975 0c.172-.685.397-1.351.677-2.003a14.145 14.145 0 013.001-4.45 14.113 14.113 0 016.453-3.678.503.503 0 000-.975 13.245 13.245 0 01-2.003-.678z" fill="#3186FF"/></svg>
-                        <span class="text-[10px] font-medium text-foreground">Google / GLM-5.1</span>
-                      </div>
-                      <span class="rounded-full bg-red-50 px-1.5 py-0.5 text-[8px] font-semibold text-error">Last Resort</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {# Request Log Table #}
-              <div class="mt-3 rounded-lg border border-border bg-background overflow-hidden">
-                <div class="flex items-center justify-between border-b border-border px-3 py-2">
-                  <p class="text-[10px] font-semibold text-foreground">Recent Requests</p>
-                  <span class="flex items-center gap-1 text-[9px] text-muted-foreground">
-                    <span class="h-1.5 w-1.5 rounded-full bg-accent animate-soft-pulse"></span>
-                    Streaming
-                  </span>
-                </div>
-                <table class="w-full text-left">
-                  <thead>
-                    <tr class="border-b border-border bg-secondary/50">
-                      <th class="px-3 py-1.5 text-[9px] font-medium text-muted-foreground">Time</th>
-                      <th class="px-3 py-1.5 text-[9px] font-medium text-muted-foreground">Status</th>
-                      <th class="px-3 py-1.5 text-[9px] font-medium text-muted-foreground hidden sm:table-cell">Provider / Model</th>
-                      <th class="px-3 py-1.5 text-[9px] font-medium text-muted-foreground hidden md:table-cell">Tokens</th>
-                      <th class="px-3 py-1.5 text-[9px] font-medium text-muted-foreground">Latency</th>
-                    </tr>
-                  </thead>
-                  <tbody class="divide-y divide-border">
-                    <tr>
-                      <td class="px-3 py-1.5 text-[10px] font-mono text-muted-foreground">14:23:01</td>
-                      <td class="px-3 py-1.5"><span class="rounded-full bg-green-50 px-1.5 py-0.5 text-[8px] font-semibold text-go">success</span></td>
-                      <td class="px-3 py-1.5 hidden sm:table-cell">
-                        <div class="flex items-center gap-1.5">
-                          <svg class="h-3 w-3 shrink-0" viewBox="0 0 24 24" fill="currentColor" fill-rule="evenodd"><title>OpenAI</title><path d="M9.205 8.658v-2.26c0-.19.072-.333.238-.428l4.543-2.616c.619-.357 1.356-.523 2.117-.523 2.854 0 4.662 2.212 4.662 4.566 0 .167 0 .357-.024.547l-4.71-2.759a.797.797 0 00-.856 0l-5.97 3.473zm10.609 8.8V12.06c0-.333-.143-.57-.429-.737l-5.97-3.473 1.95-1.118a.433.433 0 01.476 0l4.543 2.617c1.309.76 2.189 2.378 2.189 3.948 0 1.808-1.07 3.473-2.76 4.163zM7.802 12.703l-1.95-1.142c-.167-.095-.239-.238-.239-.428V5.899c0-2.545 1.95-4.472 4.591-4.472 1 0 1.927.333 2.712.928L8.23 5.067c-.285.166-.428.404-.428.737v6.898zM12 15.128l-2.795-1.57v-3.33L12 8.658l2.795 1.57v3.33L12 15.128zm1.796 7.23c-1 0-1.927-.332-2.712-.927l4.686-2.712c.285-.166.428-.404.428-.737v-6.898l1.974 1.142c.167.095.238.238.238.428v5.233c0 2.545-1.974 4.472-4.614 4.472zm-5.637-5.303l-4.544-2.617c-1.308-.761-2.188-2.378-2.188-3.948A4.482 4.482 0 014.21 6.327v5.423c0 .333.143.571.428.738l5.947 3.449-1.95 1.118a.432.432 0 01-.476 0zm-.262 3.9c-2.688 0-4.662-2.021-4.662-4.519 0-.19.024-.38.047-.57l4.686 2.71c.286.167.571.167.856 0l5.97-3.448v2.26c0 .19-.07.333-.237.428l-4.543 2.616c-.619.357-1.356.523-2.117.523zm5.899 2.83a5.947 5.947 0 005.827-4.756C22.287 18.339 24 15.84 24 13.296c0-1.665-.713-3.282-1.998-4.448.119-.5.19-.999.19-1.498 0-3.401-2.759-5.947-5.946-5.947-.642 0-1.26.095-1.88.31A5.962 5.962 0 0010.205 0a5.947 5.947 0 00-5.827 4.757C1.713 5.447 0 7.945 0 10.49c0 1.666.713 3.283 1.998 4.448-.119.5-.19 1-.19 1.499 0 3.401 2.759 5.946 5.946 5.946.642 0 1.26-.095 1.88-.309a5.96 5.96 0 004.162 1.713z"/></svg>
-                          <span class="text-[10px] font-medium text-foreground">OpenAI / GPT-5.5</span>
-                        </div>
-                      </td>
-                      <td class="px-3 py-1.5 text-[10px] font-mono text-muted-foreground hidden md:table-cell">1,247</td>
-                      <td class="px-3 py-1.5 text-[10px] font-mono text-muted-foreground">285ms</td>
-                    </tr>
-                    <tr>
-                      <td class="px-3 py-1.5 text-[10px] font-mono text-muted-foreground">14:22:58</td>
-                      <td class="px-3 py-1.5"><span class="rounded-full bg-amber-50 px-1.5 py-0.5 text-[8px] font-semibold text-warn">fallback</span></td>
-                      <td class="px-3 py-1.5 hidden sm:table-cell">
-                        <div class="flex items-center gap-1">
-                          <svg class="h-3 w-3 shrink-0" viewBox="0 0 24 24" fill="currentColor" fill-rule="evenodd"><title>OpenAI</title><path d="M9.205 8.658v-2.26c0-.19.072-.333.238-.428l4.543-2.616c.619-.357 1.356-.523 2.117-.523 2.854 0 4.662 2.212 4.662 4.566 0 .167 0 .357-.024.547l-4.71-2.759a.797.797 0 00-.856 0l-5.97 3.473zm10.609 8.8V12.06c0-.333-.143-.57-.429-.737l-5.97-3.473 1.95-1.118a.433.433 0 01.476 0l4.543 2.617c1.309.76 2.189 2.378 2.189 3.948 0 1.808-1.07 3.473-2.76 4.163zM7.802 12.703l-1.95-1.142c-.167-.095-.239-.238-.239-.428V5.899c0-2.545 1.95-4.472 4.591-4.472 1 0 1.927.333 2.712.928L8.23 5.067c-.285.166-.428.404-.428.737v6.898zM12 15.128l-2.795-1.57v-3.33L12 8.658l2.795 1.57v3.33L12 15.128zm1.796 7.23c-1 0-1.927-.332-2.712-.927l4.686-2.712c.285-.166.428-.404.428-.737v-6.898l1.974 1.142c.167.095.238.238.238.428v5.233c0 2.545-1.974 4.472-4.614 4.472zm-5.637-5.303l-4.544-2.617c-1.308-.761-2.188-2.378-2.188-3.948A4.482 4.482 0 014.21 6.327v5.423c0 .333.143.571.428.738l5.947 3.449-1.95 1.118a.432.432 0 01-.476 0zm-.262 3.9c-2.688 0-4.662-2.021-4.662-4.519 0-.19.024-.38.047-.57l4.686 2.71c.286.167.571.167.856 0l5.97-3.448v2.26c0 .19-.07.333-.237.428l-4.543 2.616c-.619.357-1.356.523-2.117.523zm5.899 2.83a5.947 5.947 0 005.827-4.756C22.287 18.339 24 15.84 24 13.296c0-1.665-.713-3.282-1.998-4.448.119-.5.19-.999.19-1.498 0-3.401-2.759-5.947-5.946-5.947-.642 0-1.26.095-1.88.31A5.962 5.962 0 0010.205 0a5.947 5.947 0 00-5.827 4.757C1.713 5.447 0 7.945 0 10.49c0 1.666.713 3.283 1.998 4.448-.119.5-.19 1-.19 1.499 0 3.401 2.759 5.946 5.946 5.946.642 0 1.26-.095 1.88-.309a5.96 5.96 0 004.162 1.713z"/></svg>
-                          <span class="line-through text-red-300/60 text-[10px]">GPT-5.5</span>
-                          <span class="text-muted-foreground text-[10px]">&rarr;</span>
-                          <svg class="h-3 w-3 shrink-0" viewBox="0 0 24 24" fill="currentColor" fill-rule="evenodd"><title>Anthropic</title><path d="M13.827 3.52h3.603L24 20h-3.603l-6.57-16.48zm-7.258 0h3.767L16.906 20h-3.674l-1.343-3.461H5.017l-1.344 3.46H0L6.57 3.522zm4.132 9.959L8.453 7.687 6.205 13.48H10.7z"/></svg>
-                          <span class="font-medium text-foreground text-[10px]">Opus 4.7</span>
-                        </div>
-                      </td>
-                      <td class="px-3 py-1.5 text-[10px] font-mono text-muted-foreground hidden md:table-cell">892</td>
-                      <td class="px-3 py-1.5 text-[10px] font-mono text-muted-foreground">1,240ms</td>
-                    </tr>
-                    <tr>
-                      <td class="px-3 py-1.5 text-[10px] font-mono text-muted-foreground">14:22:55</td>
-                      <td class="px-3 py-1.5"><span class="rounded-full bg-green-50 px-1.5 py-0.5 text-[8px] font-semibold text-go">success</span></td>
-                      <td class="px-3 py-1.5 hidden sm:table-cell">
-                        <div class="flex items-center gap-1.5">
-                          <svg class="h-3 w-3 shrink-0" viewBox="0 0 24 24" fill="currentColor" fill-rule="evenodd"><title>Anthropic</title><path d="M13.827 3.52h3.603L24 20h-3.603l-6.57-16.48zm-7.258 0h3.767L16.906 20h-3.674l-1.343-3.461H5.017l-1.344 3.46H0L6.57 3.522zm4.132 9.959L8.453 7.687 6.205 13.48H10.7z"/></svg>
-                          <span class="text-[10px] font-medium text-foreground">Anthropic / Opus 4.7</span>
-                        </div>
-                      </td>
-                      <td class="px-3 py-1.5 text-[10px] font-mono text-muted-foreground hidden md:table-cell">2,103</td>
-                      <td class="px-3 py-1.5 text-[10px] font-mono text-muted-foreground">412ms</td>
-                    </tr>
-                    <tr>
-                      <td class="px-3 py-1.5 text-[10px] font-mono text-muted-foreground">14:22:51</td>
-                      <td class="px-3 py-1.5"><span class="rounded-full bg-green-50 px-1.5 py-0.5 text-[8px] font-semibold text-go">success</span></td>
-                      <td class="px-3 py-1.5 hidden sm:table-cell">
-                        <div class="flex items-center gap-1.5">
-                          <svg class="h-3 w-3 shrink-0" viewBox="0 0 24 24" fill="currentColor" fill-rule="evenodd"><title>OpenAI</title><path d="M9.205 8.658v-2.26c0-.19.072-.333.238-.428l4.543-2.616c.619-.357 1.356-.523 2.117-.523 2.854 0 4.662 2.212 4.662 4.566 0 .167 0 .357-.024.547l-4.71-2.759a.797.797 0 00-.856 0l-5.97 3.473zm10.609 8.8V12.06c0-.333-.143-.57-.429-.737l-5.97-3.473 1.95-1.118a.433.433 0 01.476 0l4.543 2.617c1.309.76 2.189 2.378 2.189 3.948 0 1.808-1.07 3.473-2.76 4.163zM7.802 12.703l-1.95-1.142c-.167-.095-.239-.238-.239-.428V5.899c0-2.545 1.95-4.472 4.591-4.472 1 0 1.927.333 2.712.928L8.23 5.067c-.285.166-.428.404-.428.737v6.898zM12 15.128l-2.795-1.57v-3.33L12 8.658l2.795 1.57v3.33L12 15.128zm1.796 7.23c-1 0-1.927-.332-2.712-.927l4.686-2.712c.285-.166.428-.404.428-.737v-6.898l1.974 1.142c.167.095.238.238.238.428v5.233c0 2.545-1.974 4.472-4.614 4.472zm-5.637-5.303l-4.544-2.617c-1.308-.761-2.188-2.378-2.188-3.948A4.482 4.482 0 014.21 6.327v5.423c0 .333.143.571.428.738l5.947 3.449-1.95 1.118a.432.432 0 01-.476 0zm-.262 3.9c-2.688 0-4.662-2.021-4.662-4.519 0-.19.024-.38.047-.57l4.686 2.71c.286.167.571.167.856 0l5.97-3.448v2.26c0 .19-.07.333-.237.428l-4.543 2.616c-.619.357-1.356.523-2.117.523zm5.899 2.83a5.947 5.947 0 005.827-4.756C22.287 18.339 24 15.84 24 13.296c0-1.665-.713-3.282-1.998-4.448.119-.5.19-.999.19-1.498 0-3.401-2.759-5.947-5.946-5.947-.642 0-1.26.095-1.88.31A5.962 5.962 0 0010.205 0a5.947 5.947 0 00-5.827 4.757C1.713 5.447 0 7.945 0 10.49c0 1.666.713 3.283 1.998 4.448-.119.5-.19 1-.19 1.499 0 3.401 2.759 5.946 5.946 5.946.642 0 1.26-.095 1.88-.309a5.96 5.96 0 004.162 1.713z"/></svg>
-                          <span class="text-[10px] font-medium text-foreground">OpenAI / GPT-5.5-mini</span>
-                        </div>
-                      </td>
-                      <td class="px-3 py-1.5 text-[10px] font-mono text-muted-foreground hidden md:table-cell">567</td>
-                      <td class="px-3 py-1.5 text-[10px] font-mono text-muted-foreground">198ms</td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-
-            </div>
+      {# — Terminal: a fallback, replayed forever — #}
+      <div class="animate-fade-up" style="--fade-y: 24px; --fade-duration: 0.7s; --fade-delay: 0.35s;" data-reveal>
+        <div class="code-block p-5 md:p-6 shadow-[0_25px_80px_-12px_rgba(0,0,0,0.25)]" aria-hidden="true">
+          <div class="flex items-center gap-1.5 mb-4">
+            <span class="h-3 w-3 rounded-full bg-red-400/80"></span>
+            <span class="h-3 w-3 rounded-full bg-yellow-400/80"></span>
+            <span class="h-3 w-3 rounded-full bg-green-400/80"></span>
+            <span class="ml-3 text-xs text-white/30">agent output · live</span>
+          </div>
+          <div class="leading-7 text-[13px] font-mono [&>div]:whitespace-pre">
+            <div class="term-line scene-anim" style="--td: 0s"><span class="op">$</span> python <span class="var">agent.py</span></div>
+            <div class="term-line scene-anim" style="--td: 0.8s"><span class="cm">POST /r/prod/v1/chat/completions · stream=true</span></div>
+            <div class="term-line scene-anim" style="--td: 1.8s">  <span class="num">1</span>  openai/gpt-5.2         <span class="text-red-400">✗ 429 rate_limited</span>   <span class="cm">310ms</span></div>
+            <div class="term-line scene-anim" style="--td: 3.0s">  <span class="num">2</span>  anthropic/claude-4.5   <span class="str">✓ 200 · streaming</span></div>
+            <div class="term-line scene-anim" style="--td: 4.2s">     <span class="fn">›</span> Here's the summary you asked for —</div>
+            <div class="term-line scene-anim" style="--td: 5.2s"><span class="cm">──</span> <span class="text-amber-300/90">fallback</span> <span class="cm">· recovered · 1,412ms · logged to dashboard</span></div>
+            <div class="term-line scene-anim" style="--td: 6.2s"><span class="op">$</span> <span class="term-caret scene-anim text-white/80">▌</span></div>
           </div>
         </div>
-      </div>
-    </div>
-
-  </div>
-</section>
-
-{# ─────────────────────────────────────────────
-   SECTION 1b — Social Proof Bar
-   ───────────────────────────────────────────── #}
-<section class="py-8 bg-background border-y border-border">
-  <div class="mx-auto max-w-6xl px-6 md:px-12 lg:px-20">
-    <div class="grid grid-cols-2 md:grid-cols-4 gap-6 text-center">
-      <div>
-        <p class="text-3xl font-display text-accent">99.7%</p>
-        <p class="mt-1 text-sm text-muted-foreground font-body">Agent uptime maintained</p>
-      </div>
-      <div>
-        <p class="text-3xl font-display text-accent">23+</p>
-        <p class="mt-1 text-sm text-muted-foreground font-body">Outages recovered today</p>
-      </div>
-      <div>
-        <p class="text-3xl font-display text-accent">&lt;2min</p>
-        <p class="mt-1 text-sm text-muted-foreground font-body">Setup time</p>
-      </div>
-      <div>
-        <p class="text-3xl font-display text-accent">8+</p>
-        <p class="mt-1 text-sm text-muted-foreground font-body">LLM providers</p>
-      </div>
-    </div>
-  </div>
-</section>
-
-{# ─────────────────────────────────────────────
-   SECTION 2 — The Problem (Pain Agitation)
-   ───────────────────────────────────────────── #}
-<section class="section-padding md:section-padding-md bg-background border-t border-border">
-  <div class="mx-auto max-w-6xl px-6 md:px-12 lg:px-20">
-    <div class="text-center max-w-3xl mx-auto">
-      <p class="text-sm font-semibold tracking-wide text-error font-body">The reality of production LLM agents</p>
-      <h2 class="mt-3 font-display text-3xl md:text-4xl lg:text-5xl leading-[1.05] tracking-tight text-foreground">
-        Production agents fail in ways you can't predict
-      </h2>
-      <p class="mt-4 text-base text-muted-foreground leading-relaxed font-body">
-        You built the agent. You tested it. It worked perfectly. Then you shipped to production and discovered a brutal truth: LLM providers are unreliable.
-      </p>
-    </div>
-
-    <div class="mt-12 grid gap-6 md:grid-cols-3">
-      {# Pain 1 #}
-      <div class="rounded-2xl border border-border bg-secondary/30 p-6">
-        <div class="flex h-10 w-10 items-center justify-center rounded-xl bg-error/10 mb-4">
-          <svg class="h-5 w-5 text-error" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" /></svg>
-        </div>
-        <h3 class="text-base font-semibold text-foreground font-body">The 3 AM page</h3>
-        <p class="mt-2 text-sm text-muted-foreground leading-relaxed font-body">Your agent fails at 2:47 AM because OpenAI rate-limited you. Again. You're debugging in pajamas while users churn.</p>
+        <p class="mt-3 text-center text-xs text-muted-foreground font-body">
+          Your agent never sees the 429. Your user never sees an error.
+        </p>
       </div>
 
-      {# Pain 2 #}
-      <div class="rounded-2xl border border-border bg-secondary/30 p-6">
-        <div class="flex h-10 w-10 items-center justify-center rounded-xl bg-error/10 mb-4">
-          <svg class="h-5 w-5 text-error" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M3.98 8.223A10.477 10.477 0 001.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.45 10.45 0 0112 4.5c4.756 0 8.773 3.162 10.065 7.498a10.523 10.523 0 01-4.293 5.774M6.228 6.228L3 3m3.228 3.228l3.65 3.65m7.894 7.894L21 21m-3.228-3.228l-3.65-3.65m0 0a3 3 0 10-4.243-4.243m4.242 4.242L9.88 9.88" /></svg>
-        </div>
-        <h3 class="text-base font-semibold text-foreground font-body">Flying blind</h3>
-        <p class="mt-2 text-sm text-muted-foreground leading-relaxed font-body">Your agent returned garbage and you have no idea why. No request logs. No headers. No error body. Just a user complaint and a shrug.</p>
-      </div>
-
-      {# Pain 3 #}
-      <div class="rounded-2xl border border-border bg-secondary/30 p-6">
-        <div class="flex h-10 w-10 items-center justify-center rounded-xl bg-error/10 mb-4">
-          <svg class="h-5 w-5 text-error" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6v12m-3-2.818l.879.659c1.171.879 3.07.879 4.242 0 1.172-.879 1.172-2.303 0-3.182C13.536 12.219 12.768 12 12 12c-.725 0-1.45-.22-2.003-.659-1.106-.879-1.106-2.303 0-3.182s2.9-.879 4.006 0l.415.33M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-        </div>
-        <h3 class="text-base font-semibold text-foreground font-body">The context window trap</h3>
-        <p class="mt-2 text-sm text-muted-foreground leading-relaxed font-body">Your agent chokes on a big input and dies with a cryptic error. You didn't even know the token limit was that low. Now you're scrambling to find a bigger model.</p>
-      </div>
-    </div>
-
-    <div class="mt-8 text-center">
-      <p class="text-base text-foreground font-body font-medium">Sound familiar? You're not alone. Every team building production agents hits these walls.</p>
-    </div>
-  </div>
-</section>
-
-{# ─────────────────────────────────────────────
-   SECTION 3 — How It Works
-   ───────────────────────────────────────────── #}
-<section class="py-8 bg-background border-y border-border">
-  <div class="mx-auto max-w-6xl px-6 md:px-12 lg:px-20">
-    <div class="grid grid-cols-2 md:grid-cols-4 gap-6 text-center">
-      <div>
-        <p class="text-3xl font-display text-accent">99.7%</p>
-        <p class="mt-1 text-sm text-muted-foreground font-body">Agent uptime maintained</p>
-      </div>
-      <div>
-        <p class="text-3xl font-display text-accent">23+</p>
-        <p class="mt-1 text-sm text-muted-foreground font-body">Outages recovered today</p>
-      </div>
-      <div>
-        <p class="text-3xl font-display text-accent">&lt;2min</p>
-        <p class="mt-1 text-sm text-muted-foreground font-body">Setup time</p>
-      </div>
-      <div>
-        <p class="text-3xl font-display text-accent">8+</p>
-        <p class="mt-1 text-sm text-muted-foreground font-body">LLM providers</p>
-      </div>
     </div>
   </div>
 </section>
