@@ -3,6 +3,35 @@ defmodule DodoRouter.TextDiffTest do
 
   alias DodoRouter.TextDiff
 
+  describe "granularity: :line option" do
+    test "forces line mode on input that would auto-pick word mode" do
+      a = "alpha beta\ngamma delta\n"
+      b = "alpha BETA\ngamma delta\n"
+
+      assert TextDiff.diff(a, b).granularity == :word
+      assert TextDiff.diff(a, b, granularity: :line).granularity == :line
+    end
+
+    test "forced line mode still degrades past the size caps" do
+      a = String.duplicate("x", 250_000)
+
+      assert TextDiff.diff(a, a <> "y", granularity: :line).reason == :too_large
+    end
+
+    test "line-mode reconstruction invariants hold" do
+      a = "{\n  \"query\": \"dodo\",\n  \"limit\": 5\n}"
+      b = "{\n  \"query\": \"dodo router\",\n  \"limit\": 5\n}"
+
+      result = TextDiff.diff(a, b, granularity: :line)
+      assert result.granularity == :line
+
+      original = for {op, text} <- result.segments, op in [:eq, :del], into: "", do: text
+      replay = for {op, text} <- result.segments, op in [:eq, :ins], into: "", do: text
+      assert original == a
+      assert replay == b
+    end
+  end
+
   describe "compact_for_display/1" do
     test "squashes whitespace-only equal segments to a single break" do
       segments = [

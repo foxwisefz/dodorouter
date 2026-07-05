@@ -622,6 +622,127 @@ defmodule DodoRouterWeb.LogLiveReplayTest do
     end
   end
 
+  describe "tool-shaped exchanges" do
+    setup %{router: router} do
+      root =
+        LogsFixtures.log_fixture(router, %{
+          final_model: "original-model",
+          request_body:
+            Jason.encode!(%{
+              "messages" => [
+                %{"role" => "user", "content" => "find the sessions"},
+                %{
+                  "role" => "assistant",
+                  "content" => "",
+                  "tool_calls" => [
+                    %{
+                      "id" => "call_orig",
+                      "type" => "function",
+                      "function" => %{
+                        "name" => "grep_sessions",
+                        "arguments" => ~s({"query": "dodo", "limit": 5})
+                      }
+                    }
+                  ]
+                },
+                %{"role" => "user", "content" => "follow-up"}
+              ]
+            }),
+          response_body:
+            Jason.encode!(%{
+              "choices" => [
+                %{"message" => %{"role" => "assistant", "content" => "final text answer"}}
+              ]
+            })
+        })
+
+      partial =
+        LogsFixtures.log_fixture(router, %{
+          replayed_from_id: root.id,
+          replay_from_index: 0,
+          final_model: "model-tool",
+          request_body:
+            Jason.encode!(%{
+              "messages" => [%{"role" => "user", "content" => "find the sessions"}]
+            }),
+          response_body:
+            Jason.encode!(%{
+              "choices" => [
+                %{
+                  "message" => %{
+                    "role" => "assistant",
+                    "content" => "",
+                    "tool_calls" => [
+                      %{
+                        "id" => "call_replay",
+                        "type" => "function",
+                        "function" => %{
+                          "name" => "exec_search",
+                          "arguments" => ~s({"query": "dodo router", "limit": 5})
+                        }
+                      }
+                    ]
+                  }
+                }
+              ]
+            })
+        })
+
+      %{root: root, partial: partial}
+    end
+
+    test "the diff tab compares the exchange baseline's tool call, without empty-text noise", %{
+      conn: conn,
+      root: root,
+      partial: partial
+    } do
+      {:ok, view, _html} = live(conn, ~p"/logs/#{root.id}/replay?replay=#{partial.id}")
+      render_async(view)
+
+      # tool cards read from the baseline, not the root's final response
+      assert has_element?(view, "#tool-calls-section", "grep_sessions")
+      assert has_element?(view, "#tool-calls-section", "exec_search")
+
+      # no empty-content side-by-side noise inside the diff pane
+      refute view |> element("#compare-diff-pane") |> render() =~ "No text content"
+
+      # args diff is line-granularity, rendered monospaced
+      assert view |> element("#tool-args-diff") |> render() =~ "font-mono"
+    end
+
+    test "side by side renders the tool calls of both sides", %{
+      conn: conn,
+      root: root,
+      partial: partial
+    } do
+      {:ok, view, _html} = live(conn, ~p"/logs/#{root.id}/replay?replay=#{partial.id}")
+      render_async(view)
+
+      view |> element("#diff-view-side") |> render_click()
+
+      pane = view |> element("#compare-side-pane") |> render()
+      assert pane =~ "grep_sessions"
+      assert pane =~ "exec_search"
+      refute pane =~ "No text content"
+    end
+
+    test "the raw tab shows the exchange baseline for partials, not the final response", %{
+      conn: conn,
+      root: root,
+      partial: partial
+    } do
+      {:ok, view, _html} = live(conn, ~p"/logs/#{root.id}/replay?replay=#{partial.id}")
+      render_async(view)
+
+      view |> element("#diff-view-raw") |> render_click()
+
+      pane = view |> element("#compare-raw-pane") |> render()
+      assert pane =~ "grep_sessions"
+      assert pane =~ "from history"
+      refute pane =~ "final text answer"
+    end
+  end
+
   describe "thread section" do
     setup %{router: router} do
       multi_turn =

@@ -72,8 +72,8 @@ defmodule DodoRouter.TextDiff do
 
   Either argument may be `nil`, which is treated as an empty string.
   """
-  @spec diff(String.t() | nil, String.t() | nil) :: t()
-  def diff(a, b) do
+  @spec diff(String.t() | nil, String.t() | nil, keyword()) :: t()
+  def diff(a, b, opts \\ []) do
     a = a || ""
     b = b || ""
 
@@ -85,7 +85,7 @@ defmodule DodoRouter.TextDiff do
         one_sided_result(a, b)
 
       true ->
-        sized_diff(a, b)
+        sized_diff(a, b, Keyword.get(opts, :granularity, :auto))
     end
   end
 
@@ -122,7 +122,11 @@ defmodule DodoRouter.TextDiff do
     end
   end
 
-  defp sized_diff(a, b) do
+  # Forced line mode (e.g. structured text like JSON, where word diffs read
+  # as fragment soup) — still subject to the line-mode size guards
+  defp sized_diff(a, b, :line), do: line_diff(a, b)
+
+  defp sized_diff(a, b, _auto) do
     max_bytes = max(byte_size(a), byte_size(b))
 
     word_tokens_a = word_tokens(a)
@@ -130,25 +134,28 @@ defmodule DodoRouter.TextDiff do
     word_count_a = length(word_tokens_a)
     word_count_b = length(word_tokens_b)
 
-    cond do
-      max_bytes <= @word_max_bytes and word_count_a <= @word_max_tokens and
-        word_count_b <= @word_max_tokens and
-          word_count_a * word_count_b <= @word_max_product ->
-        build_result(:word, word_tokens_a, word_tokens_b)
+    if max_bytes <= @word_max_bytes and word_count_a <= @word_max_tokens and
+         word_count_b <= @word_max_tokens and
+         word_count_a * word_count_b <= @word_max_product do
+      build_result(:word, word_tokens_a, word_tokens_b)
+    else
+      line_diff(a, b)
+    end
+  end
 
-      true ->
-        line_tokens_a = line_tokens(a)
-        line_tokens_b = line_tokens(b)
-        line_count_a = length(line_tokens_a)
-        line_count_b = length(line_tokens_b)
+  defp line_diff(a, b) do
+    max_bytes = max(byte_size(a), byte_size(b))
+    line_tokens_a = line_tokens(a)
+    line_tokens_b = line_tokens(b)
+    line_count_a = length(line_tokens_a)
+    line_count_b = length(line_tokens_b)
 
-        if max_bytes <= @line_max_bytes and line_count_a <= @line_max_lines and
-             line_count_b <= @line_max_lines and
-             line_count_a * line_count_b <= @line_max_product do
-          build_result(:line, line_tokens_a, line_tokens_b)
-        else
-          %{granularity: :none, segments: [], reason: :too_large, stats: %{ins: 0, del: 0, eq: 0}}
-        end
+    if max_bytes <= @line_max_bytes and line_count_a <= @line_max_lines and
+         line_count_b <= @line_max_lines and
+         line_count_a * line_count_b <= @line_max_product do
+      build_result(:line, line_tokens_a, line_tokens_b)
+    else
+      %{granularity: :none, segments: [], reason: :too_large, stats: %{ins: 0, del: 0, eq: 0}}
     end
   end
 

@@ -294,7 +294,10 @@ defmodule DodoRouterWeb.LogLive.Replay do
             if(orig_reasoning || repl_reasoning,
               do: TextDiff.diff(orig_reasoning, repl_reasoning)
             ),
-          tool_args: if(orig_args && repl_args, do: TextDiff.diff(orig_args, repl_args))
+          tool_args:
+            if(orig_args && repl_args,
+              do: TextDiff.diff(orig_args, repl_args, granularity: :line)
+            )
         }
       end)
     end
@@ -750,7 +753,10 @@ defmodule DodoRouterWeb.LogLive.Replay do
               </div>
 
               <div :if={
-                @diff.content.granularity == :none and @diff.content.reason in [:too_large, :empty]
+                @diff.content.granularity == :none and
+                  (@diff.content.reason == :too_large or
+                     (@diff.content.reason == :empty and tool_calls(@baseline_msg) == [] and
+                        tool_calls(@replay_msg) == []))
               }>
                 <.side_by_side
                   source_msg={@baseline_msg}
@@ -773,23 +779,23 @@ defmodule DodoRouterWeb.LogLive.Replay do
                   Reasoning diff
                 </summary>
                 <div class="mt-3">
-                  <.diff_block
-                    :if={@diff.reasoning.granularity != :none}
-                    segments={@diff.reasoning.segments}
-                  />
                   <p
                     :if={
                       @diff.reasoning.granularity == :none and @diff.reasoning.reason == :one_sided
                     }
-                    class="text-sm text-base-content/50"
+                    class="text-xs text-base-content/40 mb-2"
                   >
-                    Only one side produced reasoning content.
+                    Only one side produced reasoning content:
                   </p>
+                  <.diff_block
+                    :if={@diff.reasoning.segments != []}
+                    segments={@diff.reasoning.segments}
+                  />
                 </div>
               </details>
 
               <.tool_calls_section
-                source_msg={@source_msg}
+                source_msg={@baseline_msg}
                 replay_msg={@replay_msg}
                 tool_args_diff={@diff.tool_args}
               />
@@ -814,8 +820,12 @@ defmodule DodoRouterWeb.LogLive.Replay do
           id="compare-raw-pane"
         >
           <div>
-            <div class="text-xs font-medium text-base-content/50 mb-1">Original response</div>
-            <pre class="mockup-code text-xs overflow-x-auto max-h-[70vh] overflow-y-auto p-4"><code>{format_json(@source.response_body)}</code></pre>
+            <div class="text-xs font-medium text-base-content/50 mb-1">
+              {if @partial?,
+                do: "Original · answer at message #{@anchor_index + 1} (from history)",
+                else: "Original response"}
+            </div>
+            <pre class="mockup-code text-xs overflow-x-auto max-h-[70vh] overflow-y-auto p-4"><code>{if @partial?, do: baseline_raw_json(@baseline_msg), else: format_json(@source.response_body)}</code></pre>
           </div>
           <div>
             <div class="text-xs font-medium text-base-content/50 mb-1">Replay response</div>
@@ -865,12 +875,16 @@ defmodule DodoRouterWeb.LogLive.Replay do
   end
 
   attr :segments, :list, required: true
+  attr :mono, :boolean, default: false
 
   defp diff_block(assigns) do
     assigns = assign(assigns, :segments, TextDiff.compact_for_display(assigns.segments))
 
     ~H"""
-    <div class="whitespace-pre-wrap break-words text-sm leading-relaxed">
+    <div class={[
+      "whitespace-pre-wrap break-words leading-relaxed",
+      if(@mono, do: "font-mono text-xs", else: "text-sm")
+    ]}>
       <%= for {op, text} <- @segments do %>
         <%= case op do %>
           <% :eq -> %>
@@ -897,19 +911,35 @@ defmodule DodoRouterWeb.LogLive.Replay do
         <div class="text-xs font-medium text-base-content/50 mb-2">
           Original · {@source.final_model}
         </div>
-        <div class="whitespace-pre-wrap break-words text-sm leading-relaxed">
-          {message_text(@source_msg) || "No text content"}
-        </div>
+        <.side_pane_body msg={@source_msg} />
       </div>
       <div class="card-bordered max-h-[70vh] overflow-y-auto">
         <div class="text-xs font-medium text-base-content/50 mb-2">
           Replay · {@selected.final_model}
         </div>
-        <div class="whitespace-pre-wrap break-words text-sm leading-relaxed">
-          {message_text(@replay_msg) || "No text content"}
-        </div>
+        <.side_pane_body msg={@replay_msg} />
       </div>
     </div>
+    """
+  end
+
+  attr :msg, :map, default: nil
+
+  defp side_pane_body(assigns) do
+    ~H"""
+    <div :if={message_text(@msg)} class="whitespace-pre-wrap break-words text-sm leading-relaxed">
+      {message_text(@msg)}
+    </div>
+    <div :for={call <- tool_calls(@msg)} class="mt-2 first:mt-0">
+      <span class="badge badge-secondary badge-sm mb-1">{call["function"]["name"]}</span>
+      <pre class="text-xs bg-base-200/50 rounded p-2 overflow-x-auto whitespace-pre-wrap">{pretty_args(call)}</pre>
+    </div>
+    <p
+      :if={message_text(@msg) == nil and tool_calls(@msg) == []}
+      class="text-sm text-base-content/40"
+    >
+      No text content
+    </p>
     """
   end
 
@@ -935,7 +965,7 @@ defmodule DodoRouterWeb.LogLive.Replay do
         id="tool-args-diff"
       >
         <div class="text-xs font-medium text-base-content/50 mb-2">Arguments diff</div>
-        <.diff_block segments={@tool_args_diff.segments} />
+        <.diff_block segments={@tool_args_diff.segments} mono />
       </div>
     </div>
     """
@@ -1022,7 +1052,6 @@ defmodule DodoRouterWeb.LogLive.Replay do
       "#{name} — $#{input}/$#{output} per Mtok"
     end
   end
-
 
   # Subscription plans report $0/$0 per-token in the catalog — traffic is
   # covered by the flat plan fee, not billed per token
@@ -1131,6 +1160,18 @@ defmodule DodoRouterWeb.LogLive.Replay do
       {:ok, decoded} -> Jason.encode!(decoded, pretty: true)
       _ -> str
     end
+  end
+
+  # Partial comparisons have no full response JSON for the original side —
+  # the baseline is a message from the root's history
+  defp baseline_raw_json(nil), do: ""
+
+  defp baseline_raw_json(message) do
+    message
+    |> Map.take([:role, :content, :reasoning_content, :tool_calls])
+    |> Enum.reject(fn {_key, value} -> is_nil(value) end)
+    |> Map.new()
+    |> Jason.encode!(pretty: true)
   end
 
   defp format_json(nil), do: ""
