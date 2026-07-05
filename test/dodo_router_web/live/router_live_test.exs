@@ -40,6 +40,8 @@ defmodule DodoRouterWeb.RouterLiveTest do
 
       assert render(live) =~ "Save your API key!"
       assert render(live) =~ "Test Router"
+      # The one-time key must be copyable, not just selectable
+      assert has_element?(live, "#copy-new-api-key[phx-hook=CopyButton][data-copy]")
     end
 
     test "deletes a router", %{conn: conn, user: user} do

@@ -82,7 +82,9 @@ defmodule DodoRouterWeb.ApiKeysLive.Index do
                 {@new_key.key}
               </code>
               <button
-                phx-click={JS.dispatch("phx:copy", to: "#api-key-#{@new_key.router_id}")}
+                id="copy-new-api-key"
+                phx-hook="CopyButton"
+                data-copy={@new_key.key}
                 class="p-2 rounded-lg bg-base-100 border border-base-300/50 hover:bg-secondary transition-colors"
                 title="Copy"
               >
@@ -127,7 +129,9 @@ defmodule DodoRouterWeb.ApiKeysLive.Index do
                       {@base_url}/r/{router.slug}/v1/chat/completions
                     </code>
                     <button
-                      phx-click={JS.dispatch("phx:copy", to: "#endpoint-#{router.id}")}
+                      id={"copy-endpoint-#{router.id}"}
+                      phx-hook="CopyButton"
+                      data-copy={"#{@base_url}/r/#{router.slug}/v1/chat/completions"}
                       class="p-1 rounded hover:bg-base-200 text-base-content/40 hover:text-base-content/60 transition-colors shrink-0"
                       title="Copy endpoint"
                     >
@@ -145,6 +149,7 @@ defmodule DodoRouterWeb.ApiKeysLive.Index do
                 <div class="flex items-center gap-2">
                   <span class="text-xs text-base-content/50">Are you sure?</span>
                   <button
+                    id={"confirm-regenerate-#{router.id}"}
                     phx-click="regenerate"
                     phx-value-id={router.id}
                     class="px-3 py-1.5 rounded-lg bg-error text-white text-xs font-medium hover:opacity-90 transition-opacity"
@@ -160,6 +165,7 @@ defmodule DodoRouterWeb.ApiKeysLive.Index do
                 </div>
               <% else %>
                 <button
+                  id={"regenerate-#{router.id}"}
                   phx-click="confirm_regenerate"
                   phx-value-id={router.id}
                   class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-base-300/50 text-xs font-medium text-base-content/60 hover:text-error hover:border-error/30 hover:bg-error/5 transition-colors"
