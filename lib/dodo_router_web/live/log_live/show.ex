@@ -32,7 +32,21 @@ defmodule DodoRouterWeb.LogLive.Show do
         |> Map.put(:highlighted, index == highlight_index)
       end)
 
-    resp_message = MessageNormalizer.parse_response_body(log.response_body)
+    resp_message =
+      case MessageNormalizer.parse_response_body(log.response_body) do
+        nil ->
+          nil
+
+        message ->
+          # the response bubble's producer is this log itself — mirrors the
+          # provenance chips on attributed history messages
+          Map.put(message, :producer, %{
+            provider: log.final_provider,
+            model: log.final_model,
+            log_id: log.id
+          })
+      end
+
     req_headers = parse_headers(log.request_headers)
     resp_headers = parse_headers(log.response_headers)
     available_tools = MessageNormalizer.extract_tools(req_params)
