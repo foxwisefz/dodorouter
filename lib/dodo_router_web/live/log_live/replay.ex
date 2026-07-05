@@ -413,9 +413,6 @@ defmodule DodoRouterWeb.LogLive.Replay do
                 {model_option_label(model)}
               </option>
             </datalist>
-            <p class="text-xs text-base-content/40 mt-1 h-4" id="replay-price-hint">
-              {price_hint(@targets, @target_form[:provider_key_id].value, @target_form[:model].value)}
-            </p>
           </div>
 
           <div class="w-full sm:w-44">
@@ -447,6 +444,16 @@ defmodule DodoRouterWeb.LogLive.Replay do
             {if @running?, do: "Running…", else: "Run replay"}
           </button>
         </.form>
+        <p
+          :if={
+            price_hint(@targets, @target_form[:provider_key_id].value, @target_form[:model].value) !=
+              ""
+          }
+          id="replay-price-hint"
+          class="text-xs text-base-content/40 mt-2"
+        >
+          {price_hint(@targets, @target_form[:provider_key_id].value, @target_form[:model].value)}
+        </p>
         <p :if={@running?} class="text-xs text-base-content/40 mt-2 animate-pulse">
           Dispatching to the provider — long generations can take up to a minute.
         </p>
