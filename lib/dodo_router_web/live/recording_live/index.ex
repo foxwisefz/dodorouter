@@ -106,7 +106,9 @@ defmodule DodoRouterWeb.RecordingLive.Index do
           </div>
         </div>
         <div class="flex items-center gap-3">
-          <span class="text-sm text-base-content/60">{pluralize(length(@recordings), "recording")}</span>
+          <span class="text-sm text-base-content/60">
+            {pluralize(length(@recordings), "recording")}
+          </span>
           <%= if @active_recording do %>
             <button
               phx-click="stop_recording"

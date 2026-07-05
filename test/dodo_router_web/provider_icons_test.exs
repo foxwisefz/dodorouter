@@ -1,7 +1,6 @@
 defmodule DodoRouterWeb.ProviderIconsTest do
   use ExUnit.Case, async: true
 
-  import Phoenix.Component
   import Phoenix.LiveViewTest
 
   alias DodoRouterWeb.ProviderIcons

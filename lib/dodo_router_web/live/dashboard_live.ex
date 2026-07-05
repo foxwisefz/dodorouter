@@ -250,7 +250,9 @@ defmodule DodoRouterWeb.DashboardLive do
             <div class="rounded-lg border border-base-300/50 bg-base-100 p-3">
               <div class="flex items-center justify-between mb-2">
                 <p class="text-sm font-semibold text-base-content">Routing Chain</p>
-                <p class="text-xs text-base-content/40">{pluralize(length(@selected_router_steps), "step")}</p>
+                <p class="text-xs text-base-content/40">
+                  {pluralize(length(@selected_router_steps), "step")}
+                </p>
               </div>
               <div class="space-y-1.5">
                 <%= for {step, idx} <- Enum.with_index(@selected_router_steps) do %>
