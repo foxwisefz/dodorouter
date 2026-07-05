@@ -129,6 +129,30 @@ defmodule DodoRouterWeb.LogLiveReplayTest do
       assert html =~ "As original"
     end
 
+    test "zero-priced plan models read as included in plan, not $0", %{
+      conn: conn,
+      source: source
+    } do
+      {:ok, _model} =
+        DodoRouter.Models.create_model(%{
+          provider_slug: "test_provider",
+          model_id: "test-model",
+          display_name: "Test Model",
+          input_price_per_million: Decimal.new("0"),
+          output_price_per_million: Decimal.new("0")
+        })
+
+      {:ok, view, _html} = live(conn, ~p"/logs/#{source.id}/replay")
+
+      html =
+        view
+        |> form("#replay-form")
+        |> render_change(%{replay: %{model: "test-model"}})
+
+      assert html =~ "Included in plan"
+      refute html =~ "$0"
+    end
+
     test "falls back to the generic effort set for unknown models", %{conn: conn, source: source} do
       {:ok, view, _html} = live(conn, ~p"/logs/#{source.id}/replay")
 

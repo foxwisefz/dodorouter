@@ -91,6 +91,63 @@ defmodule DodoRouter.ProxyTest do
     end
   end
 
+  describe "plan-aware cost calculation" do
+    setup do
+      user = AccountsFixtures.user_fixture()
+      {router, _api_key} = RoutersFixtures.router_fixture(user)
+
+      coding_key =
+        ProvidersFixtures.provider_key_fixture(user, %{provider_slug: "moonshot_coding"})
+
+      step = %RoutingStep{
+        id: Ecto.UUID.generate(),
+        router_id: router.id,
+        position: 0,
+        provider: "test_provider",
+        model: "test-model",
+        plan_type: "coding",
+        provider_key: coding_key,
+        provider_key_id: coding_key.id
+      }
+
+      {:ok, _platform} =
+        DodoRouter.Models.create_model(%{
+          provider_slug: "test_provider",
+          model_id: "test-model",
+          display_name: "Test Model",
+          input_price_per_million: Decimal.new("1.0"),
+          output_price_per_million: Decimal.new("2.0")
+        })
+
+      request = %{"messages" => [%{"role" => "user", "content" => "hi"}]}
+
+      %{router: router, step: step, request: request}
+    end
+
+    test "a plan catalog row wins over the provider's platform pricing", ctx do
+      {:ok, _plan} =
+        DodoRouter.Models.create_model(%{
+          provider_slug: "moonshot_coding",
+          model_id: "test-model",
+          display_name: "Test Model (plan)",
+          input_price_per_million: Decimal.new("0"),
+          output_price_per_million: Decimal.new("0")
+        })
+
+      assert {:ok, _resp, %{log: log}} =
+               Proxy.dispatch(ctx.router, ctx.request, steps: [ctx.step], log_mode: :sync)
+
+      assert Decimal.eq?(log.estimated_cost_usd, Decimal.new(0))
+    end
+
+    test "falls back to the provider's platform pricing without a plan row", ctx do
+      assert {:ok, _resp, %{log: log}} =
+               Proxy.dispatch(ctx.router, ctx.request, steps: [ctx.step], log_mode: :sync)
+
+      assert Decimal.compare(log.estimated_cost_usd, Decimal.new(0)) == :gt
+    end
+  end
+
   describe "error_response/1" do
     test "returns 400 with standardized context overflow error" do
       attempts = [

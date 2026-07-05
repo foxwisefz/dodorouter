@@ -81,7 +81,7 @@ defmodule DodoRouter.Proxy do
     last_step = List.last(result.attempted_steps)
 
     # Calculate cost using model pricing if available
-    estimated_cost = calculate_cost(last_step[:provider], last_step[:model], usage)
+    estimated_cost = calculate_cost(last_step, usage)
 
     # Encode request/response for storage (truncate large payloads)
     {truncated_req, req_flags} = truncate_body(request)
@@ -431,10 +431,20 @@ defmodule DodoRouter.Proxy do
     end
   end
 
-  defp calculate_cost(nil, _model, _usage), do: nil
+  defp calculate_cost(nil, _usage), do: nil
 
-  defp calculate_cost(provider, model, usage) do
-    case DodoRouter.Models.get_model_by_id(provider, model) do
+  defp calculate_cost(last_step, usage) do
+    key_slug = last_step[:provider_key_slug]
+    provider = last_step[:provider]
+    model = last_step[:model]
+
+    # Plan-specific catalogs (e.g. moonshot_coding, priced $0 — subscription
+    # traffic has no marginal per-token cost) win over platform pricing
+    model_struct =
+      (key_slug != provider && lookup_model(key_slug, model)) ||
+        lookup_model(provider, model)
+
+    case model_struct do
       nil ->
         nil
 
@@ -448,4 +458,8 @@ defmodule DodoRouter.Proxy do
         )
     end
   end
+
+  defp lookup_model(nil, _model), do: nil
+  defp lookup_model(_slug, nil), do: nil
+  defp lookup_model(slug, model), do: DodoRouter.Models.get_model_by_id(slug, model)
 end

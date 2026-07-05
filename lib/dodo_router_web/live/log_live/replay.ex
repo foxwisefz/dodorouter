@@ -999,16 +999,24 @@ defmodule DodoRouterWeb.LogLive.Replay do
 
   defp model_option_label(%{display_name: name, input_price: nil}), do: name
 
-  defp model_option_label(%{display_name: name, input_price: input, output_price: output}) do
-    "#{name} — $#{input}/$#{output} per Mtok"
+  defp model_option_label(%{display_name: name, input_price: input, output_price: output} = model) do
+    if plan_included?(model) do
+      "#{name} — included in plan"
+    else
+      "#{name} — $#{input}/$#{output} per Mtok"
+    end
   end
 
   defp price_hint(targets, provider_key_id, model) when is_binary(model) and model != "" do
     models = selected_target_models(targets, provider_key_id)
 
     case Enum.find(models, &(&1.id == model)) do
-      %{input_price: input, output_price: output} when not is_nil(input) ->
-        "$#{input} in / $#{output} out per Mtok"
+      %{input_price: input, output_price: output} = entry when not is_nil(input) ->
+        if plan_included?(entry) do
+          "Included in plan — no per-token cost"
+        else
+          "$#{input} in / $#{output} out per Mtok"
+        end
 
       %{} ->
         "No pricing data for this model"
@@ -1016,6 +1024,13 @@ defmodule DodoRouterWeb.LogLive.Replay do
       nil ->
         "Custom model id — pricing unknown"
     end
+  end
+
+  # Subscription plans report $0/$0 per-token in the catalog — traffic is
+  # covered by the flat plan fee, not billed per token
+  defp plan_included?(%{input_price: input, output_price: output}) do
+    not is_nil(input) and not is_nil(output) and
+      Decimal.eq?(input, 0) and Decimal.eq?(output, 0)
   end
 
   defp price_hint(_targets, _key_id, _model), do: ""
