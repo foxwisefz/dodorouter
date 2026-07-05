@@ -46,5 +46,21 @@ defmodule DodoRouterWeb.UserRegistrationControllerTest do
       assert response =~ "Register"
       assert response =~ "must have the @ sign and no spaces"
     end
+
+    test "duplicate email suggests logging in and keeps the ToS box checked", %{conn: conn} do
+      user = user_fixture()
+
+      conn =
+        post(conn, ~p"/users/register", %{
+          "user" => %{"email" => user.email, "tos_accepted" => "true"}
+        })
+
+      response = html_response(conn, 200)
+      refute response =~ "has already been taken"
+      assert response =~ "already registered"
+      assert response =~ ~s(href="/users/log-in")
+      # The accepted ToS checkbox must survive the error re-render
+      assert response =~ ~r/<input[^>]*name="user\[tos_accepted\]"[^>]*checked/s
+    end
   end
 end

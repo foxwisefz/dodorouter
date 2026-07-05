@@ -31,6 +31,7 @@
             type="checkbox"
             name={f[:tos_accepted].name}
             value="true"
+            checked={f[:tos_accepted].value in [true, "true"]}
             class="checkbox checkbox-primary"
             required
           />
