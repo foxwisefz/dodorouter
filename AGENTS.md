@@ -634,6 +634,8 @@ For hot upgrades to work correctly:
 2. **Database migrations must be backward-compatible**
    - **CRITICAL**: Migrations run **before** the new code deploys. The old code is still running when migrations execute.
    - The deploy workflow automatically runs migrations before deploying. **Always** follow these rules when creating migrations:
+     - **Creating migrations**: **Always** generate with `mix ecto.gen.migration <name>` — **never** hand-write version numbers. Ecto tracks applied migrations by version integer alone, so two files that ever share a version silently skip each other in any environment where that version is already recorded (this broke the 0.1.86 deploy). `mix precommit` runs `migrations.check_versions` to catch duplicates.
+     - **Migrations must be self-contained Ecto.Migration DSL** — never call application modules. The deploy extracts the new release's migration `.exs` files and runs them through the **currently installed (old) release** before upgrading, so application code from the new release is not available to them.
      - **Adding columns**: Add as `null: true` (no `default` on existing rows). The old code won't know about the new column, so it must not fail on insert.
      - **Adding tables**: Safe — old code won't reference them.
      - **Adding indexes**: Use `create_index/3` with `concurrently: true` to avoid locking tables.
