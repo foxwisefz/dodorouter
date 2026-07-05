@@ -374,16 +374,16 @@
 /* — Entrance reveals for the whole showcase — */
 
 @utility reveal-rise {
-  opacity: 0;
-  transform: translateY(20px);
   transition: opacity 0.7s cubic-bezier(0.16, 1, 0.3, 1), transform 0.7s cubic-bezier(0.16, 1, 0.3, 1);
   transition-delay: var(--reveal-delay, 0s);
 }
 
-/* Unlayered on purpose: must out-rank the reveal-rise utility */
-[data-reveal].in-view .reveal-rise {
-  opacity: 1;
-  transform: translateY(0);
+/* Unlayered on purpose: must out-rank the reveal-rise utility.
+   Hidden only when JS is present (html.js), so no-JS users see everything;
+   once revealed, stays visible. */
+html.js [data-reveal]:not(.revealed) .reveal-rise {
+  opacity: 0;
+  transform: translateY(20px);
 }
 @media (prefers-reduced-motion: reduce) {
   .reveal-rise { opacity: 1 !important; transform: none !important; transition: none !important; }

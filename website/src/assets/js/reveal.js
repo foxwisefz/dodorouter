@@ -4,13 +4,15 @@
 (function () {
   var els = document.querySelectorAll("[data-reveal]");
   if (!("IntersectionObserver" in window)) {
-    els.forEach(function (el) { el.classList.add("in-view"); });
+    els.forEach(function (el) { el.classList.add("in-view", "revealed"); });
     return;
   }
   var io = new IntersectionObserver(
     function (entries) {
       entries.forEach(function (entry) {
-        // Toggle rather than one-shot so looping scenes pause off-screen
+        // 'revealed' is sticky (entrance styles); 'in-view' toggles so
+        // looping scenes pause while off-screen.
+        if (entry.isIntersecting) entry.target.classList.add("revealed");
         entry.target.classList.toggle("in-view", entry.isIntersecting);
       });
     },

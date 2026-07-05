@@ -569,112 +569,71 @@ resp <span class="op">=</span> client.chat.completions.<span class="fn">create</
     <div class="text-center max-w-2xl mx-auto">
       <p class="text-sm font-semibold tracking-wide text-accent font-body">Pricing</p>
       <h2 class="mt-3 font-display text-3xl md:text-4xl lg:text-5xl leading-[1.05] tracking-tight text-foreground">
-        Less than the cost of one outage
+        Free while in beta
       </h2>
       <p class="mt-4 text-base text-muted-foreground leading-relaxed font-body">
-        One provider outage costs you more in lost users and debugging time than a year of Dodo Router. Start free. Upgrade when you're ready to sleep through the night.
+        You bring your own provider keys — DodoRouter never marks up your tokens.
+        Use the hosted instance or self-host the open-source release.
       </p>
     </div>
 
-    <div class="mt-14 grid gap-6 md:grid-cols-3 max-w-4xl mx-auto">
-      {# Free Tier #}
-      <div class="pricing-card flex flex-col">
-        <p class="text-sm font-semibold text-muted-foreground font-body">Hobby</p>
+    <div class="mt-14 grid gap-6 md:grid-cols-2 max-w-3xl mx-auto">
+      <div class="pricing-card pricing-card-featured flex flex-col">
+        <p class="text-sm font-semibold text-accent font-body">Hosted</p>
         <div class="mt-3 flex items-baseline gap-1">
           <span class="text-4xl font-display text-foreground">$0</span>
-          <span class="text-sm text-muted-foreground font-body">/month</span>
+          <span class="text-sm text-muted-foreground font-body">during beta</span>
         </div>
-        <p class="mt-2 text-sm text-muted-foreground font-body">Perfect for side projects and testing the waters.</p>
+        <p class="mt-2 text-sm text-muted-foreground font-body">Sign up, create a router, ship. We run the infrastructure.</p>
         <ul class="mt-6 space-y-3 flex-1">
           <li class="flex items-center gap-2 text-sm text-foreground font-body">
             <svg class="h-4 w-4 shrink-0 text-go" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
-            1 router with fallback chain
+            Unlimited routers &amp; fallback chains
           </li>
           <li class="flex items-center gap-2 text-sm text-foreground font-body">
             <svg class="h-4 w-4 shrink-0 text-go" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
-            3 providers
+            Every provider, including subscription plans
           </li>
           <li class="flex items-center gap-2 text-sm text-foreground font-body">
             <svg class="h-4 w-4 shrink-0 text-go" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
-            10K requests/month
+            Full logs, sessions, replay &amp; compare
           </li>
           <li class="flex items-center gap-2 text-sm text-foreground font-body">
             <svg class="h-4 w-4 shrink-0 text-go" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
-            Basic analytics & logs
-          </li>
-        </ul>
-        <a href="https://api.dodorouter.com/users/register" class="mt-8 block rounded-full border border-border bg-background py-2.5 text-center text-sm font-medium text-foreground transition-all hover:bg-secondary font-body">
-          Start Free
-        </a>
-      </div>
-
-      {# Pro Tier #}
-      <div class="pricing-card pricing-card-featured flex flex-col relative">
-        <span class="absolute -top-3 left-1/2 -translate-x-1/2 rounded-full bg-accent px-3 py-0.5 text-xs font-semibold text-white font-body">Most Popular</span>
-        <p class="text-sm font-semibold text-accent font-body">Pro</p>
-        <div class="mt-3 flex items-baseline gap-1">
-          <span class="text-4xl font-display text-foreground">$29</span>
-          <span class="text-sm text-muted-foreground font-body">/month</span>
-        </div>
-        <p class="mt-2 text-sm text-muted-foreground font-body">For production agents where downtime is not an option.</p>
-        <ul class="mt-6 space-y-3 flex-1">
-          <li class="flex items-center gap-2 text-sm text-foreground font-body">
-            <svg class="h-4 w-4 shrink-0 text-go" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
-            Unlimited routers
-          </li>
-          <li class="flex items-center gap-2 text-sm text-foreground font-body">
-            <svg class="h-4 w-4 shrink-0 text-go" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
-            All 8+ providers
-          </li>
-          <li class="flex items-center gap-2 text-sm text-foreground font-body">
-            <svg class="h-4 w-4 shrink-0 text-go" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
-            500K requests/month
-          </li>
-          <li class="flex items-center gap-2 text-sm text-foreground font-body">
-            <svg class="h-4 w-4 shrink-0 text-go" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
-            Full request logs & headers
-          </li>
-          <li class="flex items-center gap-2 text-sm text-foreground font-body">
-            <svg class="h-4 w-4 shrink-0 text-go" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
-            Priority support
+            Your provider keys, encrypted at rest
           </li>
         </ul>
         <a href="https://api.dodorouter.com/users/register" class="mt-8 block rounded-full bg-accent py-2.5 text-center text-sm font-medium text-white transition-all hover:opacity-90 font-body">
-          Start Free Trial →
+          Get started free →
         </a>
       </div>
 
-      {# Enterprise Tier #}
       <div class="pricing-card flex flex-col">
-        <p class="text-sm font-semibold text-muted-foreground font-body">Enterprise</p>
+        <p class="text-sm font-semibold text-muted-foreground font-body">Self-hosted</p>
         <div class="mt-3 flex items-baseline gap-1">
-          <span class="text-4xl font-display text-foreground">Custom</span>
+          <span class="text-4xl font-display text-foreground">Open source</span>
         </div>
-        <p class="mt-2 text-sm text-muted-foreground font-body">For teams that need custom SLAs and compliance.</p>
+        <p class="mt-2 text-sm text-muted-foreground font-body">Run it on your own box. Your keys and logs never leave your infra.</p>
         <ul class="mt-6 space-y-3 flex-1">
           <li class="flex items-center gap-2 text-sm text-foreground font-body">
             <svg class="h-4 w-4 shrink-0 text-go" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
-            Everything in Pro
+            Everything in Hosted
           </li>
           <li class="flex items-center gap-2 text-sm text-foreground font-body">
             <svg class="h-4 w-4 shrink-0 text-go" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
-            Unlimited requests
+            Single-binary Elixir release
           </li>
           <li class="flex items-center gap-2 text-sm text-foreground font-body">
             <svg class="h-4 w-4 shrink-0 text-go" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
-            Custom SLAs
+            Hot upgrades — updates without dropping requests
           </li>
           <li class="flex items-center gap-2 text-sm text-foreground font-body">
             <svg class="h-4 w-4 shrink-0 text-go" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
-            SSO &amp; audit logs
-          </li>
-          <li class="flex items-center gap-2 text-sm text-foreground font-body">
-            <svg class="h-4 w-4 shrink-0 text-go" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
-            Dedicated support
+            MIT licensed
           </li>
         </ul>
-        <a href="mailto:hello@dodorouter.com" class="mt-8 block rounded-full border border-border bg-background py-2.5 text-center text-sm font-medium text-foreground transition-all hover:bg-secondary font-body">
-          Contact Sales
+        <a href="https://github.com/foxwise-ai/dodorouter" target="_blank" rel="noopener noreferrer" class="mt-8 block rounded-full border border-border bg-background py-2.5 text-center text-sm font-medium text-foreground transition-all hover:bg-secondary font-body">
+          View on GitHub
         </a>
       </div>
     </div>
@@ -689,7 +648,7 @@ resp <span class="op">=</span> client.chat.completions.<span class="fn">create</
     <div class="text-center mb-12">
       <p class="text-sm font-semibold tracking-wide text-accent font-body">FAQ</p>
       <h2 class="mt-3 font-display text-3xl md:text-4xl lg:text-5xl leading-[1.05] tracking-tight text-foreground">
-        You probably have questions
+        Questions, answered
       </h2>
     </div>
 
@@ -697,13 +656,13 @@ resp <span class="op">=</span> client.chat.completions.<span class="fn">create</
       {# FAQ 1 #}
       <div class="rounded-xl border border-border bg-background p-6">
         <h3 class="text-base font-semibold text-foreground font-body">Can't I just build this myself?</h3>
-        <p class="mt-2 text-sm text-muted-foreground leading-relaxed font-body">Sure, if you want to spend the next 3 months building provider adapters, handling edge cases for streaming fallbacks, debugging context window errors across 8 different APIs, and building a dashboard to manage it all. Or you could change one line of code and be done in 2 minutes. Your call.</p>
+        <p class="mt-2 text-sm text-muted-foreground leading-relaxed font-body">You can — a retry loop gets you 80% of the way. The last 20% is the hard part: streaming failures mid-response, tool-call state, every provider reporting context overflow differently, and the observability to debug any of it. DodoRouter is that last 20%, already built and battle-tested.</p>
       </div>
 
       {# FAQ 2 #}
       <div class="rounded-xl border border-border bg-background p-6">
         <h3 class="text-base font-semibold text-foreground font-body">What happens when a provider fails mid-stream?</h3>
-        <p class="mt-2 text-sm text-muted-foreground leading-relaxed font-body">We catch the failure, route to the next provider in your chain, and continue seamlessly. Your users never see a broken message. We even handle partial content that was already sent to the client. This is the stuff that keeps you up at night — we've already solved it.</p>
+        <p class="mt-2 text-sm text-muted-foreground leading-relaxed font-body">DodoRouter catches the dropped stream, re-issues the request to the next provider in your chain, and keeps streaming to your client — including handling content that was already sent. The request is logged as a fallback so you can see exactly what happened.</p>
       </div>
 
       {# FAQ 3 #}
@@ -714,8 +673,8 @@ resp <span class="op">=</span> client.chat.completions.<span class="fn">create</
 
       {# FAQ 4 #}
       <div class="rounded-xl border border-border bg-background p-6">
-        <h3 class="text-base font-semibold text-foreground font-body">Is there a free trial?</h3>
-        <p class="mt-2 text-sm text-muted-foreground leading-relaxed font-body">The Hobby plan is free forever. Use it to protect one agent with up to 10K requests/month. When you need more routers, providers, or requests, upgrade to Pro. No credit card required to start.</p>
+        <h3 class="text-base font-semibold text-foreground font-body">What does it cost?</h3>
+        <p class="mt-2 text-sm text-muted-foreground leading-relaxed font-body">DodoRouter is free while in beta — no credit card, no request caps, bring your own provider keys. It's also open source, so you can self-host it any time.</p>
       </div>
 
       {# FAQ 5 #}
@@ -738,14 +697,14 @@ resp <span class="op">=</span> client.chat.completions.<span class="fn">create</
       <div class="absolute -bottom-16 -left-16 h-48 w-48 rounded-full bg-white/5"></div>
 
       <h2 class="relative font-display text-3xl md:text-4xl lg:text-5xl leading-[1.05] tracking-tight text-white">
-        Your next provider outage is coming.<br/>Will your agents survive it?
+        Point your agent at<br/>something <em>sturdier.</em>
       </h2>
       <p class="relative mt-5 text-base md:text-lg text-white/80 max-w-xl mx-auto leading-relaxed font-body">
-        Set up your first routing chain in under two minutes. Free to start, no credit card required. Sleep better tonight.
+        Create a router, add your keys, and make your first request in under two minutes. Free while in beta — no credit card required.
       </p>
       <div class="relative mt-8 flex flex-col sm:flex-row items-center justify-center gap-3">
         <a href="https://api.dodorouter.com/users/register" class="rounded-full bg-white px-8 py-3.5 text-sm font-semibold text-accent transition-all hover:bg-white/90 font-body">
-          Get Bulletproof Agents Free →
+          Get started free →
         </a>
         <a href="https://github.com/foxwise-ai/dodorouter" target="_blank" rel="noopener noreferrer" class="flex items-center gap-2 rounded-full border border-white/25 px-6 py-3.5 text-sm font-medium text-white transition-all hover:bg-white/10 font-body">
           <svg class="h-4 w-4 fill-white" viewBox="0 0 24 24"><path d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"/></svg>
