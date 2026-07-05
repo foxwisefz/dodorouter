@@ -231,7 +231,8 @@ defmodule DodoRouter.Logs do
         where: l.router_id == ^router.id and l.inserted_at >= ^since,
         select: %{
           total_requests: count(l.id),
-          successful_requests: count(fragment("CASE WHEN ? = 'success' THEN 1 END", l.status)),
+          successful_requests:
+            count(fragment("CASE WHEN ? IN ('success', 'fallback') THEN 1 END", l.status)),
           fallback_requests: count(fragment("CASE WHEN ? = 'fallback' THEN 1 END", l.status)),
           error_requests: count(fragment("CASE WHEN ? = 'error' THEN 1 END", l.status)),
           total_tokens: sum(l.total_tokens),
