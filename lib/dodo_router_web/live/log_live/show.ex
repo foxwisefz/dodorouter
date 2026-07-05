@@ -455,17 +455,20 @@ defmodule DodoRouterWeb.LogLive.Show do
                 <div
                   :if={length(@req_messages) > 3}
                   id="scroll-rail"
+                  phx-hook="ScrollRail"
                   class="hidden lg:flex fixed right-3 top-1/2 -translate-y-1/2 z-30 flex-col gap-1.5"
                 >
                   <a
-                    :for={message <- @req_messages}
-                    href={"#message-#{message.abs_index}"}
-                    id={"rail-msg-#{message.abs_index}"}
+                    :for={bucket <- rail_buckets(@req_messages)}
+                    href={"#message-#{bucket.from}"}
+                    id={"rail-msg-#{bucket.from}"}
+                    data-from={bucket.from}
+                    data-to={bucket.to}
                     class={[
                       "block w-4 h-1 rounded-full transition-all hover:scale-x-150 hover:bg-primary",
-                      rail_color(message)
+                      bucket_color(bucket)
                     ]}
-                    title={rail_title(message)}
+                    title={bucket_title(bucket)}
                   >
                   </a>
                 </div>
@@ -842,6 +845,38 @@ defmodule DodoRouterWeb.LogLive.Show do
       {index, ""} when index >= 0 -> index
       _other -> nil
     end
+  end
+
+  # A dash per message overflows the viewport on long conversations, so the
+  # rail caps at @rail_max_dashes and each dash represents a message range
+  # (single-message buckets degenerate to the exact per-message rail)
+  @rail_max_dashes 48
+
+  defp rail_buckets(messages) do
+    chunk_size = max(1, ceil(length(messages) / @rail_max_dashes))
+
+    messages
+    |> Enum.chunk_every(chunk_size)
+    |> Enum.map(fn group ->
+      %{from: hd(group).abs_index, to: List.last(group).abs_index, messages: group}
+    end)
+  end
+
+  defp bucket_color(%{messages: [message]}), do: rail_color(message)
+
+  defp bucket_color(%{messages: messages}) do
+    cond do
+      Enum.any?(messages, &Map.get(&1, :highlighted)) -> "bg-info"
+      Enum.any?(messages, &(&1.role == "user")) -> "bg-primary/60"
+      true -> "bg-base-content/25"
+    end
+  end
+
+  defp bucket_title(%{messages: [message]}), do: rail_title(message)
+
+  defp bucket_title(%{from: from, to: to, messages: messages}) do
+    user_count = Enum.count(messages, &(&1.role == "user"))
+    "##{from + 1}–##{to + 1} · #{user_count} user"
   end
 
   defp rail_color(%{highlighted: true}), do: "bg-info"
