@@ -1023,6 +1023,14 @@ defmodule DodoRouterWeb.LogLive.Replay do
     end
   end
 
+
+  # Subscription plans report $0/$0 per-token in the catalog — traffic is
+  # covered by the flat plan fee, not billed per token
+  defp plan_included?(%{input_price: input, output_price: output}) do
+    not is_nil(input) and not is_nil(output) and
+      Decimal.eq?(input, 0) and Decimal.eq?(output, 0)
+  end
+
   defp price_hint(targets, provider_key_id, model) when is_binary(model) and model != "" do
     models = selected_target_models(targets, provider_key_id)
 
@@ -1040,13 +1048,6 @@ defmodule DodoRouterWeb.LogLive.Replay do
       nil ->
         "Custom model id — pricing unknown"
     end
-  end
-
-  # Subscription plans report $0/$0 per-token in the catalog — traffic is
-  # covered by the flat plan fee, not billed per token
-  defp plan_included?(%{input_price: input, output_price: output}) do
-    not is_nil(input) and not is_nil(output) and
-      Decimal.eq?(input, 0) and Decimal.eq?(output, 0)
   end
 
   defp price_hint(_targets, _key_id, _model), do: ""
