@@ -523,6 +523,72 @@ defmodule DodoRouterWeb.LogLiveReplayTest do
     end
   end
 
+  describe "message deep links" do
+    setup %{router: router} do
+      long_thread =
+        LogsFixtures.log_fixture(router, %{
+          request_body:
+            Jason.encode!(%{
+              "messages" => [
+                %{"role" => "user", "content" => "q one"},
+                %{"role" => "assistant", "content" => "a one"},
+                %{"role" => "user", "content" => "q two"},
+                %{"role" => "assistant", "content" => "a two"},
+                %{"role" => "user", "content" => "q three"}
+              ]
+            })
+        })
+
+      %{long_thread: long_thread}
+    end
+
+    test "messages carry anchor ids and the scroll rail links to them", %{
+      conn: conn,
+      long_thread: long_thread
+    } do
+      {:ok, view, _html} = live(conn, ~p"/logs/#{long_thread.id}")
+
+      assert has_element?(view, "#message-0")
+      assert has_element?(view, "#message-4")
+      assert has_element?(view, "#scroll-rail")
+      assert has_element?(view, ~s(#scroll-rail a[href="#message-2"]))
+    end
+
+    test "?message=N scrolls to and highlights the message", %{
+      conn: conn,
+      long_thread: long_thread
+    } do
+      {:ok, view, _html} = live(conn, ~p"/logs/#{long_thread.id}?message=2")
+
+      assert has_element?(view, ~s(#message-2[phx-hook="ScrollIntoView"]))
+    end
+
+    test "the hub's anchor banner links to the exact replayed message", %{
+      conn: conn,
+      user: user,
+      router: router,
+      long_thread: long_thread,
+      provider_key: provider_key
+    } do
+      _ = router
+
+      {:ok, anchored} =
+        DodoRouter.Replays.replay(user, long_thread, %{
+          provider_key_id: provider_key.id,
+          model: "test-model",
+          message_index: 2
+        })
+
+      {:ok, view, _html} =
+        live(conn, ~p"/logs/#{long_thread.id}/replay?replay=#{anchored.id}")
+
+      render_async(view)
+
+      assert has_element?(view, "#anchor-message-link")
+      assert view |> element("#anchor-message-link") |> render() =~ "message=2"
+    end
+  end
+
   describe "thread section" do
     setup %{router: router} do
       multi_turn =

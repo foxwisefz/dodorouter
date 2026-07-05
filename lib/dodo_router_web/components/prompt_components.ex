@@ -366,7 +366,15 @@ defmodule DodoRouterWeb.PromptComponents do
       |> assign(:producer, Map.get(assigns.message, :producer))
 
     ~H"""
-    <div class={"group flex flex-col gap-1.5 #{align_class(@role)}"}>
+    <div
+      id={bubble_dom_id(@message)}
+      phx-hook={if Map.get(@message, :highlighted), do: "ScrollIntoView"}
+      class={[
+        "group flex flex-col gap-1.5",
+        align_class(@role),
+        Map.get(@message, :highlighted) && "ring-2 ring-info/40 rounded-xl p-2 -m-2"
+      ]}
+    >
       <div class="flex items-center gap-2 px-1">
         <span class={"text-[10px] uppercase tracking-wider font-semibold #{@label_class}"}>
           {@label}
@@ -444,6 +452,13 @@ defmodule DodoRouterWeb.PromptComponents do
     do: {"bg-warning/10 border border-warning/30", "text-warning", "tool result"}
 
   defp role_styles(other, _), do: {"bg-base-200", "text-base-content/40", other || "msg"}
+
+  defp bubble_dom_id(message) do
+    case Map.get(message, :abs_index) do
+      nil -> nil
+      index -> "message-#{index}"
+    end
+  end
 
   defp align_class("user"), do: "items-end"
   defp align_class(_), do: "items-start"

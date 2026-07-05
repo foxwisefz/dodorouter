@@ -10,7 +10,7 @@ defmodule DodoRouterWeb.LogLive.Show do
   import DodoRouterWeb.PromptComponents
 
   @impl true
-  def mount(%{"id" => id}, _session, socket) do
+  def mount(%{"id" => id} = params, _session, socket) do
     # Try by primary key first, then by request_id (for live stream links)
     log =
       case Logs.get_log(socket.assigns.current_user, id) do
@@ -18,13 +18,19 @@ defmodule DodoRouterWeb.LogLive.Show do
         log -> log
       end
 
+    highlight_index = parse_message_param(params["message"])
+
     {req_messages, req_params} = MessageNormalizer.parse_request_body(log.request_body)
 
     req_messages =
       log
       |> annotate_provenance(socket.assigns.current_user, req_messages)
       |> Enum.with_index()
-      |> Enum.map(fn {message, index} -> Map.put(message, :abs_index, index) end)
+      |> Enum.map(fn {message, index} ->
+        message
+        |> Map.put(:abs_index, index)
+        |> Map.put(:highlighted, index == highlight_index)
+      end)
 
     resp_message = MessageNormalizer.parse_response_body(log.response_body)
     req_headers = parse_headers(log.request_headers)
@@ -446,6 +452,23 @@ defmodule DodoRouterWeb.LogLive.Show do
                     </div>
                   </div>
                 <% end %>
+                <div
+                  :if={length(@req_messages) > 3}
+                  id="scroll-rail"
+                  class="hidden lg:flex fixed right-3 top-1/2 -translate-y-1/2 z-30 flex-col gap-1.5"
+                >
+                  <a
+                    :for={message <- @req_messages}
+                    href={"#message-#{message.abs_index}"}
+                    id={"rail-msg-#{message.abs_index}"}
+                    class={[
+                      "block w-4 h-1 rounded-full transition-all hover:scale-x-150 hover:bg-primary",
+                      rail_color(message)
+                    ]}
+                    title={rail_title(message)}
+                  >
+                  </a>
+                </div>
                 <.conversation
                   messages={@req_messages}
                   response={@resp_message}
@@ -810,6 +833,33 @@ defmodule DodoRouterWeb.LogLive.Show do
       </.modal>
     </div>
     """
+  end
+
+  defp parse_message_param(nil), do: nil
+
+  defp parse_message_param(value) when is_binary(value) do
+    case Integer.parse(value) do
+      {index, ""} when index >= 0 -> index
+      _other -> nil
+    end
+  end
+
+  defp rail_color(%{highlighted: true}), do: "bg-info"
+  defp rail_color(%{role: "user"}), do: "bg-primary/60"
+  defp rail_color(%{role: "assistant"}), do: "bg-base-content/25"
+  defp rail_color(_message), do: "bg-base-content/10"
+
+  defp rail_title(message) do
+    preview =
+      case message.content do
+        content when is_binary(content) and content != "" ->
+          " · " <> String.slice(content, 0, 60)
+
+        _other ->
+          ""
+      end
+
+    "##{message.abs_index + 1} · #{message.role}" <> preview
   end
 
   defp annotate_provenance(%{session_id: nil}, _user, messages), do: messages

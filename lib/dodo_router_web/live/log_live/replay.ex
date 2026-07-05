@@ -620,7 +620,14 @@ defmodule DodoRouterWeb.LogLive.Replay do
           <.icon name="hero-scissors" class="w-3.5 h-3.5 text-info shrink-0 mt-0.5" />
           <span>
             Replayed from message {@anchor_index + 1} of {length(@source_messages)}:
-            <span class="italic">"{from_preview(@source_messages, @anchor_index)}"</span>
+            <.link
+              id="anchor-message-link"
+              navigate={~p"/logs/#{@source.id}?#{[message: @anchor_index]}"}
+              class="italic underline decoration-dotted hover:text-primary"
+              title="Open the original log at this exact message"
+            >
+              "{from_preview(@source_messages, @anchor_index)}"
+            </.link>
             <span :if={@partial?}>
               — diffed against the original answer at that exchange; metric deltas hidden
               (contexts differ in length).
@@ -808,7 +815,7 @@ defmodule DodoRouterWeb.LogLive.Replay do
         </div>
         
     <!-- Footer links -->
-        <div class="flex items-center gap-4 mt-6 text-sm" id="compare-footer">
+        <div class="flex items-center gap-4 mt-6 mb-12 text-sm" id="compare-footer">
           <.link navigate={~p"/logs/#{@source.id}"} class="text-primary hover:underline">
             Original log ↗
           </.link>
