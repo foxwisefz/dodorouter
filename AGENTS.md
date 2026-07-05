@@ -656,6 +656,7 @@ For hot upgrades to work correctly:
      - **Removing elements**: Risky — old CSS/JS may break without them. Do in a later deploy.
      - **Changing IDs or data attributes**: Risky — old JS hooks may break. Do in a later deploy.
    - Caddy serves `/assets/*` directly from disk, bypassing Phoenix. The deploy workflow syncs `priv/static` to Caddy's mounted directory after each deploy.
+   - **Phoenix memoizes resolved static asset paths per URL** (`Phoenix.Config.cache` is get-or-compute), so digests memoized at cold boot survive hot upgrades — and survive a plain `Endpoint.Supervisor.warmup/1`, whose per-path population is also get-or-compute. Pages keep linking boot-era CSS/JS no matter how many releases hot-upgrade on top. The deploy fixes this after each hot upgrade via `bin/dodo_router rpc 'Phoenix.Config.clear_cache(DodoRouterWeb.Endpoint); Phoenix.Endpoint.Supervisor.warmup(DodoRouterWeb.Endpoint)'` (clear the memos, then re-warm from the current release's manifest).
 
 4. **ERTS version must match**
    - Upgrading Elixir or OTP versions requires a full release (not hot upgrade)
