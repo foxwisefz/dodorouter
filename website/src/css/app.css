@@ -149,3 +149,214 @@
 @utility cta-gradient {
   background: linear-gradient(135deg, hsl(239, 84%, 67%) 0%, hsl(260, 70%, 55%) 50%, hsl(280, 60%, 50%) 100%);
 }
+
+/* ──────────────────────────────────────────────────────────────
+   Feature showcase — fallback theater + bento micro-scenes.
+   Every scene is pure CSS on a shared looping timeline; scenes
+   pause until their [data-reveal] wrapper gets .in-view (reveal.js)
+   and stay still entirely under prefers-reduced-motion.
+   ────────────────────────────────────────────────────────────── */
+
+/* Unlayered on purpose: must out-rank utility-layer animation shorthands */
+[data-reveal] .scene-anim,
+[data-reveal] .scene-anim::before,
+[data-reveal] .scene-anim::after {
+  animation-play-state: paused;
+}
+[data-reveal].in-view .scene-anim,
+[data-reveal].in-view .scene-anim::before,
+[data-reveal].in-view .scene-anim::after {
+  animation-play-state: running;
+}
+@media (prefers-reduced-motion: reduce) {
+  .scene-anim, .scene-anim::before, .scene-anim::after {
+    animation: none !important;
+  }
+  .ft-log { opacity: 1 !important; transform: none !important; }
+}
+
+/* — Flagship: fallback theater (9s master loop) — */
+
+@keyframes ft-dot {
+  0%       { left: 10%; top: 46%; background: var(--color-accent); opacity: 0; }
+  3%       { opacity: 1; }
+  16%      { left: 66%; top: 14%; background: var(--color-accent); }
+  24%      { left: 66%; top: 14%; background: var(--color-error); }
+  26%      { left: 60%; top: 30%; }
+  36%      { left: 66%; top: 46%; background: var(--color-accent); }
+  46%      { left: 66%; top: 46%; background: var(--color-go); }
+  62%      { left: 10%; top: 46%; background: var(--color-go); opacity: 1; }
+  66%      { opacity: 0; }
+  100%     { left: 10%; top: 46%; opacity: 0; }
+}
+
+@keyframes ft-step1 {
+  0%, 14%  { border-color: var(--color-border); background: hsl(0, 0%, 100%); }
+  18%, 30% { border-color: var(--color-error); background: hsl(0, 84%, 60%, 0.05); }
+  36%, 100% { border-color: var(--color-border); background: hsl(0, 0%, 100%); opacity: 0.55; }
+}
+
+@keyframes ft-step1-badge {
+  0%, 16%  { opacity: 0; transform: translateY(3px) scale(0.9); }
+  20%, 60% { opacity: 1; transform: translateY(0) scale(1); }
+  68%, 100% { opacity: 0; transform: translateY(3px) scale(0.9); }
+}
+
+@keyframes ft-step2 {
+  0%, 34%  { border-color: var(--color-border); background: hsl(0, 0%, 100%); }
+  40%, 70% { border-color: var(--color-go); background: hsl(142, 71%, 45%, 0.06); }
+  80%, 100% { border-color: var(--color-border); background: hsl(0, 0%, 100%); }
+}
+
+@keyframes ft-step2-badge {
+  0%, 38%  { opacity: 0; transform: translateY(3px) scale(0.9); }
+  44%, 72% { opacity: 1; transform: translateY(0) scale(1); }
+  80%, 100% { opacity: 0; transform: translateY(3px) scale(0.9); }
+}
+
+@keyframes ft-agent {
+  0%, 44%  { border-color: var(--color-border); }
+  56%, 78% { border-color: var(--color-go); box-shadow: 0 0 0 4px hsl(142, 71%, 45%, 0.12); }
+  88%, 100% { border-color: var(--color-border); box-shadow: none; }
+}
+
+@keyframes ft-log {
+  0%, 58%  { opacity: 0; transform: translateY(8px); }
+  66%, 92% { opacity: 1; transform: translateY(0); }
+  100%     { opacity: 0; transform: translateY(8px); }
+}
+
+@utility ft-dot {
+  position: absolute;
+  width: 0.75rem;
+  height: 0.75rem;
+  margin: -0.375rem;
+  border-radius: 9999px;
+  box-shadow: 0 0 0 4px hsl(239, 84%, 67%, 0.15), 0 1px 4px rgba(0,0,0,0.2);
+  animation: ft-dot 9s cubic-bezier(0.45, 0, 0.25, 1) infinite;
+}
+
+@utility ft-step-1 { animation: ft-step1 9s linear infinite; }
+@utility ft-step-1-badge { animation: ft-step1-badge 9s linear infinite; opacity: 0; }
+@utility ft-step-2 { animation: ft-step2 9s linear infinite; }
+@utility ft-step-2-badge { animation: ft-step2-badge 9s linear infinite; opacity: 0; }
+@utility ft-agent { animation: ft-agent 9s linear infinite; }
+@utility ft-log { animation: ft-log 9s linear infinite; opacity: 0; }
+
+/* — Bento scene 1: mid-stream recovery — */
+
+@keyframes ms-line1 { /* first chunk types out then stalls */
+  0% { width: 0; }
+  22%, 100% { width: 58%; }
+}
+@keyframes ms-drop {
+  0%, 22% { opacity: 0; transform: scale(0.9); }
+  26%, 44% { opacity: 1; transform: scale(1); }
+  50%, 100% { opacity: 0; transform: scale(0.9); }
+}
+@keyframes ms-line2 { /* second provider finishes the sentence */
+  0%, 48% { width: 0; }
+  78%, 100% { width: 100%; }
+}
+@keyframes ms-caret { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+
+@utility ms-line-1 { animation: ms-line1 7s linear infinite; overflow: hidden; white-space: nowrap; }
+@utility ms-drop-chip { animation: ms-drop 7s ease infinite; opacity: 0; }
+@utility ms-line-2 { animation: ms-line2 7s linear infinite; overflow: hidden; white-space: nowrap; width: 0; }
+@utility ms-caret { animation: ms-caret 1s step-end infinite; }
+
+/* — Bento scene 2: context overflow reroute — */
+
+@keyframes co-fill {
+  0% { width: 4%; }
+  34% { width: 99%; }
+  48%, 60% { width: 99%; }
+  64%, 100% { width: 34%; }
+}
+@keyframes co-flash {
+  0%, 32% { opacity: 0; }
+  38%, 56% { opacity: 1; }
+  64%, 100% { opacity: 0; }
+}
+@keyframes co-track {  /* the track itself grows when rerouted */
+  0%, 56% { transform: scaleX(1); }
+  66%, 92% { transform: scaleX(1); }
+  100% { transform: scaleX(1); }
+}
+@keyframes co-model-swap {
+  0%, 56% { opacity: 0; transform: translateY(4px); }
+  66%, 94% { opacity: 1; transform: translateY(0); }
+  100% { opacity: 0; }
+}
+
+@utility co-fill { animation: co-fill 8s ease-in-out infinite; }
+@utility co-flash { animation: co-flash 8s ease infinite; opacity: 0; }
+@utility co-model-swap { animation: co-model-swap 8s ease infinite; opacity: 0; }
+
+/* — Bento scene 3: replay & compare — */
+
+@keyframes rc-bar {
+  0%, 10% { transform: scaleX(0); }
+  30%, 88% { transform: scaleX(1); }
+  96%, 100% { transform: scaleX(0); }
+}
+@utility rc-bar {
+  transform-origin: left center;
+  transform: scaleX(0);
+  animation: rc-bar 7s ease infinite;
+}
+
+/* — Bento scene 4: live chain reorder — */
+
+@keyframes cr-swap-a {
+  0%, 24% { transform: translateY(0); }
+  36%, 74% { transform: translateY(calc(100% + 0.375rem)); }
+  86%, 100% { transform: translateY(0); }
+}
+@keyframes cr-swap-b {
+  0%, 24% { transform: translateY(0); }
+  36%, 74% { transform: translateY(calc(-100% - 0.375rem)); }
+  86%, 100% { transform: translateY(0); }
+}
+@utility cr-swap-a { animation: cr-swap-a 8s cubic-bezier(0.4, 0, 0.2, 1) infinite; }
+@utility cr-swap-b { animation: cr-swap-b 8s cubic-bezier(0.4, 0, 0.2, 1) infinite; }
+
+/* — Bento scene 5: subscriptions as keys — */
+
+@keyframes sk-float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-4px); }
+}
+@utility sk-float { animation: sk-float 4s ease-in-out infinite; }
+@utility sk-float-late { animation: sk-float 4s ease-in-out 1.3s infinite; }
+@utility sk-float-later { animation: sk-float 4s ease-in-out 2.6s infinite; }
+
+/* — Bento scene 6: sessions & recordings — */
+
+@keyframes ss-row {
+  0%, 15% { opacity: 0; transform: translateX(-6px); }
+  25%, 88% { opacity: 1; transform: translateX(0); }
+  96%, 100% { opacity: 0; }
+}
+@utility ss-row { animation: ss-row 7s ease infinite; opacity: 0; }
+@utility rec-dot {
+  animation: soft-pulse 1.4s ease-in-out infinite;
+}
+
+/* — Entrance reveals for the whole showcase — */
+
+@utility reveal-rise {
+  opacity: 0;
+  transform: translateY(20px);
+  transition: opacity 0.7s cubic-bezier(0.16, 1, 0.3, 1), transform 0.7s cubic-bezier(0.16, 1, 0.3, 1);
+  transition-delay: var(--reveal-delay, 0s);
+}
+
+/* Unlayered on purpose: must out-rank the reveal-rise utility */
+[data-reveal].in-view .reveal-rise {
+  opacity: 1;
+  transform: translateY(0);
+}
+@media (prefers-reduced-motion: reduce) {
+  .reveal-rise { opacity: 1 !important; transform: none !important; transition: none !important; }
+}
