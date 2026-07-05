@@ -96,7 +96,8 @@ defmodule DodoRouterWeb.LogLiveReplayTest do
       assert has_element?(view, "#compare-replay")
       assert has_element?(view, "#delta-strip")
       assert has_element?(view, "#delta-latency_ms")
-      assert has_element?(view, "#content-diff")
+      # disjoint answers auto-open side by side instead of an inline diff
+      assert has_element?(view, "#compare-side-pane")
       assert has_element?(view, "#replay-switcher")
 
       assert replay.replayed_from_id == source.id
@@ -268,6 +269,38 @@ defmodule DodoRouterWeb.LogLiveReplayTest do
       render_async(view)
 
       assert has_element?(view, "#compare-replay", "model-b")
+    end
+
+    test "mostly-different responses auto-open side by side; the tab pins your choice", %{
+      conn: conn,
+      source: source
+    } do
+      different =
+        LogsFixtures.log_fixture(router_of(source), %{
+          replayed_from_id: source.id,
+          final_model: "model-diff",
+          response_body:
+            Jason.encode!(%{
+              "choices" => [
+                %{
+                  "message" => %{
+                    "role" => "assistant",
+                    "content" => "Completely unrelated turtles swim upstream tonight"
+                  }
+                }
+              ]
+            })
+        })
+
+      {:ok, view, _html} = live(conn, ~p"/logs/#{source.id}/replay?replay=#{different.id}")
+      render_async(view)
+
+      assert has_element?(view, "#compare-side-pane")
+      refute has_element?(view, "#content-diff")
+
+      view |> element("#diff-view-diff") |> render_click()
+      assert has_element?(view, "#content-diff")
+      assert has_element?(view, "#low-similarity-note")
     end
 
     test "diff view renders word-level segments", %{conn: conn, source: source, first: first} do

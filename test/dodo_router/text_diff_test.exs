@@ -3,6 +3,43 @@ defmodule DodoRouter.TextDiffTest do
 
   alias DodoRouter.TextDiff
 
+  describe "compact_for_display/1" do
+    test "squashes whitespace-only equal segments to a single break" do
+      segments = [
+        {:del, "Try:"},
+        {:eq, "\n\n\n\n"},
+        {:ins, "A few picks:"},
+        {:eq, "  \n\n  "},
+        {:del, "**Bluey**"}
+      ]
+
+      assert TextDiff.compact_for_display(segments) == [
+               {:del, "Try:"},
+               {:eq, "\n"},
+               {:ins, "A few picks:"},
+               {:eq, "\n"},
+               {:del, "**Bluey**"}
+             ]
+    end
+
+    test "whitespace-only equal segments without newlines become a single space" do
+      assert TextDiff.compact_for_display([{:del, "a"}, {:eq, "   "}, {:ins, "b"}]) ==
+               [{:del, "a"}, {:eq, " "}, {:ins, "b"}]
+    end
+
+    test "drops leading and trailing whitespace-only segments" do
+      segments = [{:eq, "\n\n"}, {:del, "old"}, {:ins, "new"}, {:eq, "\n"}]
+
+      assert TextDiff.compact_for_display(segments) == [{:del, "old"}, {:ins, "new"}]
+    end
+
+    test "leaves textual equal segments and change segments untouched" do
+      segments = [{:eq, "shared intro\n\nmore shared"}, {:del, "a\n\nb"}, {:ins, "c"}]
+
+      assert TextDiff.compact_for_display(segments) == segments
+    end
+  end
+
   describe "identical strings" do
     test "returns a single eq segment with zero stats" do
       text = "the quick brown fox"
@@ -11,7 +48,7 @@ defmodule DodoRouter.TextDiffTest do
                granularity: :word,
                segments: [{:eq, ^text}],
                reason: nil,
-               stats: %{ins: 0, del: 0}
+               stats: %{ins: 0, del: 0, eq: _}
              } = TextDiff.diff(text, text)
     end
   end
@@ -58,7 +95,7 @@ defmodule DodoRouter.TextDiffTest do
                granularity: :none,
                segments: [],
                reason: :empty,
-               stats: %{ins: 0, del: 0}
+               stats: %{ins: 0, del: 0, eq: 0}
              }
     end
 
@@ -67,7 +104,7 @@ defmodule DodoRouter.TextDiffTest do
                granularity: :none,
                segments: [],
                reason: :empty,
-               stats: %{ins: 0, del: 0}
+               stats: %{ins: 0, del: 0, eq: 0}
              }
     end
 
@@ -86,7 +123,7 @@ defmodule DodoRouter.TextDiffTest do
                granularity: :none,
                segments: [{:del, a}],
                reason: :one_sided,
-               stats: %{ins: 0, del: 3}
+               stats: %{ins: 0, del: 3, eq: 0}
              }
     end
 
@@ -99,7 +136,7 @@ defmodule DodoRouter.TextDiffTest do
                granularity: :none,
                segments: [{:ins, b}],
                reason: :one_sided,
-               stats: %{ins: 4, del: 0}
+               stats: %{ins: 4, del: 0, eq: 0}
              }
     end
 
@@ -145,7 +182,7 @@ defmodule DodoRouter.TextDiffTest do
                granularity: :none,
                segments: [],
                reason: :too_large,
-               stats: %{ins: 0, del: 0}
+               stats: %{ins: 0, del: 0, eq: 0}
              }
     end
 
@@ -184,7 +221,26 @@ defmodule DodoRouter.TextDiffTest do
 
       result = TextDiff.diff(a, b)
 
-      assert result.stats == %{ins: 2, del: 1}
+      assert result.stats == %{ins: 2, del: 1, eq: 2}
+    end
+  end
+
+  describe "similarity/1" do
+    test "identical texts are fully similar" do
+      assert TextDiff.similarity(TextDiff.diff("same text here", "same text here")) == 1.0
+    end
+
+    test "disjoint texts have zero similarity" do
+      assert TextDiff.similarity(TextDiff.diff("alpha beta", "gamma delta epsilon")) == 0.0
+    end
+
+    test "partial overlap lands in between" do
+      similarity = TextDiff.similarity(TextDiff.diff("the quick brown fox", "the quick red fox"))
+      assert similarity == 3 / 4
+    end
+
+    test "empty diffs count as similar" do
+      assert TextDiff.similarity(TextDiff.diff(nil, nil)) == 1.0
     end
   end
 

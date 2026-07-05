@@ -54,6 +54,7 @@ defmodule DodoRouterWeb.LogLive.Replay do
       |> assign(:replays, Logs.list_replays(log))
       |> assign(:running?, false)
       |> assign(:diff_view, "diff")
+      |> assign(:view_pinned, false)
       |> assign(:selected, nil)
       |> assign(:diff, nil)
 
@@ -155,7 +156,7 @@ defmodule DodoRouterWeb.LogLive.Replay do
 
   def handle_event("set_diff_view", %{"view" => view}, socket)
       when view in ~w(diff side raw) do
-    {:noreply, assign(socket, :diff_view, view)}
+    {:noreply, socket |> assign(:diff_view, view) |> assign(:view_pinned, true)}
   end
 
   @impl true
@@ -188,7 +189,23 @@ defmodule DodoRouterWeb.LogLive.Replay do
   end
 
   def handle_async(:compute_diff, {:ok, diff}, socket) do
-    {:noreply, assign(socket, :diff, diff)}
+    socket = assign(socket, :diff, diff)
+
+    # An inline word-diff of two mostly-different answers is fragment soup —
+    # open side by side instead. Manual tab clicks pin the user's choice.
+    socket =
+      if socket.assigns.view_pinned do
+        socket
+      else
+        auto_view =
+          if diff.content.granularity != :none and TextDiff.similarity(diff.content) < 0.5,
+            do: "side",
+            else: "diff"
+
+        assign(socket, :diff_view, auto_view)
+      end
+
+    {:noreply, socket}
   end
 
   def handle_async(:compute_diff, {:exit, _reason}, socket) do
@@ -587,26 +604,22 @@ defmodule DodoRouterWeb.LogLive.Replay do
       </div>
 
       <%= if @selected do %>
-        <!-- Anchor banner: which message this replay started from -->
-        <div
+        <!-- Anchor: which message this replay started from -->
+        <p
           :if={@anchor_index != nil}
           id="replay-anchor-banner"
-          class="card-bordered mb-4 flex items-start gap-3 border-info/30 bg-info/5"
+          class="mb-3 flex items-start gap-1.5 text-xs text-base-content/50"
         >
-          <.icon name="hero-scissors" class="w-5 h-5 text-info shrink-0 mt-0.5" />
-          <p class="text-sm">
-            <span class="font-medium">
-              Replayed from message {@anchor_index + 1} of {length(@source_messages)}:
-            </span>
-            <span class="text-base-content/60 italic">
-              "{from_preview(@source_messages, @anchor_index)}"
-            </span>
+          <.icon name="hero-scissors" class="w-3.5 h-3.5 text-info shrink-0 mt-0.5" />
+          <span>
+            Replayed from message {@anchor_index + 1} of {length(@source_messages)}:
+            <span class="italic">"{from_preview(@source_messages, @anchor_index)}"</span>
             <span :if={@partial?}>
-              The diff compares against the original answer at that exchange; metric deltas are
-              hidden because the contexts differ in length.
+              — diffed against the original answer at that exchange; metric deltas hidden
+              (contexts differ in length).
             </span>
-          </p>
-        </div>
+          </span>
+        </p>
         
     <!-- Identity band -->
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4" id="compare-identity">
@@ -697,7 +710,19 @@ defmodule DodoRouterWeb.LogLive.Replay do
                 Responses are too large to diff inline — showing them side by side instead.
               </div>
 
-              <div :if={@diff.content.granularity != :none} class="card-bordered" id="content-diff">
+              <div
+                :if={@diff.content.granularity != :none}
+                class="card-bordered max-h-[70vh] overflow-y-auto"
+                id="content-diff"
+              >
+                <p
+                  :if={TextDiff.similarity(@diff.content) < 0.5}
+                  id="low-similarity-note"
+                  class="text-xs text-base-content/40 mb-3"
+                >
+                  Only {round(TextDiff.similarity(@diff.content) * 100)}% shared — "Side by side"
+                  may read better for answers this different.
+                </p>
                 <.diff_block segments={@diff.content.segments} />
               </div>
 
@@ -767,11 +792,11 @@ defmodule DodoRouterWeb.LogLive.Replay do
         >
           <div>
             <div class="text-xs font-medium text-base-content/50 mb-1">Original response</div>
-            <pre class="mockup-code text-xs overflow-x-auto p-4"><code>{format_json(@source.response_body)}</code></pre>
+            <pre class="mockup-code text-xs overflow-x-auto max-h-[70vh] overflow-y-auto p-4"><code>{format_json(@source.response_body)}</code></pre>
           </div>
           <div>
             <div class="text-xs font-medium text-base-content/50 mb-1">Replay response</div>
-            <pre class="mockup-code text-xs overflow-x-auto p-4"><code>{format_json(@selected.response_body)}</code></pre>
+            <pre class="mockup-code text-xs overflow-x-auto max-h-[70vh] overflow-y-auto p-4"><code>{format_json(@selected.response_body)}</code></pre>
           </div>
         </div>
         
@@ -819,6 +844,8 @@ defmodule DodoRouterWeb.LogLive.Replay do
   attr :segments, :list, required: true
 
   defp diff_block(assigns) do
+    assigns = assign(assigns, :segments, TextDiff.compact_for_display(assigns.segments))
+
     ~H"""
     <div class="whitespace-pre-wrap break-words text-sm leading-relaxed">
       <%= for {op, text} <- @segments do %>
@@ -843,7 +870,7 @@ defmodule DodoRouterWeb.LogLive.Replay do
   defp side_by_side(assigns) do
     ~H"""
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-3">
-      <div class="card-bordered">
+      <div class="card-bordered max-h-[70vh] overflow-y-auto">
         <div class="text-xs font-medium text-base-content/50 mb-2">
           Original · {@source.final_model}
         </div>
@@ -851,7 +878,7 @@ defmodule DodoRouterWeb.LogLive.Replay do
           {message_text(@source_msg) || "No text content"}
         </div>
       </div>
-      <div class="card-bordered">
+      <div class="card-bordered max-h-[70vh] overflow-y-auto">
         <div class="text-xs font-medium text-base-content/50 mb-2">
           Replay · {@selected.final_model}
         </div>
@@ -1098,9 +1125,10 @@ defmodule DodoRouterWeb.LogLive.Replay do
 
   defp delta_chip(_delta), do: "—"
 
-  defp diff_stats_caption(%{granularity: granularity, stats: %{ins: ins, del: del}}) do
+  defp diff_stats_caption(%{granularity: granularity, stats: %{ins: ins, del: del}} = content) do
     unit = if granularity == :word, do: "words", else: "lines"
-    "+#{ins} / −#{del} #{unit}"
+    shared = round(TextDiff.similarity(content) * 100)
+    "+#{ins} / −#{del} #{unit} · #{shared}% shared"
   end
 
   defp blocker_message(:truncated),

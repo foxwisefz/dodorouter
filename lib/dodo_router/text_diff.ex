@@ -15,7 +15,7 @@ defmodule DodoRouter.TextDiff do
           granularity: :word | :line | :none,
           segments: [segment()],
           reason: nil | :empty | :one_sided | :too_large,
-          stats: %{ins: non_neg_integer(), del: non_neg_integer()}
+          stats: %{ins: non_neg_integer(), del: non_neg_integer(), eq: non_neg_integer()}
         }
 
   @word_regex ~r/\S+\s*/u
@@ -27,6 +27,44 @@ defmodule DodoRouter.TextDiff do
   @line_max_bytes 200_000
   @line_max_lines 2_000
   @line_max_product 4_000_000
+
+  @doc """
+  Prepares segments for display: whitespace-only `:eq` segments collapse to
+  a single break and edge whitespace drops.
+
+  When two texts share almost nothing, Myers aligns on the whitespace
+  between paragraphs — rendered faithfully that's colored crumbs floating
+  in voids of accumulated newlines. Display-only: unlike `diff/2` output,
+  the result does NOT reconstruct the inputs.
+  """
+  @spec compact_for_display([segment()]) :: [segment()]
+  def compact_for_display(segments) do
+    segments
+    |> Enum.map(fn
+      {:eq, text} = segment ->
+        cond do
+          String.trim(text) != "" -> segment
+          String.contains?(text, "\n") -> {:eq, "\n"}
+          true -> {:eq, " "}
+        end
+
+      segment ->
+        segment
+    end)
+    |> drop_edge_whitespace()
+  end
+
+  defp drop_edge_whitespace(segments) do
+    drop = fn segs ->
+      Enum.drop_while(segs, fn {op, text} -> op == :eq and String.trim(text) == "" end)
+    end
+
+    segments
+    |> drop.()
+    |> Enum.reverse()
+    |> drop.()
+    |> Enum.reverse()
+  end
 
   @doc """
   Diffs two strings and returns a `t:t/0` describing the segments needed to
@@ -51,8 +89,19 @@ defmodule DodoRouter.TextDiff do
     end
   end
 
+  @doc """
+  Fraction of tokens the two sides share (0.0..1.0), from a `diff/2` result.
+  """
+  @spec similarity(t()) :: float()
+  def similarity(%{stats: %{eq: eq, ins: ins, del: del}}) do
+    case eq + max(ins, del) do
+      0 -> 1.0
+      denominator -> eq / denominator
+    end
+  end
+
   defp empty_result do
-    %{granularity: :none, segments: [], reason: :empty, stats: %{ins: 0, del: 0}}
+    %{granularity: :none, segments: [], reason: :empty, stats: %{ins: 0, del: 0, eq: 0}}
   end
 
   defp one_sided_result(a, b) do
@@ -61,14 +110,14 @@ defmodule DodoRouter.TextDiff do
         granularity: :none,
         segments: [{:del, a}],
         reason: :one_sided,
-        stats: %{ins: 0, del: length(word_tokens(a))}
+        stats: %{ins: 0, del: length(word_tokens(a)), eq: 0}
       }
     else
       %{
         granularity: :none,
         segments: [{:ins, b}],
         reason: :one_sided,
-        stats: %{ins: length(word_tokens(b)), del: 0}
+        stats: %{ins: length(word_tokens(b)), del: 0, eq: 0}
       }
     end
   end
@@ -98,7 +147,7 @@ defmodule DodoRouter.TextDiff do
              line_count_a * line_count_b <= @line_max_product do
           build_result(:line, line_tokens_a, line_tokens_b)
         else
-          %{granularity: :none, segments: [], reason: :too_large, stats: %{ins: 0, del: 0}}
+          %{granularity: :none, segments: [], reason: :too_large, stats: %{ins: 0, del: 0, eq: 0}}
         end
     end
   end
@@ -118,11 +167,11 @@ defmodule DodoRouter.TextDiff do
   defp build_result(granularity, tokens_a, tokens_b) do
     diffs = List.myers_difference(tokens_a, tokens_b)
 
-    {ins, del} =
-      Enum.reduce(diffs, {0, 0}, fn
-        {:ins, tokens}, {ins, del} -> {ins + length(tokens), del}
-        {:del, tokens}, {ins, del} -> {ins, del + length(tokens)}
-        {:eq, _tokens}, acc -> acc
+    {ins, del, eq} =
+      Enum.reduce(diffs, {0, 0, 0}, fn
+        {:ins, tokens}, {ins, del, eq} -> {ins + length(tokens), del, eq}
+        {:del, tokens}, {ins, del, eq} -> {ins, del + length(tokens), eq}
+        {:eq, tokens}, {ins, del, eq} -> {ins, del, eq + length(tokens)}
       end)
 
     segments =
@@ -135,7 +184,7 @@ defmodule DodoRouter.TextDiff do
       granularity: granularity,
       segments: segments,
       reason: nil,
-      stats: %{ins: ins, del: del}
+      stats: %{ins: ins, del: del, eq: eq}
     }
   end
 
