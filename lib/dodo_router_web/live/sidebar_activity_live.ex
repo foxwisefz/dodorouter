@@ -41,8 +41,12 @@ defmodule DodoRouterWeb.SidebarActivityLive do
         Phoenix.PubSub.subscribe(DodoRouter.PubSub, "router:#{router.id}:events")
       end)
 
+      # Stay in sync when routers are created, renamed, or deleted
+      Phoenix.PubSub.subscribe(DodoRouter.PubSub, Routers.user_routers_topic(user_id))
+
       socket =
         socket
+        |> assign(:user_id, user_id)
         |> assign(:routers, routers)
         |> assign(:activity, activity)
         |> assign(:total_active, total_active)
@@ -140,6 +144,20 @@ defmodule DodoRouterWeb.SidebarActivityLive do
   @impl true
   def handle_info({:step_completed, _}, socket) do
     {:noreply, refresh_activity(socket)}
+  end
+
+  @impl true
+  def handle_info({event, router}, socket)
+      when event in [:router_created, :router_updated, :router_deleted] do
+    user = %DodoRouter.Accounts.User{id: socket.assigns.user_id}
+    routers = Routers.list_routers_with_step_count(user)
+
+    if event == :router_created do
+      Logs.subscribe_to_logs(router.id)
+      Phoenix.PubSub.subscribe(DodoRouter.PubSub, "router:#{router.id}:events")
+    end
+
+    {:noreply, socket |> assign(:routers, routers) |> refresh_activity()}
   end
 
   # Refresh activity counts from Activity (source of truth).
