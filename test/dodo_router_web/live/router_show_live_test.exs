@@ -33,6 +33,29 @@ defmodule DodoRouterWeb.RouterShowLiveTest do
       assert html =~ router.slug
     end
 
+    test "add-step modal warns when the user has no keys for the provider", %{
+      conn: conn,
+      router: router
+    } do
+      {:ok, live, _html} = live(conn, ~p"/routers/#{router.id}/routing")
+
+      # Default provider is zai and this user has no provider keys at all
+      assert has_element?(live, "#step-provider-no-keys")
+      assert render(live) =~ "/providers"
+    end
+
+    test "add-step modal shows no key warning when a matching key exists", %{
+      conn: conn,
+      router: router,
+      user: user
+    } do
+      DodoRouter.ProvidersFixtures.provider_key_fixture(user, %{"provider_slug" => "zai_standard"})
+
+      {:ok, live, _html} = live(conn, ~p"/routers/#{router.id}/routing")
+
+      refute has_element?(live, "#step-provider-no-keys")
+    end
+
     test "shows recent logs section", %{conn: conn, router: router} do
       LogsFixtures.log_fixture(router, %{final_provider: "test-provider"})
 

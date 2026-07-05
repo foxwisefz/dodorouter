@@ -955,6 +955,20 @@ defmodule DodoRouterWeb.RouterLive.Show do
                   </option>
                 <% end %>
               </select>
+              <p
+                :if={not provider_has_keys?(@provider_keys, @step_provider)}
+                id="step-provider-no-keys"
+                class="text-xs text-warning mt-1.5 flex items-center gap-1.5"
+              >
+                <.icon name="hero-exclamation-triangle" class="size-3.5 shrink-0" />
+                <span>
+                  You haven't added an API key for this provider —
+                  <.link navigate={~p"/providers"} class="underline font-medium">
+                    add one in Providers
+                  </.link>
+                  so this step can serve requests.
+                </span>
+              </p>
             </div>
             <div>
               <label class="block text-sm font-medium text-base-content/70 mb-2">Model</label>
@@ -1429,6 +1443,13 @@ defmodule DodoRouterWeb.RouterLive.Show do
 
     Enum.filter(provider_keys, fn key ->
       key.provider_slug == expected_slug
+    end)
+  end
+
+  # True when the user has a key usable by this provider under any plan type.
+  defp provider_has_keys?(provider_keys, provider) do
+    Enum.any?(["standard", "coding"], fn plan ->
+      matching_keys(provider_keys, %{provider: provider, plan_type: plan}) != []
     end)
   end
 
