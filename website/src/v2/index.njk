@@ -1,0 +1,198 @@
+---
+layout: v2.njk
+title: DodoRouter — flight recorder & failover for LLM traffic
+description: Drop-in OpenAI/Anthropic-compatible proxy. Chain providers, fall back automatically, replay everything.
+permalink: /v2/index.html
+---
+
+{# ── status bar ── #}
+<header class="border-b v2-line">
+  <div class="mx-auto max-w-6xl px-5 md:px-8 h-14 flex items-center justify-between v2-mono text-sm">
+    <div class="flex items-center gap-3">
+      <img src="/assets/images/dodo-logo-horizontal.png" alt="" class="h-6 hidden" />
+      <span class="font-bold tracking-tight">DODO<span class="v2-go">ROUTER</span></span>
+      <span class="v2-dim hidden md:inline">v0.1</span>
+    </div>
+    <div class="hidden md:flex items-center gap-6 v2-dim text-xs">
+      <span class="flex items-center gap-1.5"><span class="v2-led inline-block h-1.5 w-1.5 rounded-full bg-[var(--v2-go)] text-[var(--v2-go)]"></span> all chains nominal</span>
+      <a href="#features" class="hover:text-[var(--v2-text)] transition-colors">features</a>
+      <a href="#pricing" class="hover:text-[var(--v2-text)] transition-colors">pricing</a>
+      <a href="https://github.com/foxwise-ai/dodorouter" class="hover:text-[var(--v2-text)] transition-colors">github</a>
+    </div>
+    <a href="https://api.dodorouter.com/users/register" class="v2-mono text-xs font-semibold bg-[var(--v2-go)] text-[var(--v2-bg)] px-3.5 py-2 hover:opacity-90 transition-opacity">
+      GET STARTED →
+    </a>
+  </div>
+</header>
+
+{# ── hero: the status board ── #}
+<section class="border-b v2-line relative overflow-hidden">
+  <div class="mx-auto max-w-6xl px-5 md:px-8 py-16 md:py-24 grid gap-12 lg:grid-cols-[1.1fr_0.9fr] lg:items-center">
+    <div>
+      <p class="v2-mono text-xs v2-dim mb-6">// the reliability layer between your agent and every model</p>
+      <h1 class="v2-mono font-bold text-4xl md:text-5xl lg:text-[3.6rem] leading-[1.04] tracking-tight">
+        Your model provider<br />
+        <span class="v2-err">will fail.</span><br />
+        Your agent <span class="v2-go">doesn't<br />have to.</span><span class="v2-caret v2-go">▌</span>
+      </h1>
+      <p class="mt-7 text-base md:text-lg leading-relaxed max-w-lg" style="color: hsl(80, 8%, 72%)">
+        DodoRouter is a drop-in OpenAI- and Anthropic-compatible proxy.
+        Chain providers in the order you trust them — rate limits, outages, and
+        context overflows fall through to the next step automatically, and every
+        request is logged, replayable, and diffable.
+      </p>
+      <div class="mt-9 flex flex-wrap gap-4">
+        <a href="https://api.dodorouter.com/users/register" class="v2-btn">▶ START ROUTING</a>
+        <a href="https://github.com/foxwise-ai/dodorouter" class="v2-btn v2-btn-ghost">git clone dodorouter</a>
+      </div>
+      <p class="v2-mono mt-8 text-[11px] v2-dim">free during beta · bring your own keys · MIT licensed</p>
+    </div>
+
+    {# chain status board #}
+    <div class="border v2-line v2-panel" aria-hidden="true">
+      <div class="border-b v2-line px-4 py-2.5 flex items-center justify-between v2-mono text-[11px] v2-dim">
+        <span>chain: production</span>
+        <span class="flex items-center gap-1.5"><span class="v2-led inline-block h-1.5 w-1.5 rounded-full bg-[var(--v2-go)] text-[var(--v2-go)]"></span> live</span>
+      </div>
+      <div class="p-4 space-y-2 v2-mono text-[13px]">
+        <div class="flex items-center justify-between border v2-line px-3 py-2.5">
+          <span><span class="v2-dim">01</span>  openai/gpt-5.2</span>
+          <span class="v2-fail-cycle text-xs">429 RATE_LIMITED</span>
+        </div>
+        <div class="flex items-center justify-between border v2-line px-3 py-2.5">
+          <span><span class="v2-dim">02</span>  anthropic/claude-4.5</span>
+          <span class="v2-recover-cycle text-xs">200 · STREAMING</span>
+        </div>
+        <div class="flex items-center justify-between border v2-line px-3 py-2.5 opacity-60">
+          <span><span class="v2-dim">03</span>  moonshot/kimi-k2.5</span>
+          <span class="v2-dim text-xs">STANDBY</span>
+        </div>
+        <div class="pt-2">
+          <div class="flex items-center justify-between v2-mono text-[10px] v2-dim mb-1.5">
+            <span>request recovered</span><span>1,412ms</span>
+          </div>
+          <div class="h-1 bg-[var(--v2-line)] overflow-hidden">
+            <div class="v2-sweep h-full bg-[var(--v2-go)]"></div>
+          </div>
+        </div>
+      </div>
+      <div class="border-t v2-line px-4 py-2.5 v2-mono text-[10px] v2-dim">
+        your user saw: <span class="v2-go">a normal answer</span> · your pager: <span class="v2-go">silent</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+{# ── incident ticker ── #}
+<div class="border-b v2-line overflow-hidden py-2.5 v2-mono text-[11px] v2-dim select-none" aria-hidden="true">
+  <div class="v2-ticker flex gap-10 whitespace-nowrap w-max">
+    {% set ticker = "openai 429 → recovered via anthropic in 1.4s ··· context_length_exceeded → rerouted to gemini-3-pro (1M) ··· stream dropped mid-response → resumed on kimi-k2.5 ··· anthropic overloaded_error → recovered via zai/glm-5.1 ··· quota exhausted on ChatGPT Pro → fell back to platform key ··· " %}
+    <span>{{ ticker }}</span><span>{{ ticker }}</span>
+  </div>
+</div>
+
+{# ── drop-in ── #}
+<section class="border-b v2-line">
+  <div class="mx-auto max-w-6xl px-5 md:px-8 py-16 md:py-20 grid gap-10 lg:grid-cols-2 lg:items-center">
+    <div>
+      <p class="v2-mono text-xs v2-go mb-4">[00] DROP-IN</p>
+      <h2 class="v2-mono font-bold text-2xl md:text-3xl leading-tight tracking-tight">One line. Same SDK.<br />Every request protected.</h2>
+      <p class="mt-4 leading-relaxed max-w-md" style="color: hsl(80, 8%, 72%)">
+        Change <span class="v2-mono text-sm v2-go">base_url</span>, keep everything else —
+        streaming, tool calls, response shapes. Works with the OpenAI SDK, the Anthropic SDK,
+        or plain curl.
+      </p>
+    </div>
+    <div class="border v2-line v2-panel v2-mono text-[13px] leading-7 p-5 overflow-x-auto">
+      <p class="v2-dim"># the only change you'll make</p>
+      <p><span class="v2-dim">client = OpenAI(</span></p>
+      <p>  api_key<span class="v2-dim">=</span><span class="v2-warn">"dr-****"</span><span class="v2-dim">,</span></p>
+      <p>  base_url<span class="v2-dim">=</span><span class="v2-go">"https://api.dodorouter.com/r/prod/v1"</span></p>
+      <p><span class="v2-dim">)</span></p>
+      <p class="v2-dim mt-2"># done. fallback, logs, replay — all on.</p>
+    </div>
+  </div>
+</section>
+
+{# ── features: the manifest ── #}
+<section id="features" class="border-b v2-line">
+  <div class="mx-auto max-w-6xl px-5 md:px-8 py-16 md:py-20">
+    <p class="v2-mono text-xs v2-go mb-4">[01–06] CAPABILITIES</p>
+    <h2 class="v2-mono font-bold text-2xl md:text-3xl tracking-tight mb-10">Everything between<br />your code and the model.</h2>
+    <div class="grid gap-px sm:grid-cols-2 lg:grid-cols-3">
+      <div class="v2-cell">
+        <p class="v2-cell-num v2-mono text-xs v2-dim transition-colors">[01]</p>
+        <h3 class="v2-mono font-semibold mt-3 mb-2">Automatic fallback</h3>
+        <p class="text-sm leading-relaxed v2-dim">Rate limits, outages, overloads — the request falls through your chain until someone answers. The client never knows.</p>
+      </div>
+      <div class="v2-cell">
+        <p class="v2-cell-num v2-mono text-xs v2-dim transition-colors">[02]</p>
+        <h3 class="v2-mono font-semibold mt-3 mb-2">Mid-stream recovery</h3>
+        <p class="text-sm leading-relaxed v2-dim">A stream that dies halfway is re-issued on the next provider and keeps streaming — no broken messages, no lost tool state.</p>
+      </div>
+      <div class="v2-cell">
+        <p class="v2-cell-num v2-mono text-xs v2-dim transition-colors">[03]</p>
+        <h3 class="v2-mono font-semibold mt-3 mb-2">Context-overflow reroute</h3>
+        <p class="text-sm leading-relaxed v2-dim">Every provider reports overflow differently. All of them are detected and rerouted to a model with a bigger window.</p>
+      </div>
+      <div class="v2-cell">
+        <p class="v2-cell-num v2-mono text-xs v2-dim transition-colors">[04]</p>
+        <h3 class="v2-mono font-semibold mt-3 mb-2">Replay &amp; compare</h3>
+        <p class="text-sm leading-relaxed v2-dim">Re-run any logged request on a different model and diff the answers side by side. Audition cheaper models on real traffic.</p>
+      </div>
+      <div class="v2-cell">
+        <p class="v2-cell-num v2-mono text-xs v2-dim transition-colors">[05]</p>
+        <h3 class="v2-mono font-semibold mt-3 mb-2">Subscriptions as keys</h3>
+        <p class="text-sm leading-relaxed v2-dim">Route through Claude Max, ChatGPT Pro, Kimi Code, or z.ai Coding plans next to API keys — and fall back when quotas dry up.</p>
+      </div>
+      <div class="v2-cell">
+        <p class="v2-cell-num v2-mono text-xs v2-dim transition-colors">[06]</p>
+        <h3 class="v2-mono font-semibold mt-3 mb-2">Flight recorder</h3>
+        <p class="text-sm leading-relaxed v2-dim">Sessions, recordings, fallback traces, latency and cache analytics — every request your agent ever made, inspectable.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+{# ── pricing ── #}
+<section id="pricing" class="border-b v2-line">
+  <div class="mx-auto max-w-6xl px-5 md:px-8 py-16 md:py-20 grid gap-10 lg:grid-cols-2">
+    <div>
+      <p class="v2-mono text-xs v2-go mb-4">[07] PRICING</p>
+      <h2 class="v2-mono font-bold text-2xl md:text-3xl tracking-tight">Free while in beta.</h2>
+      <p class="mt-4 leading-relaxed max-w-md" style="color: hsl(80, 8%, 72%)">
+        Bring your own provider keys — your tokens are never marked up.
+        Use the hosted instance, or self-host the MIT-licensed release on your own box.
+      </p>
+    </div>
+    <div class="v2-mono text-sm space-y-3 self-center">
+      <p class="flex justify-between border-b v2-line pb-2"><span class="v2-dim">hosted, unlimited routers</span><span class="v2-go">$0</span></p>
+      <p class="flex justify-between border-b v2-line pb-2"><span class="v2-dim">token markup</span><span class="v2-go">none</span></p>
+      <p class="flex justify-between border-b v2-line pb-2"><span class="v2-dim">self-hosted</span><span class="v2-go">open source</span></p>
+      <p class="flex justify-between"><span class="v2-dim">credit card</span><span class="v2-go">not asked for</span></p>
+    </div>
+  </div>
+</section>
+
+{# ── CTA ── #}
+<section>
+  <div class="mx-auto max-w-6xl px-5 md:px-8 py-20 md:py-28 text-center">
+    <p class="v2-mono text-xs v2-dim mb-5">// two minutes from signup to first recovered request</p>
+    <h2 class="v2-mono font-bold text-3xl md:text-5xl tracking-tight leading-tight">
+      Point your agent at<br /><span class="v2-go">something sturdier.</span>
+    </h2>
+    <div class="mt-10 flex justify-center gap-4 flex-wrap">
+      <a href="https://api.dodorouter.com/users/register" class="v2-btn">▶ START ROUTING — FREE</a>
+    </div>
+  </div>
+  <footer class="border-t v2-line">
+    <div class="mx-auto max-w-6xl px-5 md:px-8 py-6 flex flex-wrap items-center justify-between gap-3 v2-mono text-[11px] v2-dim">
+      <span>© {{ "now" | date }} Foxwise AI · DODOROUTER</span>
+      <span class="flex gap-5">
+        <a href="/" class="hover:text-[var(--v2-text)]">light version</a>
+        <a href="https://api.dodorouter.com/terms" class="hover:text-[var(--v2-text)]">terms</a>
+        <a href="https://github.com/foxwise-ai/dodorouter" class="hover:text-[var(--v2-text)]">github</a>
+      </span>
+    </div>
+  </footer>
+</section>
