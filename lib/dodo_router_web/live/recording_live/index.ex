@@ -92,7 +92,19 @@ defmodule DodoRouterWeb.RecordingLive.Index do
     ~H"""
     <div>
       <div class="flex items-center justify-between mb-6">
-        <h1 class="text-2xl font-bold">Recordings</h1>
+        <div class="flex items-center gap-2">
+          <.link
+            navigate={~p"/routers/#{@router.id}"}
+            class="btn btn-ghost btn-sm btn-circle"
+            title={"Back to #{@router.name}"}
+          >
+            ←
+          </.link>
+          <div>
+            <h1 class="text-2xl font-bold">Recordings</h1>
+            <p class="text-sm text-base-content/50">{@router.name}</p>
+          </div>
+        </div>
         <div class="flex items-center gap-3">
           <span class="text-sm text-base-content/60">{pluralize(length(@recordings), "recording")}</span>
           <%= if @active_recording do %>

@@ -476,9 +476,20 @@ defmodule DodoRouterWeb.RouterLive.Show do
             <div class="flex-1">
               <h3 class="font-semibold text-warning">New API key generated!</h3>
               <p class="text-sm text-base-content/60">Save it now - this won't be shown again.</p>
-              <code class="block mt-2 p-3 bg-base-300 rounded-lg font-mono text-sm break-all select-all">
-                {@new_api_key}
-              </code>
+              <div class="flex items-start gap-2 mt-2">
+                <code class="flex-1 p-3 bg-base-300 rounded-lg font-mono text-sm break-all select-all">
+                  {@new_api_key}
+                </code>
+                <button
+                  id="copy-new-api-key"
+                  phx-hook="CopyButton"
+                  data-copy={@new_api_key}
+                  class="p-3 rounded-lg bg-base-300 hover:bg-base-content/10 transition-colors shrink-0"
+                  title="Copy API key"
+                >
+                  <.icon name="hero-clipboard" class="size-4 text-base-content/60" />
+                </button>
+              </div>
             </div>
           </div>
         </div>
