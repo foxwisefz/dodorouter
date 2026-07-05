@@ -133,6 +133,15 @@ defmodule DodoRouterWeb.LogLive.Replay do
 
   @impl true
   def handle_event("validate_target", %{"replay" => params}, socket) do
+    # phx-change re-sends the whole form, so a provider-key switch would
+    # otherwise carry the previous provider's model along
+    params =
+      if params["provider_key_id"] != socket.assigns.target_form[:provider_key_id].value do
+        params |> Map.put("model", "") |> Map.put("reasoning_effort", "")
+      else
+        params
+      end
+
     {:noreply, assign(socket, :target_form, to_form(params, as: :replay))}
   end
 

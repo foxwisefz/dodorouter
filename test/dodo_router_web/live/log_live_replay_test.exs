@@ -153,6 +153,39 @@ defmodule DodoRouterWeb.LogLiveReplayTest do
       refute html =~ "$0"
     end
 
+    test "changing the provider key clears the stale model and effort", %{
+      conn: conn,
+      user: user,
+      source: source,
+      provider_key: provider_key
+    } do
+      other_key = ProvidersFixtures.provider_key_fixture(user, %{label: "second key"})
+
+      {:ok, view, _html} = live(conn, ~p"/logs/#{source.id}/replay")
+
+      # pick a key, then a model for it (separate change events, like the UI)
+      view
+      |> form("#replay-form")
+      |> render_change(%{replay: %{provider_key_id: provider_key.id}})
+
+      view
+      |> form("#replay-form")
+      |> render_change(%{
+        replay: %{provider_key_id: provider_key.id, model: "kimi-k2.5", reasoning_effort: "high"}
+      })
+
+      assert view |> element("#replay-model") |> render() =~ "kimi-k2.5"
+
+      # switching keys re-sends the whole form — the old model must not survive
+      view
+      |> form("#replay-form")
+      |> render_change(%{
+        replay: %{provider_key_id: other_key.id, model: "kimi-k2.5", reasoning_effort: "high"}
+      })
+
+      refute view |> element("#replay-model") |> render() =~ "kimi-k2.5"
+    end
+
     test "falls back to the generic effort set for unknown models", %{conn: conn, source: source} do
       {:ok, view, _html} = live(conn, ~p"/logs/#{source.id}/replay")
 
