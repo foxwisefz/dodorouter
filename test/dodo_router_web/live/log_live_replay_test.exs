@@ -129,6 +129,63 @@ defmodule DodoRouterWeb.LogLiveReplayTest do
       assert html =~ "As original"
     end
 
+    test "zero-priced plan models read as included in plan, not $0", %{
+      conn: conn,
+      source: source
+    } do
+      {:ok, _model} =
+        DodoRouter.Models.create_model(%{
+          provider_slug: "test_provider",
+          model_id: "test-model",
+          display_name: "Test Model",
+          input_price_per_million: Decimal.new("0"),
+          output_price_per_million: Decimal.new("0")
+        })
+
+      {:ok, view, _html} = live(conn, ~p"/logs/#{source.id}/replay")
+
+      html =
+        view
+        |> form("#replay-form")
+        |> render_change(%{replay: %{model: "test-model"}})
+
+      assert html =~ "Included in plan"
+      refute html =~ "$0"
+    end
+
+    test "changing the provider key clears the stale model and effort", %{
+      conn: conn,
+      user: user,
+      source: source,
+      provider_key: provider_key
+    } do
+      other_key = ProvidersFixtures.provider_key_fixture(user, %{label: "second key"})
+
+      {:ok, view, _html} = live(conn, ~p"/logs/#{source.id}/replay")
+
+      # pick a key, then a model for it (separate change events, like the UI)
+      view
+      |> form("#replay-form")
+      |> render_change(%{replay: %{provider_key_id: provider_key.id}})
+
+      view
+      |> form("#replay-form")
+      |> render_change(%{
+        replay: %{provider_key_id: provider_key.id, model: "kimi-k2.5", reasoning_effort: "high"}
+      })
+
+      assert view |> element("#replay-model") |> render() =~ "kimi-k2.5"
+
+      # switching keys re-sends the whole form — the old model must not survive
+      view
+      |> form("#replay-form")
+      |> render_change(%{
+        replay: %{provider_key_id: other_key.id, model: "kimi-k2.5", reasoning_effort: "high"}
+      })
+
+      refute view |> element("#replay-model") |> render() =~ "kimi-k2.5"
+    end
+
     test "falls back to the generic effort set for unknown models", %{conn: conn, source: source} do
       {:ok, view, _html} = live(conn, ~p"/logs/#{source.id}/replay")
 
@@ -499,6 +556,72 @@ defmodule DodoRouterWeb.LogLiveReplayTest do
     end
   end
 
+  describe "message deep links" do
+    setup %{router: router} do
+      long_thread =
+        LogsFixtures.log_fixture(router, %{
+          request_body:
+            Jason.encode!(%{
+              "messages" => [
+                %{"role" => "user", "content" => "q one"},
+                %{"role" => "assistant", "content" => "a one"},
+                %{"role" => "user", "content" => "q two"},
+                %{"role" => "assistant", "content" => "a two"},
+                %{"role" => "user", "content" => "q three"}
+              ]
+            })
+        })
+
+      %{long_thread: long_thread}
+    end
+
+    test "messages carry anchor ids and the scroll rail links to them", %{
+      conn: conn,
+      long_thread: long_thread
+    } do
+      {:ok, view, _html} = live(conn, ~p"/logs/#{long_thread.id}")
+
+      assert has_element?(view, "#message-0")
+      assert has_element?(view, "#message-4")
+      assert has_element?(view, "#scroll-rail")
+      assert has_element?(view, ~s(#scroll-rail a[href="#message-2"]))
+    end
+
+    test "?message=N scrolls to and highlights the message", %{
+      conn: conn,
+      long_thread: long_thread
+    } do
+      {:ok, view, _html} = live(conn, ~p"/logs/#{long_thread.id}?message=2")
+
+      assert has_element?(view, ~s(#message-2[phx-hook="ScrollIntoView"]))
+    end
+
+    test "the hub's anchor banner links to the exact replayed message", %{
+      conn: conn,
+      user: user,
+      router: router,
+      long_thread: long_thread,
+      provider_key: provider_key
+    } do
+      _ = router
+
+      {:ok, anchored} =
+        DodoRouter.Replays.replay(user, long_thread, %{
+          provider_key_id: provider_key.id,
+          model: "test-model",
+          message_index: 2
+        })
+
+      {:ok, view, _html} =
+        live(conn, ~p"/logs/#{long_thread.id}/replay?replay=#{anchored.id}")
+
+      render_async(view)
+
+      assert has_element?(view, "#anchor-message-link")
+      assert view |> element("#anchor-message-link") |> render() =~ "message=2"
+    end
+  end
+
   describe "thread section" do
     setup %{router: router} do
       multi_turn =
@@ -605,8 +728,32 @@ defmodule DodoRouterWeb.LogLiveReplayTest do
 
       {:ok, view, _html} = live(conn, ~p"/logs")
 
-      assert has_element?(view, "#logs-#{replay.id}", "replay")
-      refute has_element?(view, "#logs-#{source.id} .badge", "replay")
+      assert has_element?(view, "#logs-#{replay.id}", "rerun")
+
+      assert has_element?(
+               view,
+               ~s{#logs-#{replay.id} [title="Replay of another log (full thread)"]}
+             )
+
+      refute has_element?(view, "#logs-#{source.id} .badge", "rerun")
+    end
+
+    test "logs index shows the anchor on message-anchored replays", %{
+      conn: conn,
+      router: router,
+      source: source
+    } do
+      anchored =
+        LogsFixtures.log_fixture(router, %{replayed_from_id: source.id, replay_from_index: 3})
+
+      {:ok, view, _html} = live(conn, ~p"/logs")
+
+      assert has_element?(view, "#logs-#{anchored.id}", "#4")
+
+      assert has_element?(
+               view,
+               ~s(#logs-#{anchored.id} [title="Replay of another log — from message 4"])
+             )
     end
   end
 end

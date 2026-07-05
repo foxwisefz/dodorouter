@@ -81,7 +81,7 @@ defmodule DodoRouter.Proxy do
     last_step = List.last(result.attempted_steps)
 
     # Calculate cost using model pricing if available
-    estimated_cost = calculate_cost(last_step[:provider], last_step[:model], usage)
+    estimated_cost = calculate_cost(last_step, usage)
 
     # Encode request/response for storage (truncate large payloads)
     {truncated_req, req_flags} = truncate_body(request)
@@ -431,21 +431,47 @@ defmodule DodoRouter.Proxy do
     end
   end
 
-  defp calculate_cost(nil, _model, _usage), do: nil
+  # Subscription surfaces without a models.dev plan catalog: traffic is
+  # covered by the flat plan fee, so marginal per-token cost is zero
+  @subscription_key_slugs ~w(openai-codex anthropic_oauth)
 
-  defp calculate_cost(provider, model, usage) do
-    case DodoRouter.Models.get_model_by_id(provider, model) do
-      nil ->
-        nil
+  defp calculate_cost(nil, _usage), do: nil
 
-      model_struct ->
-        DodoRouter.Models.calculate_cost(
-          model_struct,
-          usage.prompt_tokens || 0,
-          usage.completion_tokens || 0,
-          cache_read_tokens: usage.cache_read_tokens || 0,
-          cache_write_tokens: usage.cache_write_tokens || 0
-        )
+  defp calculate_cost(last_step, usage) do
+    key_slug = last_step[:provider_key_slug]
+    provider = last_step[:provider]
+    model = last_step[:model]
+
+    # Plan-specific catalogs (e.g. moonshot_coding, priced $0 — subscription
+    # traffic has no marginal per-token cost) win over platform pricing
+    plan_row = key_slug != provider && lookup_model(key_slug, model)
+
+    cond do
+      match?(%{}, plan_row) ->
+        cost_from_model(plan_row, usage)
+
+      key_slug in @subscription_key_slugs ->
+        Decimal.new(0)
+
+      true ->
+        case lookup_model(provider, model) do
+          nil -> nil
+          model_struct -> cost_from_model(model_struct, usage)
+        end
     end
   end
+
+  defp cost_from_model(model_struct, usage) do
+    DodoRouter.Models.calculate_cost(
+      model_struct,
+      usage.prompt_tokens || 0,
+      usage.completion_tokens || 0,
+      cache_read_tokens: usage.cache_read_tokens || 0,
+      cache_write_tokens: usage.cache_write_tokens || 0
+    )
+  end
+
+  defp lookup_model(nil, _model), do: nil
+  defp lookup_model(_slug, nil), do: nil
+  defp lookup_model(slug, model), do: DodoRouter.Models.get_model_by_id(slug, model)
 end

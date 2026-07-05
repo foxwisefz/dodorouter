@@ -83,13 +83,78 @@ defmodule DodoRouter.Models.Sync do
             end
           end)
 
-        {:ok, count}
+        {:ok, mirrored} = mirror_subscription_catalogs()
+
+        {:ok, count + mirrored}
 
       {:error, reason} ->
         Logger.error("Failed to fetch models from models.dev: #{inspect(reason)}")
         {:error, reason}
     end
   end
+
+  # Subscription surfaces (Claude Pro/Max setup-tokens, ChatGPT-plan Codex)
+  # have no models.dev entry. Mirror the platform catalog into them with
+  # zeroed pricing — model ids/limits/capabilities stay synced upstream,
+  # the pricing is ours: flat plan fee, no marginal per-token cost.
+  @subscription_mirrors [
+    {"anthropic", "anthropic_oauth"},
+    {"openai", "openai-codex"}
+  ]
+
+  @mirrored_fields [
+    :display_name,
+    :max_input_tokens,
+    :max_output_tokens,
+    :supports_vision,
+    :supports_audio_input,
+    :supports_audio_output,
+    :supports_function_calling,
+    :supports_streaming,
+    :supports_system_messages,
+    :supports_response_schema,
+    :supports_reasoning,
+    :supports_prompt_caching,
+    :reasoning_efforts,
+    :metadata
+  ]
+
+  @doc """
+  Upserts zero-priced copies of the relevant platform models under the
+  subscription provider slugs. Runs as part of `sync_from_models_dev/0`.
+  """
+  def mirror_subscription_catalogs do
+    count =
+      Enum.reduce(@subscription_mirrors, 0, fn {source_slug, subscription_slug}, acc ->
+        mirrored =
+          source_slug
+          |> Models.list_models_by_provider()
+          |> Enum.filter(&mirrored_model?(subscription_slug, &1.model_id))
+          |> Enum.count(fn model ->
+            attrs =
+              model
+              |> Map.take(@mirrored_fields)
+              |> Map.merge(%{
+                provider_slug: subscription_slug,
+                model_id: model.model_id,
+                input_price_per_million: Decimal.new(0),
+                output_price_per_million: Decimal.new(0),
+                cache_read_price_per_million: Decimal.new(0),
+                cache_write_price_per_million: Decimal.new(0)
+              })
+
+            match?({:ok, _}, Models.upsert_model(attrs))
+          end)
+
+        acc + mirrored
+      end)
+
+    {:ok, count}
+  end
+
+  defp mirrored_model?("anthropic_oauth", model_id), do: String.starts_with?(model_id, "claude")
+  defp mirrored_model?("openai-codex", model_id), do: String.contains?(model_id, "codex")
+  defp mirrored_model?(_subscription_slug, _model_id), do: false
 
   defp fetch_models do
     case Req.get(@models_dev_url, receive_timeout: 30_000) do

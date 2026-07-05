@@ -133,6 +133,15 @@ defmodule DodoRouterWeb.LogLive.Replay do
 
   @impl true
   def handle_event("validate_target", %{"replay" => params}, socket) do
+    # phx-change re-sends the whole form, so a provider-key switch would
+    # otherwise carry the previous provider's model along
+    params =
+      if params["provider_key_id"] != socket.assigns.target_form[:provider_key_id].value do
+        params |> Map.put("model", "") |> Map.put("reasoning_effort", "")
+      else
+        params
+      end
+
     {:noreply, assign(socket, :target_form, to_form(params, as: :replay))}
   end
 
@@ -620,7 +629,14 @@ defmodule DodoRouterWeb.LogLive.Replay do
           <.icon name="hero-scissors" class="w-3.5 h-3.5 text-info shrink-0 mt-0.5" />
           <span>
             Replayed from message {@anchor_index + 1} of {length(@source_messages)}:
-            <span class="italic">"{from_preview(@source_messages, @anchor_index)}"</span>
+            <.link
+              id="anchor-message-link"
+              navigate={~p"/logs/#{@source.id}?#{[message: @anchor_index]}"}
+              class="italic underline decoration-dotted hover:text-primary"
+              title="Open the original log at this exact message"
+            >
+              "{from_preview(@source_messages, @anchor_index)}"
+            </.link>
             <span :if={@partial?}>
               — diffed against the original answer at that exchange; metric deltas hidden
               (contexts differ in length).
@@ -808,7 +824,7 @@ defmodule DodoRouterWeb.LogLive.Replay do
         </div>
         
     <!-- Footer links -->
-        <div class="flex items-center gap-4 mt-6 text-sm" id="compare-footer">
+        <div class="flex items-center gap-4 mt-6 mb-12 text-sm" id="compare-footer">
           <.link navigate={~p"/logs/#{@source.id}"} class="text-primary hover:underline">
             Original log ↗
           </.link>
@@ -999,16 +1015,32 @@ defmodule DodoRouterWeb.LogLive.Replay do
 
   defp model_option_label(%{display_name: name, input_price: nil}), do: name
 
-  defp model_option_label(%{display_name: name, input_price: input, output_price: output}) do
-    "#{name} — $#{input}/$#{output} per Mtok"
+  defp model_option_label(%{display_name: name, input_price: input, output_price: output} = model) do
+    if plan_included?(model) do
+      "#{name} — included in plan"
+    else
+      "#{name} — $#{input}/$#{output} per Mtok"
+    end
+  end
+
+
+  # Subscription plans report $0/$0 per-token in the catalog — traffic is
+  # covered by the flat plan fee, not billed per token
+  defp plan_included?(%{input_price: input, output_price: output}) do
+    not is_nil(input) and not is_nil(output) and
+      Decimal.eq?(input, 0) and Decimal.eq?(output, 0)
   end
 
   defp price_hint(targets, provider_key_id, model) when is_binary(model) and model != "" do
     models = selected_target_models(targets, provider_key_id)
 
     case Enum.find(models, &(&1.id == model)) do
-      %{input_price: input, output_price: output} when not is_nil(input) ->
-        "$#{input} in / $#{output} out per Mtok"
+      %{input_price: input, output_price: output} = entry when not is_nil(input) ->
+        if plan_included?(entry) do
+          "Included in plan — no per-token cost"
+        else
+          "$#{input} in / $#{output} out per Mtok"
+        end
 
       %{} ->
         "No pricing data for this model"
