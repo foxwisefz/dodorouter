@@ -180,11 +180,11 @@
 @keyframes ft-dot {
   0%       { left: 10%; top: 46%; background: var(--color-accent); opacity: 0; }
   3%       { opacity: 1; }
-  16%      { left: 66%; top: 14%; background: var(--color-accent); }
-  24%      { left: 66%; top: 14%; background: var(--color-error); }
-  26%      { left: 60%; top: 30%; }
-  36%      { left: 66%; top: 46%; background: var(--color-accent); }
-  46%      { left: 66%; top: 46%; background: var(--color-go); }
+  16%      { left: 53%; top: 14%; background: var(--color-accent); }
+  24%      { left: 53%; top: 14%; background: var(--color-error); }
+  26%      { left: 48%; top: 30%; }
+  36%      { left: 53%; top: 46%; background: var(--color-accent); }
+  46%      { left: 53%; top: 46%; background: var(--color-go); }
   62%      { left: 10%; top: 46%; background: var(--color-go); opacity: 1; }
   66%      { opacity: 0; }
   100%     { left: 10%; top: 46%; opacity: 0; }
