@@ -56,6 +56,7 @@ defmodule DodoRouter.Replays do
         steps: [step],
         log_mode: :sync,
         replayed_from_id: root.id,
+        replay_from_index: message_index,
         request_id: request_id
       ]
 
@@ -114,9 +115,13 @@ defmodule DodoRouter.Replays do
 
   @doc """
   Returns the reason the given log can't be replayed, or nil when it can.
+
+  With a `message_index`, checks replayability of just the history up to
+  that message — storage truncation after the cut doesn't block a partial
+  replay.
   """
-  def replay_blocker(%RequestLog{} = source) do
-    case prepare_request(source, "replay-probe") do
+  def replay_blocker(%RequestLog{} = source, message_index \\ nil) do
+    case prepare_request(source, "replay-probe", nil, message_index) do
       {:ok, _request} -> nil
       {:error, reason} -> reason
     end
@@ -167,7 +172,7 @@ defmodule DodoRouter.Replays do
         provider_key: key,
         provider: provider,
         display_name: info.name,
-        models: models_for(provider)
+        models: models_for(key, provider)
       }
     end)
   end
@@ -274,9 +279,15 @@ defmodule DodoRouter.Replays do
 
   defp offerable_key?(_key), do: true
 
-  defp models_for(provider) do
-    catalog = Models.list_models_by_provider(provider)
-    catalog_ids = MapSet.new(catalog, & &1.model_id)
+  # Plan-specific catalogs (e.g. moonshot_coding) live under the KEY slug;
+  # they take precedence over the provider's global entries on id collisions.
+  defp models_for(key, provider) do
+    plan_catalog =
+      if key.provider_slug == provider,
+        do: [],
+        else: Models.list_models_by_provider(key.provider_slug)
+
+    catalog = plan_catalog ++ Models.list_models_by_provider(provider)
 
     catalog_entries =
       Enum.map(catalog, fn model ->
@@ -292,12 +303,13 @@ defmodule DodoRouter.Replays do
     registry_entries =
       provider
       |> Registry.available_models()
-      |> Enum.reject(&MapSet.member?(catalog_ids, &1))
       |> Enum.map(
         &%{id: &1, display_name: &1, input_price: nil, output_price: nil, max_input_tokens: nil}
       )
 
-    Enum.sort_by(catalog_entries ++ registry_entries, & &1.id)
+    (catalog_entries ++ registry_entries)
+    |> Enum.uniq_by(& &1.id)
+    |> Enum.sort_by(& &1.id)
   end
 
   defp to_number(nil), do: nil

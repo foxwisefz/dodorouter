@@ -12,6 +12,9 @@ defmodule DodoRouter.Models.Sync do
 
   @models_dev_url "https://models.dev/api.json"
 
+  # Keys are models.dev provider ids, values are our adapter slugs.
+  # models.dev keys Moonshot under "moonshotai" — a bare "moonshot" key
+  # doesn't exist there and silently dropped every Kimi model.
   @provider_slug_map %{
     "anthropic" => "anthropic",
     "openai" => "openai",
@@ -21,9 +24,28 @@ defmodule DodoRouter.Models.Sync do
     "xai" => "xai",
     "deepseek" => "deepseek",
     "cohere" => "cohere",
-    "moonshot" => "moonshot",
-    "zai" => "zai"
+    "moonshotai" => "moonshot",
+    "zai" => "zai",
+    # Coding-plan catalogs live under the provider-KEY slug so their model
+    # ids/pricing don't collide with the provider's global entries
+    "kimi-for-coding" => "moonshot_coding",
+    "zai-coding-plan" => "zai_coding"
   }
+
+  @doc """
+  Maps a models.dev provider key to our adapter slug (nil = not synced).
+  """
+  def dodo_slug_for(models_dev_key), do: Map.get(@provider_slug_map, models_dev_key)
+
+  @doc """
+  Mapped models.dev keys absent from a fetched payload — a rename upstream
+  would otherwise silently drop that provider's whole catalog.
+  """
+  def missing_upstream_keys(providers) when is_map(providers) do
+    @provider_slug_map
+    |> Map.keys()
+    |> Enum.reject(&Map.has_key?(providers, &1))
+  end
 
   @doc """
   Fetches models from models.dev and upserts them into the database.
@@ -32,6 +54,17 @@ defmodule DodoRouter.Models.Sync do
   def sync_from_models_dev do
     case fetch_models() do
       {:ok, providers} ->
+        case missing_upstream_keys(providers) do
+          [] ->
+            :ok
+
+          missing ->
+            Logger.warning(
+              "models.dev no longer has provider key(s) #{inspect(missing)} — " <>
+                "their catalogs will not sync (upstream rename?)"
+            )
+        end
+
         count =
           providers
           |> Enum.flat_map(&parse_provider_models/1)
@@ -72,7 +105,7 @@ defmodule DodoRouter.Models.Sync do
   end
 
   defp parse_provider_models({provider_key, provider_data}) do
-    dodo_slug = Map.get(@provider_slug_map, provider_key)
+    dodo_slug = dodo_slug_for(provider_key)
     models = provider_data["models"] || %{}
 
     if dodo_slug == nil do

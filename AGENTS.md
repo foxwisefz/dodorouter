@@ -41,6 +41,7 @@ Every adapter must satisfy several **cross-cutting contracts** documented in thi
    - [Usage & Cache Token Normalization](#llm-provider-usage--cache-token-normalization) — usage field mapping for cache extraction
 2. **Test the seams** — unit-testing adapter functions in isolation is insufficient. You **must** write at least one test that pipes adapter output through the downstream contract (e.g. `convert_usage/1` → `Adapter.extract_usage/1`) to verify they compose correctly.
 3. **When adding a new cross-cutting concern** (anything all adapters must satisfy), document it as a new section in this file with the same structure: known provider patterns, the contract, and how to test it.
+4. **Slug naming**: for a NEW adapter, prefer the provider's models.dev key as the slug (check https://models.dev/api.json) and add the mapping to `Models.Sync`'s `@provider_slug_map` — the sync silently drops providers whose mapped key doesn't exist upstream (it now logs a warning when that happens). **Never rename existing slugs** to chase upstream naming: they're baked into `routing_steps.provider`, `request_logs.final_provider`, `models.provider_slug`, and `provider_keys.provider_slug`; translation happens only in the sync map. Coding-plan catalogs (e.g. models.dev `kimi-for-coding`) map to the provider-KEY slug (`moonshot_coding`), not the adapter slug.
 
 ### Phoenix v1.8 guidelines
 

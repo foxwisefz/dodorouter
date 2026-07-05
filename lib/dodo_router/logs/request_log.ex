@@ -66,6 +66,11 @@ defmodule DodoRouter.Logs.RequestLog do
     belongs_to :replayed_from, __MODULE__
     has_many :replays, __MODULE__, foreign_key: :replayed_from_id
 
+    # Message index the replay was anchored at (nil = whole thread). Stored
+    # explicitly: an anchor at the last user message doesn't shorten the
+    # history, so it can't be derived from the message prefix.
+    field :replay_from_index, :integer
+
     field :inserted_at, :utc_datetime_usec
   end
 
@@ -102,7 +107,8 @@ defmodule DodoRouter.Logs.RequestLog do
       :recording_id,
       :truncation_flags,
       :favorite,
-      :replayed_from_id
+      :replayed_from_id,
+      :replay_from_index
     ])
     |> validate_required([:router_id, :request_id, :status, :inserted_at])
     |> validate_inclusion(:status, @statuses)

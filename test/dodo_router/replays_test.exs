@@ -241,9 +241,28 @@ defmodule DodoRouter.ReplaysTest do
                })
 
       assert replay.replayed_from_id == ctx.multi_turn.id
+      assert replay.replay_from_index == 0
 
       request = Jason.decode!(replay.request_body)
       assert request["messages"] == [%{"role" => "user", "content" => "first question"}]
+    end
+
+    test "records the anchor even at the last message, where the history isn't shortened",
+         ctx do
+      assert {:ok, replay} =
+               Replays.replay(ctx.user, ctx.multi_turn, %{
+                 provider_key_id: ctx.provider_key.id,
+                 model: "test-model",
+                 message_index: 2
+               })
+
+      assert replay.replay_from_index == 2
+      assert length(Jason.decode!(replay.request_body)["messages"]) == 3
+    end
+
+    test "whole-thread replays record no anchor", ctx do
+      assert {:ok, replay} = Replays.replay(ctx.user, ctx.multi_turn, target(ctx))
+      assert replay.replay_from_index == nil
     end
 
     test "rejects an index that isn't a user message", ctx do
@@ -331,6 +350,24 @@ defmodule DodoRouter.ReplaysTest do
       broken = LogsFixtures.log_fixture(ctx.router, %{request_body: "not json"})
       assert Replays.replay_blocker(broken) == :invalid_request_body
     end
+
+    test "a cut point before the truncated content unblocks the replay", ctx do
+      log =
+        LogsFixtures.log_fixture(ctx.router, %{
+          request_body:
+            Jason.encode!(%{
+              "messages" => [
+                %{"role" => "user", "content" => "clean question"},
+                %{"role" => "assistant", "content" => "big answer\n\n... [truncated]"},
+                %{"role" => "user", "content" => "follow-up"}
+              ]
+            })
+        })
+
+      assert Replays.replay_blocker(log) == :truncated
+      assert Replays.replay_blocker(log, 0) == nil
+      assert Replays.replay_blocker(log, 2) == :truncated
+    end
   end
 
   describe "list_targets/1" do
@@ -340,6 +377,35 @@ defmodule DodoRouter.ReplaysTest do
       assert [%{provider: "test_provider", provider_key: key, models: models}] = targets
       assert key.id == ctx.provider_key.id
       assert Enum.any?(models, &(&1.id == "test-model"))
+    end
+
+    test "coding-plan keys offer their plan catalog alongside the provider's", ctx do
+      {:ok, _} =
+        DodoRouter.Models.create_model(%{
+          provider_slug: "moonshot_coding",
+          model_id: "k2p6",
+          display_name: "Kimi K2.6 (coding plan)"
+        })
+
+      {:ok, _} =
+        DodoRouter.Models.create_model(%{
+          provider_slug: "moonshot",
+          model_id: "kimi-k2.6",
+          display_name: "Kimi K2.6"
+        })
+
+      coding_key =
+        ProvidersFixtures.provider_key_fixture(ctx.user, %{provider_slug: "moonshot_coding"})
+
+      target =
+        ctx.user
+        |> Replays.list_targets()
+        |> Enum.find(&(&1.provider_key.id == coding_key.id))
+
+      assert target.provider == "moonshot"
+      model_ids = Enum.map(target.models, & &1.id)
+      assert "k2p6" in model_ids
+      assert "kimi-k2.6" in model_ids
     end
 
     test "returns no targets for a user without keys", _ctx do
