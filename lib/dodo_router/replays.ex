@@ -56,6 +56,7 @@ defmodule DodoRouter.Replays do
         steps: [step],
         log_mode: :sync,
         replayed_from_id: root.id,
+        replay_from_index: message_index,
         request_id: request_id
       ]
 

@@ -109,11 +109,24 @@ defmodule DodoRouterWeb.LogLive.Replay do
   defp adopted_from(nil, _messages), do: nil
 
   defp adopted_from(replay, source_messages) do
-    with cut when is_integer(cut) <- candidate_from(replay, length(source_messages)),
-         %{role: "user"} <- Enum.at(source_messages, cut - 1) do
-      cut - 1
+    with index when is_integer(index) <- candidate_anchor(replay, source_messages),
+         %{role: "user"} <- Enum.at(source_messages, index) do
+      index
     else
       _other -> nil
+    end
+  end
+
+  # The recorded anchor wins; prefix-derivation covers replays created
+  # before replay_from_index existed (only detectable when the cut
+  # actually shortened the thread).
+  defp candidate_anchor(%{replay_from_index: index}, _messages) when is_integer(index),
+    do: index
+
+  defp candidate_anchor(replay, source_messages) do
+    case candidate_from(replay, length(source_messages)) do
+      nil -> nil
+      cut -> cut - 1
     end
   end
 
@@ -184,17 +197,15 @@ defmodule DodoRouterWeb.LogLive.Replay do
   end
 
   defp select_replay(socket, nil) do
-    source_count = length(socket.assigns.source_messages)
-
     candidates =
       Enum.map(socket.assigns.replays, fn replay ->
-        from = candidate_from(replay, source_count)
+        anchor = candidate_anchor(replay, socket.assigns.source_messages)
 
         %{
           log: replay,
           effort: step_effort(replay),
-          from: from,
-          from_preview: from && from_preview(socket.assigns.source_messages, from - 1),
+          anchor: anchor,
+          anchor_preview: anchor && from_preview(socket.assigns.source_messages, anchor),
           deltas: Replays.deltas(socket.assigns.source, replay) |> Map.new(&{&1.key, &1})
         }
       end)
@@ -205,6 +216,7 @@ defmodule DodoRouterWeb.LogLive.Replay do
     |> assign(:deltas, [])
     |> assign(:partial?, false)
     |> assign(:cut, nil)
+    |> assign(:anchor_index, nil)
     |> assign(:baseline_msg, nil)
     |> assign(:candidates, candidates)
   end
@@ -235,6 +247,7 @@ defmodule DodoRouterWeb.LogLive.Replay do
       |> assign(:baseline_msg, baseline_msg)
       |> assign(:partial?, partial?)
       |> assign(:cut, cut)
+      |> assign(:anchor_index, candidate_anchor(replay_log, source_messages))
       |> assign(:deltas, deltas)
       |> assign(:diff, nil)
 
@@ -296,8 +309,11 @@ defmodule DodoRouterWeb.LogLive.Replay do
           <p class="font-medium text-base-content">This request can't be replayed</p>
           <p class="text-sm text-base-content/60">{blocker_message(@effective_blocker)}</p>
           <p :if={@effective_blocker == :truncated} class="text-sm text-base-content/60 mt-1">
-            Truncation only affects the full thread — pick "from here" on a message below to
-            replay from that point instead.
+            Truncation only affects the full thread —
+            <.link navigate={~p"/logs/#{@source.id}"} class="text-primary hover:underline">
+              open the log
+            </.link>
+            and use "replay from here" on a message before the truncated content.
           </p>
         </div>
       </div>
@@ -419,42 +435,6 @@ defmodule DodoRouterWeb.LogLive.Replay do
         </p>
       </div>
       
-    <!-- Thread -->
-      <details
-        :if={@source_messages != []}
-        class="card-bordered mb-6"
-        id="thread-section"
-        open={@from_index != nil or @effective_blocker != nil}
-      >
-        <summary class="cursor-pointer text-sm font-medium text-base-content/70">
-          Thread · {length(@source_messages)} messages
-        </summary>
-        <div class="mt-3 space-y-1">
-          <div
-            :for={{message, index} <- Enum.with_index(@source_messages)}
-            class={[
-              "flex items-start gap-2 text-sm rounded px-2 py-1",
-              @from_index == index && "bg-info/10"
-            ]}
-            id={"thread-msg-#{index}"}
-          >
-            <span class="text-[10px] uppercase tracking-wider font-semibold text-base-content/40 w-16 shrink-0 mt-0.5">
-              {message.role}
-            </span>
-            <span class="text-base-content/70 flex-1 truncate">{thread_preview(message)}</span>
-            <.link
-              :if={message.role == "user"}
-              patch={thread_from_path(@source, index, @selected)}
-              class="text-[10px] text-base-content/40 hover:text-primary shrink-0 inline-flex items-center gap-0.5"
-              id={"thread-from-#{index}"}
-              title="Replay the conversation from this message"
-            >
-              <.icon name="hero-arrow-path" class="w-2.5 h-2.5" /> from here
-            </.link>
-          </div>
-        </div>
-      </details>
-      
     <!-- Replay switcher (compare state) -->
       <div
         :if={@replays != [] and @selected}
@@ -553,11 +533,11 @@ defmodule DodoRouterWeb.LogLive.Replay do
                     {candidate.effort}
                   </span>
                   <span
-                    :if={candidate.from}
+                    :if={candidate.anchor != nil}
                     class="badge badge-ghost badge-xs gap-0.5"
-                    title={"Partial replay from message #{candidate.from}: \"#{candidate.from_preview}\""}
+                    title={"Replayed from message #{candidate.anchor + 1}: \"#{candidate.anchor_preview}\""}
                   >
-                    <.icon name="hero-scissors" class="w-2.5 h-2.5" /> from #{candidate.from}
+                    <.icon name="hero-scissors" class="w-2.5 h-2.5" /> from #{candidate.anchor + 1}
                   </span>
                 </div>
               </td>
@@ -607,21 +587,24 @@ defmodule DodoRouterWeb.LogLive.Replay do
       </div>
 
       <%= if @selected do %>
-        <!-- Partial replay banner -->
+        <!-- Anchor banner: which message this replay started from -->
         <div
-          :if={@partial?}
-          id="partial-replay-banner"
+          :if={@anchor_index != nil}
+          id="replay-anchor-banner"
           class="card-bordered mb-4 flex items-start gap-3 border-info/30 bg-info/5"
         >
           <.icon name="hero-scissors" class="w-5 h-5 text-info shrink-0 mt-0.5" />
           <p class="text-sm">
-            <span class="font-medium">Partial replay</span>
-            — replayed from message {@cut} of {length(@source_messages)}:
-            <span class="text-base-content/60 italic">
-              "{from_preview(@source_messages, @cut - 1)}"
+            <span class="font-medium">
+              Replayed from message {@anchor_index + 1} of {length(@source_messages)}:
             </span>
-            The diff compares against the original answer at that exchange; metric deltas are
-            hidden because the contexts differ in length.
+            <span class="text-base-content/60 italic">
+              "{from_preview(@source_messages, @anchor_index)}"
+            </span>
+            <span :if={@partial?}>
+              The diff compares against the original answer at that exchange; metric deltas are
+              hidden because the contexts differ in length.
+            </span>
           </p>
         </div>
         
@@ -1047,17 +1030,6 @@ defmodule DodoRouterWeb.LogLive.Replay do
       _message -> ""
     end
   end
-
-  defp thread_preview(%{content: content}) when is_binary(content) and content != "",
-    do: String.slice(content, 0, 160)
-
-  defp thread_preview(%{tool_calls: [_ | _]}), do: "[tool call]"
-  defp thread_preview(_message), do: "[no text]"
-
-  defp thread_from_path(source, index, nil), do: ~p"/logs/#{source.id}/replay?#{[from: index]}"
-
-  defp thread_from_path(source, index, selected),
-    do: ~p"/logs/#{source.id}/replay?#{[from: index, replay: selected.id]}"
 
   defp message_text(nil), do: nil
 

@@ -348,7 +348,7 @@ defmodule DodoRouterWeb.LogLiveReplayTest do
       assert Jason.decode!(replay.request_body)["messages"] ==
                [%{"role" => "user", "content" => "first question"}]
 
-      assert has_element?(view, "#partial-replay-banner")
+      assert has_element?(view, "#replay-anchor-banner")
       refute has_element?(view, "#delta-strip")
       # diff runs against the original answer at that exchange, not the final response
       assert html =~ "crud"
@@ -392,7 +392,42 @@ defmodule DodoRouterWeb.LogLiveReplayTest do
       {:ok, view, _html} = live(conn, ~p"/logs/#{multi_turn.id}/replay?replay=#{partial.id}")
       render_async(view)
 
-      assert has_element?(view, "#partial-replay-banner", "first question")
+      assert has_element?(view, "#replay-anchor-banner", "first question")
+    end
+
+    test "an anchor at the last message is shown, adopted, and repeated on re-runs", %{
+      conn: conn,
+      user: user,
+      multi_turn: multi_turn,
+      provider_key: provider_key
+    } do
+      {:ok, anchored} =
+        DodoRouter.Replays.replay(user, multi_turn, %{
+          provider_key_id: provider_key.id,
+          model: "test-model",
+          message_index: 2
+        })
+
+      {:ok, view, _html} = live(conn, ~p"/logs/#{multi_turn.id}/replay?replay=#{anchored.id}")
+      render_async(view)
+
+      # anchor visible even though the history wasn't shortened
+      assert has_element?(view, "#replay-anchor-banner", "second question")
+      # not partial: full-context deltas remain honest
+      assert has_element?(view, "#delta-strip")
+      # the picker adopted the anchor
+      assert has_element?(view, "#replay-from-banner", "second question")
+
+      view
+      |> form("#replay-form", replay: %{provider_key_id: provider_key.id, model: "test-model"})
+      |> render_submit()
+
+      render_async(view)
+
+      new_replay =
+        multi_turn |> Logs.list_replays() |> Enum.reject(&(&1.id == anchored.id)) |> hd()
+
+      assert new_replay.replay_from_index == 2
     end
 
     test "viewing a partial replay adopts its cut point for the next run", %{
@@ -448,23 +483,6 @@ defmodule DodoRouterWeb.LogLiveReplayTest do
       %{multi_turn: multi_turn}
     end
 
-    test "the hub shows the thread with from-here pickers on user messages", %{
-      conn: conn,
-      multi_turn: multi_turn
-    } do
-      {:ok, view, _html} = live(conn, ~p"/logs/#{multi_turn.id}/replay")
-
-      assert has_element?(view, "#thread-section", "first question")
-      assert has_element?(view, "#thread-section", "second question")
-      assert has_element?(view, "#thread-from-0")
-      assert has_element?(view, "#thread-from-2")
-      refute has_element?(view, "#thread-from-1")
-
-      view |> element("#thread-from-0") |> render_click()
-      assert_patch(view, ~p"/logs/#{multi_turn.id}/replay?from=0")
-      assert has_element?(view, "#replay-from-banner", "first question")
-    end
-
     test "a truncation-blocked thread still offers partial replays", %{
       conn: conn,
       router: router
@@ -489,14 +507,14 @@ defmodule DodoRouterWeb.LogLiveReplayTest do
             Jason.encode!(%{"messages" => [%{"role" => "user", "content" => "clean question"}]})
         })
 
-      # whole-thread mode: blocked, but the thread is browsable
+      # whole-thread mode: blocked, with a pointer back to the log page
       {:ok, view, _html} = live(conn, ~p"/logs/#{blocked_root.id}/replay")
       assert has_element?(view, "#replay-blocker")
       refute has_element?(view, "#replay-form")
-      assert has_element?(view, "#thread-section")
+      refute has_element?(view, "#thread-section")
 
-      # picking a clean cut point unblocks the picker
-      view |> element("#thread-from-0") |> render_click()
+      # a from-here deep link (log page hover) unblocks the picker
+      {:ok, view, _html} = live(conn, ~p"/logs/#{blocked_root.id}/replay?from=0")
       assert has_element?(view, "#replay-form")
       refute has_element?(view, "#replay-blocker")
 

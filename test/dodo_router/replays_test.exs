@@ -241,9 +241,28 @@ defmodule DodoRouter.ReplaysTest do
                })
 
       assert replay.replayed_from_id == ctx.multi_turn.id
+      assert replay.replay_from_index == 0
 
       request = Jason.decode!(replay.request_body)
       assert request["messages"] == [%{"role" => "user", "content" => "first question"}]
+    end
+
+    test "records the anchor even at the last message, where the history isn't shortened",
+         ctx do
+      assert {:ok, replay} =
+               Replays.replay(ctx.user, ctx.multi_turn, %{
+                 provider_key_id: ctx.provider_key.id,
+                 model: "test-model",
+                 message_index: 2
+               })
+
+      assert replay.replay_from_index == 2
+      assert length(Jason.decode!(replay.request_body)["messages"]) == 3
+    end
+
+    test "whole-thread replays record no anchor", ctx do
+      assert {:ok, replay} = Replays.replay(ctx.user, ctx.multi_turn, target(ctx))
+      assert replay.replay_from_index == nil
     end
 
     test "rejects an index that isn't a user message", ctx do
