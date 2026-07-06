@@ -1,6 +1,8 @@
 defmodule DodoRouterWeb.ProvidersLive.Index do
   use DodoRouterWeb, :live_view
 
+  alias DodoRouter.Providers.KeyVerifier
+
   alias DodoRouter.Providers
   alias DodoRouter.Providers.ProviderKey
   alias DodoRouter.Proxy.Adapter.Registry
@@ -25,16 +27,24 @@ defmodule DodoRouterWeb.ProvidersLive.Index do
       |> assign(:form, nil)
       |> assign(:codex_device, nil)
       |> assign(:codex_timer, nil)
+      |> assign(:verifying, MapSet.new())
 
     {:ok, socket}
   end
 
   @impl true
   def handle_params(params, _uri, socket) do
+    return_to =
+      case params["return_to"] do
+        "/routers/" <> _ = path -> path
+        _ -> nil
+      end
+
     socket =
       socket
       |> assign(:highlighted_key_id, params["highlight"])
       |> assign(:filtered_provider, params["provider"])
+      |> assign(:return_to, return_to)
 
     {:noreply, socket}
   end
@@ -42,6 +52,13 @@ defmodule DodoRouterWeb.ProvidersLive.Index do
   @impl true
   def handle_event("filter_provider", %{"provider" => provider_slug}, socket) do
     {:noreply, assign(socket, :filtered_provider, provider_slug)}
+  end
+
+  def handle_event("reverify", %{"id" => id}, socket) do
+    case Providers.get_provider_key(socket.assigns.current_user, id) do
+      nil -> {:noreply, socket}
+      key -> {:noreply, start_verification(socket, key)}
+    end
   end
 
   def handle_event("clear_filter", _params, socket) do
@@ -137,7 +154,7 @@ defmodule DodoRouterWeb.ProvidersLive.Index do
       }
 
       case Providers.create_provider_key(socket.assigns.current_user, attrs, api_key) do
-        {:ok, _provider_key} ->
+        {:ok, provider_key} ->
           provider_keys = Providers.list_provider_keys_grouped(socket.assigns.current_user)
 
           socket =
@@ -146,6 +163,7 @@ defmodule DodoRouterWeb.ProvidersLive.Index do
             |> assign(:adding_to, nil)
             |> assign(:form, nil)
             |> put_flash(:info, "API key added")
+            |> start_verification(provider_key)
 
           {:noreply, socket}
 
@@ -247,6 +265,84 @@ defmodule DodoRouterWeb.ProvidersLive.Index do
   end
 
   @impl true
+  def handle_async({:verify_key, key_id}, result, socket) do
+    case result do
+      {:ok, {:ok, :valid}} ->
+        Providers.mark_key_verified(key_id)
+
+      {:ok, {:ok, :unverifiable}} ->
+        :ok
+
+      {:ok, {:error, class, detail}} ->
+        Providers.apply_health(key_id, class, detail)
+
+      {:exit, _reason} ->
+        :ok
+    end
+
+    {:noreply,
+     socket
+     |> assign(:verifying, MapSet.delete(socket.assigns.verifying, key_id))
+     |> assign(
+       :provider_keys,
+       Providers.list_provider_keys_grouped(socket.assigns.current_user)
+     )}
+  end
+
+  defp start_verification(socket, key) do
+    socket
+    |> assign(:verifying, MapSet.put(socket.assigns.verifying, key.id))
+    |> start_async({:verify_key, key.id}, fn -> KeyVerifier.verify(key) end)
+  end
+
+  attr :key, :map, required: true
+  attr :verifying, :any, required: true
+
+  defp key_status_badge(assigns) do
+    ~H"""
+    <%= cond do %>
+      <% MapSet.member?(@verifying, @key.id) -> %>
+        <span class="loading loading-spinner loading-xs text-base-content/40" title="Verifying key…">
+        </span>
+      <% @key.status == "valid" -> %>
+        <span title={"Verified — last OK " <> relative_time(@key.last_ok_at || @key.verified_at)}>
+          <.icon name="hero-check-circle" class="size-4 text-success" />
+        </span>
+      <% @key.status == "invalid" -> %>
+        <span title={"Invalid since " <> relative_time(@key.last_error_at) <> " — " <> (@key.last_error_detail || "authentication failed")}>
+          <.icon name="hero-x-circle" class="size-4 text-error" />
+        </span>
+      <% @key.status == "quota_exceeded" -> %>
+        <span title={"Out of credits/quota since " <> relative_time(@key.last_error_at)}>
+          <.icon name="hero-exclamation-triangle" class="size-4 text-warning" />
+        </span>
+      <% true -> %>
+        <button
+          phx-click="reverify"
+          phx-value-id={@key.id}
+          class="text-base-content/40 hover:text-base-content transition-colors"
+          title="Not verified yet — click to verify"
+        >
+          <.icon name="hero-question-mark-circle" class="size-4" />
+        </button>
+    <% end %>
+    """
+  end
+
+  defp relative_time(nil), do: "recently"
+
+  defp relative_time(%DateTime{} = dt) do
+    diff = DateTime.diff(DateTime.utc_now(), dt, :second)
+
+    cond do
+      diff < 60 -> "just now"
+      diff < 3600 -> "#{div(diff, 60)}m ago"
+      diff < 86_400 -> "#{div(diff, 3600)}h ago"
+      true -> "#{div(diff, 86_400)}d ago"
+    end
+  end
+
+  @impl true
   def render(assigns) do
     ~H"""
     <div class="max-w-2xl">
@@ -254,6 +350,19 @@ defmodule DodoRouterWeb.ProvidersLive.Index do
       <div class="mb-8">
         <h1 class="text-2xl font-bold">Providers</h1>
         <p class="text-base-content/50 text-sm">Connect your LLM provider API keys</p>
+      </div>
+
+      <div
+        :if={@return_to}
+        id="return-to-router"
+        class="mb-6 flex items-center justify-between gap-3 rounded-xl border border-primary/30 bg-primary/5 px-4 py-3"
+      >
+        <p class="text-sm text-base-content/70">
+          You're setting up a router — add a key below, then continue where you left off.
+        </p>
+        <.link navigate={@return_to} class="btn btn-primary btn-sm shrink-0">
+          Continue setup →
+        </.link>
       </div>
       
     <!-- Provider Filter -->
@@ -389,20 +498,7 @@ defmodule DodoRouterWeb.ProvidersLive.Index do
                         </form>
                       <% else %>
                         <div class="flex items-center gap-3">
-                          <svg
-                            xmlns="http://www.w3.org/2000/svg"
-                            class="h-4 w-4 text-success"
-                            fill="none"
-                            viewBox="0 0 24 24"
-                            stroke="currentColor"
-                          >
-                            <path
-                              stroke-linecap="round"
-                              stroke-linejoin="round"
-                              stroke-width="2"
-                              d="M5 13l4 4L19 7"
-                            />
-                          </svg>
+                          <.key_status_badge key={key} verifying={@verifying} />
                           <button
                             phx-click="start_edit"
                             phx-value-id={key.id}
@@ -410,7 +506,7 @@ defmodule DodoRouterWeb.ProvidersLive.Index do
                           >
                             {key.label}
                             <span class="text-base-content/40 font-mono text-xs ml-1.5">
-                              {key.key_hint}
+                              {Providers.compact_key_hint(key.key_hint)}
                             </span>
                           </button>
                         </div>

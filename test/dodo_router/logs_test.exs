@@ -285,4 +285,23 @@ defmodule DodoRouter.LogsTest do
       assert hd(logs).id == log1.id
     end
   end
+
+  describe "stats/2" do
+    test "counts fallback-recovered requests as successful" do
+      {router, _api_key} = RoutersFixtures.router_fixture()
+
+      LogsFixtures.log_fixture(router, %{status: "success"})
+      LogsFixtures.log_fixture(router, %{status: "fallback"})
+      LogsFixtures.log_fixture(router, %{status: "error"})
+
+      stats = Logs.stats(router)
+
+      assert stats.total_requests == 3
+      # A fallback means the client still got a successful response —
+      # it must count toward the success rate, matching stats_by_provider/2.
+      assert stats.successful_requests == 2
+      assert stats.fallback_requests == 1
+      assert stats.error_requests == 1
+    end
+  end
 end

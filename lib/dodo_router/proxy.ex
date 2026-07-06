@@ -43,6 +43,8 @@ defmodule DodoRouter.Proxy do
 
       log = log_request(router, request, result, request_id, start_time, opts)
 
+      record_key_health(result.attempted_steps)
+
       broadcast_event(router, result, request_id)
 
       # Calculate provider time (sum of all attempt latencies)
@@ -171,6 +173,17 @@ defmodule DodoRouter.Proxy do
   end
 
   @doc false
+  # Fire-and-forget key health tracking — must never block or fail dispatch.
+  defp record_key_health(attempted_steps) do
+    Task.Supervisor.start_child(DodoRouter.KeyHealthTaskSupervisor, fn ->
+      DodoRouter.Providers.record_attempts(attempted_steps)
+    end)
+
+    :ok
+  rescue
+    _ -> :ok
+  end
+
   def truncate_body(nil), do: {nil, []}
 
   def truncate_body(body) when is_map(body) do

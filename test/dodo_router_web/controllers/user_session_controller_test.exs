@@ -24,7 +24,11 @@ defmodule DodoRouterWeb.UserSessionControllerTest do
         |> get(~p"/users/log-in")
         |> html_response(200)
 
-      assert html =~ "You need to reauthenticate"
+      # Neutral copy: this page is reached both from sudo-mode expiry and
+      # from stale magic links, so it must not assume either context.
+      assert html =~ "Log in again to continue as"
+      assert html =~ user.email
+      refute html =~ "You need to reauthenticate"
       refute html =~ "Register"
       assert html =~ "Log in with email"
 
@@ -49,7 +53,8 @@ defmodule DodoRouterWeb.UserSessionControllerTest do
         end)
 
       conn = get(conn, ~p"/users/log-in/#{token}")
-      assert html_response(conn, 200) =~ "Confirm and stay logged in"
+      # One button, remember-me implied — no stay/only-this-time choice
+      assert html_response(conn, 200) =~ "Continue to DodoRouter"
     end
 
     test "renders login page for confirmed user", %{conn: conn, user: user} do

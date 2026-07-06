@@ -64,8 +64,12 @@ defmodule DodoRouter.Routers do
       |> Repo.insert()
 
     case result do
-      {:ok, router} -> {:ok, router, api_key}
-      {:error, changeset} -> {:error, changeset}
+      {:ok, router} ->
+        broadcast_router_change(router, :router_created)
+        {:ok, router, api_key}
+
+      {:error, changeset} ->
+        {:error, changeset}
     end
   end
 
@@ -73,10 +77,34 @@ defmodule DodoRouter.Routers do
     router
     |> Router.changeset(attrs)
     |> Repo.update()
+    |> tap_broadcast(:router_updated)
   end
 
   def delete_router(%Router{} = router) do
-    Repo.delete(router)
+    router
+    |> Repo.delete()
+    |> tap_broadcast(:router_deleted)
+  end
+
+  @doc """
+  Topic carrying `{:router_created | :router_updated | :router_deleted, router}`
+  messages for all routers belonging to a user (used by the sidebar).
+  """
+  def user_routers_topic(user_id), do: "user:#{user_id}:routers"
+
+  defp tap_broadcast({:ok, router} = result, event) do
+    broadcast_router_change(router, event)
+    result
+  end
+
+  defp tap_broadcast(result, _event), do: result
+
+  defp broadcast_router_change(%Router{} = router, event) do
+    Phoenix.PubSub.broadcast(
+      DodoRouter.PubSub,
+      user_routers_topic(router.user_id),
+      {event, router}
+    )
   end
 
   def change_router(%Router{} = router, attrs \\ %{}) do

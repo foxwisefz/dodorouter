@@ -1,0 +1,478 @@
+---
+layout: base.njk
+title: DodoRouter — See what your agent actually sends the model
+description: "The instrument for harness engineering: point Claude Code, OpenCode, or your own agent at DodoRouter and every model call becomes visible — real system prompts, tools, context, failures. Replay, compare, and route with fallback."
+permalink: /v2/index.html
+eleventyExcludeFromCollections: true
+---
+
+{# ─────────────────────────────────────────────
+   /v2 — harness-engineering positioning: the instrument
+   you build harnesses WITH, not armor you bolt on after.
+   ───────────────────────────────────────────── #}
+
+<section class="hero-canvas relative overflow-hidden bg-background">
+  <div class="mx-auto max-w-6xl px-6 md:px-12 lg:px-20 pt-14 pb-16 md:pt-20 md:pb-24">
+    <div class="text-center max-w-3xl mx-auto">
+      <div class="animate-fade-up inline-flex items-center gap-2 rounded-full border border-border bg-background px-4 py-1.5 text-sm text-muted-foreground font-body" style="--fade-y: 10px; --fade-duration: 0.5s;">
+        <span class="relative flex h-2 w-2">
+          <span class="absolute inline-flex h-full w-full animate-ping rounded-full bg-go opacity-75"></span>
+          <span class="relative inline-flex h-2 w-2 rounded-full bg-go"></span>
+        </span>
+        The instrument for harness engineering
+      </div>
+
+      <h1 class="animate-fade-up mt-6 font-display text-5xl md:text-6xl lg:text-[4.5rem] leading-[0.97] tracking-tight text-foreground" style="--fade-y: 16px; --fade-duration: 0.6s; --fade-delay: 0.1s;">
+        See what your agent<br /><em>actually</em> sends the model.
+      </h1>
+
+      <p class="animate-fade-up mt-5 text-base md:text-lg text-muted-foreground leading-relaxed font-body max-w-2xl mx-auto" style="--fade-y: 16px; --fade-duration: 0.6s; --fade-delay: 0.2s;">
+        Agents are model + harness — and the harness does its work in the dark.
+        Point Claude Code, OpenCode, or your own agent at DodoRouter and every model
+        call becomes visible: the real system prompts, the tools, the context, the
+        failures. Harness engineering starts with seeing.
+      </p>
+
+      <div class="animate-fade-up mt-7 flex items-center justify-center gap-3" style="--fade-y: 16px; --fade-duration: 0.6s; --fade-delay: 0.3s;">
+        <a href="https://api.dodorouter.com/users/register" class="rounded-full bg-primary px-7 py-3 text-sm font-medium font-body text-primary-foreground transition-all hover:opacity-90">
+          Start watching →
+        </a>
+        <a href="https://github.com/foxwise-ai/dodorouter" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-2 rounded-full border border-border bg-background px-5 py-3 text-sm font-medium font-body text-foreground transition-colors hover:bg-secondary">
+          <svg class="h-4 w-4 fill-foreground" viewBox="0 0 24 24"><path d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"/></svg>
+          Open source
+        </a>
+      </div>
+    </div>
+
+    {# — The living dashboard — #}
+    <div class="animate-fade-up mt-10" style="--fade-y: 28px; --fade-duration: 0.8s; --fade-delay: 0.45s;" data-reveal>
+      <div class="frosted-glass rounded-2xl p-3 md:p-4" aria-hidden="true">
+        <div class="rounded-xl bg-white/95 border border-border overflow-hidden font-body select-none">
+          {# top bar #}
+          <div class="flex items-center justify-between px-4 py-2.5 border-b border-border">
+            <div class="flex items-center gap-2">
+              <span class="flex h-5 w-5 items-center justify-center rounded bg-accent text-white text-[10px] font-bold">D</span>
+              <span class="text-xs font-semibold text-foreground">my-production-router</span>
+              <span class="flex items-center gap-1 rounded-full bg-green-50 px-2 py-0.5 text-[10px] font-semibold text-go">
+                <span class="h-1.5 w-1.5 rounded-full bg-go scene-anim animate-soft-pulse"></span> Live
+              </span>
+            </div>
+            <span class="text-[10px] text-muted-foreground">Last 24 hours</span>
+          </div>
+
+          <div class="grid lg:grid-cols-5">
+            {# left: stats + chart #}
+            <div class="lg:col-span-3 p-4 border-b lg:border-b-0 lg:border-r border-border">
+              <div class="grid grid-cols-3 gap-2.5 mb-4">
+                <div class="rounded-lg border border-border bg-secondary/30 p-3">
+                  <p class="text-[10px] font-medium text-muted-foreground">Requests</p>
+                  <p class="text-lg font-semibold text-foreground tabular-nums"><span data-count-to="12847">0</span></p>
+                  <p class="text-[10px] font-medium text-go">+14.2%</p>
+                </div>
+                <div class="rounded-lg border border-border bg-secondary/30 p-3">
+                  <p class="text-[10px] font-medium text-muted-foreground">Success rate</p>
+                  <p class="text-lg font-semibold text-foreground tabular-nums"><span data-count-to="99.7" data-count-suffix="%">0%</span></p>
+                  <p class="text-[10px] text-muted-foreground">23 saved by fallback</p>
+                </div>
+                <div class="rounded-lg border border-border bg-secondary/30 p-3">
+                  <p class="text-[10px] font-medium text-muted-foreground">p95 latency</p>
+                  <p class="text-lg font-semibold text-foreground tabular-nums"><span data-count-to="340" data-count-suffix="ms">0ms</span></p>
+                  <p class="text-[10px] font-medium text-go">−8%</p>
+                </div>
+              </div>
+
+              <div class="rounded-lg border border-border bg-secondary/20 p-3">
+                <div class="flex items-center justify-between mb-2">
+                  <p class="text-[10px] font-semibold text-foreground">Request volume</p>
+                  <div class="flex items-center gap-2 text-[9px] text-muted-foreground">
+                    <span class="flex items-center gap-1"><span class="h-1.5 w-1.5 rounded-full bg-accent"></span> success</span>
+                    <span class="flex items-center gap-1"><span class="h-1.5 w-1.5 rounded-full bg-warn"></span> fallback</span>
+                  </div>
+                </div>
+                <svg viewBox="0 0 400 90" class="h-28 w-full" preserveAspectRatio="none">
+                  <defs>
+                    <linearGradient id="heroFill" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stop-color="hsl(239, 84%, 67%)" stop-opacity="0.14" />
+                      <stop offset="100%" stop-color="hsl(239, 84%, 67%)" stop-opacity="0" />
+                    </linearGradient>
+                  </defs>
+                  <path class="chart-fill-in scene-anim" d="M0,62 C20,58 30,50 48,44 C66,38 76,52 92,45 C108,38 118,28 136,24 C154,20 164,30 180,34 C196,38 208,18 224,15 C240,12 252,24 268,20 C284,16 296,10 312,13 C328,16 340,8 356,10 C372,12 386,6 400,4 L400,90 L0,90 Z" fill="url(#heroFill)" />
+                  <path class="chart-draw scene-anim" d="M0,62 C20,58 30,50 48,44 C66,38 76,52 92,45 C108,38 118,28 136,24 C154,20 164,30 180,34 C196,38 208,18 224,15 C240,12 252,24 268,20 C284,16 296,10 312,13 C328,16 340,8 356,10 C372,12 386,6 400,4" fill="none" stroke="hsl(239, 84%, 67%)" stroke-width="2" vector-effect="non-scaling-stroke" />
+                  <circle cx="180" cy="34" r="3.5" fill="hsl(38, 92%, 50%)" class="scene-anim animate-soft-pulse" />
+                  <circle cx="268" cy="20" r="3.5" fill="hsl(38, 92%, 50%)" class="scene-anim animate-soft-pulse" />
+                </svg>
+              </div>
+            </div>
+
+            {# right: chain reacting to an incident + live feed #}
+            <div class="lg:col-span-2 p-4">
+              <p class="text-[10px] font-semibold text-foreground mb-2">Routing chain</p>
+              <div class="space-y-1.5 text-[11px] font-mono">
+                <div class="hd-fail scene-anim flex items-center justify-between rounded-lg border px-2.5 py-2">
+                  <span class="text-foreground"><span class="text-muted-foreground">1</span> openai / gpt-5.2</span>
+                  <span class="hd-fail-badge scene-anim rounded bg-error/10 px-1.5 py-0.5 text-[9px] font-bold text-error">429</span>
+                </div>
+                <div class="hd-recover scene-anim flex items-center justify-between rounded-lg border px-2.5 py-2">
+                  <span class="text-foreground"><span class="text-muted-foreground">2</span> anthropic / claude-4.5</span>
+                  <span class="hd-recover-badge scene-anim rounded bg-go/10 px-1.5 py-0.5 text-[9px] font-bold text-go">200 ✓</span>
+                </div>
+                <div class="flex items-center justify-between rounded-lg border border-border px-2.5 py-2 opacity-60">
+                  <span class="text-foreground"><span class="text-muted-foreground">3</span> moonshot / kimi-k2.5</span>
+                  <span class="text-[9px] text-muted-foreground">standby</span>
+                </div>
+              </div>
+
+              <p class="text-[10px] font-semibold text-foreground mt-4 mb-2">Live requests</p>
+              <div class="space-y-1 text-[10px] font-mono">
+                <div class="feed-row scene-anim flex items-center justify-between rounded bg-secondary/40 px-2 py-1.5" style="--fd: 0s">
+                  <span class="text-foreground">chat · glm-4.7</span>
+                  <span class="rounded bg-go/10 px-1 text-go font-bold">ok · 285ms</span>
+                </div>
+                <div class="feed-row scene-anim flex items-center justify-between rounded bg-secondary/40 px-2 py-1.5" style="--fd: 2.4s">
+                  <span class="text-foreground">chat · gpt-5.2 <span class="line-through text-muted-foreground">→</span> claude-4.5</span>
+                  <span class="rounded bg-warn/10 px-1 text-warn font-bold">fallback · 1.2s</span>
+                </div>
+                <div class="feed-row scene-anim flex items-center justify-between rounded bg-secondary/40 px-2 py-1.5" style="--fd: 4.8s">
+                  <span class="text-foreground">stream · kimi-k2.5</span>
+                  <span class="rounded bg-go/10 px-1 text-go font-bold">ok · 198ms</span>
+                </div>
+                <div class="feed-row scene-anim flex items-center justify-between rounded bg-secondary/40 px-2 py-1.5" style="--fd: 7.2s">
+                  <span class="text-foreground">chat · claude-4.5</span>
+                  <span class="rounded bg-go/10 px-1 text-go font-bold">ok · 412ms</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <p class="mt-3 text-center text-xs text-muted-foreground font-body">
+        Your agent's traffic, live — one base-URL change away.
+      </p>
+    </div>
+  </div>
+</section>
+
+{# ── Step zero: X-ray the pros ── #}
+<section class="section-padding md:section-padding-md bg-background border-t border-border">
+  <div class="mx-auto max-w-6xl px-6 md:px-12 lg:px-20">
+    <div class="grid items-center gap-12 lg:grid-cols-2 lg:gap-20">
+      <div>
+        <p class="text-sm font-semibold tracking-wide text-accent font-body">Step zero</p>
+        <h2 class="mt-3 font-display text-3xl md:text-4xl lg:text-5xl leading-[1.05] tracking-tight text-foreground">
+          Before you build a harness,<br /><em>watch the best ones work.</em>
+        </h2>
+        <p class="mt-5 text-base md:text-lg text-muted-foreground leading-relaxed font-body max-w-lg">
+          Claude Code and OpenCode are world-class harnesses — and they'll show you
+          everything, if you can see their traffic. Route them through DodoRouter with one
+          base-URL change and read what they really do: the system prompts, the tool
+          definitions, how they compact context, when they retry, what they do with errors.
+        </p>
+        <ul class="mt-6 space-y-3 font-body">
+          <li class="flex items-start gap-3">
+            <span class="mt-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-go/10">
+              <svg class="h-3 w-3 text-go" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
+            </span>
+            <span class="text-sm text-foreground">Full request and response bodies, headers included — nothing summarized away</span>
+          </li>
+          <li class="flex items-start gap-3">
+            <span class="mt-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-go/10">
+              <svg class="h-3 w-3 text-go" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
+            </span>
+            <span class="text-sm text-foreground">Works with anything OpenAI- or Anthropic-compatible</span>
+          </li>
+          <li class="flex items-start gap-3">
+            <span class="mt-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-go/10">
+              <svg class="h-3 w-3 text-go" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
+            </span>
+            <span class="text-sm text-foreground">Route it through your Claude Max or ChatGPT Pro subscription while you're at it</span>
+          </li>
+        </ul>
+        <p class="mt-5 text-xs text-muted-foreground font-body font-mono">
+          ANTHROPIC_BASE_URL=https://api.dodorouter.com/r/inspect/v1 claude
+        </p>
+      </div>
+
+      {# inspected request pane — styled like the real Request Details page #}
+      <div class="rounded-2xl border border-border bg-white shadow-[0_8px_40px_rgba(0,0,0,0.05)] font-body select-none overflow-hidden" data-reveal aria-hidden="true">
+        <div class="flex items-center justify-between px-4 py-2.5 border-b border-border bg-secondary/20">
+          <div class="flex items-center gap-1.5">
+            <span class="h-2.5 w-2.5 rounded-full bg-red-400/70"></span>
+            <span class="h-2.5 w-2.5 rounded-full bg-yellow-400/70"></span>
+            <span class="h-2.5 w-2.5 rounded-full bg-green-400/70"></span>
+          </div>
+          <span class="text-[11px] font-semibold text-foreground">Request Details</span>
+          <span class="rounded-full bg-accent/10 px-2 py-0.5 text-[10px] font-bold text-accent">claude-code</span>
+        </div>
+
+        <div class="flex gap-4 px-4 pt-2.5 text-[11px] font-medium border-b border-border">
+          <span class="pb-2 text-muted-foreground">Conversation</span>
+          <span class="pb-2 text-accent border-b-2 border-accent -mb-px">Original Request</span>
+          <span class="pb-2 text-muted-foreground">Final Response</span>
+          <span class="pb-2 text-muted-foreground hidden sm:block">Fallback Trace</span>
+        </div>
+
+        <div class="grid grid-cols-[auto_1fr]">
+          <div class="border-r border-border p-3.5 space-y-2.5 text-[10px] whitespace-nowrap">
+            <div><p class="text-muted-foreground uppercase tracking-wide text-[8px]">Model</p><p class="font-mono text-foreground">claude-4.5</p></div>
+            <div><p class="text-muted-foreground uppercase tracking-wide text-[8px]">Prompt</p><p class="font-mono text-foreground">61,204 tok</p></div>
+            <div><p class="text-muted-foreground uppercase tracking-wide text-[8px]">Cached</p><p class="font-mono text-go">78%</p></div>
+            <div><p class="text-muted-foreground uppercase tracking-wide text-[8px]">Stream</p><p class="font-mono text-foreground">yes</p></div>
+          </div>
+
+          <div class="p-3.5 space-y-2 min-w-0">
+            <div class="ss-row scene-anim rounded-lg border border-border bg-secondary/20 p-3">
+              <div class="flex items-center justify-between mb-1">
+                <p class="text-[10px] font-bold text-foreground font-mono">system</p>
+                <span class="text-[9px] text-muted-foreground">9,412 tokens</span>
+              </div>
+              <p class="font-display italic text-sm text-foreground/90 leading-snug">“You are Claude Code, Anthropic's official CLI for Claude…”</p>
+              <p class="text-[9px] text-muted-foreground mt-1">rules · code conventions · tool guidance · safety policy</p>
+            </div>
+
+            <div class="ss-row scene-anim rounded-lg border border-border bg-secondary/20 p-3" style="animation-delay: 0.6s">
+              <div class="flex items-center justify-between mb-1.5">
+                <p class="text-[10px] font-bold text-foreground font-mono">tools</p>
+                <span class="text-[9px] text-muted-foreground">16 definitions</span>
+              </div>
+              <div class="flex flex-wrap gap-1 text-[9px] font-mono">
+                <span class="rounded bg-white border border-border px-1.5 py-0.5 text-foreground">Bash</span>
+                <span class="rounded bg-white border border-border px-1.5 py-0.5 text-foreground">Edit</span>
+                <span class="rounded bg-white border border-border px-1.5 py-0.5 text-foreground">Read</span>
+                <span class="rounded bg-white border border-border px-1.5 py-0.5 text-foreground">Grep</span>
+                <span class="rounded bg-white border border-border px-1.5 py-0.5 text-foreground">WebFetch</span>
+                <span class="rounded bg-white border border-border px-1.5 py-0.5 text-foreground">Task</span>
+                <span class="rounded bg-white border border-border px-1.5 py-0.5 text-muted-foreground">+10 more</span>
+              </div>
+            </div>
+
+            <div class="ss-row scene-anim rounded-lg border border-border bg-secondary/20 p-3" style="animation-delay: 1.2s">
+              <div class="flex items-center justify-between mb-1">
+                <p class="text-[10px] font-bold text-foreground font-mono">messages</p>
+                <span class="text-[9px] text-muted-foreground">42 turns</span>
+              </div>
+              <div class="flex items-center gap-1.5">
+                <span class="h-1.5 flex-1 rounded-full bg-secondary"></span>
+                <span class="h-1.5 w-8 rounded-full bg-warn/60" title="compaction"></span>
+                <span class="h-1.5 flex-[2] rounded-full bg-secondary"></span>
+              </div>
+              <p class="text-[9px] text-muted-foreground mt-1">full history — <span class="text-warn font-semibold">context compaction visible at turn 31</span></p>
+            </div>
+          </div>
+        </div>
+
+        <p class="px-4 py-2.5 border-t border-border text-[11px] text-muted-foreground text-center">
+          This is how the pros steer a model — now it's your reference material.
+        </p>
+      </div>
+    </div>
+  </div>
+</section>
+
+{# ── Build yours with the lights on ── #}
+<section class="section-padding md:section-padding-md bg-secondary/40">
+  <div class="mx-auto max-w-6xl px-6 md:px-12 lg:px-20">
+    <div class="text-center max-w-2xl mx-auto" data-reveal>
+      <p class="text-sm font-semibold tracking-wide text-accent font-body">Then: your harness</p>
+      <h2 class="mt-3 font-display text-3xl md:text-4xl leading-[1.05] tracking-tight text-foreground reveal-rise">
+        Build yours with the <em>lights on</em>
+      </h2>
+      <p class="mt-4 text-base text-muted-foreground leading-relaxed font-body reveal-rise">
+        Guides, sensors, feedback loops — every iteration on your harness raises the same
+        question: what did the model actually see, and what did it do? DodoRouter answers
+        it for every single call.
+      </p>
+    </div>
+
+    <div class="mt-14 grid gap-6 lg:grid-cols-3 font-body">
+      <div class="feature-card" data-reveal>
+        <div class="rounded-xl border border-border bg-secondary/30 p-4 h-40 overflow-hidden mb-4" aria-hidden="true">
+          <div class="flex items-center justify-between mb-2 text-[9px]">
+            <span class="rounded bg-accent/10 px-1.5 py-0.5 font-bold text-accent">session: checkout-agent</span>
+            <span class="flex items-center gap-1 font-bold text-error"><span class="rec-dot scene-anim h-1.5 w-1.5 rounded-full bg-error"></span>REC</span>
+          </div>
+          <div class="space-y-1 text-[10px] font-mono">
+            <div class="ss-row scene-anim flex justify-between rounded bg-white border border-border px-2 py-1.5"><span class="text-foreground">get_cart → 200</span><span class="text-muted-foreground">241ms</span></div>
+            <div class="ss-row scene-anim flex justify-between rounded bg-white border border-border px-2 py-1.5" style="animation-delay: 0.7s"><span class="text-foreground">apply_discount → 200</span><span class="text-muted-foreground">82% cached</span></div>
+            <div class="ss-row scene-anim flex justify-between rounded bg-white border border-border px-2 py-1.5" style="animation-delay: 1.4s"><span class="text-warn">charge_card → fallback</span><span class="text-muted-foreground">trace ↗</span></div>
+          </div>
+        </div>
+        <h3 class="text-base font-semibold text-foreground">Follow whole agent runs</h3>
+        <p class="mt-2 text-sm text-muted-foreground leading-relaxed">One header groups calls into sessions; recordings capture full conversations. Step through a run call by call — including the exact moment your new guide changed the model's behavior.</p>
+      </div>
+
+      <div class="feature-card" data-reveal>
+        <div class="rounded-xl border border-border bg-secondary/30 p-4 h-40 overflow-hidden mb-4" aria-hidden="true">
+          <div class="grid grid-cols-2 gap-2 h-full">
+            <div class="rounded-lg bg-white border border-border p-2">
+              <p class="text-[8px] font-bold text-muted-foreground mb-1.5">glm-4.7 · original</p>
+              <div class="space-y-1">
+                <div class="h-1.5 w-10/12 rounded bg-secondary"></div>
+                <div class="h-1.5 w-8/12 rounded bg-secondary"></div>
+                <div class="h-1.5 w-11/12 rounded bg-secondary"></div>
+              </div>
+              <p class="mt-1.5 text-[8px] text-muted-foreground">1,247 tok · 285ms</p>
+            </div>
+            <div class="rounded-lg bg-white border border-accent/40 p-2">
+              <p class="text-[8px] font-bold text-accent mb-1.5">kimi-k2.5 · replay</p>
+              <div class="space-y-1">
+                <div class="rc-bar scene-anim h-1.5 w-10/12 rounded bg-secondary"></div>
+                <div class="rc-bar scene-anim h-1.5 w-9/12 rounded bg-go/30" style="animation-delay: 0.4s"></div>
+                <div class="rc-bar scene-anim h-1.5 w-7/12 rounded bg-error/25" style="animation-delay: 0.8s"></div>
+              </div>
+              <p class="mt-1.5 text-[8px] text-muted-foreground">1,180 tok · 198ms</p>
+            </div>
+          </div>
+        </div>
+        <h3 class="text-base font-semibold text-foreground">Experiment on real traffic</h3>
+        <p class="mt-2 text-sm text-muted-foreground leading-relaxed">Replay any logged call against another model and diff the answers. Test whether your harness holds up on a cheaper model — with production prompts, not synthetic benchmarks.</p>
+      </div>
+
+      <div class="feature-card" data-reveal>
+        <div class="rounded-xl border border-border bg-secondary/30 p-4 h-40 overflow-hidden mb-4" aria-hidden="true">
+          <div class="flex items-center gap-1.5 text-[9px] text-muted-foreground mb-2">
+            <span class="rounded bg-accent/10 px-1.5 py-0.5 font-bold text-accent">streaming</span>
+            <span class="ms-drop-chip scene-anim rounded bg-error/10 px-1.5 py-0.5 font-bold text-error">openai dropped mid-stream</span>
+          </div>
+          <div class="rounded-lg bg-white border border-border p-2.5 text-[10px] leading-relaxed text-foreground font-mono">
+            <div class="ms-line-1 scene-anim">The three key findings from the</div>
+            <div class="flex"><div class="ms-line-2 scene-anim">Q3 report are: first, revenue…</div><span class="ms-caret scene-anim text-accent">▌</span></div>
+            <div class="mt-1.5 text-[8px] text-muted-foreground">↳ continued by <span class="font-semibold text-go">anthropic</span> — same message, no reset</div>
+          </div>
+        </div>
+        <h3 class="text-base font-semibold text-foreground">Failures you can read</h3>
+        <p class="mt-2 text-sm text-muted-foreground leading-relaxed">When a call fails, the page leads with why: each provider's real error body, per-step timing, what the client saw. Rate limit or bad key? Overflow or outage? You'll know in seconds.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+{# ── And it routes ── #}
+<section class="section-padding md:section-padding-md bg-background">
+  <div class="mx-auto max-w-6xl px-6 md:px-12 lg:px-20">
+    {# — And it routes: fallback theater — #}
+    <div data-reveal class="grid items-center gap-12 lg:grid-cols-5 lg:gap-16">
+      <div class="lg:col-span-2 reveal-rise">
+        <p class="text-sm font-semibold tracking-wide text-accent font-body">Automatic fallback</p>
+        <h2 class="mt-3 font-display text-3xl md:text-4xl lg:text-5xl leading-[1.05] tracking-tight text-foreground">
+          And because it's a router,<br /><em>your runs survive.</em>
+        </h2>
+        <p class="mt-5 text-base text-muted-foreground leading-relaxed font-body">
+          The instrument doubles as infrastructure. Chain providers in the order you trust
+          them and a six-hour agent run stops dying because one provider had a bad minute —
+          rate limits, outages, and context overflows reroute to the next step automatically.
+        </p>
+        <div class="mt-6 flex flex-wrap gap-2 font-body">
+          <span class="inline-flex items-center gap-1.5 rounded-full border border-border bg-background px-3 py-1 text-xs font-medium text-foreground">
+            <span class="h-1.5 w-1.5 rounded-full bg-go"></span> Primary
+          </span>
+          <span class="inline-flex items-center gap-1.5 rounded-full border border-border bg-background px-3 py-1 text-xs font-medium text-foreground">
+            <span class="h-1.5 w-1.5 rounded-full bg-warn"></span> Fallback
+          </span>
+          <span class="inline-flex items-center gap-1.5 rounded-full border border-border bg-background px-3 py-1 text-xs font-medium text-foreground">
+            <span class="h-1.5 w-1.5 rounded-full bg-error"></span> Last resort
+          </span>
+        </div>
+        <a href="https://api.dodorouter.com/users/register" class="mt-8 inline-flex items-center gap-2 rounded-full bg-primary px-5 py-2.5 text-sm font-medium font-body text-primary-foreground hover:opacity-90 transition-opacity">
+          Build your chain
+          <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3" /></svg>
+        </a>
+      </div>
+
+      <div class="lg:col-span-3 reveal-rise" style="--reveal-delay: 0.15s">
+        <div class="rounded-2xl border border-border bg-white p-5 md:p-6 shadow-[0_8px_40px_rgba(0,0,0,0.05)] font-body select-none" aria-hidden="true">
+          <div class="flex items-center justify-between mb-4">
+            <p class="text-xs font-semibold text-foreground">Live request</p>
+            <span class="flex items-center gap-1.5 text-[10px] text-muted-foreground">
+              <span class="h-1.5 w-1.5 rounded-full bg-accent scene-anim animate-soft-pulse"></span>
+              replaying a real outage
+            </span>
+          </div>
+
+          {# The stage: agent node left, 3-step chain right, traveling dot #}
+          <div class="relative h-64">
+            {# connection lines #}
+            <svg class="absolute inset-0 h-full w-full" preserveAspectRatio="none" viewBox="0 0 100 100">
+              <path d="M14,46 C34,46 40,14 56,14" fill="none" stroke="hsl(0,0%,90%)" stroke-width="0.6" vector-effect="non-scaling-stroke" />
+              <path d="M14,46 C34,46 40,46 56,46" fill="none" stroke="hsl(0,0%,90%)" stroke-width="0.6" vector-effect="non-scaling-stroke" />
+              <path d="M14,46 C34,46 40,78 56,78" fill="none" stroke="hsl(0,0%,90%)" stroke-width="0.6" vector-effect="non-scaling-stroke" />
+            </svg>
+
+            {# the request dot #}
+            <span class="ft-dot scene-anim" style="z-index: 5"></span>
+
+            {# agent node #}
+            <div class="ft-agent scene-anim absolute rounded-xl border bg-white px-3 py-2 shadow-sm" style="left: 10%; top: 46%; transform: translate(-50%, -50%)">
+              <p class="text-[10px] font-semibold text-foreground whitespace-nowrap">Your agent</p>
+              <p class="text-[9px] text-muted-foreground whitespace-nowrap">openai sdk · stream=true</p>
+            </div>
+
+            {# step 1 — fails #}
+            <div class="ft-step-1 scene-anim absolute w-[44%] rounded-xl border bg-white px-3 py-2 shadow-sm" style="left: 63%; top: 14%; transform: translate(-25%, -50%)">
+              <div class="flex items-center justify-between gap-2">
+                <div class="flex items-center gap-1.5 min-w-0">
+                  <span class="flex h-4 w-4 shrink-0 items-center justify-center rounded bg-secondary text-[8px] font-bold text-muted-foreground">1</span>
+                  <p class="text-[10px] font-semibold text-foreground truncate">openai / gpt-5.2</p>
+                </div>
+                <span class="ft-step-1-badge scene-anim shrink-0 rounded-full bg-error/10 px-1.5 py-0.5 text-[8px] font-bold text-error whitespace-nowrap">429 rate limited</span>
+              </div>
+            </div>
+
+            {# step 2 — recovers #}
+            <div class="ft-step-2 scene-anim absolute w-[44%] rounded-xl border bg-white px-3 py-2 shadow-sm" style="left: 63%; top: 46%; transform: translate(-25%, -50%)">
+              <div class="flex items-center justify-between gap-2">
+                <div class="flex items-center gap-1.5 min-w-0">
+                  <span class="flex h-4 w-4 shrink-0 items-center justify-center rounded bg-secondary text-[8px] font-bold text-muted-foreground">2</span>
+                  <p class="text-[10px] font-semibold text-foreground truncate">anthropic / claude-sonnet</p>
+                </div>
+                <span class="ft-step-2-badge scene-anim shrink-0 rounded-full bg-go/10 px-1.5 py-0.5 text-[8px] font-bold text-go whitespace-nowrap">200 OK</span>
+              </div>
+            </div>
+
+            {# step 3 — never needed #}
+            <div class="absolute w-[44%] rounded-xl border border-border bg-white px-3 py-2 opacity-60" style="left: 63%; top: 78%; transform: translate(-25%, -50%)">
+              <div class="flex items-center gap-1.5 min-w-0">
+                <span class="flex h-4 w-4 shrink-0 items-center justify-center rounded bg-secondary text-[8px] font-bold text-muted-foreground">3</span>
+                <p class="text-[10px] font-semibold text-foreground truncate">moonshot / kimi-k2.5</p>
+              </div>
+            </div>
+          </div>
+
+          {# the log line that lands in your dashboard #}
+          <div class="ft-log scene-anim mt-4 flex items-center gap-2 rounded-lg border border-border bg-secondary/40 px-3 py-2 text-[10px]">
+            <span class="rounded bg-warn/15 px-1.5 py-0.5 font-bold text-warn">fallback</span>
+            <span class="text-muted-foreground line-through decoration-error/60">openai</span>
+            <svg class="h-2.5 w-2.5 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3" /></svg>
+            <span class="font-semibold text-foreground">anthropic / claude-sonnet</span>
+            <span class="ml-auto text-muted-foreground">1,412ms · recovered</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+{# ── CTA ── #}
+<section class="section-padding md:section-padding-md bg-secondary/40">
+  <div class="mx-auto max-w-6xl px-6 md:px-12 lg:px-20">
+    <div class="cta-gradient rounded-3xl px-8 py-16 md:px-16 md:py-20 text-center relative overflow-hidden">
+      <div class="absolute -top-20 -right-20 h-64 w-64 rounded-full bg-white/5"></div>
+      <div class="absolute -bottom-16 -left-16 h-48 w-48 rounded-full bg-white/5"></div>
+      <h2 class="relative font-display text-3xl md:text-4xl lg:text-5xl leading-[1.05] tracking-tight text-white">
+        Harness engineering<br />starts with <em>seeing.</em>
+      </h2>
+      <p class="relative mt-5 text-base md:text-lg text-white/80 max-w-xl mx-auto leading-relaxed font-body">
+        Create a router, point an agent at it, and read your first real system prompt
+        two minutes from now. Free while in beta.
+      </p>
+      <div class="relative mt-8 flex flex-col sm:flex-row items-center justify-center gap-3">
+        <a href="https://api.dodorouter.com/users/register" class="rounded-full bg-white px-8 py-3.5 text-sm font-semibold text-accent transition-all hover:bg-white/90 font-body">
+          Start watching →
+        </a>
+        <a href="/" class="flex items-center gap-2 rounded-full border border-white/25 px-6 py-3.5 text-sm font-medium text-white transition-all hover:bg-white/10 font-body">
+          See the general version of this page
+        </a>
+      </div>
+    </div>
+  </div>
+</section>

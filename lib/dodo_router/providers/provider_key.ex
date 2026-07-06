@@ -13,6 +13,14 @@ defmodule DodoRouter.Providers.ProviderKey do
     field :key_ref, :string
     field :key_hint, :string
 
+    # Health tracking — written via Repo.update_all only, never cast
+    field :status, :string
+    field :verified_at, :utc_datetime_usec
+    field :last_ok_at, :utc_datetime_usec
+    field :last_error_class, :string
+    field :last_error_at, :utc_datetime_usec
+    field :last_error_detail, :string
+
     belongs_to :user, DodoRouter.Accounts.User
 
     timestamps()

@@ -38,8 +38,24 @@ defmodule DodoRouterWeb.RouterLiveTest do
       |> form("#router-form", router: %{name: "Test Router"})
       |> render_submit()
 
-      assert render(live) =~ "Save your API key!"
-      assert render(live) =~ "Test Router"
+      # Creation drops the user straight into the new router's page,
+      # where the one-time key banner (with copy button) is shown.
+      {path, flash} = assert_redirect(live)
+      assert path =~ ~r"^/routers/[0-9a-f-]+$"
+      assert flash["new_api_key"]
+    end
+
+    test "invisible slug errors surface in the create modal", %{conn: conn} do
+      {:ok, live, _html} = live(conn, ~p"/routers/new")
+
+      html =
+        live
+        |> form("#router-form", router: %{name: "ab"})
+        |> render_submit()
+
+      # "ab" derives a 2-char slug, which fails the min-length validation on
+      # a field the form doesn't render — the error must still be visible.
+      assert html =~ "URL name"
     end
 
     test "deletes a router", %{conn: conn, user: user} do

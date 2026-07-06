@@ -44,8 +44,20 @@ defmodule DodoRouterWeb.SessionLive.Index do
     ~H"""
     <div>
       <div class="flex items-center justify-between mb-6">
-        <h1 class="text-2xl font-bold">Sessions</h1>
-        <span class="text-sm text-base-content/60">{length(@sessions)} sessions</span>
+        <div class="flex items-center gap-2">
+          <.link
+            navigate={~p"/routers/#{@router.id}"}
+            class="btn btn-ghost btn-sm btn-circle"
+            title={"Back to #{@router.name}"}
+          >
+            ←
+          </.link>
+          <div>
+            <h1 class="text-2xl font-bold">Sessions</h1>
+            <p class="text-sm text-base-content/50">{@router.name}</p>
+          </div>
+        </div>
+        <span class="text-sm text-base-content/60">{pluralize(length(@sessions), "session")}</span>
       </div>
 
       <div class="space-y-3">
@@ -66,7 +78,7 @@ defmodule DodoRouterWeb.SessionLive.Index do
                 <% end %>
               </div>
               <div class="text-right text-sm text-base-content/60">
-                <div>{session.request_count} requests</div>
+                <div>{pluralize(session.request_count, "request")}</div>
                 <div>{Calendar.strftime(session.last_activity, "%b %d, %H:%M")}</div>
               </div>
             </div>

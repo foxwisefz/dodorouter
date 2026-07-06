@@ -43,7 +43,9 @@ defmodule DodoRouterWeb.ProvidersLiveTest do
 
       {:ok, _live, html} = live(conn, ~p"/providers")
 
-      assert html =~ "sk-•••••••xyz"
+      # old-scheme stored hints are compacted to fixed width at render
+
+      assert html =~ "sk-••••xyz"
     end
 
     test "can open add key form", %{conn: conn} do
@@ -87,6 +89,46 @@ defmodule DodoRouterWeb.ProvidersLiveTest do
 
       # Form should still be visible after empty submission
       assert has_element?(live, "input[name=\"provider_key[api_key]\"]")
+    end
+  end
+
+  test "shows a continue-setup banner when arriving from a router", %{conn: conn, user: user} do
+    {router, _} = DodoRouter.RoutersFixtures.router_fixture(user)
+
+    {:ok, live, _html} = live(conn, ~p"/providers?return_to=/routers/#{router.id}")
+
+    assert has_element?(live, "#return-to-router")
+    assert has_element?(live, "#return-to-router a[href='/routers/#{router.id}']")
+  end
+
+  test "ignores non-router return_to values", %{conn: conn} do
+    {:ok, live, _html} = live(conn, ~p"/providers?return_to=https://evil.example")
+
+    refute has_element?(live, "#return-to-router")
+  end
+
+  describe "key verification" do
+    test "saved keys verify asynchronously and show a status badge", %{conn: conn, user: user} do
+      key =
+        DodoRouter.ProvidersFixtures.provider_key_fixture(user, %{
+          "provider_slug" => "zai_standard"
+        })
+
+      {:ok, live, html} = live(conn, ~p"/providers")
+
+      # unverified keys show the click-to-verify affordance
+      assert html =~ "Not verified yet"
+
+      # passive traffic marking an auth failure surfaces as invalid
+      DodoRouter.Providers.apply_health(key.id, :auth_invalid, "invalid_api_key")
+      {:ok, _live2, html2} = live(conn, ~p"/providers")
+      assert html2 =~ "Invalid since"
+
+      # a later success self-heals to verified
+      DodoRouter.Providers.apply_health(key.id, :ok)
+      {:ok, _live3, html3} = live(conn, ~p"/providers")
+      assert html3 =~ "Verified"
+      _ = live
     end
   end
 end

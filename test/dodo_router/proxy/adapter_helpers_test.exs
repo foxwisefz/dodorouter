@@ -25,11 +25,12 @@ defmodule DodoRouter.Proxy.AdapterHelpersTest do
       assert Providers.generate_key_hint("sk-abcdefgh") == "sk-••••••••"
     end
 
-    test "shows first 3 and last 3 for keys 12+ chars" do
-      assert Providers.generate_key_hint("sk-abcdefg1234") == "sk-••••••••234"
+    test "keys 12+ chars get a fixed-width hint: 3 + •••• + 3" do
+      # Length-preserving masking made 60+ char keys render 50+ bullets,
+      # overflowing every select and card that shows a hint.
+      assert Providers.generate_key_hint("sk-abcdefg1234") == "sk-••••234"
 
-      assert Providers.generate_key_hint("sk-proj-abc123def456ghi789xyz") ==
-               "sk-•••••••••••••••••••••••xyz"
+      assert Providers.generate_key_hint("sk-proj-abc123def456ghi789xyz") == "sk-••••xyz"
     end
 
     test "never reveals the full API key" do
@@ -44,17 +45,24 @@ defmodule DodoRouter.Proxy.AdapterHelpersTest do
           ] do
         hint = Providers.generate_key_hint(key)
         assert hint != key, "Hint should not equal the full key for: #{key}"
-        assert String.length(hint) == String.length(key), "Hint should be same length as key"
         assert String.contains?(hint, "•"), "Hint must contain at least one bullet for: #{key}"
       end
     end
 
-    test "hint is always shorter than or equal to key length" do
-      for len <- 1..50 do
+    test "hint never exceeds 11 characters regardless of key length" do
+      for len <- 1..200 do
         key = String.duplicate("a", len)
         hint = Providers.generate_key_hint(key)
-        assert String.length(hint) <= len
+        assert String.length(hint) <= 11
       end
+    end
+
+    test "compact_key_hint collapses bullet runs in hints stored under the old scheme" do
+      long_stored = "sk-" <> String.duplicate("•", 57) <> "X2F"
+      assert Providers.compact_key_hint(long_stored) == "sk-••••X2F"
+      # already-short hints pass through
+      assert Providers.compact_key_hint("sk-••••abc") == "sk-••••abc"
+      assert Providers.compact_key_hint(nil) == ""
     end
   end
 

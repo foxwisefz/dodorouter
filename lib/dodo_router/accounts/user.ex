@@ -46,8 +46,10 @@ defmodule DodoRouter.Accounts.User do
 
     if Keyword.get(opts, :validate_unique, true) do
       changeset
-      |> unsafe_validate_unique(:email, DodoRouter.Repo)
-      |> unique_constraint(:email)
+      |> unsafe_validate_unique(:email, DodoRouter.Repo,
+        message: "already registered — log in with this email instead"
+      )
+      |> unique_constraint(:email, message: "already registered — log in with this email instead")
       |> validate_email_changed()
     else
       changeset

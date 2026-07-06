@@ -186,9 +186,9 @@ defmodule DodoRouterWeb.LogLive.Show do
       </div>
       
     <!-- Split pane -->
-      <div class="flex-1 flex overflow-hidden">
+      <div class="flex-1 flex flex-col lg:flex-row overflow-hidden">
         <!-- Left sidebar -->
-        <div class="w-52 border-r border-base-300/30 overflow-y-auto p-3 space-y-4 bg-base-100/30">
+        <div class="w-full lg:w-52 shrink-0 max-h-44 lg:max-h-none border-b lg:border-b-0 lg:border-r border-base-300/30 overflow-y-auto p-3 space-y-4 lg:space-y-4 bg-base-100/30 grid grid-cols-2 gap-x-4 lg:block">
           <!-- Status -->
           <div>
             <div class="text-[10px] uppercase tracking-wider text-base-content/40 font-semibold mb-1">
@@ -205,27 +205,27 @@ defmodule DodoRouterWeb.LogLive.Show do
             <div class="space-y-1 text-xs">
               <div class="flex justify-between">
                 <span class="text-base-content/60">Total</span>
-                <span class="font-mono">{@log.latency_ms || "-"}ms</span>
+                <span class="font-mono">{fmt_ms(@log.latency_ms)}</span>
               </div>
               <div class="flex justify-between">
                 <span class="text-base-content/60">Provider</span>
-                <span class="font-mono">{provider_time(@log)}ms</span>
+                <span class="font-mono">{fmt_ms(provider_time(@log))}</span>
               </div>
               <div class="flex justify-between">
                 <span class="text-base-content/60">Overhead</span>
-                <span class="font-mono">{overhead_time(@log)}ms</span>
+                <span class="font-mono">{fmt_ms(overhead_time(@log))}</span>
               </div>
-              <div class="flex justify-between">
+              <div :if={@log.ttfb_ms} class="flex justify-between">
                 <span class="text-base-content/60">TTFB</span>
-                <span class="font-mono">{@log.ttfb_ms || "-"}ms</span>
+                <span class="font-mono">{fmt_ms(@log.ttfb_ms)}</span>
               </div>
-              <div class="flex justify-between">
+              <div :if={@log.upload_ms} class="flex justify-between">
                 <span class="text-base-content/60">Upload</span>
-                <span class="font-mono">{@log.upload_ms || "-"}ms</span>
+                <span class="font-mono">{fmt_ms(@log.upload_ms)}</span>
               </div>
-              <div class="flex justify-between">
+              <div :if={@log.ttfb_ms} class="flex justify-between">
                 <span class="text-base-content/60">Wait</span>
-                <span class="font-mono">{wait_time(@log)}ms</span>
+                <span class="font-mono">{fmt_ms(wait_time(@log))}</span>
               </div>
               <%= if @log.provider_processing_ms do %>
                 <div class="flex justify-between">
@@ -239,9 +239,11 @@ defmodule DodoRouterWeb.LogLive.Show do
     <!-- Model -->
           <div>
             <div class="text-[10px] uppercase tracking-wider text-base-content/40 font-semibold mb-1">
-              Model
+              {if @log.status == "error", do: "Model (last attempted)", else: "Model"}
             </div>
-            <div class="text-sm font-mono">{@log.final_model}</div>
+            <div class={["text-sm font-mono", @log.status == "error" && "text-base-content/50 line-through decoration-error/40"]}>
+              {@log.final_model}
+            </div>
             <div class="flex items-center gap-1.5 mt-1">
               <div class="w-3.5 h-3.5 rounded flex items-center justify-center shrink-0 bg-base-200">
                 <.provider_logo slug={normalize_slug(@log.final_provider)} class="w-2.5 h-2.5" />
@@ -270,10 +272,17 @@ defmodule DodoRouterWeb.LogLive.Show do
                 <span class="text-base-content/60">Type</span>
                 <span class="text-right"><.call_type_badge type={@log.call_type} /></span>
               </div>
-              <div class="flex justify-between">
-                <span class="text-base-content/60">Tokens</span>
-                <span class="font-mono">{@log.total_tokens || "-"}</span>
-              </div>
+              <%= if @log.prompt_tokens || @log.completion_tokens do %>
+                <div class="flex justify-between">
+                  <span class="text-base-content/60">Input (billed)</span>
+                  <span class="font-mono">{@log.prompt_tokens || "—"}</span>
+                </div>
+              <% else %>
+                <div class="flex justify-between">
+                  <span class="text-base-content/60">Tokens</span>
+                  <span class="font-mono">{@log.total_tokens || "—"}</span>
+                </div>
+              <% end %>
               <%= if @log.cache_read_tokens && @log.cache_read_tokens > 0 do %>
                 <div class="flex justify-between text-success">
                   <span class="flex items-center gap-1">
@@ -301,6 +310,10 @@ defmodule DodoRouterWeb.LogLive.Show do
                   <span class="font-mono">{@log.cache_write_tokens}</span>
                 </div>
               <% end %>
+              <div :if={@log.completion_tokens} class="flex justify-between">
+                <span class="text-base-content/60">Output</span>
+                <span class="font-mono">{@log.completion_tokens}</span>
+              </div>
               <div class="flex justify-between">
                 <span class="text-base-content/60">Cost</span>
                 <span class="font-mono">
@@ -339,7 +352,13 @@ defmodule DodoRouterWeb.LogLive.Show do
             </div>
             <div class="space-y-1">
               <%= for {attempt, _idx} <- Enum.with_index(@log.attempted_steps) do %>
-                <div class="flex items-center gap-1.5 text-xs">
+                <div
+                  phx-click="set_tab"
+                  phx-value-tab="fallback_trace"
+                  role="button"
+                  title="Open the fallback trace"
+                  class="flex items-center gap-1.5 text-xs rounded px-1 -mx-1 py-0.5 cursor-pointer hover:bg-secondary/60 transition-colors"
+                >
                   <%= if attempt["status"] == "success" do %>
                     <span class="text-success">✓</span>
                   <% else %>
@@ -370,7 +389,7 @@ defmodule DodoRouterWeb.LogLive.Show do
         <div class="flex-1 overflow-hidden flex flex-col">
           <!-- Tabs -->
           <div class="border-b border-base-300/30 px-4 pt-2">
-            <div class="flex gap-1" role="tablist">
+            <div class="flex gap-1 overflow-x-auto whitespace-nowrap" role="tablist">
               <button
                 type="button"
                 phx-click="set_tab"
@@ -442,6 +461,49 @@ defmodule DodoRouterWeb.LogLive.Show do
           <div class="flex-1 overflow-y-auto">
             <%= if @active_tab == "conversation" do %>
               <div class="p-4">
+                <div
+                  :if={@log.status == "error"}
+                  id="request-failure-panel"
+                  class="mb-4 rounded-xl border border-error/30 bg-error/5 p-4"
+                >
+                  <div class="flex items-center gap-2 mb-1.5">
+                    <.icon name="hero-x-circle" class="size-5 text-error shrink-0" />
+                    <h3 class="font-semibold text-error">
+                      This request failed — no provider returned a response
+                    </h3>
+                  </div>
+                  <p :if={client_error_message(@log)} class="text-sm text-base-content/80 mb-3">
+                    Returned to your client:
+                    <span class="font-mono">{client_error_message(@log)}</span>
+                  </p>
+                  <div class="space-y-1">
+                    <div
+                      :for={attempt <- @log.attempted_steps || []}
+                      class="flex items-center gap-2 text-sm font-mono"
+                    >
+                      <.icon name="hero-x-mark" class="size-3.5 text-error shrink-0" />
+                      <span class="text-base-content/80">
+                        {attempt["provider"]}/{attempt["model"]}
+                      </span>
+                      <span class="text-error/80">
+                        {attempt["http_status"]} {attempt["error"]}
+                      </span>
+                      <span class="text-base-content/50 text-xs truncate">
+                        {attempt_error_message(attempt)}
+                      </span>
+                      <span class="ml-auto text-base-content/40 text-xs shrink-0">
+                        {attempt["latency_ms"]}ms
+                      </span>
+                    </div>
+                  </div>
+                  <button
+                    phx-click="set_tab"
+                    phx-value-tab="fallback_trace"
+                    class="mt-3 text-sm text-error font-medium hover:underline"
+                  >
+                    Full fallback trace with headers and bodies →
+                  </button>
+                </div>
                 <%= if length(@truncation_flags) > 0 do %>
                   <div class="alert alert-warning mb-4">
                     <svg
@@ -627,7 +689,11 @@ defmodule DodoRouterWeb.LogLive.Show do
             <%= if @active_tab == "fallback_trace" do %>
               <div class="p-4 space-y-3">
                 <div class="text-sm text-base-content/60 mb-2">
-                  Request was retried across {length(@log.attempted_steps)} providers before succeeding.
+                  {if @log.status == "error",
+                    do:
+                      "All #{length(@log.attempted_steps)} providers failed — each attempt below with its actual response.",
+                    else:
+                      "Request was retried across #{length(@log.attempted_steps)} providers before succeeding."}
                 </div>
                 <%= for {attempt, idx} <- Enum.with_index(@log.attempted_steps) do %>
                   <div class={[
@@ -949,6 +1015,29 @@ defmodule DodoRouterWeb.LogLive.Show do
     """
   end
 
+  defp client_error_message(log) do
+    with body when is_binary(body) <- log.response_body,
+         {:ok, %{"error" => err}} <- Jason.decode(body) do
+      err["message"] || err["type"]
+    else
+      _ -> nil
+    end
+  end
+
+  defp attempt_error_message(attempt) do
+    case attempt["error_body"] do
+      body when is_binary(body) ->
+        case Jason.decode(body) do
+          {:ok, %{"error" => %{"message" => msg}}} -> msg
+          {:ok, %{"error" => msg}} when is_binary(msg) -> msg
+          _ -> String.slice(body, 0, 120)
+        end
+
+      _ ->
+        nil
+    end
+  end
+
   defp parse_headers(nil), do: nil
 
   defp parse_headers(str) when is_binary(str) do
@@ -969,8 +1058,17 @@ defmodule DodoRouterWeb.LogLive.Show do
 
   defp format_json(str) when is_binary(str) do
     case Jason.decode(str) do
-      {:ok, decoded} -> Jason.encode!(deep_parse_json_strings(decoded), pretty: true)
-      _ -> str
+      {:ok, decoded} when is_map(decoded) ->
+        decoded
+        |> Map.delete("_truncation_flags")
+        |> deep_parse_json_strings()
+        |> Jason.encode!(pretty: true)
+
+      {:ok, decoded} ->
+        Jason.encode!(deep_parse_json_strings(decoded), pretty: true)
+
+      _ ->
+        str
     end
   end
 
@@ -1016,6 +1114,11 @@ defmodule DodoRouterWeb.LogLive.Show do
 
   defp overhead_time(_), do: 0
 
+  # "11526ms" reads worse than "11.5s"; nil renders as an em dash, not "-ms"
+  defp fmt_ms(ms) when is_integer(ms) and ms >= 1000, do: "#{Float.round(ms / 1000, 1)}s"
+  defp fmt_ms(ms) when is_integer(ms), do: "#{ms}ms"
+  defp fmt_ms(_), do: "—"
+
   defp wait_time(%{ttfb_ms: ttfb, upload_ms: upload})
        when is_integer(ttfb) and is_integer(upload) do
     ttfb - upload
@@ -1030,9 +1133,12 @@ defmodule DodoRouterWeb.LogLive.Show do
 
   defp cache_pct(%{cache_read_tokens: nil}), do: ""
 
+  # Anthropic-style usage reports prompt_tokens EXCLUDING cache reads, so the
+  # denominator must be cached + billed input or a 54k-token cache hit over a
+  # 6-token billed prompt renders as "902567%".
   defp cache_pct(%{cache_read_tokens: cached, prompt_tokens: prompt})
-       when is_integer(cached) and is_integer(prompt) and prompt > 0 do
-    pct = Float.round(cached / prompt * 100, 0)
+       when is_integer(cached) and is_integer(prompt) and cached + prompt > 0 do
+    pct = Float.round(cached / (cached + prompt) * 100, 0)
     "#{trunc(pct)}%"
   end
 

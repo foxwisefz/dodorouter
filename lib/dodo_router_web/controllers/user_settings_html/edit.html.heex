@@ -1,49 +1,60 @@
 <Layouts.app flash={@flash} current_scope={@current_scope}>
-  <div class="text-center">
-    <.header>
-      Account Settings
-      <:subtitle>Manage your account email address and password settings</:subtitle>
-    </.header>
+  <div class="mx-auto max-w-xl space-y-8">
+    <div class="text-center">
+      <.header>
+        Account Settings
+        <:subtitle>Manage your account email address and password settings</:subtitle>
+      </.header>
+    </div>
+
+    <div class="rounded-xl border border-base-300/50 bg-base-100 p-6">
+      <h2 class="text-sm font-semibold text-base-content mb-4">Email address</h2>
+      <.form :let={f} for={@email_changeset} action={~p"/users/settings"} id="update_email">
+        <input type="hidden" name="action" value="update_email" />
+
+        <.input
+          field={f[:email]}
+          type="email"
+          label="Email"
+          autocomplete="username"
+          spellcheck="false"
+          required
+        />
+
+        <.button variant="primary" phx-disable-with="Changing...">Change Email</.button>
+      </.form>
+    </div>
+
+    <div class="rounded-xl border border-base-300/50 bg-base-100 p-6">
+      <h2 class="text-sm font-semibold text-base-content mb-1">
+        {if @current_scope.user.hashed_password, do: "Change password", else: "Set a password"}
+      </h2>
+      <p :if={!@current_scope.user.hashed_password} class="text-xs text-base-content/50 mb-4">
+        You currently log in with email links. Setting a password lets you log in with it as well.
+      </p>
+      <.form :let={f} for={@password_changeset} action={~p"/users/settings"} id="update_password">
+        <input type="hidden" name="action" value="update_password" />
+
+        <.input
+          field={f[:password]}
+          type="password"
+          label="New password"
+          autocomplete="new-password"
+          spellcheck="false"
+          required
+        />
+        <.input
+          field={f[:password_confirmation]}
+          type="password"
+          label="Confirm new password"
+          autocomplete="new-password"
+          spellcheck="false"
+          required
+        />
+        <.button variant="primary" phx-disable-with="Saving...">
+          {if @current_scope.user.hashed_password, do: "Change Password", else: "Set Password"}
+        </.button>
+      </.form>
+    </div>
   </div>
-
-  <.form :let={f} for={@email_changeset} action={~p"/users/settings"} id="update_email">
-    <input type="hidden" name="action" value="update_email" />
-
-    <.input
-      field={f[:email]}
-      type="email"
-      label="Email"
-      autocomplete="username"
-      spellcheck="false"
-      required
-    />
-
-    <.button variant="primary" phx-disable-with="Changing...">Change Email</.button>
-  </.form>
-
-  <div class="divider" />
-
-  <.form :let={f} for={@password_changeset} action={~p"/users/settings"} id="update_password">
-    <input type="hidden" name="action" value="update_password" />
-
-    <.input
-      field={f[:password]}
-      type="password"
-      label="New password"
-      autocomplete="new-password"
-      spellcheck="false"
-      required
-    />
-    <.input
-      field={f[:password_confirmation]}
-      type="password"
-      label="Confirm new password"
-      autocomplete="new-password"
-      spellcheck="false"
-      required
-    />
-    <.button variant="primary" phx-disable-with="Changing...">
-      Save Password
-    </.button>
-  </.form>
 </Layouts.app>

@@ -6,7 +6,7 @@
         <p>Log in</p>
         <:subtitle>
           <%= if @current_scope do %>
-            You need to reauthenticate to perform sensitive actions on your account.
+            Log in again to continue as {@current_scope.user.email}.
           <% else %>
             Don't have an account? <.link
               navigate={~p"/users/register"}
@@ -44,31 +44,43 @@
       </.button>
     </.form>
 
-    <div class="divider">or</div>
-
-    <.form :let={f} for={@form} as={:user} id="login_form_password" action={~p"/users/log-in"}>
-      <.input
-        readonly={!!@current_scope}
-        field={f[:email]}
-        type="email"
-        label="Email"
-        autocomplete="username"
-        spellcheck="false"
-        required
-      />
-      <.input
-        field={f[:password]}
-        type="password"
-        label="Password"
-        autocomplete="current-password"
-        spellcheck="false"
-      />
-      <.button class="btn btn-primary w-full" name={@form[:remember_me].name} value="true">
-        Log in and stay logged in <span aria-hidden="true">→</span>
-      </.button>
-      <.button class="btn btn-primary btn-soft w-full mt-2">
-        Log in only this time
-      </.button>
-    </.form>
+    <details id="password-login" class="group">
+      <summary class="cursor-pointer list-none text-center text-sm text-base-content/60 hover:text-base-content select-none py-1">
+        <span class="underline decoration-dotted underline-offset-4">
+          Have a password? Log in with it instead
+        </span>
+      </summary>
+      <.form
+        :let={f}
+        for={@form}
+        as={:user}
+        id="login_form_password"
+        action={~p"/users/log-in"}
+        class="mt-3"
+      >
+        <.input
+          readonly={!!@current_scope}
+          field={f[:email]}
+          type="email"
+          label="Email"
+          autocomplete="username"
+          spellcheck="false"
+          required
+        />
+        <.input
+          field={f[:password]}
+          type="password"
+          label="Password"
+          autocomplete="current-password"
+          spellcheck="false"
+        />
+        <.button class="btn btn-primary w-full" name={@form[:remember_me].name} value="true">
+          Log in and stay logged in <span aria-hidden="true">→</span>
+        </.button>
+        <.button class="btn btn-primary btn-soft w-full mt-2">
+          Log in only this time
+        </.button>
+      </.form>
+    </details>
   </div>
 </Layouts.app>

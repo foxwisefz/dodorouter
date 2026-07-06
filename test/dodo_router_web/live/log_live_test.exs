@@ -19,12 +19,14 @@ defmodule DodoRouterWeb.LogLiveTest do
       assert html =~ log.final_provider
     end
 
-    test "shows empty table when no logs", %{conn: conn, user: user} do
+    test "shows empty state when no logs", %{conn: conn, user: user} do
       {_router, _api_key} = RoutersFixtures.router_fixture(user)
 
-      {:ok, _live, html} = live(conn, ~p"/logs")
+      {:ok, live, html} = live(conn, ~p"/logs")
 
       assert html =~ "Request Logs"
+      assert has_element?(live, "#logs-empty")
+      assert render(live) =~ "No requests yet"
     end
 
     test "can filter by router", %{conn: conn, user: user} do
@@ -130,6 +132,12 @@ defmodule DodoRouterWeb.LogLiveTest do
 
       assert html =~ "cached"
       assert html =~ "response"
+      # 400 cached of (400 cached + 500 billed) = 44%, never >100%
+      assert html =~ "(44%)"
+      # billed input and output are separated so the cached figure can't
+      # dwarf an ambiguous "Tokens" total
+      assert html =~ "Input (billed)"
+      assert html =~ "Output"
     end
 
     test "renders per-step response body in fallback trace", %{conn: conn, user: user} do
@@ -335,6 +343,41 @@ defmodule DodoRouterWeb.LogLiveTest do
 
       refute html =~ "standard"
       refute html =~ "coding"
+    end
+  end
+
+  describe "Show — failed requests" do
+    test "the default tab leads with what went wrong", %{conn: conn, user: user} do
+      {router, _} = RoutersFixtures.router_fixture(user)
+
+      log =
+        LogsFixtures.log_fixture(router, %{
+          status: "error",
+          http_status: 502,
+          request_body: Jason.encode!(%{"messages" => [%{"role" => "user", "content" => "hi"}]}),
+          response_body:
+            Jason.encode!(%{
+              "error" => %{"message" => "All providers failed", "type" => "upstream_error"}
+            }),
+          attempted_steps: [
+            %{
+              "provider" => "anthropic",
+              "model" => "claude-sonnet",
+              "status" => "error",
+              "error" => "auth_error",
+              "http_status" => 401,
+              "error_body" => ~s({"error":{"message":"invalid x-api-key"}}),
+              "latency_ms" => 310
+            }
+          ]
+        })
+
+      {:ok, live, html} = live(conn, ~p"/logs/#{log.id}")
+
+      assert has_element?(live, "#request-failure-panel")
+      assert html =~ "no provider returned a response"
+      assert html =~ "All providers failed"
+      assert html =~ "invalid x-api-key"
     end
   end
 end

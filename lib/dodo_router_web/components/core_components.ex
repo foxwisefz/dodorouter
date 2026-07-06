@@ -568,4 +568,15 @@ defmodule DodoRouterWeb.CoreComponents do
   def translate_errors(errors, field) when is_list(errors) do
     for {^field, {msg, opts}} <- errors, do: translate_error({msg, opts})
   end
+
+  @doc """
+  Formats a count with its noun, adding an "s" unless the count is 1.
+
+      iex> pluralize(1, "request")
+      "1 request"
+      iex> pluralize(3, "session")
+      "3 sessions"
+  """
+  def pluralize(1, noun), do: "1 #{noun}"
+  def pluralize(count, noun), do: "#{count} #{noun}s"
 end

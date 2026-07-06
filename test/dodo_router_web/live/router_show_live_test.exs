@@ -21,16 +21,178 @@ defmodule DodoRouterWeb.RouterShowLiveTest do
       assert html =~ router.slug
     end
 
-    test "shows API usage snippet", %{conn: conn, router: router} do
-      {:ok, live, _html} = live(conn, ~p"/routers/#{router.id}")
-
-      html =
-        live
-        |> element("button[phx-click=\"toggle_connect\"]")
-        |> render_click()
+    test "shows API usage snippet with a copy button", %{conn: conn, router: router} do
+      # Connect is expanded by default on a router with no traffic yet
+      {:ok, live, html} = live(conn, ~p"/routers/#{router.id}")
 
       assert html =~ "curl"
       assert html =~ router.slug
+      assert has_element?(live, "#copy-snippet[phx-hook=CopyButton][data-copy]")
+    end
+
+    test "fresh router shows the getting-started checklist and open Connect panel", %{
+      conn: conn,
+      router: router
+    } do
+      {:ok, live, html} = live(conn, ~p"/routers/#{router.id}")
+
+      assert has_element?(live, "#setup-checklist")
+      assert html =~ "0/4 done"
+      # Connect must be expanded for a router with no traffic — the first
+      # code snippet is the next thing a new user needs.
+      assert html =~ "curl"
+    end
+
+    test "checklist tracks progress and disappears once the router is live", %{
+      conn: conn,
+      router: router,
+      user: user
+    } do
+      key =
+        DodoRouter.ProvidersFixtures.provider_key_fixture(user, %{
+          "provider_slug" => "zai_standard"
+        })
+
+      {:ok, step} =
+        DodoRouter.Routers.create_routing_step(router, %{
+          "provider" => "zai",
+          "model" => "glm-4.7"
+        })
+
+      {:ok, _step} = DodoRouter.Routers.update_routing_step(step, %{provider_key_id: key.id})
+
+      {:ok, live, html} = live(conn, ~p"/routers/#{router.id}")
+      assert html =~ "3/4 done"
+
+      LogsFixtures.log_fixture(router, %{status: "success"})
+
+      # The already-open page hears the new log over PubSub and completes live
+      refute render(live) =~ "setup-checklist"
+
+      {:ok, live2, _html} = live(conn, ~p"/routers/#{router.id}")
+      refute has_element?(live2, "#setup-checklist")
+    end
+
+    test "add-step provider list mirrors the Providers page", %{conn: conn, router: router} do
+      {:ok, _live, html} = live(conn, ~p"/routers/#{router.id}/routing")
+
+      # Key-slug granularity, including subscription keys…
+      assert html =~ ~s(value="anthropic_oauth")
+      assert html =~ "Claude subscription"
+      assert html =~ ~s(value="zai_coding")
+      # …and no internal test provider
+      refute html =~ ~s(value="test_provider")
+    end
+
+    test "model select includes models synced from models.dev", %{conn: conn, router: router} do
+      {:ok, _} =
+        DodoRouter.Models.create_model(%{
+          provider_slug: "zai",
+          model_id: "glm-6-fresh-from-sync",
+          display_name: "GLM 6"
+        })
+
+      {:ok, _live, html} = live(conn, ~p"/routers/#{router.id}/routing")
+
+      assert html =~ "glm-6-fresh-from-sync"
+    end
+
+    test "adding a step auto-assigns the matching key", %{conn: conn, router: router, user: user} do
+      key =
+        DodoRouter.ProvidersFixtures.provider_key_fixture(user, %{
+          "provider_slug" => "zai_standard"
+        })
+
+      {:ok, live, _html} = live(conn, ~p"/routers/#{router.id}/routing")
+
+      live
+      |> form("#routing-modal form", %{"step" => %{"model" => "glm-5"}})
+      |> render_submit()
+
+      [step] = DodoRouter.Routers.list_routing_steps(router)
+      assert step.provider == "zai"
+      assert step.plan_type == "standard"
+      assert step.provider_key_id == key.id
+    end
+
+    test "an unhealthy assigned key shows a warning on the chain", %{
+      conn: conn,
+      router: router,
+      user: user
+    } do
+      key =
+        DodoRouter.ProvidersFixtures.provider_key_fixture(user, %{
+          "provider_slug" => "zai_standard"
+        })
+
+      {:ok, step} =
+        DodoRouter.Routers.create_routing_step(router, %{"provider" => "zai", "model" => "glm-5"})
+
+      {:ok, _} = DodoRouter.Routers.update_routing_step(step, %{provider_key_id: key.id})
+      DodoRouter.Providers.apply_health(key.id, :auth_invalid, "invalid_api_key")
+
+      {:ok, _live, html} = live(conn, ~p"/routers/#{router.id}")
+
+      assert html =~ "failing authentication"
+      assert html =~ "— invalid"
+    end
+
+    test "chain key selects offer subscription keys of the same adapter", %{
+      conn: conn,
+      router: router,
+      user: user
+    } do
+      DodoRouter.ProvidersFixtures.provider_key_fixture(user, %{
+        "provider_slug" => "anthropic_oauth",
+        "label" => "Claude Max"
+      })
+
+      {:ok, _step} =
+        DodoRouter.Routers.create_routing_step(router, %{
+          "provider" => "anthropic",
+          "model" => "claude-sonnet-4-20250514"
+        })
+
+      {:ok, _live, html} = live(conn, ~p"/routers/#{router.id}")
+
+      # The oauth key must be selectable even though the step's derived
+      # key slug would be plain "anthropic"
+      assert html =~ "Claude Max"
+    end
+
+    test "add-step modal preselects the provider the user has a key for", %{
+      conn: conn,
+      router: router,
+      user: user
+    } do
+      DodoRouter.ProvidersFixtures.provider_key_fixture(user, %{"provider_slug" => "moonshot"})
+
+      {:ok, _live, html} = live(conn, ~p"/routers/#{router.id}/routing")
+
+      assert html =~ ~r/<option[^>]*value="moonshot"[^>]*selected/
+    end
+
+    test "add-step modal warns when the user has no keys for the provider", %{
+      conn: conn,
+      router: router
+    } do
+      {:ok, live, _html} = live(conn, ~p"/routers/#{router.id}/routing")
+
+      # Default provider is zai and this user has no provider keys at all
+      assert has_element?(live, "#step-provider-no-keys")
+      assert render(live) =~ "/providers"
+    end
+
+    test "add-step modal shows no key warning when a matching key exists", %{
+      conn: conn,
+      router: router,
+      user: user
+    } do
+      DodoRouter.ProvidersFixtures.provider_key_fixture(user, %{"provider_slug" => "zai_standard"})
+
+      {:ok, live, _html} = live(conn, ~p"/routers/#{router.id}/routing")
+
+      refute has_element?(live, "#step-provider-no-keys")
     end
 
     test "shows recent logs section", %{conn: conn, router: router} do
@@ -42,12 +204,8 @@ defmodule DodoRouterWeb.RouterShowLiveTest do
     end
 
     test "can switch code language and format", %{conn: conn, router: router} do
+      # Connect starts expanded for a router with no traffic
       {:ok, live, _html} = live(conn, ~p"/routers/#{router.id}")
-
-      # Expand Connect section first
-      live
-      |> element("button[phx-click=\"toggle_connect\"]")
-      |> render_click()
 
       # Switch to Python
       html =
