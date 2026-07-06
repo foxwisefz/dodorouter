@@ -189,6 +189,36 @@ defmodule DodoRouterWeb.LogLiveTest do
              )
     end
 
+    test "timing rows only appear when they add information", %{conn: conn, user: user} do
+      {router, _api_key} = RoutersFixtures.router_fixture(user)
+
+      # upload took 0ms and wait therefore equals TTFB: neither row helps
+      log =
+        LogsFixtures.log_fixture(router, %{
+          latency_ms: 7000,
+          ttfb_ms: 2600,
+          upload_ms: 0
+        })
+
+      {:ok, _live, html} = live(conn, ~p"/logs/#{log.request_id}")
+
+      assert html =~ "TTFB"
+      refute html =~ "Upload"
+      refute html =~ "Wait"
+
+      # a real upload keeps both rows
+      slow_upload =
+        LogsFixtures.log_fixture(router, %{
+          latency_ms: 7000,
+          ttfb_ms: 2600,
+          upload_ms: 400
+        })
+
+      {:ok, _live, html2} = live(conn, ~p"/logs/#{slow_upload.request_id}")
+      assert html2 =~ "Upload"
+      assert html2 =~ "Wait"
+    end
+
     test "detail page renders no duplicate element ids", %{conn: conn, user: user} do
       {router, _api_key} = RoutersFixtures.router_fixture(user)
 

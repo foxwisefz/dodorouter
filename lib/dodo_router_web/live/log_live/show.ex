@@ -233,12 +233,17 @@ defmodule DodoRouterWeb.LogLive.Show do
                 <span class="text-base-content/60">TTFB</span>
                 <span class="font-mono">{fmt_ms(@log.ttfb_ms)}</span>
               </div>
-              <div :if={@log.upload_ms} class="flex justify-between">
+              <%!-- Upload/Wait only earn a row when upload actually took time;
+                   otherwise Wait just repeats TTFB --%>
+              <div :if={@log.upload_ms && @log.upload_ms > 0} class="flex justify-between">
                 <span class="text-base-content/60">Upload</span>
                 <span class="font-mono">{fmt_ms(@log.upload_ms)}</span>
               </div>
-              <div :if={@log.ttfb_ms} class="flex justify-between">
-                <span class="text-base-content/60">Wait</span>
+              <div
+                :if={@log.ttfb_ms && @log.upload_ms && @log.upload_ms > 0}
+                class="flex justify-between"
+              >
+                <span class="text-base-content/60" title="TTFB minus upload">Wait</span>
                 <span class="font-mono">{fmt_ms(wait_time(@log))}</span>
               </div>
               <%= if @log.provider_processing_ms do %>
