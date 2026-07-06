@@ -321,151 +321,233 @@ resp <span class="op">=</span> client.chat.completions.<span class="fn">create</
       </div>
     </div>
 
-    {# — Bento: six scenes, every card is a working illustration — #}
-    <div data-reveal class="mt-20">
+    {# — Six features, each at full size — #}
+    <div data-reveal class="mt-24">
       <div class="text-center max-w-2xl mx-auto reveal-rise">
         <h3 class="font-display text-3xl md:text-4xl leading-[1.05] tracking-tight text-foreground">
           Reliability is just the <em>beginning</em>
         </h3>
         <p class="mt-4 text-base text-muted-foreground leading-relaxed font-body">
-          Everything between your code and the model, handled — and visible.
+          Everything between your code and the model — handled, visible, and adjustable while it runs.
         </p>
       </div>
+    </div>
 
-      <div class="mt-12 grid gap-5 sm:grid-cols-2 lg:grid-cols-3 font-body">
-
-        {# 1 — mid-stream recovery #}
-        <div class="feature-card reveal-rise flex flex-col" style="--reveal-delay: 0.05s">
-          <div class="rounded-xl border border-border bg-secondary/30 p-4 h-32 overflow-hidden" aria-hidden="true">
-            <div class="flex items-center gap-1.5 text-[9px] text-muted-foreground mb-2">
-              <span class="rounded bg-accent/10 px-1.5 py-0.5 font-bold text-accent">streaming</span>
-              <span class="ms-drop-chip scene-anim rounded bg-error/10 px-1.5 py-0.5 font-bold text-error">openai dropped mid-stream</span>
-            </div>
-            <div class="rounded-lg bg-white border border-border p-2.5 text-[10px] leading-relaxed text-foreground font-mono">
-              <div class="ms-line-1 scene-anim">The three key findings from the</div>
-              <div class="flex"><div class="ms-line-2 scene-anim">Q3 report are: first, revenue…</div><span class="ms-caret scene-anim text-accent">▌</span></div>
-              <div class="mt-1.5 text-[8px] text-muted-foreground">↳ continued by <span class="font-semibold text-go">anthropic</span> — same message, no reset</div>
-            </div>
-          </div>
-          <h3 class="mt-4 text-base font-semibold text-foreground">Mid-stream failure recovery</h3>
-          <p class="mt-2 text-sm text-muted-foreground leading-relaxed">A streaming response dies halfway? DodoRouter catches it, re-issues the request on the next step, and keeps streaming. No broken messages, no lost tool state.</p>
+    {# 1 — mid-stream recovery #}
+    <div data-reveal class="mt-16 grid items-center gap-10 lg:grid-cols-2 lg:gap-16 font-body">
+      <div class="reveal-rise">
+        <p class="text-sm font-semibold tracking-wide text-accent">Mid-stream failure recovery</p>
+        <h3 class="mt-2 font-display text-2xl md:text-3xl tracking-tight text-foreground">The stream dies. The sentence doesn't.</h3>
+        <p class="mt-4 text-muted-foreground leading-relaxed">
+          The cruelest failure mode: a provider drops the connection halfway through a streamed
+          answer, with tool calls in flight. DodoRouter catches the dropped stream, re-issues the
+          request on the next step in your chain, and keeps streaming to your client.
+        </p>
+        <ul class="mt-4 space-y-2 text-sm text-foreground">
+          <li class="flex gap-2"><span class="text-go">✓</span> No broken half-messages in your UI</li>
+          <li class="flex gap-2"><span class="text-go">✓</span> Tool-call state carried across providers</li>
+          <li class="flex gap-2"><span class="text-go">✓</span> Logged as a fallback, so you can see it happened</li>
+        </ul>
+      </div>
+      <div class="reveal-rise rounded-2xl border border-border bg-white p-6 shadow-[0_8px_40px_rgba(0,0,0,0.04)]" style="--reveal-delay: 0.1s" aria-hidden="true">
+        <div class="flex items-center gap-2 text-xs text-muted-foreground mb-3">
+          <span class="rounded bg-accent/10 px-2 py-0.5 font-bold text-accent">streaming</span>
+          <span class="ms-drop-chip scene-anim rounded bg-error/10 px-2 py-0.5 font-bold text-error">openai dropped mid-stream</span>
         </div>
-
-        {# 2 — context overflow #}
-        <div class="feature-card reveal-rise flex flex-col" style="--reveal-delay: 0.1s">
-          <div class="rounded-xl border border-border bg-secondary/30 p-4 h-32 overflow-hidden" aria-hidden="true">
-            <div class="flex items-center justify-between text-[9px] text-muted-foreground mb-2">
-              <span>prompt tokens</span>
-              <span class="co-flash scene-anim rounded bg-error/10 px-1.5 py-0.5 font-bold text-error">context_length_exceeded</span>
-            </div>
-            <div class="relative h-3 rounded-full bg-white border border-border overflow-hidden">
-              <div class="co-fill scene-anim absolute inset-y-0 left-0 rounded-full bg-gradient-to-r from-accent to-error"></div>
-              <span class="absolute right-[18%] top-0 bottom-0 w-px bg-error/40"></span>
-            </div>
-            <div class="mt-1 flex justify-between text-[8px] text-muted-foreground">
-              <span>0</span><span class="text-error/70">128k limit</span>
-            </div>
-            <div class="co-model-swap scene-anim mt-2.5 flex items-center gap-1.5 text-[9px]">
-              <span class="rounded bg-secondary px-1.5 py-0.5 font-mono text-muted-foreground line-through">gpt-5.2 · 128k</span>
-              <svg class="h-2.5 w-2.5 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3" /></svg>
-              <span class="rounded bg-go/10 px-1.5 py-0.5 font-mono font-semibold text-go">gemini-3-pro · 1M ✓</span>
-            </div>
-          </div>
-          <h3 class="mt-4 text-base font-semibold text-foreground">Context-overflow rerouting</h3>
-          <p class="mt-2 text-sm text-muted-foreground leading-relaxed">Every provider reports overflow differently — a 400 here, a silent empty response there. We detect them all and hop to a model with a bigger window automatically.</p>
+        <div class="rounded-xl bg-secondary/30 border border-border p-4 text-sm leading-relaxed text-foreground font-mono">
+          <div class="ms-line-1 scene-anim">The three key findings from the</div>
+          <div class="flex"><div class="ms-line-2 scene-anim">Q3 report are: first, revenue…</div><span class="ms-caret scene-anim text-accent">▌</span></div>
+          <div class="mt-3 text-xs text-muted-foreground">↳ continued by <span class="font-semibold text-go">anthropic</span> — same message, no reset, client never disconnected</div>
         </div>
-
-        {# 3 — replay & compare #}
-        <div class="feature-card reveal-rise flex flex-col" style="--reveal-delay: 0.15s">
-          <div class="rounded-xl border border-border bg-secondary/30 p-4 h-32 overflow-hidden" aria-hidden="true">
-            <div class="grid grid-cols-2 gap-2 h-full">
-              <div class="rounded-lg bg-white border border-border p-2">
-                <p class="text-[8px] font-bold text-muted-foreground mb-1.5">glm-4.7 · original</p>
-                <div class="space-y-1">
-                  <div class="h-1.5 w-10/12 rounded bg-secondary"></div>
-                  <div class="h-1.5 w-8/12 rounded bg-secondary"></div>
-                  <div class="h-1.5 w-11/12 rounded bg-secondary"></div>
-                  <div class="h-1.5 w-6/12 rounded bg-secondary"></div>
-                </div>
-                <p class="mt-1.5 text-[8px] text-muted-foreground">1,247 tok · 285ms</p>
-              </div>
-              <div class="rounded-lg bg-white border border-accent/40 p-2">
-                <p class="text-[8px] font-bold text-accent mb-1.5">kimi-k2.5 · replay</p>
-                <div class="space-y-1">
-                  <div class="rc-bar scene-anim h-1.5 w-10/12 rounded bg-secondary"></div>
-                  <div class="rc-bar scene-anim h-1.5 w-9/12 rounded bg-go/30" style="animation-delay: 0.4s"></div>
-                  <div class="rc-bar scene-anim h-1.5 w-11/12 rounded bg-secondary" style="animation-delay: 0.8s"></div>
-                  <div class="rc-bar scene-anim h-1.5 w-7/12 rounded bg-error/25" style="animation-delay: 1.2s"></div>
-                </div>
-                <p class="mt-1.5 text-[8px] text-muted-foreground">1,180 tok · 198ms</p>
-              </div>
-            </div>
-          </div>
-          <h3 class="mt-4 text-base font-semibold text-foreground">Replay &amp; compare</h3>
-          <p class="mt-2 text-sm text-muted-foreground leading-relaxed">Take any logged request and re-run it against a different provider or model — side by side, diffed. Audition a cheaper model on real production traffic before you commit.</p>
-        </div>
-
-        {# 4 — live chain control #}
-        <div class="feature-card reveal-rise flex flex-col" style="--reveal-delay: 0.05s">
-          <div class="rounded-xl border border-border bg-secondary/30 p-4 h-32 overflow-hidden" aria-hidden="true">
-            <div class="space-y-1.5 text-[10px]">
-              <div class="cr-swap-a scene-anim relative z-10 flex items-center gap-2 rounded-lg bg-white border border-border px-2.5 py-1.5 shadow-sm">
-                <svg class="h-3 w-3 text-muted-foreground/60" fill="currentColor" viewBox="0 0 24 24"><circle cx="8" cy="6" r="1.6"/><circle cx="16" cy="6" r="1.6"/><circle cx="8" cy="12" r="1.6"/><circle cx="16" cy="12" r="1.6"/><circle cx="8" cy="18" r="1.6"/><circle cx="16" cy="18" r="1.6"/></svg>
-                <span class="font-semibold text-foreground">zai / glm-5.1</span>
-                <span class="ml-auto rounded bg-go/10 px-1.5 py-0.5 text-[8px] font-bold text-go">Primary</span>
-              </div>
-              <div class="cr-swap-b scene-anim flex items-center gap-2 rounded-lg bg-white border border-border px-2.5 py-1.5">
-                <svg class="h-3 w-3 text-muted-foreground/60" fill="currentColor" viewBox="0 0 24 24"><circle cx="8" cy="6" r="1.6"/><circle cx="16" cy="6" r="1.6"/><circle cx="8" cy="12" r="1.6"/><circle cx="16" cy="12" r="1.6"/><circle cx="8" cy="18" r="1.6"/><circle cx="16" cy="18" r="1.6"/></svg>
-                <span class="font-semibold text-foreground">moonshot / kimi-k2.5</span>
-                <span class="ml-auto rounded bg-warn/10 px-1.5 py-0.5 text-[8px] font-bold text-warn">Fallback</span>
-              </div>
-              <div class="flex items-center gap-2 rounded-lg bg-white border border-border px-2.5 py-1.5 opacity-70">
-                <svg class="h-3 w-3 text-muted-foreground/60" fill="currentColor" viewBox="0 0 24 24"><circle cx="8" cy="6" r="1.6"/><circle cx="16" cy="6" r="1.6"/><circle cx="8" cy="12" r="1.6"/><circle cx="16" cy="12" r="1.6"/><circle cx="8" cy="18" r="1.6"/><circle cx="16" cy="18" r="1.6"/></svg>
-                <span class="font-semibold text-foreground">openai / gpt-5.2</span>
-                <span class="ml-auto rounded bg-error/10 px-1.5 py-0.5 text-[8px] font-bold text-error">Last resort</span>
-              </div>
-            </div>
-          </div>
-          <h3 class="mt-4 text-base font-semibold text-foreground">Rewire chains in production</h3>
-          <p class="mt-2 text-sm text-muted-foreground leading-relaxed">Reorder steps, swap models, rotate keys, tune reasoning effort — from the dashboard, effective on the very next request. No deploys, no restarts, no downtime.</p>
-        </div>
-
-        {# 5 — subscriptions as keys #}
-        <div class="feature-card reveal-rise flex flex-col" style="--reveal-delay: 0.1s">
-          <div class="rounded-xl border border-border bg-secondary/30 p-4 h-32 overflow-hidden" aria-hidden="true">
-            <p class="text-[9px] text-muted-foreground mb-2.5">provider keys</p>
-            <div class="flex flex-wrap gap-1.5 text-[9px] font-semibold">
-              <span class="sk-float scene-anim inline-flex items-center gap-1 rounded-full border border-border bg-white px-2 py-1 text-foreground"><span class="h-1.5 w-1.5 rounded-full bg-[#D97757]"></span>Claude Max</span>
-              <span class="sk-float-late scene-anim inline-flex items-center gap-1 rounded-full border border-border bg-white px-2 py-1 text-foreground"><span class="h-1.5 w-1.5 rounded-full bg-[#10A37F]"></span>ChatGPT Pro</span>
-              <span class="sk-float-later scene-anim inline-flex items-center gap-1 rounded-full border border-border bg-white px-2 py-1 text-foreground"><span class="h-1.5 w-1.5 rounded-full bg-[#1C1C1C]"></span>Kimi Code</span>
-              <span class="sk-float scene-anim inline-flex items-center gap-1 rounded-full border border-border bg-white px-2 py-1 text-foreground"><span class="h-1.5 w-1.5 rounded-full bg-accent"></span>z.ai Coding</span>
-              <span class="sk-float-late scene-anim inline-flex items-center gap-1 rounded-full border border-border bg-white px-2 py-1 text-muted-foreground">+ pay-as-you-go API keys</span>
-            </div>
-            <p class="mt-2.5 text-[8px] text-muted-foreground">OAuth device flow built in — no token copy-pasting</p>
-          </div>
-          <h3 class="mt-4 text-base font-semibold text-foreground">Use the subscriptions you already pay for</h3>
-          <p class="mt-2 text-sm text-muted-foreground leading-relaxed">Route requests through Claude Max, ChatGPT Pro, Kimi Code, or z.ai Coding plans alongside regular API keys — and fall back between them when quotas run dry.</p>
-        </div>
-
-        {# 6 — sessions & recordings #}
-        <div class="feature-card reveal-rise flex flex-col" style="--reveal-delay: 0.15s">
-          <div class="rounded-xl border border-border bg-secondary/30 p-4 h-32 overflow-hidden" aria-hidden="true">
-            <div class="flex items-center justify-between mb-2 text-[9px]">
-              <span class="rounded bg-accent/10 px-1.5 py-0.5 font-bold text-accent">session: checkout-agent</span>
-              <span class="flex items-center gap-1 font-bold text-error"><span class="rec-dot scene-anim h-1.5 w-1.5 rounded-full bg-error"></span>REC</span>
-            </div>
-            <div class="space-y-1 text-[9px] font-mono">
-              <div class="ss-row scene-anim flex justify-between rounded bg-white border border-border px-2 py-1"><span class="text-foreground">get_cart → 200</span><span class="text-muted-foreground">241ms</span></div>
-              <div class="ss-row scene-anim flex justify-between rounded bg-white border border-border px-2 py-1" style="animation-delay: 0.7s"><span class="text-foreground">apply_discount → 200</span><span class="text-muted-foreground">189ms</span></div>
-              <div class="ss-row scene-anim flex justify-between rounded bg-white border border-border px-2 py-1" style="animation-delay: 1.4s"><span class="text-warn">charge_card → fallback</span><span class="text-muted-foreground">1.2s</span></div>
-            </div>
-          </div>
-          <h3 class="mt-4 text-base font-semibold text-foreground">Sessions &amp; recordings</h3>
-          <p class="mt-2 text-sm text-muted-foreground leading-relaxed">Group requests into sessions with one header, record whole conversations, and step through exactly what your agent did — request by request, token by token.</p>
-        </div>
-
       </div>
     </div>
+
+    {# 2 — context overflow #}
+    <div data-reveal class="mt-20 grid items-center gap-10 lg:grid-cols-2 lg:gap-16 font-body">
+      <div class="reveal-rise order-2 lg:order-1 rounded-2xl border border-border bg-white p-6 shadow-[0_8px_40px_rgba(0,0,0,0.04)]" style="--reveal-delay: 0.1s" aria-hidden="true">
+        <div class="flex items-center justify-between text-xs text-muted-foreground mb-3">
+          <span>prompt tokens</span>
+          <span class="co-flash scene-anim rounded bg-error/10 px-2 py-0.5 font-bold text-error">context_length_exceeded</span>
+        </div>
+        <div class="relative h-4 rounded-full bg-secondary/40 border border-border overflow-hidden">
+          <div class="co-fill scene-anim absolute inset-y-0 left-0 rounded-full bg-gradient-to-r from-accent to-error"></div>
+          <span class="absolute right-[18%] top-0 bottom-0 w-px bg-error/40"></span>
+        </div>
+        <div class="mt-1.5 flex justify-between text-[11px] text-muted-foreground">
+          <span>0</span><span class="text-error/70">128k limit</span>
+        </div>
+        <div class="co-model-swap scene-anim mt-4 flex items-center gap-2 text-sm">
+          <span class="rounded-lg bg-secondary px-2.5 py-1 font-mono text-muted-foreground line-through">gpt-5.2 · 128k</span>
+          <svg class="h-3.5 w-3.5 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3" /></svg>
+          <span class="rounded-lg bg-go/10 px-2.5 py-1 font-mono font-semibold text-go">gemini-3-pro · 1M ✓</span>
+        </div>
+        <p class="mt-3 text-xs text-muted-foreground">Detected from the provider's own error shape — 400s, finish_reasons, even silent empty bodies.</p>
+      </div>
+      <div class="reveal-rise order-1 lg:order-2">
+        <p class="text-sm font-semibold tracking-wide text-accent">Context-overflow rerouting</p>
+        <h3 class="mt-2 font-display text-2xl md:text-3xl tracking-tight text-foreground">Too many tokens? Hop to a bigger window.</h3>
+        <p class="mt-4 text-muted-foreground leading-relaxed">
+          Every provider reports overflow differently — OpenAI throws a code, Anthropic says
+          "prompt is too long", z.ai returns a 200 with a special finish_reason, Kimi 400s with
+          the count. DodoRouter knows every dialect, and instead of guessing token limits
+          preflight, it reacts to the real signal and reroutes to a model with room.
+        </p>
+        <ul class="mt-4 space-y-2 text-sm text-foreground">
+          <li class="flex gap-2"><span class="text-go">✓</span> Per-provider overflow detection, maintained for you</li>
+          <li class="flex gap-2"><span class="text-go">✓</span> Optional skip-fallback toggle when you'd rather fail fast</li>
+          <li class="flex gap-2"><span class="text-go">✓</span> One standardized error if the whole chain is too small</li>
+        </ul>
+      </div>
+    </div>
+
+    {# 3 — replay & compare #}
+    <div data-reveal class="mt-20 grid items-center gap-10 lg:grid-cols-2 lg:gap-16 font-body">
+      <div class="reveal-rise">
+        <p class="text-sm font-semibold tracking-wide text-accent">Replay &amp; compare</p>
+        <h3 class="mt-2 font-display text-2xl md:text-3xl tracking-tight text-foreground">Audition models on your real traffic.</h3>
+        <p class="mt-4 text-muted-foreground leading-relaxed">
+          Wondering if a cheaper model could handle your workload? Take any logged request and
+          re-run it against a different provider or model — the answers render side by side,
+          diffed, with tokens and latency compared. No synthetic benchmarks; your production
+          prompts are the benchmark.
+        </p>
+        <ul class="mt-4 space-y-2 text-sm text-foreground">
+          <li class="flex gap-2"><span class="text-go">✓</span> Replay against any provider key you hold</li>
+          <li class="flex gap-2"><span class="text-go">✓</span> Diff view highlights what actually changed</li>
+          <li class="flex gap-2"><span class="text-go">✓</span> Replays never pollute your request stats</li>
+        </ul>
+      </div>
+      <div class="reveal-rise rounded-2xl border border-border bg-white p-6 shadow-[0_8px_40px_rgba(0,0,0,0.04)]" style="--reveal-delay: 0.1s" aria-hidden="true">
+        <div class="grid grid-cols-2 gap-3">
+          <div class="rounded-xl bg-secondary/30 border border-border p-3.5">
+            <p class="text-[11px] font-bold text-muted-foreground mb-2.5">glm-4.7 · original</p>
+            <div class="space-y-1.5">
+              <div class="h-2 w-10/12 rounded bg-secondary"></div>
+              <div class="h-2 w-8/12 rounded bg-secondary"></div>
+              <div class="h-2 w-11/12 rounded bg-secondary"></div>
+              <div class="h-2 w-9/12 rounded bg-secondary"></div>
+              <div class="h-2 w-6/12 rounded bg-secondary"></div>
+            </div>
+            <p class="mt-2.5 text-[11px] text-muted-foreground">1,247 tok · 285ms</p>
+          </div>
+          <div class="rounded-xl bg-white border border-accent/40 p-3.5">
+            <p class="text-[11px] font-bold text-accent mb-2.5">kimi-k2.5 · replay</p>
+            <div class="space-y-1.5">
+              <div class="rc-bar scene-anim h-2 w-10/12 rounded bg-secondary"></div>
+              <div class="rc-bar scene-anim h-2 w-9/12 rounded bg-go/30" style="animation-delay: 0.4s"></div>
+              <div class="rc-bar scene-anim h-2 w-11/12 rounded bg-secondary" style="animation-delay: 0.8s"></div>
+              <div class="rc-bar scene-anim h-2 w-7/12 rounded bg-error/25" style="animation-delay: 1.2s"></div>
+              <div class="rc-bar scene-anim h-2 w-8/12 rounded bg-go/30" style="animation-delay: 1.6s"></div>
+            </div>
+            <p class="mt-2.5 text-[11px] text-muted-foreground">1,180 tok · 198ms · <span class="text-go font-semibold">−31% latency</span></p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    {# 4 — live chain control #}
+    <div data-reveal class="mt-20 grid items-center gap-10 lg:grid-cols-2 lg:gap-16 font-body">
+      <div class="reveal-rise order-2 lg:order-1 rounded-2xl border border-border bg-white p-6 shadow-[0_8px_40px_rgba(0,0,0,0.04)]" style="--reveal-delay: 0.1s" aria-hidden="true">
+        <div class="space-y-2 text-sm font-mono">
+          <div class="cr-swap-a scene-anim relative z-10 flex items-center gap-2.5 rounded-xl bg-white border border-border px-3 py-2.5 shadow-sm">
+            <svg class="h-3.5 w-3.5 text-muted-foreground/60" fill="currentColor" viewBox="0 0 24 24"><circle cx="8" cy="6" r="1.6"/><circle cx="16" cy="6" r="1.6"/><circle cx="8" cy="12" r="1.6"/><circle cx="16" cy="12" r="1.6"/><circle cx="8" cy="18" r="1.6"/><circle cx="16" cy="18" r="1.6"/></svg>
+            <span class="font-semibold text-foreground">zai / glm-5.1</span>
+            <span class="ml-auto rounded bg-go/10 px-2 py-0.5 text-[10px] font-bold text-go">Primary</span>
+          </div>
+          <div class="cr-swap-b scene-anim flex items-center gap-2.5 rounded-xl bg-white border border-border px-3 py-2.5">
+            <svg class="h-3.5 w-3.5 text-muted-foreground/60" fill="currentColor" viewBox="0 0 24 24"><circle cx="8" cy="6" r="1.6"/><circle cx="16" cy="6" r="1.6"/><circle cx="8" cy="12" r="1.6"/><circle cx="16" cy="12" r="1.6"/><circle cx="8" cy="18" r="1.6"/><circle cx="16" cy="18" r="1.6"/></svg>
+            <span class="font-semibold text-foreground">moonshot / kimi-k2.5</span>
+            <span class="ml-auto rounded bg-warn/10 px-2 py-0.5 text-[10px] font-bold text-warn">Fallback</span>
+          </div>
+          <div class="flex items-center gap-2.5 rounded-xl bg-white border border-border px-3 py-2.5 opacity-70">
+            <svg class="h-3.5 w-3.5 text-muted-foreground/60" fill="currentColor" viewBox="0 0 24 24"><circle cx="8" cy="6" r="1.6"/><circle cx="16" cy="6" r="1.6"/><circle cx="8" cy="12" r="1.6"/><circle cx="16" cy="12" r="1.6"/><circle cx="8" cy="18" r="1.6"/><circle cx="16" cy="18" r="1.6"/></svg>
+            <span class="font-semibold text-foreground">openai / gpt-5.2</span>
+            <span class="ml-auto rounded bg-error/10 px-2 py-0.5 text-[10px] font-bold text-error">Last resort</span>
+          </div>
+        </div>
+        <p class="mt-3 text-xs text-muted-foreground">Reordering live — the next request already follows the new chain.</p>
+      </div>
+      <div class="reveal-rise order-1 lg:order-2">
+        <p class="text-sm font-semibold tracking-wide text-accent">Rewire in production</p>
+        <h3 class="mt-2 font-display text-2xl md:text-3xl tracking-tight text-foreground">Change everything. Deploy nothing.</h3>
+        <p class="mt-4 text-muted-foreground leading-relaxed">
+          Reorder steps, swap models, rotate keys, tune reasoning effort and temperature —
+          from the dashboard, effective on the very next request. Your agent keeps its one
+          base URL; the routing behind it is yours to remix at any hour, mid-incident,
+          without a code change or restart.
+        </p>
+        <ul class="mt-4 space-y-2 text-sm text-foreground">
+          <li class="flex gap-2"><span class="text-go">✓</span> Per-step model, key, reasoning effort, temperature</li>
+          <li class="flex gap-2"><span class="text-go">✓</span> Takes effect instantly, no deploys or restarts</li>
+          <li class="flex gap-2"><span class="text-go">✓</span> Client-sent options always win when present</li>
+        </ul>
+      </div>
+    </div>
+
+    {# 5 — subscriptions as keys #}
+    <div data-reveal class="mt-20 grid items-center gap-10 lg:grid-cols-2 lg:gap-16 font-body">
+      <div class="reveal-rise">
+        <p class="text-sm font-semibold tracking-wide text-accent">Subscriptions as keys</p>
+        <h3 class="mt-2 font-display text-2xl md:text-3xl tracking-tight text-foreground">Route through plans you already pay for.</h3>
+        <p class="mt-4 text-muted-foreground leading-relaxed">
+          Claude Max, ChatGPT Pro, Kimi Code, z.ai Coding — those subscriptions carry serious
+          model quota. DodoRouter treats them as first-class provider keys (OAuth device flow
+          built in, no token copy-pasting) so your chain can burn subscription quota first and
+          fall back to pay-as-you-go API keys only when it runs dry.
+        </p>
+        <ul class="mt-4 space-y-2 text-sm text-foreground">
+          <li class="flex gap-2"><span class="text-go">✓</span> Connect with a device-code login, not a pasted token</li>
+          <li class="flex gap-2"><span class="text-go">✓</span> Mix subscription and API keys in one chain</li>
+          <li class="flex gap-2"><span class="text-go">✓</span> Key health tracked — quota-dry keys flagged automatically</li>
+        </ul>
+      </div>
+      <div class="reveal-rise rounded-2xl border border-border bg-white p-6 shadow-[0_8px_40px_rgba(0,0,0,0.04)]" style="--reveal-delay: 0.1s" aria-hidden="true">
+        <p class="text-xs text-muted-foreground mb-3">provider keys</p>
+        <div class="flex flex-wrap gap-2 text-sm font-semibold">
+          <span class="sk-float scene-anim inline-flex items-center gap-1.5 rounded-full border border-border bg-white px-3 py-1.5 text-foreground"><span class="h-2 w-2 rounded-full bg-[#D97757]"></span>Claude Max</span>
+          <span class="sk-float-late scene-anim inline-flex items-center gap-1.5 rounded-full border border-border bg-white px-3 py-1.5 text-foreground"><span class="h-2 w-2 rounded-full bg-[#10A37F]"></span>ChatGPT Pro</span>
+          <span class="sk-float-later scene-anim inline-flex items-center gap-1.5 rounded-full border border-border bg-white px-3 py-1.5 text-foreground"><span class="h-2 w-2 rounded-full bg-[#1C1C1C]"></span>Kimi Code</span>
+          <span class="sk-float scene-anim inline-flex items-center gap-1.5 rounded-full border border-border bg-white px-3 py-1.5 text-foreground"><span class="h-2 w-2 rounded-full bg-accent"></span>z.ai Coding</span>
+        </div>
+        <div class="mt-4 rounded-xl border border-border bg-secondary/30 p-3.5 text-xs font-mono space-y-1.5">
+          <p class="flex justify-between"><span class="text-foreground">1 · anthropic via <b>Claude Max</b></span><span class="text-go">quota: healthy ✓</span></p>
+          <p class="flex justify-between"><span class="text-foreground">2 · anthropic via <b>API key</b></span><span class="text-muted-foreground">standby</span></p>
+          <p class="text-muted-foreground">subscription first, wallet second.</p>
+        </div>
+      </div>
+    </div>
+
+    {# 6 — flight recorder #}
+    <div data-reveal class="mt-20 grid items-center gap-10 lg:grid-cols-2 lg:gap-16 font-body">
+      <div class="reveal-rise order-2 lg:order-1 rounded-2xl border border-border bg-white p-6 shadow-[0_8px_40px_rgba(0,0,0,0.04)]" style="--reveal-delay: 0.1s" aria-hidden="true">
+        <div class="flex items-center justify-between mb-3 text-xs">
+          <span class="rounded bg-accent/10 px-2 py-0.5 font-bold text-accent">session: checkout-agent</span>
+          <span class="flex items-center gap-1.5 font-bold text-error"><span class="rec-dot scene-anim h-2 w-2 rounded-full bg-error"></span>REC</span>
+        </div>
+        <div class="space-y-1.5 text-xs font-mono">
+          <div class="ss-row scene-anim flex justify-between rounded-lg bg-secondary/40 border border-border px-3 py-2"><span class="text-foreground">get_cart → 200</span><span class="text-muted-foreground">241ms</span></div>
+          <div class="ss-row scene-anim flex justify-between rounded-lg bg-secondary/40 border border-border px-3 py-2" style="animation-delay: 0.7s"><span class="text-foreground">apply_discount → 200</span><span class="text-muted-foreground">189ms · 82% cached</span></div>
+          <div class="ss-row scene-anim flex justify-between rounded-lg bg-secondary/40 border border-border px-3 py-2" style="animation-delay: 1.4s"><span class="text-warn">charge_card → fallback</span><span class="text-muted-foreground">1.2s · trace ↗</span></div>
+          <div class="ss-row scene-anim flex justify-between rounded-lg bg-secondary/40 border border-border px-3 py-2" style="animation-delay: 2.1s"><span class="text-foreground">send_receipt → 200</span><span class="text-muted-foreground">203ms</span></div>
+        </div>
+      </div>
+      <div class="reveal-rise order-1 lg:order-2">
+        <p class="text-sm font-semibold tracking-wide text-accent">The flight recorder</p>
+        <h3 class="mt-2 font-display text-2xl md:text-3xl tracking-tight text-foreground">Every request your agent ever made, inspectable.</h3>
+        <p class="mt-4 text-muted-foreground leading-relaxed">
+          One header groups requests into sessions; recordings capture whole conversations.
+          Each request opens into a full picture — the conversation, the raw request and
+          response, headers, and a per-step fallback trace with each provider's real error
+          body. When something goes wrong, the cause is on screen, not in your imagination.
+        </p>
+        <ul class="mt-4 space-y-2 text-sm text-foreground">
+          <li class="flex gap-2"><span class="text-go">✓</span> Failures lead with what the client saw and why</li>
+          <li class="flex gap-2"><span class="text-go">✓</span> Cache-hit and cost analytics per model and provider</li>
+          <li class="flex gap-2"><span class="text-go">✓</span> Live — new requests appear as they happen</li>
+        </ul>
+      </div>
+    </div>
+
   </div>
 </section>
 
