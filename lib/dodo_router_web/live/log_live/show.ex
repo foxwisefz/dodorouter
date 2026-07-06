@@ -186,9 +186,9 @@ defmodule DodoRouterWeb.LogLive.Show do
       </div>
       
     <!-- Split pane -->
-      <div class="flex-1 flex overflow-hidden">
+      <div class="flex-1 flex flex-col lg:flex-row overflow-hidden">
         <!-- Left sidebar -->
-        <div class="w-52 border-r border-base-300/30 overflow-y-auto p-3 space-y-4 bg-base-100/30">
+        <div class="w-full lg:w-52 shrink-0 max-h-44 lg:max-h-none border-b lg:border-b-0 lg:border-r border-base-300/30 overflow-y-auto p-3 space-y-4 lg:space-y-4 bg-base-100/30 grid grid-cols-2 gap-x-4 lg:block">
           <!-- Status -->
           <div>
             <div class="text-[10px] uppercase tracking-wider text-base-content/40 font-semibold mb-1">
@@ -378,7 +378,7 @@ defmodule DodoRouterWeb.LogLive.Show do
         <div class="flex-1 overflow-hidden flex flex-col">
           <!-- Tabs -->
           <div class="border-b border-base-300/30 px-4 pt-2">
-            <div class="flex gap-1" role="tablist">
+            <div class="flex gap-1 overflow-x-auto whitespace-nowrap" role="tablist">
               <button
                 type="button"
                 phx-click="set_tab"
@@ -1047,8 +1047,17 @@ defmodule DodoRouterWeb.LogLive.Show do
 
   defp format_json(str) when is_binary(str) do
     case Jason.decode(str) do
-      {:ok, decoded} -> Jason.encode!(deep_parse_json_strings(decoded), pretty: true)
-      _ -> str
+      {:ok, decoded} when is_map(decoded) ->
+        decoded
+        |> Map.delete("_truncation_flags")
+        |> deep_parse_json_strings()
+        |> Jason.encode!(pretty: true)
+
+      {:ok, decoded} ->
+        Jason.encode!(deep_parse_json_strings(decoded), pretty: true)
+
+      _ ->
+        str
     end
   end
 
@@ -1113,9 +1122,12 @@ defmodule DodoRouterWeb.LogLive.Show do
 
   defp cache_pct(%{cache_read_tokens: nil}), do: ""
 
+  # Anthropic-style usage reports prompt_tokens EXCLUDING cache reads, so the
+  # denominator must be cached + billed input or a 54k-token cache hit over a
+  # 6-token billed prompt renders as "902567%".
   defp cache_pct(%{cache_read_tokens: cached, prompt_tokens: prompt})
-       when is_integer(cached) and is_integer(prompt) and prompt > 0 do
-    pct = Float.round(cached / prompt * 100, 0)
+       when is_integer(cached) and is_integer(prompt) and cached + prompt > 0 do
+    pct = Float.round(cached / (cached + prompt) * 100, 0)
     "#{trunc(pct)}%"
   end
 
