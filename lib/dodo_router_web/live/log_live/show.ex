@@ -442,6 +442,48 @@ defmodule DodoRouterWeb.LogLive.Show do
           <div class="flex-1 overflow-y-auto">
             <%= if @active_tab == "conversation" do %>
               <div class="p-4">
+                <div
+                  :if={@log.status == "error"}
+                  id="request-failure-panel"
+                  class="mb-4 rounded-xl border border-error/30 bg-error/5 p-4"
+                >
+                  <div class="flex items-center gap-2 mb-1.5">
+                    <.icon name="hero-x-circle" class="size-5 text-error shrink-0" />
+                    <h3 class="font-semibold text-error">
+                      This request failed — no provider returned a response
+                    </h3>
+                  </div>
+                  <p :if={client_error_message(@log)} class="text-sm text-base-content/80 mb-3">
+                    Returned to your client: <span class="font-mono">{client_error_message(@log)}</span>
+                  </p>
+                  <div class="space-y-1">
+                    <div
+                      :for={attempt <- @log.attempted_steps || []}
+                      class="flex items-center gap-2 text-sm font-mono"
+                    >
+                      <.icon name="hero-x-mark" class="size-3.5 text-error shrink-0" />
+                      <span class="text-base-content/80">
+                        {attempt["provider"]}/{attempt["model"]}
+                      </span>
+                      <span class="text-error/80">
+                        {attempt["http_status"]} {attempt["error"]}
+                      </span>
+                      <span class="text-base-content/50 text-xs truncate">
+                        {attempt_error_message(attempt)}
+                      </span>
+                      <span class="ml-auto text-base-content/40 text-xs shrink-0">
+                        {attempt["latency_ms"]}ms
+                      </span>
+                    </div>
+                  </div>
+                  <button
+                    phx-click="set_tab"
+                    phx-value-tab="fallback_trace"
+                    class="mt-3 text-sm text-error font-medium hover:underline"
+                  >
+                    Full fallback trace with headers and bodies →
+                  </button>
+                </div>
                 <%= if length(@truncation_flags) > 0 do %>
                   <div class="alert alert-warning mb-4">
                     <svg
@@ -947,6 +989,29 @@ defmodule DodoRouterWeb.LogLive.Show do
     ~H"""
     <span class={"badge #{@class}"}>{@label}</span>
     """
+  end
+
+  defp client_error_message(log) do
+    with body when is_binary(body) <- log.response_body,
+         {:ok, %{"error" => err}} <- Jason.decode(body) do
+      err["message"] || err["type"]
+    else
+      _ -> nil
+    end
+  end
+
+  defp attempt_error_message(attempt) do
+    case attempt["error_body"] do
+      body when is_binary(body) ->
+        case Jason.decode(body) do
+          {:ok, %{"error" => %{"message" => msg}}} -> msg
+          {:ok, %{"error" => msg}} when is_binary(msg) -> msg
+          _ -> String.slice(body, 0, 120)
+        end
+
+      _ ->
+        nil
+    end
   end
 
   defp parse_headers(nil), do: nil

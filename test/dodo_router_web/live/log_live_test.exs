@@ -339,4 +339,37 @@ defmodule DodoRouterWeb.LogLiveTest do
       refute html =~ "coding"
     end
   end
+
+  describe "Show — failed requests" do
+    test "the default tab leads with what went wrong", %{conn: conn, user: user} do
+      {router, _} = RoutersFixtures.router_fixture(user)
+
+      log =
+        LogsFixtures.log_fixture(router, %{
+          status: "error",
+          http_status: 502,
+          request_body: Jason.encode!(%{"messages" => [%{"role" => "user", "content" => "hi"}]}),
+          response_body:
+            Jason.encode!(%{"error" => %{"message" => "All providers failed", "type" => "upstream_error"}}),
+          attempted_steps: [
+            %{
+              "provider" => "anthropic",
+              "model" => "claude-sonnet",
+              "status" => "error",
+              "error" => "auth_error",
+              "http_status" => 401,
+              "error_body" => ~s({"error":{"message":"invalid x-api-key"}}),
+              "latency_ms" => 310
+            }
+          ]
+        })
+
+      {:ok, live, html} = live(conn, ~p"/logs/#{log.id}")
+
+      assert has_element?(live, "#request-failure-panel")
+      assert html =~ "no provider returned a response"
+      assert html =~ "All providers failed"
+      assert html =~ "invalid x-api-key"
+    end
+  end
 end

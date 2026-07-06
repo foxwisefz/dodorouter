@@ -54,6 +54,13 @@ defmodule DodoRouterWeb.ProvidersLive.Index do
     {:noreply, assign(socket, :filtered_provider, provider_slug)}
   end
 
+  def handle_event("reverify", %{"id" => id}, socket) do
+    case Providers.get_provider_key(socket.assigns.current_user, id) do
+      nil -> {:noreply, socket}
+      key -> {:noreply, start_verification(socket, key)}
+    end
+  end
+
   def handle_event("clear_filter", _params, socket) do
     {:noreply, assign(socket, :filtered_provider, nil)}
   end
@@ -254,14 +261,6 @@ defmodule DodoRouterWeb.ProvidersLive.Index do
          socket
          |> assign(codex_device: nil, codex_timer: nil)
          |> put_flash(:error, "ChatGPT authorization failed. Please try again.")}
-    end
-  end
-
-  @impl true
-  def handle_event("reverify", %{"id" => id}, socket) do
-    case Providers.get_provider_key(socket.assigns.current_user, id) do
-      nil -> {:noreply, socket}
-      key -> {:noreply, start_verification(socket, key)}
     end
   end
 

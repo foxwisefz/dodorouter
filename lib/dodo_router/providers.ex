@@ -153,8 +153,6 @@ defmodule DodoRouter.Providers do
     DodoRouter.Secrets.delete_provider_key(user_id, key_ref)
   end
 
-  # show bits of API key
-  @doc false
   @doc """
   Records key health from a completed proxy dispatch's attempted steps.
 
@@ -238,6 +236,8 @@ defmodule DodoRouter.Providers do
   defp error_reason_atom("network_error"), do: :network_error
   defp error_reason_atom(_), do: nil
 
+  # show bits of API key
+  @doc false
   def generate_key_hint(nil), do: ""
 
   @doc false
