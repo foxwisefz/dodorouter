@@ -271,6 +271,60 @@
 @keyframes caret-blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
 @utility term-caret { animation: caret-blink 1.1s step-end infinite; }
 
+/* — Hero live dashboard — */
+
+@keyframes hd-fail {
+  0%, 26% { background: hsl(0, 0%, 100%); border-color: var(--color-border); }
+  32%, 56% { background: hsl(0, 84%, 60%, 0.06); border-color: hsl(0, 84%, 60%, 0.45); }
+  64%, 100% { background: hsl(0, 0%, 100%); border-color: var(--color-border); opacity: 0.65; }
+}
+@keyframes hd-fail-badge {
+  0%, 28% { opacity: 0; }
+  34%, 62% { opacity: 1; }
+  70%, 100% { opacity: 0; }
+}
+@keyframes hd-recover {
+  0%, 36% { background: hsl(0, 0%, 100%); border-color: var(--color-border); }
+  44%, 80% { background: hsl(142, 71%, 45%, 0.07); border-color: hsl(142, 71%, 45%, 0.5); }
+  90%, 100% { background: hsl(0, 0%, 100%); border-color: var(--color-border); }
+}
+@keyframes hd-recover-badge {
+  0%, 40% { opacity: 0; }
+  48%, 84% { opacity: 1; }
+  92%, 100% { opacity: 0; }
+}
+@utility hd-fail { animation: hd-fail 10s linear infinite; }
+@utility hd-fail-badge { animation: hd-fail-badge 10s linear infinite; opacity: 0; }
+@utility hd-recover { animation: hd-recover 10s linear infinite; }
+@utility hd-recover-badge { animation: hd-recover-badge 10s linear infinite; opacity: 0; }
+
+@keyframes chart-draw {
+  from { stroke-dashoffset: 600; }
+  to { stroke-dashoffset: 0; }
+}
+@utility chart-draw {
+  stroke-dasharray: 600;
+  stroke-dashoffset: 600;
+  animation: chart-draw 2.8s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+@keyframes chart-fill-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@utility chart-fill-in { opacity: 0; animation: chart-fill-in 1.2s ease 1.8s forwards; }
+
+@keyframes feed-row {
+  0% { opacity: 0; transform: translateY(-6px); }
+  6% { opacity: 1; transform: translateY(0); }
+  92% { opacity: 1; }
+  100% { opacity: 0; }
+}
+@utility feed-row {
+  opacity: 0;
+  animation: feed-row 10s linear infinite;
+  animation-delay: var(--fd, 0s);
+}
+
 /* — Bento scene 1: mid-stream recovery — */
 
 @keyframes ms-line1 { /* first chunk types out then stalls */
