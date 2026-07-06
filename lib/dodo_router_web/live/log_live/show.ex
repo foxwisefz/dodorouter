@@ -205,27 +205,27 @@ defmodule DodoRouterWeb.LogLive.Show do
             <div class="space-y-1 text-xs">
               <div class="flex justify-between">
                 <span class="text-base-content/60">Total</span>
-                <span class="font-mono">{@log.latency_ms || "-"}ms</span>
+                <span class="font-mono">{fmt_ms(@log.latency_ms)}</span>
               </div>
               <div class="flex justify-between">
                 <span class="text-base-content/60">Provider</span>
-                <span class="font-mono">{provider_time(@log)}ms</span>
+                <span class="font-mono">{fmt_ms(provider_time(@log))}</span>
               </div>
               <div class="flex justify-between">
                 <span class="text-base-content/60">Overhead</span>
-                <span class="font-mono">{overhead_time(@log)}ms</span>
+                <span class="font-mono">{fmt_ms(overhead_time(@log))}</span>
               </div>
-              <div class="flex justify-between">
+              <div :if={@log.ttfb_ms} class="flex justify-between">
                 <span class="text-base-content/60">TTFB</span>
-                <span class="font-mono">{@log.ttfb_ms || "-"}ms</span>
+                <span class="font-mono">{fmt_ms(@log.ttfb_ms)}</span>
               </div>
-              <div class="flex justify-between">
+              <div :if={@log.upload_ms} class="flex justify-between">
                 <span class="text-base-content/60">Upload</span>
-                <span class="font-mono">{@log.upload_ms || "-"}ms</span>
+                <span class="font-mono">{fmt_ms(@log.upload_ms)}</span>
               </div>
-              <div class="flex justify-between">
+              <div :if={@log.ttfb_ms} class="flex justify-between">
                 <span class="text-base-content/60">Wait</span>
-                <span class="font-mono">{wait_time(@log)}ms</span>
+                <span class="font-mono">{fmt_ms(wait_time(@log))}</span>
               </div>
               <%= if @log.provider_processing_ms do %>
                 <div class="flex justify-between">
@@ -239,9 +239,11 @@ defmodule DodoRouterWeb.LogLive.Show do
     <!-- Model -->
           <div>
             <div class="text-[10px] uppercase tracking-wider text-base-content/40 font-semibold mb-1">
-              Model
+              {if @log.status == "error", do: "Model (last attempted)", else: "Model"}
             </div>
-            <div class="text-sm font-mono">{@log.final_model}</div>
+            <div class={["text-sm font-mono", @log.status == "error" && "text-base-content/50 line-through decoration-error/40"]}>
+              {@log.final_model}
+            </div>
             <div class="flex items-center gap-1.5 mt-1">
               <div class="w-3.5 h-3.5 rounded flex items-center justify-center shrink-0 bg-base-200">
                 <.provider_logo slug={normalize_slug(@log.final_provider)} class="w-2.5 h-2.5" />
@@ -339,7 +341,13 @@ defmodule DodoRouterWeb.LogLive.Show do
             </div>
             <div class="space-y-1">
               <%= for {attempt, _idx} <- Enum.with_index(@log.attempted_steps) do %>
-                <div class="flex items-center gap-1.5 text-xs">
+                <div
+                  phx-click="set_tab"
+                  phx-value-tab="fallback_trace"
+                  role="button"
+                  title="Open the fallback trace"
+                  class="flex items-center gap-1.5 text-xs rounded px-1 -mx-1 py-0.5 cursor-pointer hover:bg-secondary/60 transition-colors"
+                >
                   <%= if attempt["status"] == "success" do %>
                     <span class="text-success">✓</span>
                   <% else %>
@@ -670,7 +678,11 @@ defmodule DodoRouterWeb.LogLive.Show do
             <%= if @active_tab == "fallback_trace" do %>
               <div class="p-4 space-y-3">
                 <div class="text-sm text-base-content/60 mb-2">
-                  Request was retried across {length(@log.attempted_steps)} providers before succeeding.
+                  {if @log.status == "error",
+                    do:
+                      "All #{length(@log.attempted_steps)} providers failed — each attempt below with its actual response.",
+                    else:
+                      "Request was retried across #{length(@log.attempted_steps)} providers before succeeding."}
                 </div>
                 <%= for {attempt, idx} <- Enum.with_index(@log.attempted_steps) do %>
                   <div class={[
@@ -1081,6 +1093,11 @@ defmodule DodoRouterWeb.LogLive.Show do
   end
 
   defp overhead_time(_), do: 0
+
+  # "11526ms" reads worse than "11.5s"; nil renders as an em dash, not "-ms"
+  defp fmt_ms(ms) when is_integer(ms) and ms >= 1000, do: "#{Float.round(ms / 1000, 1)}s"
+  defp fmt_ms(ms) when is_integer(ms), do: "#{ms}ms"
+  defp fmt_ms(_), do: "—"
 
   defp wait_time(%{ttfb_ms: ttfb, upload_ms: upload})
        when is_integer(ttfb) and is_integer(upload) do
