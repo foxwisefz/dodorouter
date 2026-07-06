@@ -219,6 +219,36 @@ defmodule DodoRouterWeb.LogLiveTest do
       assert html2 =~ "Wait"
     end
 
+    test "model reasoning is viewable but collapsed", %{conn: conn, user: user} do
+      {router, _api_key} = RoutersFixtures.router_fixture(user)
+
+      log =
+        LogsFixtures.log_fixture(router, %{
+          request_body: Jason.encode!(%{"messages" => [%{"role" => "user", "content" => "2+2?"}]}),
+          response_body:
+            Jason.encode!(%{
+              "choices" => [
+                %{
+                  "finish_reason" => "stop",
+                  "message" => %{
+                    "role" => "assistant",
+                    "content" => "4",
+                    "reasoning_content" => "The user wants simple arithmetic. 2+2 equals 4."
+                  }
+                }
+              ]
+            })
+        })
+
+      {:ok, _live, html} = live(conn, ~p"/logs/#{log.request_id}")
+
+      assert html =~ "Reasoning"
+      assert html =~ "simple arithmetic"
+      # collapsed by default: the <details> tag itself carries no open attr
+      assert html =~ ~r/<details[^>]*reasoning-block/
+      refute html =~ ~r/<details[^>]*reasoning-block[^>]*\sopen[\s>]/
+    end
+
     test "detail page renders no duplicate element ids", %{conn: conn, user: user} do
       {router, _api_key} = RoutersFixtures.router_fixture(user)
 

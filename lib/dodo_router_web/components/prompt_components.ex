@@ -427,6 +427,18 @@ defmodule DodoRouterWeb.PromptComponents do
       </div>
 
       <div class={"max-w-[85%] rounded-2xl px-4 py-3 shadow-sm #{@bubble_class}"}>
+        <details
+          :if={is_binary(Map.get(@message, :reasoning_content)) && @message.reasoning_content != ""}
+          class="reasoning-block group mb-2 rounded-lg border border-base-300/40 bg-base-100/50"
+        >
+          <summary class="cursor-pointer select-none px-3 py-1.5 text-[11px] font-medium text-base-content/50 hover:text-base-content/80 transition-colors list-none flex items-center gap-1.5">
+            <.icon
+              name="hero-chevron-right"
+              class="w-3 h-3 transition-transform group-open:rotate-90"
+            /> Reasoning
+          </summary>
+          <div class="px-3 pb-2.5 text-xs leading-relaxed text-base-content/60 whitespace-pre-wrap">{@message.reasoning_content}</div>
+        </details>
         <div class="max-w-none">
           <MarkdownRenderer.render content={@message.content} />
         </div>
