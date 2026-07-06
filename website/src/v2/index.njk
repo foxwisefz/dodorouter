@@ -194,13 +194,13 @@ eleventyExcludeFromCollections: true
 
       {# inspected request pane #}
       <div class="rounded-2xl border border-border bg-white p-5 shadow-[0_8px_40px_rgba(0,0,0,0.04)] font-body select-none" data-reveal aria-hidden="true">
-        <div class="flex items-center justify-between mb-3">
-          <div class="flex gap-1 text-[10px] font-medium">
+        <div class="flex flex-wrap items-center justify-between gap-y-2 mb-3">
+          <div class="flex gap-1 text-[10px] font-medium whitespace-nowrap">
             <span class="rounded-md bg-secondary px-2 py-1 text-foreground">Conversation</span>
             <span class="rounded-md bg-accent text-white px-2 py-1">Original Request</span>
-            <span class="rounded-md bg-secondary px-2 py-1 text-muted-foreground">Fallback Trace</span>
+            <span class="rounded-md bg-secondary px-2 py-1 text-muted-foreground">Trace</span>
           </div>
-          <span class="text-[10px] text-muted-foreground">claude-code · 61,204 prompt tok</span>
+          <span class="text-[10px] text-muted-foreground whitespace-nowrap shrink-0 ml-auto pl-2">61,204 prompt tok</span>
         </div>
         <div class="rounded-xl bg-secondary/30 border border-border p-4 text-[11px] font-mono leading-relaxed overflow-hidden">
           <p class="text-muted-foreground">"system": [</p>
