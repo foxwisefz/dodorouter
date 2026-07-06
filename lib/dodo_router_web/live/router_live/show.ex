@@ -1083,7 +1083,7 @@ defmodule DodoRouterWeb.RouterLive.Show do
                 <option value="" disabled selected={@step_model == ""}>
                   Select a model…
                 </option>
-                <%= for model <- Registry.available_models(@step_provider) do %>
+                <%= for model <- model_options(@step_provider) do %>
                   <option value={model} selected={@step_model == model}>
                     {model}
                   </option>
@@ -1587,6 +1587,20 @@ defmodule DodoRouterWeb.RouterLive.Show do
     </li>
     """
   end
+
+  # Synced model catalog first, adapter's built-in list as fallback/extras.
+  defp model_options(provider) do
+    synced =
+      provider
+      |> normalize_models_provider()
+      |> Models.list_models_by_provider()
+      |> Enum.map(& &1.model_id)
+
+    Enum.uniq(synced ++ Registry.available_models(provider))
+  end
+
+  defp normalize_models_provider("openai-codex"), do: "openai"
+  defp normalize_models_provider(slug), do: slug
 
   defp matching_keys(provider_keys, %{provider: provider}) do
     slugs =

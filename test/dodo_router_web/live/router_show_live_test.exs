@@ -84,6 +84,19 @@ defmodule DodoRouterWeb.RouterShowLiveTest do
       refute html =~ ~s(value="test_provider")
     end
 
+    test "model select includes models synced from models.dev", %{conn: conn, router: router} do
+      {:ok, _} =
+        DodoRouter.Models.create_model(%{
+          provider_slug: "zai",
+          model_id: "glm-6-fresh-from-sync",
+          display_name: "GLM 6"
+        })
+
+      {:ok, _live, html} = live(conn, ~p"/routers/#{router.id}/routing")
+
+      assert html =~ "glm-6-fresh-from-sync"
+    end
+
     test "adding a step auto-assigns the matching key", %{conn: conn, router: router, user: user} do
       key =
         DodoRouter.ProvidersFixtures.provider_key_fixture(user, %{"provider_slug" => "zai_standard"})
