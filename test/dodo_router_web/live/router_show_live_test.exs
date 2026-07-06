@@ -73,6 +73,56 @@ defmodule DodoRouterWeb.RouterShowLiveTest do
       refute has_element?(live2, "#setup-checklist")
     end
 
+    test "add-step provider list mirrors the Providers page", %{conn: conn, router: router} do
+      {:ok, _live, html} = live(conn, ~p"/routers/#{router.id}/routing")
+
+      # Key-slug granularity, including subscription keys…
+      assert html =~ ~s(value="anthropic_oauth")
+      assert html =~ "Claude subscription"
+      assert html =~ ~s(value="zai_coding")
+      # …and no internal test provider
+      refute html =~ ~s(value="test_provider")
+    end
+
+    test "adding a step auto-assigns the matching key", %{conn: conn, router: router, user: user} do
+      key =
+        DodoRouter.ProvidersFixtures.provider_key_fixture(user, %{"provider_slug" => "zai_standard"})
+
+      {:ok, live, _html} = live(conn, ~p"/routers/#{router.id}/routing")
+
+      live
+      |> form("#routing-modal form", %{"step" => %{"model" => "glm-5"}})
+      |> render_submit()
+
+      [step] = DodoRouter.Routers.list_routing_steps(router)
+      assert step.provider == "zai"
+      assert step.plan_type == "standard"
+      assert step.provider_key_id == key.id
+    end
+
+    test "chain key selects offer subscription keys of the same adapter", %{
+      conn: conn,
+      router: router,
+      user: user
+    } do
+      DodoRouter.ProvidersFixtures.provider_key_fixture(user, %{
+        "provider_slug" => "anthropic_oauth",
+        "label" => "Claude Max"
+      })
+
+      {:ok, _step} =
+        DodoRouter.Routers.create_routing_step(router, %{
+          "provider" => "anthropic",
+          "model" => "claude-sonnet-4-20250514"
+        })
+
+      {:ok, _live, html} = live(conn, ~p"/routers/#{router.id}")
+
+      # The oauth key must be selectable even though the step's derived
+      # key slug would be plain "anthropic"
+      assert html =~ "Claude Max"
+    end
+
     test "add-step modal preselects the provider the user has a key for", %{
       conn: conn,
       router: router,

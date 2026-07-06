@@ -37,6 +37,7 @@ defmodule DodoRouterWeb.RouterLive.Show do
       |> assign(:code_language, "curl")
       |> assign(:connect_collapsed, length(recent_logs) > 0)
       |> assign(:provider_keys, provider_keys)
+      |> assign(:provider_info, Registry.provider_info())
       |> assign(:steps_list, router.routing_steps)
       |> assign(:new_api_key, Phoenix.Flash.get(socket.assigns.flash, :new_api_key))
       |> stream(:routing_steps, router.routing_steps)
@@ -63,7 +64,7 @@ defmodule DodoRouterWeb.RouterLive.Show do
     |> assign(:page_title, "Routing - #{socket.assigns.router.name}")
     |> assign(:new_step, %RoutingStep{})
     |> assign(:editing_step, nil)
-    |> assign(:step_provider, default_step_provider(socket.assigns.provider_keys))
+    |> assign_step_key_slug(default_step_key_slug(socket.assigns.provider_keys))
     |> assign(:step_model, "")
     |> assign(:step_model_custom, false)
     |> assign_step_efforts()
@@ -76,7 +77,7 @@ defmodule DodoRouterWeb.RouterLive.Show do
     socket
     |> assign(:page_title, "Edit Step - #{socket.assigns.router.name}")
     |> assign(:editing_step, step)
-    |> assign(:step_provider, step.provider)
+    |> assign_step_key_slug(step_key_slug_for(step, socket.assigns.provider_keys))
     |> assign(:step_model, step.model)
     |> assign(:step_model_custom, custom?)
     |> assign_step_efforts()
@@ -150,9 +151,9 @@ defmodule DodoRouterWeb.RouterLive.Show do
   end
 
   def handle_event("update_step_form", %{"step" => step_params}, socket) do
-    prev_provider = socket.assigns.step_provider
-    provider = Map.get(step_params, "provider", prev_provider)
-    provider_changed? = provider != prev_provider
+    prev_slug = socket.assigns.step_key_slug
+    key_slug = Map.get(step_params, "key_slug", prev_slug)
+    provider_changed? = key_slug != prev_slug
     model = Map.get(step_params, "model")
 
     {custom?, model} =
@@ -175,7 +176,7 @@ defmodule DodoRouterWeb.RouterLive.Show do
 
     {:noreply,
      socket
-     |> assign(:step_provider, provider)
+     |> assign_step_key_slug(key_slug)
      |> assign(:step_model, model)
      |> assign(:step_model_custom, custom?)
      |> assign_step_efforts()}
@@ -194,6 +195,8 @@ defmodule DodoRouterWeb.RouterLive.Show do
 
     case Routers.create_routing_step(socket.assigns.router, step_params) do
       {:ok, step} ->
+        step = auto_assign_key(step, socket.assigns.provider_keys, socket.assigns.step_key_slug)
+
         {:noreply,
          socket
          |> stream_insert(:routing_steps, step)
@@ -1032,30 +1035,43 @@ defmodule DodoRouterWeb.RouterLive.Show do
             <div>
               <label class="block text-sm font-medium text-base-content/70 mb-2">Provider</label>
               <select
-                name="step[provider]"
+                name="step[key_slug]"
                 class="w-full py-2.5 px-3 bg-base-200 border border-base-300/50 rounded-lg"
                 required
               >
-                <%= for {slug, config} <- Enum.sort_by(Registry.all_adapters(), fn {s, _} -> s end) do %>
-                  <option value={slug} selected={@step_provider == slug}>
-                    {config.display_name}
+                <%= for slug <- step_slug_options() do %>
+                  <option value={slug} selected={@step_key_slug == slug}>
+                    {@provider_info[slug][:name] || slug}
                   </option>
                 <% end %>
               </select>
-              <p
-                :if={not provider_has_keys?(@provider_keys, @step_provider)}
-                id="step-provider-no-keys"
-                class="text-xs text-warning mt-1.5 flex items-center gap-1.5"
-              >
-                <.icon name="hero-exclamation-triangle" class="size-3.5 shrink-0" />
-                <span>
-                  You haven't added an API key for this provider —
-                  <.link navigate={~p"/providers"} class="underline font-medium">
-                    add one in Providers
-                  </.link>
-                  so this step can serve requests.
-                </span>
-              </p>
+              <input type="hidden" name="step[provider]" value={@step_provider} />
+              <input type="hidden" name="step[plan_type]" value={plan_type_for_slug(@step_key_slug)} />
+              <%= case keys_with_slug(@provider_keys, @step_key_slug) do %>
+                <% [] -> %>
+                  <p
+                    id="step-provider-no-keys"
+                    class="text-xs text-warning mt-1.5 flex items-center gap-1.5"
+                  >
+                    <.icon name="hero-exclamation-triangle" class="size-3.5 shrink-0" />
+                    <span>
+                      You haven't added an API key for this provider —
+                      <.link
+                        navigate={~p"/providers?return_to=/routers/#{@router.id}"}
+                        class="underline font-medium"
+                      >
+                        add one in Providers
+                      </.link>
+                      so this step can serve requests.
+                    </span>
+                  </p>
+                <% [key | _] -> %>
+                  <p id="step-key-hint" class="text-xs text-base-content/50 mt-1.5">
+                    Will use your key
+                    <span class="font-mono">{key.label} ({key.key_hint})</span>
+                    — change it on the chain afterwards if needed.
+                  </p>
+              <% end %>
             </div>
             <div>
               <label class="block text-sm font-medium text-base-content/70 mb-2">Model</label>
@@ -1121,44 +1137,6 @@ defmodule DodoRouterWeb.RouterLive.Show do
               </p>
             </div>
             <%!-- z.ai specific options --%>
-            <div :if={@step_provider == "zai"}>
-              <label class="block text-sm font-medium text-base-content/70 mb-2">Plan Type</label>
-              <select
-                name="step[plan_type]"
-                class="w-full py-2.5 px-3 bg-base-200 border border-base-300/50 rounded-lg"
-              >
-                <option value="standard">Standard (/api/paas/v4)</option>
-                <option
-                  value="coding"
-                  selected={@editing_step && @editing_step.plan_type == "coding"}
-                >
-                  Coding Plan (/api/coding/paas/v4)
-                </option>
-              </select>
-              <p class="text-xs text-base-content/50 mt-1.5">
-                Select based on your z.ai subscription
-              </p>
-            </div>
-            <%!-- Moonshot specific options --%>
-            <div :if={@step_provider == "moonshot"}>
-              <label class="block text-sm font-medium text-base-content/70 mb-2">Endpoint</label>
-              <select
-                name="step[plan_type]"
-                class="w-full py-2.5 px-3 bg-base-200 border border-base-300/50 rounded-lg"
-              >
-                <option value="standard">Standard (api.moonshot.ai/v1)</option>
-                <option
-                  value="coding"
-                  selected={@editing_step && @editing_step.plan_type == "coding"}
-                >
-                  Kimi Code (api.kimi.com/coding/v1)
-                </option>
-              </select>
-              <p class="text-xs text-base-content/50 mt-1.5">
-                Select the Kimi coding endpoint for code-optimized models
-              </p>
-            </div>
-
             <details
               class="group rounded-lg border border-base-300/40 bg-base-200/30"
               open={@editing_step && (@editing_step.temperature || @editing_step.max_tokens)}
@@ -1526,8 +1504,50 @@ defmodule DodoRouterWeb.RouterLive.Show do
   end
 
   # New users get the provider they already added a key for preselected.
-  defp default_step_provider([]), do: "zai"
-  defp default_step_provider([key | _]), do: Registry.adapter_provider(key.provider_slug)
+  defp default_step_key_slug([]), do: "zai_standard"
+  defp default_step_key_slug([key | _]), do: key.provider_slug
+
+  # The step form is driven by a provider-KEY slug (same list the Providers
+  # page shows); the adapter slug and plan type are derived from it.
+  defp assign_step_key_slug(socket, key_slug) do
+    socket
+    |> assign(:step_key_slug, key_slug)
+    |> assign(:step_provider, Registry.adapter_provider(key_slug))
+  end
+
+  defp step_key_slug_for(step, provider_keys) do
+    assigned = Enum.find(provider_keys, &(&1.id == step.provider_key_id))
+
+    if assigned,
+      do: assigned.provider_slug,
+      else: Registry.to_key_slug(step.provider, step.plan_type || "standard")
+  end
+
+  defp plan_type_for_slug(key_slug) do
+    if String.contains?(key_slug, "coding"), do: "coding", else: "standard"
+  end
+
+  defp step_slug_options do
+    DodoRouter.Providers.ProviderKey.provider_slugs()
+    |> Enum.reject(&(&1 == "test_provider"))
+  end
+
+  defp keys_with_slug(provider_keys, key_slug) do
+    Enum.filter(provider_keys, &(&1.provider_slug == key_slug))
+  end
+
+  defp auto_assign_key(step, provider_keys, key_slug) do
+    case keys_with_slug(provider_keys, key_slug) do
+      [key | _] ->
+        case Routers.update_routing_step(step, %{provider_key_id: key.id}) do
+          {:ok, updated} -> updated
+          _ -> step
+        end
+
+      [] ->
+        step
+    end
+  end
 
   defp setup_state(assigns) do
     steps = assigns.steps_list
@@ -1568,19 +1588,14 @@ defmodule DodoRouterWeb.RouterLive.Show do
     """
   end
 
-  defp matching_keys(provider_keys, %{provider: provider, plan_type: plan_type}) do
-    expected_slug = Registry.to_key_slug(provider, plan_type || "standard")
+  defp matching_keys(provider_keys, %{provider: provider}) do
+    slugs =
+      case Registry.all_adapters()[provider] do
+        %{key_slugs: key_slugs} -> key_slugs
+        _ -> [provider]
+      end
 
-    Enum.filter(provider_keys, fn key ->
-      key.provider_slug == expected_slug
-    end)
-  end
-
-  # True when the user has a key usable by this provider under any plan type.
-  defp provider_has_keys?(provider_keys, provider) do
-    Enum.any?(["standard", "coding"], fn plan ->
-      matching_keys(provider_keys, %{provider: provider, plan_type: plan}) != []
-    end)
+    Enum.filter(provider_keys, &(&1.provider_slug in slugs))
   end
 
   defp swap_at(list, i, j) do
