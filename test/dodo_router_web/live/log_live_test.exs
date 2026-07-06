@@ -134,6 +134,10 @@ defmodule DodoRouterWeb.LogLiveTest do
       assert html =~ "response"
       # 400 cached of (400 cached + 500 billed) = 44%, never >100%
       assert html =~ "(44%)"
+      # billed input and output are separated so the cached figure can't
+      # dwarf an ambiguous "Tokens" total
+      assert html =~ "Input (billed)"
+      assert html =~ "Output"
     end
 
     test "renders per-step response body in fallback trace", %{conn: conn, user: user} do

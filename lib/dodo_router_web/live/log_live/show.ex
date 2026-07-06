@@ -272,10 +272,17 @@ defmodule DodoRouterWeb.LogLive.Show do
                 <span class="text-base-content/60">Type</span>
                 <span class="text-right"><.call_type_badge type={@log.call_type} /></span>
               </div>
-              <div class="flex justify-between">
-                <span class="text-base-content/60">Tokens</span>
-                <span class="font-mono">{@log.total_tokens || "-"}</span>
-              </div>
+              <%= if @log.prompt_tokens || @log.completion_tokens do %>
+                <div class="flex justify-between">
+                  <span class="text-base-content/60">Input (billed)</span>
+                  <span class="font-mono">{@log.prompt_tokens || "—"}</span>
+                </div>
+              <% else %>
+                <div class="flex justify-between">
+                  <span class="text-base-content/60">Tokens</span>
+                  <span class="font-mono">{@log.total_tokens || "—"}</span>
+                </div>
+              <% end %>
               <%= if @log.cache_read_tokens && @log.cache_read_tokens > 0 do %>
                 <div class="flex justify-between text-success">
                   <span class="flex items-center gap-1">
@@ -303,6 +310,10 @@ defmodule DodoRouterWeb.LogLive.Show do
                   <span class="font-mono">{@log.cache_write_tokens}</span>
                 </div>
               <% end %>
+              <div :if={@log.completion_tokens} class="flex justify-between">
+                <span class="text-base-content/60">Output</span>
+                <span class="font-mono">{@log.completion_tokens}</span>
+              </div>
               <div class="flex justify-between">
                 <span class="text-base-content/60">Cost</span>
                 <span class="font-mono">
