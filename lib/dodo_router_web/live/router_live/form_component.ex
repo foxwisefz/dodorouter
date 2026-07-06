@@ -25,12 +25,26 @@ defmodule DodoRouterWeb.RouterLive.FormComponent do
           phx-mounted={JS.focus()}
           autocomplete="router-name"
         />
+        <%!-- The slug is derived from the name and has no visible field, so
+              its validation errors (too short, already taken) must surface
+              here or the Save button appears to silently do nothing. --%>
+        <p
+          :for={msg <- Enum.map(@form[:slug].errors, fn {m, _} -> m end)}
+          :if={@form.action}
+          class="text-error text-sm -mt-2"
+        >
+          URL name {msg} (derived from the name — try a different one)
+        </p>
         <.input
+          :if={@action == :edit}
           field={@form[:session_header]}
           type="text"
-          label="Session Header"
+          label="Session header"
           placeholder="x-session-id"
         />
+        <p :if={@action == :edit} class="text-xs text-base-content/50 -mt-2">
+          Requests carrying this HTTP header are grouped into sessions.
+        </p>
         <:actions>
           <.button phx-disable-with="Saving...">Save Router</.button>
         </:actions>
