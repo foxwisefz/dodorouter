@@ -97,6 +97,98 @@ defmodule DodoRouterWeb.LogLiveTest do
   end
 
   describe "Show" do
+    test "subscription-covered requests say plan instead of $0.0000", %{conn: conn, user: user} do
+      {router, _api_key} = RoutersFixtures.router_fixture(user)
+
+      log =
+        LogsFixtures.log_fixture(router, %{
+          estimated_cost_usd: Decimal.new(0),
+          attempted_steps: [
+            %{
+              "provider" => "zai",
+              "provider_key_slug" => "zai_coding",
+              "model" => "glm-4.7",
+              "status" => "success",
+              "latency_ms" => 100
+            }
+          ]
+        })
+
+      {:ok, _live, html} = live(conn, ~p"/logs/#{log.request_id}")
+
+      assert html =~ "included in plan"
+      refute html =~ "$0.0000"
+
+      # a zero-cost API-key request keeps the dollar figure
+      api_log =
+        LogsFixtures.log_fixture(router, %{
+          estimated_cost_usd: Decimal.new(0),
+          attempted_steps: [
+            %{
+              "provider" => "openai",
+              "provider_key_slug" => "openai",
+              "model" => "gpt-4o",
+              "status" => "success",
+              "latency_ms" => 100
+            }
+          ]
+        })
+
+      {:ok, _live, html2} = live(conn, ~p"/logs/#{api_log.request_id}")
+      assert html2 =~ "$0.0000"
+    end
+
+    test "shows the requested model when the router served a different one", %{
+      conn: conn,
+      user: user
+    } do
+      {router, _api_key} = RoutersFixtures.router_fixture(user)
+
+      log =
+        LogsFixtures.log_fixture(router, %{
+          final_model: "glm-4.7",
+          final_provider: "zai",
+          request_body:
+            Jason.encode!(%{
+              "model" => "claude-fable-5",
+              "messages" => [%{"role" => "user", "content" => "hi"}]
+            })
+        })
+
+      {:ok, _live, html} = live(conn, ~p"/logs/#{log.request_id}")
+
+      assert html =~ "requested"
+      assert html =~ "claude-fable-5"
+
+      # same model requested and served -> no redundant line
+      same_log =
+        LogsFixtures.log_fixture(router, %{
+          final_model: "glm-4.7",
+          request_body:
+            Jason.encode!(%{
+              "model" => "glm-4.7",
+              "messages" => [%{"role" => "user", "content" => "hi"}]
+            })
+        })
+
+      {:ok, live2, _} = live(conn, ~p"/logs/#{same_log.request_id}")
+      refute render(live2) =~ "requested"
+    end
+
+    test "links to the session the request belongs to", %{conn: conn, user: user} do
+      {router, _api_key} = RoutersFixtures.router_fixture(user)
+      log = LogsFixtures.log_with_session(router, "checkout-flow")
+
+      {:ok, live, html} = live(conn, ~p"/logs/#{log.request_id}")
+
+      assert html =~ "checkout-flow"
+
+      assert has_element?(
+               live,
+               ~s(a[href="/routers/#{router.id}/sessions/checkout-flow"])
+             )
+    end
+
     test "detail page renders no duplicate element ids", %{conn: conn, user: user} do
       {router, _api_key} = RoutersFixtures.router_fixture(user)
 
@@ -231,9 +323,9 @@ defmodule DodoRouterWeb.LogLiveTest do
       assert html =~ "response"
       # 400 cached of (400 cached + 500 billed) = 44%, never >100%
       assert html =~ "(44%)"
-      # billed input and output are separated so the cached figure can't
-      # dwarf an ambiguous "Tokens" total
-      assert html =~ "Input (billed)"
+      # new (uncached) input and output are separated so the cached figure
+      # can't dwarf an ambiguous "Tokens" total
+      assert html =~ "Input (new)"
       assert html =~ "Output"
     end
 

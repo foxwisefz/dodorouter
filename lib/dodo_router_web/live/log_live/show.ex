@@ -267,6 +267,13 @@ defmodule DodoRouterWeb.LogLive.Show do
               </div>
               <div class="text-xs text-base-content/60">{@log.final_provider}</div>
             </div>
+            <div
+              :if={requested_model(@req_params, @log)}
+              class="mt-1 text-[11px] text-base-content/40"
+              title="Model named by the client; the routing chain decided what actually served it"
+            >
+              requested: <span class="font-mono">{requested_model(@req_params, @log)}</span>
+            </div>
             <%= if effort = attempt_effort(List.last(@log.attempted_steps)) do %>
               <div class="mt-1.5">
                 <span
@@ -277,6 +284,20 @@ defmodule DodoRouterWeb.LogLive.Show do
                 </span>
               </div>
             <% end %>
+          </div>
+          
+    <!-- Session -->
+          <div :if={@log.session_id}>
+            <div class="text-[10px] uppercase tracking-wider text-base-content/40 font-semibold mb-1">
+              Session
+            </div>
+            <.link
+              navigate={~p"/routers/#{@log.router_id}/sessions/#{@log.session_id}"}
+              class="text-xs font-mono text-primary hover:underline break-all"
+              title="All requests in this session"
+            >
+              {@log.session_id}
+            </.link>
           </div>
           
     <!-- Usage -->
@@ -291,7 +312,12 @@ defmodule DodoRouterWeb.LogLive.Show do
               </div>
               <%= if @log.prompt_tokens || @log.completion_tokens do %>
                 <div class="flex justify-between">
-                  <span class="text-base-content/60">Input (billed)</span>
+                  <span
+                    class="text-base-content/60"
+                    title="Uncached prompt tokens. Cache reads are billed separately at a reduced rate."
+                  >
+                    Input (new)
+                  </span>
                   <span class="font-mono">{@log.prompt_tokens || "—"}</span>
                 </div>
               <% else %>
@@ -333,14 +359,23 @@ defmodule DodoRouterWeb.LogLive.Show do
               </div>
               <div class="flex justify-between">
                 <span class="text-base-content/60">Cost</span>
-                <span class="font-mono">
-                  {if @log.estimated_cost_usd,
-                    do: "$#{Decimal.round(@log.estimated_cost_usd, 4)}",
-                    else: "-"}
-                </span>
+                <%= if plan_covered?(@log) do %>
+                  <span
+                    class="text-success"
+                    title="Served through a subscription/coding-plan key — no marginal per-token cost"
+                  >
+                    included in plan
+                  </span>
+                <% else %>
+                  <span class="font-mono">
+                    {if @log.estimated_cost_usd,
+                      do: "$#{Decimal.round(@log.estimated_cost_usd, 4)}",
+                      else: "-"}
+                  </span>
+                <% end %>
               </div>
               <div class="flex justify-between">
-                <span class="text-base-content/60">Size</span>
+                <span class="text-base-content/60" title="Request payload size">Req size</span>
                 <span class="font-mono">{format_bytes(@log.payload_size_bytes)}</span>
               </div>
             </div>
@@ -1032,6 +1067,36 @@ defmodule DodoRouterWeb.LogLive.Show do
       {:ok, %{"choices" => [%{"finish_reason" => reason} | _]}} -> reason
       {:ok, %{"stop_reason" => reason}} -> reason
       _ -> nil
+    end
+  end
+
+  # Traffic served through a subscription or coding-plan key has no marginal
+  # per-token cost; "$0.0000" there reads like broken billing.
+  defp plan_covered?(log) do
+    zero_cost? = log.estimated_cost_usd && Decimal.eq?(log.estimated_cost_usd, 0)
+
+    key_slug =
+      case List.last(log.attempted_steps || []) do
+        %{"provider_key_slug" => slug} -> slug
+        _ -> nil
+      end
+
+    provider =
+      case List.last(log.attempted_steps || []) do
+        %{"provider" => p} -> p
+        _ -> nil
+      end
+
+    !!(zero_cost? && key_slug && key_slug != provider)
+  end
+
+  defp requested_model(req_params, log) do
+    case req_params do
+      %{"model" => model} when is_binary(model) and model != "" ->
+        if model != log.final_model, do: model
+
+      _ ->
+        nil
     end
   end
 
