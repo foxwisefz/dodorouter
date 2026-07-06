@@ -1,14 +1,14 @@
 ---
 layout: base.njk
-title: DodoRouter — The model layer of your agent harness
-description: "Agent = model + harness. DodoRouter is the harness's model layer: automatic failover across providers, full observability of every model call, and live control without redeploys."
+title: DodoRouter — See what your agent actually sends the model
+description: "The instrument for harness engineering: point Claude Code, OpenCode, or your own agent at DodoRouter and every model call becomes visible — real system prompts, tools, context, failures. Replay, compare, and route with fallback."
 permalink: /v2/index.html
 eleventyExcludeFromCollections: true
 ---
 
 {# ─────────────────────────────────────────────
-   /v2 — harness-engineering positioning draft.
-   Same design system and scenes as /, different story.
+   /v2 — harness-engineering positioning: the instrument
+   you build harnesses WITH, not armor you bolt on after.
    ───────────────────────────────────────────── #}
 
 <section class="hero-canvas relative overflow-hidden bg-background">
@@ -19,23 +19,23 @@ eleventyExcludeFromCollections: true
           <span class="absolute inline-flex h-full w-full animate-ping rounded-full bg-go opacity-75"></span>
           <span class="relative inline-flex h-2 w-2 rounded-full bg-go"></span>
         </span>
-        Harness engineering · the model layer
+        The instrument for harness engineering
       </div>
 
       <h1 class="animate-fade-up mt-6 font-display text-5xl md:text-6xl lg:text-[4.5rem] leading-[0.97] tracking-tight text-foreground" style="--fade-y: 16px; --fade-duration: 0.6s; --fade-delay: 0.1s;">
-        Your agent is only as good<br />as its <em>harness.</em>
+        See what your agent<br /><em>actually</em> sends the model.
       </h1>
 
       <p class="animate-fade-up mt-5 text-base md:text-lg text-muted-foreground leading-relaxed font-body max-w-2xl mx-auto" style="--fade-y: 16px; --fade-duration: 0.6s; --fade-delay: 0.2s;">
-        Agent = model + harness. You've built the guides, the sensors, the feedback loops —
-        but the model call itself is still a single point of failure. DodoRouter is the
-        harness's <b class="text-foreground">model layer</b>: failover, observability, and
-        live control for every call your agent makes.
+        Agents are model + harness — and the harness does its work in the dark.
+        Point Claude Code, OpenCode, or your own agent at DodoRouter and every model
+        call becomes visible: the real system prompts, the tools, the context, the
+        failures. Harness engineering starts with seeing.
       </p>
 
       <div class="animate-fade-up mt-7 flex items-center justify-center gap-3" style="--fade-y: 16px; --fade-duration: 0.6s; --fade-delay: 0.3s;">
         <a href="https://api.dodorouter.com/users/register" class="rounded-full bg-primary px-7 py-3 text-sm font-medium font-body text-primary-foreground transition-all hover:opacity-90">
-          Harden your harness →
+          Start watching →
         </a>
         <a href="https://github.com/foxwise-ai/dodorouter" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-2 rounded-full border border-border bg-background px-5 py-3 text-sm font-medium font-body text-foreground transition-colors hover:bg-secondary">
           <svg class="h-4 w-4 fill-foreground" viewBox="0 0 24 24"><path d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"/></svg>
@@ -146,80 +146,174 @@ eleventyExcludeFromCollections: true
         </div>
       </div>
       <p class="mt-3 text-center text-xs text-muted-foreground font-body">
-        The model layer, live: sensors on every call, failover mid-incident, no code in sight.
+        Your agent's traffic, live — one base-URL change away.
       </p>
     </div>
   </div>
 </section>
 
-{# ── Agent = model + harness: where DodoRouter sits ── #}
-<section class="section-padding bg-background border-t border-border">
+{# ── Step zero: X-ray the pros ── #}
+<section class="section-padding md:section-padding-md bg-background border-t border-border">
   <div class="mx-auto max-w-6xl px-6 md:px-12 lg:px-20">
     <div class="grid items-center gap-12 lg:grid-cols-2 lg:gap-20">
       <div>
-        <p class="text-sm font-semibold tracking-wide text-accent font-body">Where it sits</p>
+        <p class="text-sm font-semibold tracking-wide text-accent font-body">Step zero</p>
         <h2 class="mt-3 font-display text-3xl md:text-4xl lg:text-5xl leading-[1.05] tracking-tight text-foreground">
-          Prompt engineering. Context engineering.<br /><em>Now the harness.</em>
+          Before you build a harness,<br /><em>watch the best ones work.</em>
         </h2>
         <p class="mt-5 text-base md:text-lg text-muted-foreground leading-relaxed font-body max-w-lg">
-          As agents got capable, the bottleneck moved from prompting to reliable execution
-          over long horizons. The discipline that emerged — harness engineering — is about
-          the scaffolding around the model: guides that steer it, sensors that check it,
-          recovery when it fails.
+          Claude Code and OpenCode are world-class harnesses — and they'll show you
+          everything, if you can see their traffic. Route them through DodoRouter with one
+          base-URL change and read what they really do: the system prompts, the tool
+          definitions, how they compact context, when they retry, what they do with errors.
         </p>
-        <p class="mt-4 text-base text-muted-foreground leading-relaxed font-body max-w-lg">
-          Most teams build guardrails <em>above</em> the model — tests, linters, review loops —
-          and leave the model call itself naked underneath. One 429 at the wrong moment and a
-          six-hour agent run dies at hour five. DodoRouter is the layer that makes the calls
-          themselves harness-grade.
+        <ul class="mt-6 space-y-3 font-body">
+          <li class="flex items-start gap-3">
+            <span class="mt-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-go/10">
+              <svg class="h-3 w-3 text-go" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
+            </span>
+            <span class="text-sm text-foreground">Full request and response bodies, headers included — nothing summarized away</span>
+          </li>
+          <li class="flex items-start gap-3">
+            <span class="mt-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-go/10">
+              <svg class="h-3 w-3 text-go" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
+            </span>
+            <span class="text-sm text-foreground">Works with anything OpenAI- or Anthropic-compatible</span>
+          </li>
+          <li class="flex items-start gap-3">
+            <span class="mt-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-go/10">
+              <svg class="h-3 w-3 text-go" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
+            </span>
+            <span class="text-sm text-foreground">Route it through your Claude Max or ChatGPT Pro subscription while you're at it</span>
+          </li>
+        </ul>
+        <p class="mt-5 text-xs text-muted-foreground font-body font-mono">
+          ANTHROPIC_BASE_URL=https://api.dodorouter.com/r/inspect/v1 claude
         </p>
       </div>
 
-      {# the stack, alive #}
+      {# inspected request pane #}
       <div class="rounded-2xl border border-border bg-white p-5 shadow-[0_8px_40px_rgba(0,0,0,0.04)] font-body select-none" data-reveal aria-hidden="true">
-        <p class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-3">Your agent's stack</p>
-        <div class="space-y-2">
-          <div class="rounded-xl border border-border bg-secondary/30 px-4 py-3">
-            <p class="text-sm font-semibold text-foreground">Agent loop</p>
-            <p class="text-xs text-muted-foreground">plans, calls tools, iterates</p>
+        <div class="flex items-center justify-between mb-3">
+          <div class="flex gap-1 text-[10px] font-medium">
+            <span class="rounded-md bg-secondary px-2 py-1 text-foreground">Conversation</span>
+            <span class="rounded-md bg-accent text-white px-2 py-1">Original Request</span>
+            <span class="rounded-md bg-secondary px-2 py-1 text-muted-foreground">Fallback Trace</span>
           </div>
-          <div class="rounded-xl border border-border bg-secondary/30 px-4 py-3">
-            <p class="text-sm font-semibold text-foreground">Harness</p>
-            <p class="text-xs text-muted-foreground">guides · sensors · feedback loops · guardrails</p>
-          </div>
-          <div class="rounded-xl border-2 border-accent bg-accent/5 px-4 py-3 relative">
-            <span class="absolute -top-2.5 right-3 rounded-full bg-accent px-2 py-0.5 text-[9px] font-bold text-white">DODOROUTER</span>
-            <p class="text-sm font-semibold text-foreground">Model layer</p>
-            <p class="text-xs text-muted-foreground">failover · observability · live control · replay</p>
-          </div>
-          <div class="grid grid-cols-3 gap-2 text-center text-[11px] font-mono">
-            <div class="hd-fail scene-anim rounded-lg border px-2 py-2 text-foreground">openai</div>
-            <div class="hd-recover scene-anim rounded-lg border px-2 py-2 text-foreground">anthropic</div>
-            <div class="rounded-lg border border-border px-2 py-2 text-foreground opacity-60">moonshot</div>
-          </div>
+          <span class="text-[10px] text-muted-foreground">claude-code · 61,204 prompt tok</span>
+        </div>
+        <div class="rounded-xl bg-secondary/30 border border-border p-4 text-[11px] font-mono leading-relaxed overflow-hidden">
+          <p class="text-muted-foreground">"system": [</p>
+          <p class="text-foreground pl-3">"You are Claude Code, Anthropic's official CLI…"</p>
+          <p class="text-muted-foreground pl-3">…9,412 more tokens of guides, rules, and tool docs</p>
+          <p class="text-muted-foreground">],</p>
+          <p class="text-muted-foreground">"tools": [</p>
+          <p class="text-foreground pl-3">{"name": "Bash", "description": "Executes a bash…"}</p>
+          <p class="text-foreground pl-3">{"name": "Edit", "description": "Performs exact…"}</p>
+          <p class="text-muted-foreground pl-3">…14 more tool definitions</p>
+          <p class="text-muted-foreground">],</p>
+          <p class="text-muted-foreground">"messages": [<span class="text-foreground">…full history, compaction visible</span>]</p>
         </div>
         <p class="mt-3 text-xs text-muted-foreground text-center">
-          When a provider fails, the layer absorbs it — the loop above never notices.
+          This is how the pros steer a model. Now it's your reference material.
         </p>
       </div>
     </div>
   </div>
 </section>
 
-{# ── The reliability story, reframed ── #}
+{# ── Build yours with the lights on ── #}
 <section class="section-padding md:section-padding-md bg-secondary/40">
   <div class="mx-auto max-w-6xl px-6 md:px-12 lg:px-20">
-    {# — Flagship: watch a fallback happen — #}
+    <div class="text-center max-w-2xl mx-auto" data-reveal>
+      <p class="text-sm font-semibold tracking-wide text-accent font-body">Then: your harness</p>
+      <h2 class="mt-3 font-display text-3xl md:text-4xl leading-[1.05] tracking-tight text-foreground reveal-rise">
+        Build yours with the <em>lights on</em>
+      </h2>
+      <p class="mt-4 text-base text-muted-foreground leading-relaxed font-body reveal-rise">
+        Guides, sensors, feedback loops — every iteration on your harness raises the same
+        question: what did the model actually see, and what did it do? DodoRouter answers
+        it for every single call.
+      </p>
+    </div>
+
+    <div class="mt-14 grid gap-6 lg:grid-cols-3 font-body">
+      <div class="feature-card" data-reveal>
+        <div class="rounded-xl border border-border bg-secondary/30 p-4 h-40 overflow-hidden mb-4" aria-hidden="true">
+          <div class="flex items-center justify-between mb-2 text-[9px]">
+            <span class="rounded bg-accent/10 px-1.5 py-0.5 font-bold text-accent">session: checkout-agent</span>
+            <span class="flex items-center gap-1 font-bold text-error"><span class="rec-dot scene-anim h-1.5 w-1.5 rounded-full bg-error"></span>REC</span>
+          </div>
+          <div class="space-y-1 text-[10px] font-mono">
+            <div class="ss-row scene-anim flex justify-between rounded bg-white border border-border px-2 py-1.5"><span class="text-foreground">get_cart → 200</span><span class="text-muted-foreground">241ms</span></div>
+            <div class="ss-row scene-anim flex justify-between rounded bg-white border border-border px-2 py-1.5" style="animation-delay: 0.7s"><span class="text-foreground">apply_discount → 200</span><span class="text-muted-foreground">82% cached</span></div>
+            <div class="ss-row scene-anim flex justify-between rounded bg-white border border-border px-2 py-1.5" style="animation-delay: 1.4s"><span class="text-warn">charge_card → fallback</span><span class="text-muted-foreground">trace ↗</span></div>
+          </div>
+        </div>
+        <h3 class="text-base font-semibold text-foreground">Follow whole agent runs</h3>
+        <p class="mt-2 text-sm text-muted-foreground leading-relaxed">One header groups calls into sessions; recordings capture full conversations. Step through a run call by call — including the exact moment your new guide changed the model's behavior.</p>
+      </div>
+
+      <div class="feature-card" data-reveal>
+        <div class="rounded-xl border border-border bg-secondary/30 p-4 h-40 overflow-hidden mb-4" aria-hidden="true">
+          <div class="grid grid-cols-2 gap-2 h-full">
+            <div class="rounded-lg bg-white border border-border p-2">
+              <p class="text-[8px] font-bold text-muted-foreground mb-1.5">glm-4.7 · original</p>
+              <div class="space-y-1">
+                <div class="h-1.5 w-10/12 rounded bg-secondary"></div>
+                <div class="h-1.5 w-8/12 rounded bg-secondary"></div>
+                <div class="h-1.5 w-11/12 rounded bg-secondary"></div>
+              </div>
+              <p class="mt-1.5 text-[8px] text-muted-foreground">1,247 tok · 285ms</p>
+            </div>
+            <div class="rounded-lg bg-white border border-accent/40 p-2">
+              <p class="text-[8px] font-bold text-accent mb-1.5">kimi-k2.5 · replay</p>
+              <div class="space-y-1">
+                <div class="rc-bar scene-anim h-1.5 w-10/12 rounded bg-secondary"></div>
+                <div class="rc-bar scene-anim h-1.5 w-9/12 rounded bg-go/30" style="animation-delay: 0.4s"></div>
+                <div class="rc-bar scene-anim h-1.5 w-7/12 rounded bg-error/25" style="animation-delay: 0.8s"></div>
+              </div>
+              <p class="mt-1.5 text-[8px] text-muted-foreground">1,180 tok · 198ms</p>
+            </div>
+          </div>
+        </div>
+        <h3 class="text-base font-semibold text-foreground">Experiment on real traffic</h3>
+        <p class="mt-2 text-sm text-muted-foreground leading-relaxed">Replay any logged call against another model and diff the answers. Test whether your harness holds up on a cheaper model — with production prompts, not synthetic benchmarks.</p>
+      </div>
+
+      <div class="feature-card" data-reveal>
+        <div class="rounded-xl border border-border bg-secondary/30 p-4 h-40 overflow-hidden mb-4" aria-hidden="true">
+          <div class="flex items-center gap-1.5 text-[9px] text-muted-foreground mb-2">
+            <span class="rounded bg-accent/10 px-1.5 py-0.5 font-bold text-accent">streaming</span>
+            <span class="ms-drop-chip scene-anim rounded bg-error/10 px-1.5 py-0.5 font-bold text-error">openai dropped mid-stream</span>
+          </div>
+          <div class="rounded-lg bg-white border border-border p-2.5 text-[10px] leading-relaxed text-foreground font-mono">
+            <div class="ms-line-1 scene-anim">The three key findings from the</div>
+            <div class="flex"><div class="ms-line-2 scene-anim">Q3 report are: first, revenue…</div><span class="ms-caret scene-anim text-accent">▌</span></div>
+            <div class="mt-1.5 text-[8px] text-muted-foreground">↳ continued by <span class="font-semibold text-go">anthropic</span> — same message, no reset</div>
+          </div>
+        </div>
+        <h3 class="text-base font-semibold text-foreground">Failures you can read</h3>
+        <p class="mt-2 text-sm text-muted-foreground leading-relaxed">When a call fails, the page leads with why: each provider's real error body, per-step timing, what the client saw. Rate limit or bad key? Overflow or outage? You'll know in seconds.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+{# ── And it routes ── #}
+<section class="section-padding md:section-padding-md bg-background">
+  <div class="mx-auto max-w-6xl px-6 md:px-12 lg:px-20">
+    {# — And it routes: fallback theater — #}
     <div data-reveal class="grid items-center gap-12 lg:grid-cols-5 lg:gap-16">
       <div class="lg:col-span-2 reveal-rise">
         <p class="text-sm font-semibold tracking-wide text-accent font-body">Automatic fallback</p>
         <h2 class="mt-3 font-display text-3xl md:text-4xl lg:text-5xl leading-[1.05] tracking-tight text-foreground">
-          Recovery is a harness<br />concern. <em>It's handled.</em>
+          And because it's a router,<br /><em>your runs survive.</em>
         </h2>
         <p class="mt-5 text-base text-muted-foreground leading-relaxed font-body">
-          A long-horizon agent run shouldn't die because one provider had a bad minute.
-          Rate limits, outages, overloads, context overflows — the model layer absorbs them
-          and reroutes, so the loop above keeps executing.
+          The instrument doubles as infrastructure. Chain providers in the order you trust
+          them and a six-hour agent run stops dying because one provider had a bad minute —
+          rate limits, outages, and context overflows reroute to the next step automatically.
         </p>
         <div class="mt-6 flex flex-wrap gap-2 font-body">
           <span class="inline-flex items-center gap-1.5 rounded-full border border-border bg-background px-3 py-1 text-xs font-medium text-foreground">
@@ -312,92 +406,6 @@ eleventyExcludeFromCollections: true
   </div>
 </section>
 
-{# ── Sensors / tighten / evals — harness framing of the big three ── #}
-<section class="section-padding md:section-padding-md bg-background">
-  <div class="mx-auto max-w-6xl px-6 md:px-12 lg:px-20">
-    <div class="text-center max-w-2xl mx-auto" data-reveal>
-      <p class="text-sm font-semibold tracking-wide text-accent font-body">The harness loop</p>
-      <h2 class="mt-3 font-display text-3xl md:text-4xl leading-[1.05] tracking-tight text-foreground reveal-rise">
-        Observe. Tighten. <em>Verify.</em>
-      </h2>
-      <p class="mt-4 text-base text-muted-foreground leading-relaxed font-body reveal-rise">
-        Every agent mistake is a chance to tighten the harness — if you can see it,
-        change something, and prove the change helps. That loop is built in.
-      </p>
-    </div>
-
-    <div class="mt-14 grid gap-6 lg:grid-cols-3 font-body">
-      <div class="feature-card" data-reveal>
-        <p class="text-xs font-bold uppercase tracking-wider text-accent mb-3">Sensors</p>
-        <div class="rounded-xl border border-border bg-secondary/30 p-4 h-40 overflow-hidden mb-4" aria-hidden="true">
-          <div class="flex items-center justify-between mb-2 text-[9px]">
-            <span class="rounded bg-accent/10 px-1.5 py-0.5 font-bold text-accent">session: checkout-agent</span>
-            <span class="flex items-center gap-1 font-bold text-error"><span class="rec-dot scene-anim h-1.5 w-1.5 rounded-full bg-error"></span>REC</span>
-          </div>
-          <div class="space-y-1 text-[10px] font-mono">
-            <div class="ss-row scene-anim flex justify-between rounded bg-white border border-border px-2 py-1.5"><span class="text-foreground">get_cart → 200</span><span class="text-muted-foreground">241ms</span></div>
-            <div class="ss-row scene-anim flex justify-between rounded bg-white border border-border px-2 py-1.5" style="animation-delay: 0.7s"><span class="text-foreground">apply_discount → 200</span><span class="text-muted-foreground">189ms</span></div>
-            <div class="ss-row scene-anim flex justify-between rounded bg-white border border-border px-2 py-1.5" style="animation-delay: 1.4s"><span class="text-warn">charge_card → fallback</span><span class="text-muted-foreground">trace ↗</span></div>
-          </div>
-        </div>
-        <h3 class="text-base font-semibold text-foreground">See every model call</h3>
-        <p class="mt-2 text-sm text-muted-foreground leading-relaxed">Sessions, recordings, fallback traces with real provider error bodies, latency and cache analytics. Your harness can't learn from failures it can't see.</p>
-      </div>
-
-      <div class="feature-card" data-reveal>
-        <p class="text-xs font-bold uppercase tracking-wider text-accent mb-3">Tighten</p>
-        <div class="rounded-xl border border-border bg-secondary/30 p-4 h-40 overflow-hidden mb-4" aria-hidden="true">
-          <div class="space-y-1.5 text-[10px] font-mono">
-            <div class="cr-swap-a scene-anim relative z-10 flex items-center gap-2 rounded-lg bg-white border border-border px-2.5 py-1.5 shadow-sm">
-              <span class="font-semibold text-foreground">zai / glm-5.1</span>
-              <span class="ml-auto rounded bg-go/10 px-1.5 py-0.5 text-[8px] font-bold text-go">Primary</span>
-            </div>
-            <div class="cr-swap-b scene-anim flex items-center gap-2 rounded-lg bg-white border border-border px-2.5 py-1.5">
-              <span class="font-semibold text-foreground">moonshot / kimi-k2.5</span>
-              <span class="ml-auto rounded bg-warn/10 px-1.5 py-0.5 text-[8px] font-bold text-warn">Fallback</span>
-            </div>
-            <div class="flex items-center gap-2 rounded-lg bg-white border border-border px-2.5 py-1.5 opacity-70">
-              <span class="font-semibold text-foreground">openai / gpt-5.2</span>
-              <span class="ml-auto rounded bg-error/10 px-1.5 py-0.5 text-[8px] font-bold text-error">Last resort</span>
-            </div>
-          </div>
-          <p class="mt-2 text-[9px] text-muted-foreground">reordered live — next request follows the new chain</p>
-        </div>
-        <h3 class="text-base font-semibold text-foreground">Change it without redeploying</h3>
-        <p class="mt-2 text-sm text-muted-foreground leading-relaxed">Reorder providers, swap models, tune reasoning effort, rotate keys — from the dashboard, mid-incident. The agent keeps one base URL; the harness tightens behind it.</p>
-      </div>
-
-      <div class="feature-card" data-reveal>
-        <p class="text-xs font-bold uppercase tracking-wider text-accent mb-3">Verify</p>
-        <div class="rounded-xl border border-border bg-secondary/30 p-4 h-40 overflow-hidden mb-4" aria-hidden="true">
-          <div class="grid grid-cols-2 gap-2 h-full">
-            <div class="rounded-lg bg-white border border-border p-2">
-              <p class="text-[8px] font-bold text-muted-foreground mb-1.5">glm-4.7 · original</p>
-              <div class="space-y-1">
-                <div class="h-1.5 w-10/12 rounded bg-secondary"></div>
-                <div class="h-1.5 w-8/12 rounded bg-secondary"></div>
-                <div class="h-1.5 w-11/12 rounded bg-secondary"></div>
-              </div>
-              <p class="mt-1.5 text-[8px] text-muted-foreground">1,247 tok · 285ms</p>
-            </div>
-            <div class="rounded-lg bg-white border border-accent/40 p-2">
-              <p class="text-[8px] font-bold text-accent mb-1.5">kimi-k2.5 · replay</p>
-              <div class="space-y-1">
-                <div class="rc-bar scene-anim h-1.5 w-10/12 rounded bg-secondary"></div>
-                <div class="rc-bar scene-anim h-1.5 w-9/12 rounded bg-go/30" style="animation-delay: 0.4s"></div>
-                <div class="rc-bar scene-anim h-1.5 w-7/12 rounded bg-error/25" style="animation-delay: 0.8s"></div>
-              </div>
-              <p class="mt-1.5 text-[8px] text-muted-foreground">1,180 tok · 198ms</p>
-            </div>
-          </div>
-        </div>
-        <h3 class="text-base font-semibold text-foreground">Evals on production traffic</h3>
-        <p class="mt-2 text-sm text-muted-foreground leading-relaxed">Replay any logged request against a different model and diff the answers. Your real prompts are the benchmark — audition changes before you commit them to the chain.</p>
-      </div>
-    </div>
-  </div>
-</section>
-
 {# ── CTA ── #}
 <section class="section-padding md:section-padding-md bg-secondary/40">
   <div class="mx-auto max-w-6xl px-6 md:px-12 lg:px-20">
@@ -405,15 +413,15 @@ eleventyExcludeFromCollections: true
       <div class="absolute -top-20 -right-20 h-64 w-64 rounded-full bg-white/5"></div>
       <div class="absolute -bottom-16 -left-16 h-48 w-48 rounded-full bg-white/5"></div>
       <h2 class="relative font-display text-3xl md:text-4xl lg:text-5xl leading-[1.05] tracking-tight text-white">
-        You engineered the harness.<br />Don't leave the <em>model layer</em> naked.
+        Harness engineering<br />starts with <em>seeing.</em>
       </h2>
       <p class="relative mt-5 text-base md:text-lg text-white/80 max-w-xl mx-auto leading-relaxed font-body">
-        Drop-in for the OpenAI and Anthropic APIs. Two minutes from signup to your first
-        recovered request. Free while in beta.
+        Create a router, point an agent at it, and read your first real system prompt
+        two minutes from now. Free while in beta.
       </p>
       <div class="relative mt-8 flex flex-col sm:flex-row items-center justify-center gap-3">
         <a href="https://api.dodorouter.com/users/register" class="rounded-full bg-white px-8 py-3.5 text-sm font-semibold text-accent transition-all hover:bg-white/90 font-body">
-          Get started free →
+          Start watching →
         </a>
         <a href="/" class="flex items-center gap-2 rounded-full border border-white/25 px-6 py-3.5 text-sm font-medium text-white transition-all hover:bg-white/10 font-body">
           See the general version of this page
