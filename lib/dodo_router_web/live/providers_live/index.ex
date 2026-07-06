@@ -430,7 +430,7 @@ defmodule DodoRouterWeb.ProvidersLive.Index do
                           >
                             {key.label}
                             <span class="text-base-content/40 font-mono text-xs ml-1.5">
-                              {key.key_hint}
+                              {Providers.compact_key_hint(key.key_hint)}
                             </span>
                           </button>
                         </div>

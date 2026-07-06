@@ -806,7 +806,7 @@ defmodule DodoRouterWeb.RouterLive.Show do
                         <option value="">-- Select API Key --</option>
                         <%= for key <- matching_keys(@provider_keys, step) do %>
                           <option value={key.id} selected={step.provider_key_id == key.id}>
-                            {key.label} ({key.key_hint})
+                            {key.label} ({Providers.compact_key_hint(key.key_hint)})
                           </option>
                         <% end %>
                       </select>
@@ -1068,7 +1068,7 @@ defmodule DodoRouterWeb.RouterLive.Show do
                 <% [key | _] -> %>
                   <p id="step-key-hint" class="text-xs text-base-content/50 mt-1.5">
                     Will use your key
-                    <span class="font-mono">{key.label} ({key.key_hint})</span>
+                    <span class="font-mono">{key.label} ({Providers.compact_key_hint(key.key_hint)})</span>
                     — change it on the chain afterwards if needed.
                   </p>
               <% end %>

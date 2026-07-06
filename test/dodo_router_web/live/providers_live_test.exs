@@ -43,7 +43,9 @@ defmodule DodoRouterWeb.ProvidersLiveTest do
 
       {:ok, _live, html} = live(conn, ~p"/providers")
 
-      assert html =~ "sk-•••••••xyz"
+      # old-scheme stored hints are compacted to fixed width at render
+
+      assert html =~ "sk-••••xyz"
     end
 
     test "can open add key form", %{conn: conn} do

@@ -176,13 +176,20 @@ defmodule DodoRouter.Providers do
           prefix <> bullets
 
         true ->
+          # Fixed-width mask: length-preserving bullets made long keys
+          # overflow every UI element that renders a hint.
           prefix = String.slice(key, 0, 3)
           suffix = String.slice(key, -3..-1//1)
-          bullet_count = min(len - 6, 200)
-          bullets = String.duplicate("•", bullet_count)
-          "#{prefix}#{bullets}#{suffix}"
+          "#{prefix}••••#{suffix}"
       end
 
     hint
   end
+
+  @doc """
+  Collapses bullet runs in key hints stored under the old length-preserving
+  scheme, so existing rows display at the same fixed width as new ones.
+  """
+  def compact_key_hint(nil), do: ""
+  def compact_key_hint(hint), do: String.replace(hint, ~r/•{5,}/u, "••••")
 end
