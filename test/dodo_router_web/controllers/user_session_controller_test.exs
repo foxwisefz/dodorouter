@@ -53,7 +53,8 @@ defmodule DodoRouterWeb.UserSessionControllerTest do
         end)
 
       conn = get(conn, ~p"/users/log-in/#{token}")
-      assert html_response(conn, 200) =~ "Confirm and stay logged in"
+      # One button, remember-me implied — no stay/only-this-time choice
+      assert html_response(conn, 200) =~ "Continue to DodoRouter"
     end
 
     test "renders login page for confirmed user", %{conn: conn, user: user} do
