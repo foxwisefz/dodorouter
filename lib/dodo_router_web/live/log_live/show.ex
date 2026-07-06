@@ -69,6 +69,7 @@ defmodule DodoRouterWeb.LogLive.Show do
       |> assign(:show_resp_headers, false)
       |> assign(:expanded_messages, MapSet.new())
       |> assign(:truncation_flags, log.truncation_flags || [])
+      |> assign(:finish_reason, extract_finish_reason(log.response_body))
       |> assign(:replay_count, Logs.replay_counts([log.id]) |> Map.get(log.id, 0))
 
     {:ok, socket}
@@ -195,6 +196,19 @@ defmodule DodoRouterWeb.LogLive.Show do
               Status
             </div>
             <div class="text-lg"><.status_badge status={@log.status} /></div>
+            <div
+              :if={@finish_reason in ["length", "max_tokens", "model_length", "content_filter"]}
+              id="truncation-notice"
+              class="mt-2 flex items-start gap-1.5 rounded-lg bg-warning/10 px-2 py-1.5 text-[11px] leading-snug text-warning"
+              title={"finish_reason: #{@finish_reason}"}
+            >
+              <.icon name="hero-scissors" class="w-3.5 h-3.5 shrink-0 mt-px" />
+              <span>
+                {if @finish_reason == "content_filter",
+                  do: "Response cut off by the provider's content filter",
+                  else: "Response truncated — hit the max_tokens limit"}
+              </span>
+            </div>
           </div>
           
     <!-- Timing -->
@@ -241,7 +255,10 @@ defmodule DodoRouterWeb.LogLive.Show do
             <div class="text-[10px] uppercase tracking-wider text-base-content/40 font-semibold mb-1">
               {if @log.status == "error", do: "Model (last attempted)", else: "Model"}
             </div>
-            <div class={["text-sm font-mono", @log.status == "error" && "text-base-content/50 line-through decoration-error/40"]}>
+            <div class={[
+              "text-sm font-mono",
+              @log.status == "error" && "text-base-content/50 line-through decoration-error/40"
+            ]}>
               {@log.final_model}
             </div>
             <div class="flex items-center gap-1.5 mt-1">
@@ -651,8 +668,19 @@ defmodule DodoRouterWeb.LogLive.Show do
                     <% end %>
                   </div>
                 <% end %>
-                <div class="mockup-code text-xs max-h-[calc(100vh-240px)] overflow-auto">
-                  <pre><code><%= format_json(@log.request_body) %></code></pre>
+                <div class="relative">
+                  <button
+                    id="copy-request-json"
+                    phx-hook="CopyButton"
+                    data-copy={format_json(@log.request_body)}
+                    class="absolute right-2 top-2 z-10 px-2 py-1 rounded bg-base-100/10 text-[10px] font-medium text-base-content/60 hover:text-primary transition-colors"
+                    title="Copy request JSON"
+                  >
+                    <.icon name="hero-clipboard-document" class="w-3.5 h-3.5" />
+                  </button>
+                  <div class="mockup-code text-xs max-h-[calc(100vh-240px)] overflow-auto">
+                    <pre class="whitespace-pre-wrap break-words"><code><%= format_json(@log.request_body) %></code></pre>
+                  </div>
                 </div>
               </div>
             <% end %>
@@ -680,8 +708,19 @@ defmodule DodoRouterWeb.LogLive.Show do
                     <% end %>
                   </div>
                 <% end %>
-                <div class="mockup-code text-xs max-h-[calc(100vh-240px)] overflow-auto">
-                  <pre><code><%= format_json(@log.response_body) %></code></pre>
+                <div class="relative">
+                  <button
+                    id="copy-response-json"
+                    phx-hook="CopyButton"
+                    data-copy={format_json(@log.response_body)}
+                    class="absolute right-2 top-2 z-10 px-2 py-1 rounded bg-base-100/10 text-[10px] font-medium text-base-content/60 hover:text-primary transition-colors"
+                    title="Copy response JSON"
+                  >
+                    <.icon name="hero-clipboard-document" class="w-3.5 h-3.5" />
+                  </button>
+                  <div class="mockup-code text-xs max-h-[calc(100vh-240px)] overflow-auto">
+                    <pre class="whitespace-pre-wrap break-words"><code><%= format_json(@log.response_body) %></code></pre>
+                  </div>
                 </div>
               </div>
             <% end %>
@@ -982,6 +1021,18 @@ defmodule DodoRouterWeb.LogLive.Show do
   defp annotate_provenance(log, user, messages) do
     siblings = Logs.list_session_responses(user, log.session_id)
     Provenance.annotate(messages, siblings)
+  end
+
+  # The finish_reason of the first choice, so truncated or filtered responses
+  # are visible even though the request itself counts as a success.
+  defp extract_finish_reason(nil), do: nil
+
+  defp extract_finish_reason(body) when is_binary(body) do
+    case Jason.decode(body) do
+      {:ok, %{"choices" => [%{"finish_reason" => reason} | _]}} -> reason
+      {:ok, %{"stop_reason" => reason}} -> reason
+      _ -> nil
+    end
   end
 
   defp status_badge(assigns) do

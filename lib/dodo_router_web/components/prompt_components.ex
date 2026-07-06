@@ -91,6 +91,7 @@ defmodule DodoRouterWeb.PromptComponents do
       <div class="space-y-3">
         <.collapsed_message_list
           messages={@system_messages}
+          id_prefix="sys"
           response={false}
           tool_results={%{}}
           cached_indices={@cached_indices}
@@ -125,6 +126,9 @@ defmodule DodoRouterWeb.PromptComponents do
   attr :breakpoint_estimated, :boolean, default: false
   attr :index_offset, :integer, default: 0
   attr :replay_base, :string, default: nil
+  # Namespaces DOM ids: the conversation renders two of these lists (system +
+  # dialogue) whose indexes both start at 0, so ids must not collide.
+  attr :id_prefix, :string, default: "msg"
 
   defp collapsed_message_list(assigns) do
     segments = build_segments(assigns.messages, assigns.response)
@@ -143,6 +147,7 @@ defmodule DodoRouterWeb.PromptComponents do
       <.message_bubble
         message={seg.message}
         index={seg.index}
+        id_prefix={@id_prefix}
         response={seg.response}
         next_message={message_at(@segments, idx + 1)}
         prev_message={message_at(@segments, idx - 1)}
@@ -345,6 +350,7 @@ defmodule DodoRouterWeb.PromptComponents do
 
   attr :message, :map, required: true
   attr :index, :any, required: true
+  attr :id_prefix, :string, default: "msg"
   attr :response, :boolean, default: false
   attr :next_message, :map, default: nil
   attr :prev_message, :map, default: nil
@@ -401,7 +407,7 @@ defmodule DodoRouterWeb.PromptComponents do
         <%= if is_binary(@message.content) && @message.content != "" do %>
           <button
             type="button"
-            id={"copy-#{@index}"}
+            id={"copy-#{@id_prefix}-#{@index}"}
             phx-hook="CopyButton"
             data-copy={@message.content}
             class="text-base-content/25 hover:text-primary transition-colors"

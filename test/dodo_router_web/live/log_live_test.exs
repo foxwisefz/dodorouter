@@ -97,6 +97,103 @@ defmodule DodoRouterWeb.LogLiveTest do
   end
 
   describe "Show" do
+    test "detail page renders no duplicate element ids", %{conn: conn, user: user} do
+      {router, _api_key} = RoutersFixtures.router_fixture(user)
+
+      log =
+        LogsFixtures.log_fixture(router, %{
+          request_body:
+            Jason.encode!(%{
+              "messages" => [
+                %{"role" => "system", "content" => "be terse"},
+                %{"role" => "user", "content" => "hello"},
+                %{"role" => "assistant", "content" => "hi"},
+                %{"role" => "user", "content" => "more"}
+              ]
+            }),
+          response_body:
+            Jason.encode!(%{
+              "choices" => [
+                %{
+                  "finish_reason" => "stop",
+                  "message" => %{"role" => "assistant", "content" => "sure"}
+                }
+              ]
+            })
+        })
+
+      {:ok, _live, html} = live(conn, ~p"/logs/#{log.request_id}")
+
+      ids = Regex.scan(~r/\sid="([^"]+)"/, html, capture: :all_but_first) |> List.flatten()
+      dupes = ids |> Enum.frequencies() |> Enum.filter(fn {_id, n} -> n > 1 end)
+      assert dupes == [], "duplicate element ids: #{inspect(dupes)}"
+    end
+
+    test "raw request and response tabs offer a copy button", %{conn: conn, user: user} do
+      {router, _api_key} = RoutersFixtures.router_fixture(user)
+
+      log =
+        LogsFixtures.log_fixture(router, %{
+          request_body: Jason.encode!(%{"messages" => [%{"role" => "user", "content" => "hi"}]}),
+          response_body:
+            Jason.encode!(%{
+              "choices" => [%{"message" => %{"role" => "assistant", "content" => "yo"}}]
+            })
+        })
+
+      {:ok, live, _html} = live(conn, ~p"/logs/#{log.request_id}")
+
+      live |> element("button", "Original Request") |> render_click()
+      assert has_element?(live, "#copy-request-json[phx-hook=CopyButton][data-copy]")
+
+      live |> element("button", "Final Response") |> render_click()
+      assert has_element?(live, "#copy-response-json[phx-hook=CopyButton][data-copy]")
+    end
+
+    test "a truncated response is called out even when the request succeeded", %{
+      conn: conn,
+      user: user
+    } do
+      {router, _api_key} = RoutersFixtures.router_fixture(user)
+
+      log =
+        LogsFixtures.log_fixture(router, %{
+          status: "success",
+          request_body: Jason.encode!(%{"messages" => [%{"role" => "user", "content" => "hi"}]}),
+          response_body:
+            Jason.encode!(%{
+              "choices" => [
+                %{
+                  "finish_reason" => "length",
+                  "message" => %{"role" => "assistant", "content" => "Call me Ish"}
+                }
+              ]
+            })
+        })
+
+      {:ok, live, html} = live(conn, ~p"/logs/#{log.request_id}")
+
+      assert has_element?(live, "#truncation-notice")
+      assert html =~ "max_tokens"
+
+      # and a normal stop response shows no such warning
+      ok_log =
+        LogsFixtures.log_fixture(router, %{
+          response_body:
+            Jason.encode!(%{
+              "choices" => [
+                %{
+                  "finish_reason" => "stop",
+                  "message" => %{"role" => "assistant", "content" => "done"}
+                }
+              ]
+            })
+        })
+
+      {:ok, live2, _} = live(conn, ~p"/logs/#{ok_log.request_id}")
+      refute has_element?(live2, "#truncation-notice")
+    end
+
     test "renders conversation with cache tokens without crashing", %{conn: conn, user: user} do
       {router, _api_key} = RoutersFixtures.router_fixture(user)
 
