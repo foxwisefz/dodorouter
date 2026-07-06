@@ -325,6 +325,39 @@
   animation-delay: var(--fd, 0s);
 }
 
+/* — Drop-in scene: one line swaps, capabilities unlock (12s loop) — */
+
+@keyframes url-old {
+  0%, 26% { opacity: 1; }
+  32%, 88% { opacity: 0; }
+  96%, 100% { opacity: 1; }
+}
+@keyframes url-new {
+  0%, 28% { opacity: 0; }
+  36%, 90% { opacity: 1; }
+  98%, 100% { opacity: 0; }
+}
+@keyframes url-flash {
+  0%, 24% { background: transparent; }
+  30%, 40% { background: hsl(239, 84%, 67%, 0.12); }
+  50%, 100% { background: transparent; }
+}
+@keyframes chip-unlock {
+  0%, 38% { opacity: 0.45; border-color: var(--color-border); background: hsl(0, 0%, 100%); }
+  46%, 88% { opacity: 1; border-color: hsl(142, 71%, 45%, 0.45); background: hsl(142, 71%, 45%, 0.07); }
+  96%, 100% { opacity: 0.45; border-color: var(--color-border); background: hsl(0, 0%, 100%); }
+}
+@keyframes chip-check {
+  0%, 40% { opacity: 0; transform: scale(0.6); }
+  47%, 88% { opacity: 1; transform: scale(1); }
+  96%, 100% { opacity: 0; }
+}
+@utility url-old { animation: url-old 12s linear infinite; }
+@utility url-new { animation: url-new 12s linear infinite; }
+@utility url-flash { animation: url-flash 12s linear infinite; border-radius: 0.375rem; }
+@utility chip-unlock { animation: chip-unlock 12s linear infinite; animation-delay: var(--cd, 0s); }
+@utility chip-check { animation: chip-check 12s linear infinite; animation-delay: var(--cd, 0s); }
+
 /* — Bento scene 1: mid-stream recovery — */
 
 @keyframes ms-line1 { /* first chunk types out then stalls */

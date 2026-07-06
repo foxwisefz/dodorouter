@@ -179,37 +179,49 @@ description: Drop-in OpenAI- and Anthropic-compatible proxy. Chain providers, fa
           </li>
         </ul>
       </div>
-      <div class="code-block p-5 md:p-6">
-        <div class="flex items-center gap-1.5 mb-4">
-          <span class="h-3 w-3 rounded-full bg-red-400/80"></span>
-          <span class="h-3 w-3 rounded-full bg-yellow-400/80"></span>
-          <span class="h-3 w-3 rounded-full bg-green-400/80"></span>
-          <span class="ml-3 text-xs text-white/30">quickstart.py</span>
+      <div class="rounded-2xl border border-border bg-white p-6 shadow-[0_8px_40px_rgba(0,0,0,0.04)] font-body select-none" data-reveal aria-hidden="true">
+        <p class="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-3">
+          The only line that changes
+        </p>
+        <div class="rounded-xl border border-border bg-secondary/30 px-4 py-3.5 font-mono text-sm overflow-x-auto">
+          <span class="text-muted-foreground">base_url</span>
+          <span class="text-muted-foreground"> = </span>
+          <span class="url-flash scene-anim inline-grid align-bottom px-1">
+            <span class="url-old scene-anim col-start-1 row-start-1 whitespace-nowrap text-error/70 line-through decoration-error/40">"https://api.openai.com/v1"</span>
+            <span class="url-new scene-anim col-start-1 row-start-1 whitespace-nowrap text-go font-semibold">"https://api.dodorouter.com/r/prod/v1"</span>
+          </span>
         </div>
-        <pre class="whitespace-pre"><span class="cm"># Before: your agent calls OpenAI directly</span>
-<span class="kw">from</span> openai <span class="kw">import</span> OpenAI
 
-client <span class="op">=</span> <span class="fn">OpenAI</span>(
-  api_key<span class="op">=</span><span class="str">"sk-..."</span>,
-  base_url<span class="op">=</span><span class="str">"https://api.openai.com/v1"</span>
-)
+        <div class="my-4 flex items-center gap-3">
+          <span class="h-px flex-1 bg-border"></span>
+          <span class="text-[11px] text-muted-foreground">and everything unlocks</span>
+          <span class="h-px flex-1 bg-border"></span>
+        </div>
 
-<span class="cm"># After: your agent routes through DodoRouter</span>
-client <span class="op">=</span> <span class="fn">OpenAI</span>(
-  api_key<span class="op">=</span><span class="str">"dr-..."</span>,
-  base_url<span class="op">=</span><span class="str">"https://api.dodorouter.com/v1"</span>
-)
+        <div class="grid grid-cols-2 gap-2 text-[12px] font-medium text-foreground">
+          <span class="chip-unlock scene-anim flex items-center gap-1.5 rounded-lg border px-2.5 py-2" style="--cd: 0s">
+            <span class="chip-check scene-anim text-go" style="--cd: 0s">✓</span> Automatic failover
+          </span>
+          <span class="chip-unlock scene-anim flex items-center gap-1.5 rounded-lg border px-2.5 py-2" style="--cd: 0.35s">
+            <span class="chip-check scene-anim text-go" style="--cd: 0.35s">✓</span> Every request logged
+          </span>
+          <span class="chip-unlock scene-anim flex items-center gap-1.5 rounded-lg border px-2.5 py-2" style="--cd: 0.7s">
+            <span class="chip-check scene-anim text-go" style="--cd: 0.7s">✓</span> Replay &amp; compare
+          </span>
+          <span class="chip-unlock scene-anim flex items-center gap-1.5 rounded-lg border px-2.5 py-2" style="--cd: 1.05s">
+            <span class="chip-check scene-anim text-go" style="--cd: 1.05s">✓</span> Sessions &amp; recordings
+          </span>
+          <span class="chip-unlock scene-anim flex items-center gap-1.5 rounded-lg border px-2.5 py-2" style="--cd: 1.4s">
+            <span class="chip-check scene-anim text-go" style="--cd: 1.4s">✓</span> Live provider rewiring
+          </span>
+          <span class="chip-unlock scene-anim flex items-center gap-1.5 rounded-lg border px-2.5 py-2" style="--cd: 1.75s">
+            <span class="chip-check scene-anim text-go" style="--cd: 1.75s">✓</span> Key health tracking
+          </span>
+        </div>
 
-<span class="cm"># That's it. Same SDK. Now with automatic fallback.</span>
-resp <span class="op">=</span> client.chat.completions.<span class="fn">create</span>(
-  model<span class="op">=</span><span class="str">"my-production-router"</span>,
-  messages<span class="op">=</span>[
-    {<span class="str">"role"</span>: <span class="str">"user"</span>,
-     <span class="str">"content"</span>: <span class="str">"Hello!"</span>}
-  ],
-  stream<span class="op">=</span><span class="kw">True</span>,
-  tools<span class="op">=</span>my_tools
-)</pre>
+        <p class="mt-4 text-xs text-muted-foreground text-center">
+          Same SDK, same request shapes — streaming and tool calls included.
+        </p>
       </div>
     </div>
   </div>
