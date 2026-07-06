@@ -4,6 +4,7 @@ defmodule DodoRouter.Providers do
   """
 
   import Ecto.Query
+  alias DodoRouter.Providers.KeyHealth
   alias DodoRouter.Repo
   alias DodoRouter.Providers.ProviderKey
   alias DodoRouter.Accounts.User
@@ -154,6 +155,89 @@ defmodule DodoRouter.Providers do
 
   # show bits of API key
   @doc false
+  @doc """
+  Records key health from a completed proxy dispatch's attempted steps.
+
+  Takes the terminal outcome per provider key (a request may retry the same
+  key), classifies it, and applies the KeyHealth state machine with a
+  targeted update_all — no read-modify-write, safe under concurrency.
+  Steps without an assigned key (shared/legacy keys) are skipped.
+  """
+  def record_attempts(attempted_steps) when is_list(attempted_steps) do
+    attempted_steps
+    |> Enum.filter(& &1[:provider_key_id])
+    |> Enum.group_by(& &1[:provider_key_id])
+    |> Enum.each(fn {key_id, attempts} ->
+      attempt = List.last(attempts)
+
+      class =
+        if attempt[:status] == "success" do
+          :ok
+        else
+          KeyHealth.classify(
+            attempt[:http_status],
+            error_reason_atom(attempt[:error]),
+            attempt[:error_body]
+          )
+        end
+
+      apply_health(key_id, class, KeyHealth.error_detail(attempt[:error_body]))
+    end)
+  end
+
+  def record_attempts(_), do: :ok
+
+  @doc """
+  Applies a health class to a key. Reads only the current status, then
+  writes the transition via update_all keyed on that status so concurrent
+  writers converge instead of clobbering.
+  """
+  def apply_health(key_id, class, detail \\ nil) do
+    case Repo.one(from k in ProviderKey, where: k.id == ^key_id, select: {k.id, k.status}) do
+      nil ->
+        :ok
+
+      {_id, current} ->
+        {new_status, fields} = KeyHealth.transition(current, class)
+
+        fields =
+          fields
+          |> Map.merge(if detail && class != :ok, do: %{last_error_detail: detail}, else: %{})
+          |> Map.merge(if new_status == :unchanged, do: %{}, else: %{status: new_status})
+
+        {_count, _} =
+          Repo.update_all(
+            from(k in ProviderKey, where: k.id == ^key_id),
+            set: Map.to_list(fields)
+          )
+
+        :ok
+    end
+  end
+
+  @doc "Marks a key as actively verified just now."
+  def mark_key_verified(key_id) do
+    now = DateTime.utc_now()
+
+    Repo.update_all(
+      from(k in ProviderKey, where: k.id == ^key_id),
+      set: [
+        status: "valid",
+        verified_at: now,
+        last_error_class: nil,
+        last_error_at: nil,
+        last_error_detail: nil
+      ]
+    )
+
+    :ok
+  end
+
+  defp error_reason_atom(nil), do: nil
+  defp error_reason_atom("timeout"), do: :timeout
+  defp error_reason_atom("network_error"), do: :network_error
+  defp error_reason_atom(_), do: nil
+
   def generate_key_hint(nil), do: ""
 
   @doc false

@@ -113,6 +113,26 @@ defmodule DodoRouterWeb.RouterShowLiveTest do
       assert step.provider_key_id == key.id
     end
 
+    test "an unhealthy assigned key shows a warning on the chain", %{
+      conn: conn,
+      router: router,
+      user: user
+    } do
+      key =
+        DodoRouter.ProvidersFixtures.provider_key_fixture(user, %{"provider_slug" => "zai_standard"})
+
+      {:ok, step} =
+        DodoRouter.Routers.create_routing_step(router, %{"provider" => "zai", "model" => "glm-5"})
+
+      {:ok, _} = DodoRouter.Routers.update_routing_step(step, %{provider_key_id: key.id})
+      DodoRouter.Providers.apply_health(key.id, :auth_invalid, "invalid_api_key")
+
+      {:ok, _live, html} = live(conn, ~p"/routers/#{router.id}")
+
+      assert html =~ "failing authentication"
+      assert html =~ "— invalid"
+    end
+
     test "chain key selects offer subscription keys of the same adapter", %{
       conn: conn,
       router: router,

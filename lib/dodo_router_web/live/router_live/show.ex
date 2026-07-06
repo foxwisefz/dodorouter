@@ -806,11 +806,19 @@ defmodule DodoRouterWeb.RouterLive.Show do
                         <option value="">-- Select API Key --</option>
                         <%= for key <- matching_keys(@provider_keys, step) do %>
                           <option value={key.id} selected={step.provider_key_id == key.id}>
-                            {key.label} ({Providers.compact_key_hint(key.key_hint)})
+                            {key.label} ({Providers.compact_key_hint(key.key_hint)}){key_status_suffix(key)}
                           </option>
                         <% end %>
                       </select>
                     </.form>
+                    <p
+                      :if={selected_key_problem(@provider_keys, step)}
+                      class="mt-1.5 text-xs text-error flex items-center gap-1"
+                    >
+                      <.icon name="hero-x-circle" class="size-3.5 shrink-0" />
+                      {selected_key_problem(@provider_keys, step)}
+                      <.link navigate={~p"/providers"} class="underline">Fix in Providers</.link>
+                    </p>
                   </div>
                 </div>
                 <div class="flex flex-col gap-1">
@@ -1601,6 +1609,18 @@ defmodule DodoRouterWeb.RouterLive.Show do
 
   defp normalize_models_provider("openai-codex"), do: "openai"
   defp normalize_models_provider(slug), do: slug
+
+  defp key_status_suffix(%{status: "invalid"}), do: " — invalid"
+  defp key_status_suffix(%{status: "quota_exceeded"}), do: " — out of credits"
+  defp key_status_suffix(_), do: ""
+
+  defp selected_key_problem(provider_keys, step) do
+    case Enum.find(provider_keys, &(&1.id == step.provider_key_id)) do
+      %{status: "invalid"} -> "This key is failing authentication — requests through it will fail."
+      %{status: "quota_exceeded"} -> "This key is out of credits or quota."
+      _ -> nil
+    end
+  end
 
   defp matching_keys(provider_keys, %{provider: provider}) do
     slugs =

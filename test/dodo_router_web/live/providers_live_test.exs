@@ -106,4 +106,26 @@ defmodule DodoRouterWeb.ProvidersLiveTest do
 
     refute has_element?(live, "#return-to-router")
   end
+
+  describe "key verification" do
+    test "saved keys verify asynchronously and show a status badge", %{conn: conn, user: user} do
+      key = DodoRouter.ProvidersFixtures.provider_key_fixture(user, %{"provider_slug" => "zai_standard"})
+
+      {:ok, live, html} = live(conn, ~p"/providers")
+
+      # unverified keys show the click-to-verify affordance
+      assert html =~ "Not verified yet"
+
+      # passive traffic marking an auth failure surfaces as invalid
+      DodoRouter.Providers.apply_health(key.id, :auth_invalid, "invalid_api_key")
+      {:ok, _live2, html2} = live(conn, ~p"/providers")
+      assert html2 =~ "Invalid since"
+
+      # a later success self-heals to verified
+      DodoRouter.Providers.apply_health(key.id, :ok)
+      {:ok, _live3, html3} = live(conn, ~p"/providers")
+      assert html3 =~ "Verified"
+      _ = live
+    end
+  end
 end
