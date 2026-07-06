@@ -589,11 +589,21 @@ defmodule DodoRouter.MCP.Tools do
         {:error, "No tool named #{name}. Call tools/list to see what exists."}
 
       tool ->
-        if Principal.allows?(principal, tool.scopes) do
-          tool.name |> run(principal, args) |> normalize()
-        else
-          {:error,
-           "This token is missing the #{Enum.join(tool.scopes, " ")} scope, which #{name} requires."}
+        cond do
+          not DodoRouter.Billing.subscribed?(principal.user) ->
+            # The proxy answers 402 for an unpaid owner; a valid OAuth token
+            # must not be a side door around the same paywall. tools/list stays
+            # available so this reads as a billing problem, not a missing tool.
+            {:error,
+             "The account that owns this token has no active subscription, so tools cannot run. " <>
+               "Ask the account owner to visit their DodoRouter billing page to subscribe."}
+
+          Principal.allows?(principal, tool.scopes) ->
+            tool.name |> run(principal, args) |> normalize()
+
+          true ->
+            {:error,
+             "This token is missing the #{Enum.join(tool.scopes, " ")} scope, which #{name} requires."}
         end
     end
   end

@@ -137,6 +137,8 @@ For local development, `mix attesto_phoenix.gen.dev_https` (with [mkcert](https:
 
 ## Troubleshooting
 
+**Every tool refuses with "no active subscription".** Hosted service only: the account that owns the connection has no active subscription, so tools list but will not run — the same paywall that makes the proxy answer `402`. The account owner subscribes on their [billing page](/docs/dashboard/#billing); the connection itself is fine and starts working the moment they do. Not applicable to self-hosted instances unless billing was enabled there.
+
 **The agent connects but every tool says "UNAVAILABLE".** It is missing permissions. Reconnect and tick the ones it needs on the consent screen — the tool description names them.
 
 **Every OAuth request fails with "the request must be made over TLS", but the URL is https.** TLS terminates at your reverse proxy, and the app is not trusting that proxy's `X-Forwarded-Proto` header. A loopback proxy is trusted by default; anything else must be listed in `ATTESTO_TRUSTED_PROXIES` — see [Self-hosting](#self-hosting) above. Some MCP SDKs raise the same error on their side when the `WWW-Authenticate` challenge on `/mcp` advertises an `http://` metadata URL — check that header with `curl -si -X POST <base>/mcp`; a current DodoRouter pins it to the configured `https` audience origin.

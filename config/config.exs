@@ -109,6 +109,16 @@ config :dodo_router,
 # (see config/dev.exs and scripts/dev-workspace.sh).
 config :dodo_router, :cookie_suffix, ""
 
+# Stripe billing defaults — overridden in runtime.exs when STRIPE_SECRET_KEY
+# is set. Disabled means the paywall passes everyone through.
+config :dodo_router, :billing,
+  enabled: false,
+  webhook_secret: nil,
+  price_lookup_key: "dodo_router_monthly_19",
+  trial_days: 0
+
+config :dodo_router, :stripe_client, DodoRouter.Billing.StripeClient.Live
+
 # Configures the endpoint
 config :dodo_router, DodoRouterWeb.Endpoint,
   url: [host: "localhost"],

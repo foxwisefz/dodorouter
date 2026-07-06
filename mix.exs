@@ -100,7 +100,8 @@ defmodule DodoRouter.MixProject do
       {:bandit, "~> 1.5"},
       {:logger_file_backend, "~> 0.0.14"},
       {:castle, "~> 0.3.1"},
-      {:forecastle, "~> 0.1.3"}
+      {:forecastle, "~> 0.1.3"},
+      {:stripity_stripe, "~> 3.2"}
     ]
   end
 
