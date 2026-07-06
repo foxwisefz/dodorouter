@@ -224,7 +224,8 @@ defmodule DodoRouterWeb.LogLiveTest do
 
       log =
         LogsFixtures.log_fixture(router, %{
-          request_body: Jason.encode!(%{"messages" => [%{"role" => "user", "content" => "2+2?"}]}),
+          request_body:
+            Jason.encode!(%{"messages" => [%{"role" => "user", "content" => "2+2?"}]}),
           response_body:
             Jason.encode!(%{
               "choices" => [
@@ -283,6 +284,41 @@ defmodule DodoRouterWeb.LogLiveTest do
       # the response's sections are open; the history message's are not
       assert html =~ ~r/<details class="md-section" open/
       assert html =~ ~r/<details class="md-section">/
+    end
+
+    test "system preamble folds into a single row so the dialogue leads", %{
+      conn: conn,
+      user: user
+    } do
+      {router, _api_key} = RoutersFixtures.router_fixture(user)
+
+      log =
+        LogsFixtures.log_fixture(router, %{
+          request_body:
+            Jason.encode!(%{
+              "messages" => [
+                %{"role" => "system", "content" => String.duplicate("rules ", 200)},
+                %{"role" => "system", "content" => "more rules"},
+                %{"role" => "user", "content" => "the actual question"}
+              ]
+            }),
+          response_body:
+            Jason.encode!(%{
+              "choices" => [
+                %{"message" => %{"role" => "assistant", "content" => "the actual answer"}}
+              ]
+            })
+        })
+
+      {:ok, _live, html} = live(conn, ~p"/logs/#{log.request_id}")
+
+      assert html =~ "System prompt"
+      assert html =~ "2 messages"
+      # collapsed by default
+      assert html =~ ~r/<details[^>]*system-block/
+      refute html =~ ~r/<details[^>]*system-block[^>]*\sopen[\s>]/
+      assert html =~ "the actual question"
+      assert html =~ "the actual answer"
     end
 
     test "detail page renders no duplicate element ids", %{conn: conn, user: user} do

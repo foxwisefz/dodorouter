@@ -89,15 +89,39 @@ defmodule DodoRouterWeb.PromptComponents do
       <% end %>
 
       <div class="space-y-3">
-        <.collapsed_message_list
-          messages={@system_messages}
-          id_prefix="sys"
-          response={false}
-          tool_results={%{}}
-          cached_indices={@cached_indices}
-          breakpoint_idx={@breakpoint_idx}
-          breakpoint_estimated={@breakpoint_estimated}
-        />
+        <%!-- The dialogue is what a log reader came for; the system preamble
+             (often thousands of tokens) folds into one row --%>
+        <details :if={@system_messages != []} class="system-block group">
+          <summary class="cursor-pointer select-none list-none flex items-center gap-2 rounded-lg border border-base-300/40 bg-base-200/40 px-3 py-2 text-xs text-base-content/60 hover:text-base-content transition-colors">
+            <.icon
+              name="hero-chevron-right"
+              class="w-3 h-3 shrink-0 transition-transform group-open:rotate-90"
+            />
+            <span class="font-medium">System prompt</span>
+            <span class="text-base-content/40">
+              {pluralize(length(@system_messages), "message")} · {system_chars(@system_messages)} chars
+            </span>
+            <span
+              :if={
+                MapSet.size(@cached_indices) >= length(@system_messages) and @system_messages != []
+              }
+              class="ml-auto text-[10px] px-1.5 py-0.5 rounded bg-success/10 text-success font-medium"
+            >
+              cached
+            </span>
+          </summary>
+          <div class="mt-2 space-y-3">
+            <.collapsed_message_list
+              messages={@system_messages}
+              id_prefix="sys"
+              response={false}
+              tool_results={%{}}
+              cached_indices={@cached_indices}
+              breakpoint_idx={@breakpoint_idx}
+              breakpoint_estimated={@breakpoint_estimated}
+            />
+          </div>
+        </details>
 
         <%= if length(@tools) > 0 do %>
           <.available_tools tools={@tools} />
@@ -437,7 +461,9 @@ defmodule DodoRouterWeb.PromptComponents do
               class="w-3 h-3 transition-transform group-open:rotate-90"
             /> Reasoning
           </summary>
-          <div class="px-3 pb-2.5 text-xs leading-relaxed text-base-content/60 whitespace-pre-wrap">{@message.reasoning_content}</div>
+          <div class="px-3 pb-2.5 text-xs leading-relaxed text-base-content/60 whitespace-pre-wrap">
+            {@message.reasoning_content}
+          </div>
         </details>
         <div class="max-w-none">
           <MarkdownRenderer.render content={@message.content} open_sections={@response} />
@@ -773,14 +799,16 @@ defmodule DodoRouterWeb.PromptComponents do
 
   def available_tools(assigns) do
     ~H"""
-    <div class="px-4 py-2 bg-base-200/20 border-y border-base-300/20">
-      <div class="flex items-center gap-2 mb-1.5">
-        <span class="text-[10px] uppercase tracking-wider text-base-content/40 font-semibold">
-          Tools
-        </span>
+    <details class="group px-4 py-1" open={length(@tools) <= 8}>
+      <summary class="cursor-pointer select-none list-none flex items-center gap-2 py-1 text-base-content/40 hover:text-base-content/70 transition-colors">
+        <.icon
+          name="hero-chevron-right"
+          class="w-3 h-3 shrink-0 transition-transform group-open:rotate-90"
+        />
+        <span class="text-[10px] uppercase tracking-wider font-semibold">Tools</span>
         <span class="text-[10px] text-base-content/30">{length(@tools)} available</span>
-      </div>
-      <div class="flex flex-wrap gap-1.5">
+      </summary>
+      <div class="flex flex-wrap gap-1.5 mt-1.5">
         <%= for tool <- @tools do %>
           <button
             type="button"
@@ -793,8 +821,14 @@ defmodule DodoRouterWeb.PromptComponents do
           </button>
         <% end %>
       </div>
-    </div>
+    </details>
     """
+  end
+
+  defp system_chars(messages) do
+    messages
+    |> Enum.map(fn m -> m.content |> to_string() |> String.length() end)
+    |> Enum.sum()
   end
 
   def tool_icon(name) do
