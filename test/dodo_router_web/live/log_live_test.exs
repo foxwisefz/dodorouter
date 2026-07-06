@@ -97,6 +97,327 @@ defmodule DodoRouterWeb.LogLiveTest do
   end
 
   describe "Show" do
+    test "subscription-covered requests say plan instead of $0.0000", %{conn: conn, user: user} do
+      {router, _api_key} = RoutersFixtures.router_fixture(user)
+
+      log =
+        LogsFixtures.log_fixture(router, %{
+          estimated_cost_usd: Decimal.new(0),
+          attempted_steps: [
+            %{
+              "provider" => "zai",
+              "provider_key_slug" => "zai_coding",
+              "model" => "glm-4.7",
+              "status" => "success",
+              "latency_ms" => 100
+            }
+          ]
+        })
+
+      {:ok, _live, html} = live(conn, ~p"/logs/#{log.request_id}")
+
+      assert html =~ "included in plan"
+      refute html =~ "$0.0000"
+
+      # a zero-cost API-key request keeps the dollar figure
+      api_log =
+        LogsFixtures.log_fixture(router, %{
+          estimated_cost_usd: Decimal.new(0),
+          attempted_steps: [
+            %{
+              "provider" => "openai",
+              "provider_key_slug" => "openai",
+              "model" => "gpt-4o",
+              "status" => "success",
+              "latency_ms" => 100
+            }
+          ]
+        })
+
+      {:ok, _live, html2} = live(conn, ~p"/logs/#{api_log.request_id}")
+      assert html2 =~ "$0.0000"
+    end
+
+    test "shows the requested model when the router served a different one", %{
+      conn: conn,
+      user: user
+    } do
+      {router, _api_key} = RoutersFixtures.router_fixture(user)
+
+      log =
+        LogsFixtures.log_fixture(router, %{
+          final_model: "glm-4.7",
+          final_provider: "zai",
+          request_body:
+            Jason.encode!(%{
+              "model" => "claude-fable-5",
+              "messages" => [%{"role" => "user", "content" => "hi"}]
+            })
+        })
+
+      {:ok, _live, html} = live(conn, ~p"/logs/#{log.request_id}")
+
+      assert html =~ "requested"
+      assert html =~ "claude-fable-5"
+
+      # same model requested and served -> no redundant line
+      same_log =
+        LogsFixtures.log_fixture(router, %{
+          final_model: "glm-4.7",
+          request_body:
+            Jason.encode!(%{
+              "model" => "glm-4.7",
+              "messages" => [%{"role" => "user", "content" => "hi"}]
+            })
+        })
+
+      {:ok, live2, _} = live(conn, ~p"/logs/#{same_log.request_id}")
+      refute render(live2) =~ "requested"
+    end
+
+    test "links to the session the request belongs to", %{conn: conn, user: user} do
+      {router, _api_key} = RoutersFixtures.router_fixture(user)
+      log = LogsFixtures.log_with_session(router, "checkout-flow")
+
+      {:ok, live, html} = live(conn, ~p"/logs/#{log.request_id}")
+
+      assert html =~ "checkout-flow"
+
+      assert has_element?(
+               live,
+               ~s(a[href="/routers/#{router.id}/sessions/checkout-flow"])
+             )
+    end
+
+    test "timing rows only appear when they add information", %{conn: conn, user: user} do
+      {router, _api_key} = RoutersFixtures.router_fixture(user)
+
+      # upload took 0ms and wait therefore equals TTFB: neither row helps
+      log =
+        LogsFixtures.log_fixture(router, %{
+          latency_ms: 7000,
+          ttfb_ms: 2600,
+          upload_ms: 0
+        })
+
+      {:ok, _live, html} = live(conn, ~p"/logs/#{log.request_id}")
+
+      assert html =~ "TTFB"
+      refute html =~ "Upload"
+      refute html =~ "Wait"
+
+      # a real upload keeps both rows
+      slow_upload =
+        LogsFixtures.log_fixture(router, %{
+          latency_ms: 7000,
+          ttfb_ms: 2600,
+          upload_ms: 400
+        })
+
+      {:ok, _live, html2} = live(conn, ~p"/logs/#{slow_upload.request_id}")
+      assert html2 =~ "Upload"
+      assert html2 =~ "Wait"
+    end
+
+    test "model reasoning is viewable but collapsed", %{conn: conn, user: user} do
+      {router, _api_key} = RoutersFixtures.router_fixture(user)
+
+      log =
+        LogsFixtures.log_fixture(router, %{
+          request_body:
+            Jason.encode!(%{"messages" => [%{"role" => "user", "content" => "2+2?"}]}),
+          response_body:
+            Jason.encode!(%{
+              "choices" => [
+                %{
+                  "finish_reason" => "stop",
+                  "message" => %{
+                    "role" => "assistant",
+                    "content" => "4",
+                    "reasoning_content" => "The user wants simple arithmetic. 2+2 equals 4."
+                  }
+                }
+              ]
+            })
+        })
+
+      {:ok, _live, html} = live(conn, ~p"/logs/#{log.request_id}")
+
+      assert html =~ "Reasoning"
+      assert html =~ "simple arithmetic"
+      # collapsed by default: the <details> tag itself carries no open attr
+      assert html =~ ~r/<details[^>]*reasoning-block/
+      refute html =~ ~r/<details[^>]*reasoning-block[^>]*\sopen[\s>]/
+    end
+
+    test "final response sections start expanded, history stays collapsed", %{
+      conn: conn,
+      user: user
+    } do
+      {router, _api_key} = RoutersFixtures.router_fixture(user)
+
+      log =
+        LogsFixtures.log_fixture(router, %{
+          request_body:
+            Jason.encode!(%{
+              "messages" => [
+                %{"role" => "user", "content" => "## Earlier heading\n\nold context"},
+                %{"role" => "user", "content" => "write the report"}
+              ]
+            }),
+          response_body:
+            Jason.encode!(%{
+              "choices" => [
+                %{
+                  "finish_reason" => "stop",
+                  "message" => %{
+                    "role" => "assistant",
+                    "content" => "## Findings\n\nAll good.\n\n## Next steps\n\nShip it."
+                  }
+                }
+              ]
+            })
+        })
+
+      {:ok, _live, html} = live(conn, ~p"/logs/#{log.request_id}")
+
+      # the response's sections are open; the history message's are not
+      assert html =~ ~r/<details class="md-section" open/
+      assert html =~ ~r/<details class="md-section">/
+    end
+
+    test "system preamble folds into a single row so the dialogue leads", %{
+      conn: conn,
+      user: user
+    } do
+      {router, _api_key} = RoutersFixtures.router_fixture(user)
+
+      log =
+        LogsFixtures.log_fixture(router, %{
+          request_body:
+            Jason.encode!(%{
+              "messages" => [
+                %{"role" => "system", "content" => String.duplicate("rules ", 200)},
+                %{"role" => "system", "content" => "more rules"},
+                %{"role" => "user", "content" => "the actual question"}
+              ]
+            }),
+          response_body:
+            Jason.encode!(%{
+              "choices" => [
+                %{"message" => %{"role" => "assistant", "content" => "the actual answer"}}
+              ]
+            })
+        })
+
+      {:ok, _live, html} = live(conn, ~p"/logs/#{log.request_id}")
+
+      assert html =~ "System prompt"
+      assert html =~ "2 messages"
+      # collapsed by default
+      assert html =~ ~r/<details[^>]*system-block/
+      refute html =~ ~r/<details[^>]*system-block[^>]*\sopen[\s>]/
+      assert html =~ "the actual question"
+      assert html =~ "the actual answer"
+    end
+
+    test "detail page renders no duplicate element ids", %{conn: conn, user: user} do
+      {router, _api_key} = RoutersFixtures.router_fixture(user)
+
+      log =
+        LogsFixtures.log_fixture(router, %{
+          request_body:
+            Jason.encode!(%{
+              "messages" => [
+                %{"role" => "system", "content" => "be terse"},
+                %{"role" => "user", "content" => "hello"},
+                %{"role" => "assistant", "content" => "hi"},
+                %{"role" => "user", "content" => "more"}
+              ]
+            }),
+          response_body:
+            Jason.encode!(%{
+              "choices" => [
+                %{
+                  "finish_reason" => "stop",
+                  "message" => %{"role" => "assistant", "content" => "sure"}
+                }
+              ]
+            })
+        })
+
+      {:ok, _live, html} = live(conn, ~p"/logs/#{log.request_id}")
+
+      ids = Regex.scan(~r/\sid="([^"]+)"/, html, capture: :all_but_first) |> List.flatten()
+      dupes = ids |> Enum.frequencies() |> Enum.filter(fn {_id, n} -> n > 1 end)
+      assert dupes == [], "duplicate element ids: #{inspect(dupes)}"
+    end
+
+    test "raw request and response tabs offer a copy button", %{conn: conn, user: user} do
+      {router, _api_key} = RoutersFixtures.router_fixture(user)
+
+      log =
+        LogsFixtures.log_fixture(router, %{
+          request_body: Jason.encode!(%{"messages" => [%{"role" => "user", "content" => "hi"}]}),
+          response_body:
+            Jason.encode!(%{
+              "choices" => [%{"message" => %{"role" => "assistant", "content" => "yo"}}]
+            })
+        })
+
+      {:ok, live, _html} = live(conn, ~p"/logs/#{log.request_id}")
+
+      live |> element("button", "Original Request") |> render_click()
+      assert has_element?(live, "#copy-request-json[phx-hook=CopyButton][data-copy]")
+
+      live |> element("button", "Final Response") |> render_click()
+      assert has_element?(live, "#copy-response-json[phx-hook=CopyButton][data-copy]")
+    end
+
+    test "a truncated response is called out even when the request succeeded", %{
+      conn: conn,
+      user: user
+    } do
+      {router, _api_key} = RoutersFixtures.router_fixture(user)
+
+      log =
+        LogsFixtures.log_fixture(router, %{
+          status: "success",
+          request_body: Jason.encode!(%{"messages" => [%{"role" => "user", "content" => "hi"}]}),
+          response_body:
+            Jason.encode!(%{
+              "choices" => [
+                %{
+                  "finish_reason" => "length",
+                  "message" => %{"role" => "assistant", "content" => "Call me Ish"}
+                }
+              ]
+            })
+        })
+
+      {:ok, live, html} = live(conn, ~p"/logs/#{log.request_id}")
+
+      assert has_element?(live, "#truncation-notice")
+      assert html =~ "max_tokens"
+
+      # and a normal stop response shows no such warning
+      ok_log =
+        LogsFixtures.log_fixture(router, %{
+          response_body:
+            Jason.encode!(%{
+              "choices" => [
+                %{
+                  "finish_reason" => "stop",
+                  "message" => %{"role" => "assistant", "content" => "done"}
+                }
+              ]
+            })
+        })
+
+      {:ok, live2, _} = live(conn, ~p"/logs/#{ok_log.request_id}")
+      refute has_element?(live2, "#truncation-notice")
+    end
+
     test "renders conversation with cache tokens without crashing", %{conn: conn, user: user} do
       {router, _api_key} = RoutersFixtures.router_fixture(user)
 
@@ -134,9 +455,9 @@ defmodule DodoRouterWeb.LogLiveTest do
       assert html =~ "response"
       # 400 cached of (400 cached + 500 billed) = 44%, never >100%
       assert html =~ "(44%)"
-      # billed input and output are separated so the cached figure can't
-      # dwarf an ambiguous "Tokens" total
-      assert html =~ "Input (billed)"
+      # new (uncached) input and output are separated so the cached figure
+      # can't dwarf an ambiguous "Tokens" total
+      assert html =~ "Input (new)"
       assert html =~ "Output"
     end
 

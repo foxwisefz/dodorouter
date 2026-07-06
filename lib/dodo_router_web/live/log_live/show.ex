@@ -69,6 +69,7 @@ defmodule DodoRouterWeb.LogLive.Show do
       |> assign(:show_resp_headers, false)
       |> assign(:expanded_messages, MapSet.new())
       |> assign(:truncation_flags, log.truncation_flags || [])
+      |> assign(:finish_reason, extract_finish_reason(log.response_body))
       |> assign(:replay_count, Logs.replay_counts([log.id]) |> Map.get(log.id, 0))
 
     {:ok, socket}
@@ -195,6 +196,19 @@ defmodule DodoRouterWeb.LogLive.Show do
               Status
             </div>
             <div class="text-lg"><.status_badge status={@log.status} /></div>
+            <div
+              :if={@finish_reason in ["length", "max_tokens", "model_length", "content_filter"]}
+              id="truncation-notice"
+              class="mt-2 flex items-start gap-1.5 rounded-lg bg-warning/10 px-2 py-1.5 text-[11px] leading-snug text-warning"
+              title={"finish_reason: #{@finish_reason}"}
+            >
+              <.icon name="hero-scissors" class="w-3.5 h-3.5 shrink-0 mt-px" />
+              <span>
+                {if @finish_reason == "content_filter",
+                  do: "Response cut off by the provider's content filter",
+                  else: "Response truncated — hit the max_tokens limit"}
+              </span>
+            </div>
           </div>
           
     <!-- Timing -->
@@ -219,12 +233,17 @@ defmodule DodoRouterWeb.LogLive.Show do
                 <span class="text-base-content/60">TTFB</span>
                 <span class="font-mono">{fmt_ms(@log.ttfb_ms)}</span>
               </div>
-              <div :if={@log.upload_ms} class="flex justify-between">
+              <%!-- Upload/Wait only earn a row when upload actually took time;
+                   otherwise Wait just repeats TTFB --%>
+              <div :if={@log.upload_ms && @log.upload_ms > 0} class="flex justify-between">
                 <span class="text-base-content/60">Upload</span>
                 <span class="font-mono">{fmt_ms(@log.upload_ms)}</span>
               </div>
-              <div :if={@log.ttfb_ms} class="flex justify-between">
-                <span class="text-base-content/60">Wait</span>
+              <div
+                :if={@log.ttfb_ms && @log.upload_ms && @log.upload_ms > 0}
+                class="flex justify-between"
+              >
+                <span class="text-base-content/60" title="TTFB minus upload">Wait</span>
                 <span class="font-mono">{fmt_ms(wait_time(@log))}</span>
               </div>
               <%= if @log.provider_processing_ms do %>
@@ -241,7 +260,10 @@ defmodule DodoRouterWeb.LogLive.Show do
             <div class="text-[10px] uppercase tracking-wider text-base-content/40 font-semibold mb-1">
               {if @log.status == "error", do: "Model (last attempted)", else: "Model"}
             </div>
-            <div class={["text-sm font-mono", @log.status == "error" && "text-base-content/50 line-through decoration-error/40"]}>
+            <div class={[
+              "text-sm font-mono",
+              @log.status == "error" && "text-base-content/50 line-through decoration-error/40"
+            ]}>
               {@log.final_model}
             </div>
             <div class="flex items-center gap-1.5 mt-1">
@@ -249,6 +271,13 @@ defmodule DodoRouterWeb.LogLive.Show do
                 <.provider_logo slug={normalize_slug(@log.final_provider)} class="w-2.5 h-2.5" />
               </div>
               <div class="text-xs text-base-content/60">{@log.final_provider}</div>
+            </div>
+            <div
+              :if={requested_model(@req_params, @log)}
+              class="mt-1 text-[11px] text-base-content/40"
+              title="Model named by the client; the routing chain decided what actually served it"
+            >
+              requested: <span class="font-mono">{requested_model(@req_params, @log)}</span>
             </div>
             <%= if effort = attempt_effort(List.last(@log.attempted_steps)) do %>
               <div class="mt-1.5">
@@ -260,6 +289,20 @@ defmodule DodoRouterWeb.LogLive.Show do
                 </span>
               </div>
             <% end %>
+          </div>
+          
+    <!-- Session -->
+          <div :if={@log.session_id}>
+            <div class="text-[10px] uppercase tracking-wider text-base-content/40 font-semibold mb-1">
+              Session
+            </div>
+            <.link
+              navigate={~p"/routers/#{@log.router_id}/sessions/#{@log.session_id}"}
+              class="text-xs font-mono text-primary hover:underline break-all"
+              title="All requests in this session"
+            >
+              {@log.session_id}
+            </.link>
           </div>
           
     <!-- Usage -->
@@ -274,7 +317,12 @@ defmodule DodoRouterWeb.LogLive.Show do
               </div>
               <%= if @log.prompt_tokens || @log.completion_tokens do %>
                 <div class="flex justify-between">
-                  <span class="text-base-content/60">Input (billed)</span>
+                  <span
+                    class="text-base-content/60"
+                    title="Uncached prompt tokens. Cache reads are billed separately at a reduced rate."
+                  >
+                    Input (new)
+                  </span>
                   <span class="font-mono">{@log.prompt_tokens || "—"}</span>
                 </div>
               <% else %>
@@ -316,14 +364,23 @@ defmodule DodoRouterWeb.LogLive.Show do
               </div>
               <div class="flex justify-between">
                 <span class="text-base-content/60">Cost</span>
-                <span class="font-mono">
-                  {if @log.estimated_cost_usd,
-                    do: "$#{Decimal.round(@log.estimated_cost_usd, 4)}",
-                    else: "-"}
-                </span>
+                <%= if plan_covered?(@log) do %>
+                  <span
+                    class="text-success"
+                    title="Served through a subscription/coding-plan key — no marginal per-token cost"
+                  >
+                    included in plan
+                  </span>
+                <% else %>
+                  <span class="font-mono">
+                    {if @log.estimated_cost_usd,
+                      do: "$#{Decimal.round(@log.estimated_cost_usd, 4)}",
+                      else: "-"}
+                  </span>
+                <% end %>
               </div>
               <div class="flex justify-between">
-                <span class="text-base-content/60">Size</span>
+                <span class="text-base-content/60" title="Request payload size">Req size</span>
                 <span class="font-mono">{format_bytes(@log.payload_size_bytes)}</span>
               </div>
             </div>
@@ -651,8 +708,19 @@ defmodule DodoRouterWeb.LogLive.Show do
                     <% end %>
                   </div>
                 <% end %>
-                <div class="mockup-code text-xs max-h-[calc(100vh-240px)] overflow-auto">
-                  <pre><code><%= format_json(@log.request_body) %></code></pre>
+                <div class="relative">
+                  <button
+                    id="copy-request-json"
+                    phx-hook="CopyButton"
+                    data-copy={format_json(@log.request_body)}
+                    class="absolute right-2 top-2 z-10 px-2 py-1 rounded bg-base-100/10 text-[10px] font-medium text-base-content/60 hover:text-primary transition-colors"
+                    title="Copy request JSON"
+                  >
+                    <.icon name="hero-clipboard-document" class="w-3.5 h-3.5" />
+                  </button>
+                  <div class="mockup-code text-xs max-h-[calc(100vh-240px)] overflow-auto">
+                    <pre class="whitespace-pre-wrap break-words"><code><%= format_json(@log.request_body) %></code></pre>
+                  </div>
                 </div>
               </div>
             <% end %>
@@ -680,8 +748,19 @@ defmodule DodoRouterWeb.LogLive.Show do
                     <% end %>
                   </div>
                 <% end %>
-                <div class="mockup-code text-xs max-h-[calc(100vh-240px)] overflow-auto">
-                  <pre><code><%= format_json(@log.response_body) %></code></pre>
+                <div class="relative">
+                  <button
+                    id="copy-response-json"
+                    phx-hook="CopyButton"
+                    data-copy={format_json(@log.response_body)}
+                    class="absolute right-2 top-2 z-10 px-2 py-1 rounded bg-base-100/10 text-[10px] font-medium text-base-content/60 hover:text-primary transition-colors"
+                    title="Copy response JSON"
+                  >
+                    <.icon name="hero-clipboard-document" class="w-3.5 h-3.5" />
+                  </button>
+                  <div class="mockup-code text-xs max-h-[calc(100vh-240px)] overflow-auto">
+                    <pre class="whitespace-pre-wrap break-words"><code><%= format_json(@log.response_body) %></code></pre>
+                  </div>
                 </div>
               </div>
             <% end %>
@@ -982,6 +1061,48 @@ defmodule DodoRouterWeb.LogLive.Show do
   defp annotate_provenance(log, user, messages) do
     siblings = Logs.list_session_responses(user, log.session_id)
     Provenance.annotate(messages, siblings)
+  end
+
+  # The finish_reason of the first choice, so truncated or filtered responses
+  # are visible even though the request itself counts as a success.
+  defp extract_finish_reason(nil), do: nil
+
+  defp extract_finish_reason(body) when is_binary(body) do
+    case Jason.decode(body) do
+      {:ok, %{"choices" => [%{"finish_reason" => reason} | _]}} -> reason
+      {:ok, %{"stop_reason" => reason}} -> reason
+      _ -> nil
+    end
+  end
+
+  # Traffic served through a subscription or coding-plan key has no marginal
+  # per-token cost; "$0.0000" there reads like broken billing.
+  defp plan_covered?(log) do
+    zero_cost? = log.estimated_cost_usd && Decimal.eq?(log.estimated_cost_usd, 0)
+
+    key_slug =
+      case List.last(log.attempted_steps || []) do
+        %{"provider_key_slug" => slug} -> slug
+        _ -> nil
+      end
+
+    provider =
+      case List.last(log.attempted_steps || []) do
+        %{"provider" => p} -> p
+        _ -> nil
+      end
+
+    !!(zero_cost? && key_slug && key_slug != provider)
+  end
+
+  defp requested_model(req_params, log) do
+    case req_params do
+      %{"model" => model} when is_binary(model) and model != "" ->
+        if model != log.final_model, do: model
+
+      _ ->
+        nil
+    end
   end
 
   defp status_badge(assigns) do

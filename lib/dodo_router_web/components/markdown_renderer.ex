@@ -17,6 +17,9 @@ defmodule DodoRouterWeb.MarkdownRenderer do
   Render content as a markdown tree with collapsible sections.
   """
   attr :content, :any, required: true
+  # Final responses read top-to-bottom, so their sections start expanded;
+  # system prompts and history stay collapsed to keep long logs scannable.
+  attr :open_sections, :boolean, default: false
 
   def render(assigns) do
     nodes =
@@ -29,7 +32,7 @@ defmodule DodoRouterWeb.MarkdownRenderer do
 
     ~H"""
     <div class="md-content text-sm leading-snug space-y-1.5">
-      <.md_nodes nodes={@nodes} />
+      <.md_nodes nodes={@nodes} open_sections={@open_sections} />
     </div>
     """
   end
@@ -319,16 +322,18 @@ defmodule DodoRouterWeb.MarkdownRenderer do
   # ---------------------------------------------------------------------------
 
   attr :nodes, :list, required: true
+  attr :open_sections, :boolean, default: false
 
   defp md_nodes(assigns) do
     ~H"""
     <%= for node <- @nodes do %>
-      <.md_node node={node} />
+      <.md_node node={node} open_sections={@open_sections} />
     <% end %>
     """
   end
 
   attr :node, :any, required: true
+  attr :open_sections, :boolean, default: false
 
   defp md_node(%{node: {:section, {:heading, level, text}, children}} = assigns) do
     assigns =
@@ -338,7 +343,7 @@ defmodule DodoRouterWeb.MarkdownRenderer do
       |> assign(:children, children)
 
     ~H"""
-    <details class="md-section">
+    <details class="md-section" open={@open_sections}>
       <summary class={[
         "md-summary cursor-pointer select-none flex items-center gap-1.5 py-0.5 -ml-3 pl-3",
         "hover:text-primary transition-colors list-none"
@@ -347,7 +352,7 @@ defmodule DodoRouterWeb.MarkdownRenderer do
         <span class={heading_class(@level)}><.inline text={@text} /></span>
       </summary>
       <div class="md-section-body pl-3 border-l border-base-300/30 mt-1 space-y-1.5">
-        <.md_nodes nodes={@children} />
+        <.md_nodes nodes={@children} open_sections={@open_sections} />
       </div>
     </details>
     """
@@ -366,7 +371,7 @@ defmodule DodoRouterWeb.MarkdownRenderer do
         <span class="text-base-content/80 font-semibold">&lt;{@name}&gt;</span>
       </summary>
       <div class="md-xml-body pl-3 border-l border-base-content/20 mt-1 space-y-1.5">
-        <.md_nodes nodes={@children} />
+        <.md_nodes nodes={@children} open_sections={@open_sections} />
       </div>
     </details>
     """
@@ -416,7 +421,7 @@ defmodule DodoRouterWeb.MarkdownRenderer do
     ~H"""
     <ul class="list-disc pl-5 space-y-0.5 marker:text-base-content/30">
       <%= for item <- @items do %>
-        <li class="break-words"><.md_nodes nodes={item} /></li>
+        <li class="break-words"><.md_nodes nodes={item} open_sections={@open_sections} /></li>
       <% end %>
     </ul>
     """
@@ -428,7 +433,7 @@ defmodule DodoRouterWeb.MarkdownRenderer do
     ~H"""
     <ol class="list-decimal pl-5 space-y-0.5 marker:text-base-content/30">
       <%= for item <- @items do %>
-        <li class="break-words"><.md_nodes nodes={item} /></li>
+        <li class="break-words"><.md_nodes nodes={item} open_sections={@open_sections} /></li>
       <% end %>
     </ol>
     """
@@ -439,7 +444,7 @@ defmodule DodoRouterWeb.MarkdownRenderer do
 
     ~H"""
     <blockquote class="border-l-2 border-base-300/40 pl-2 text-base-content/70 italic">
-      <.md_nodes nodes={@children} />
+      <.md_nodes nodes={@children} open_sections={@open_sections} />
     </blockquote>
     """
   end
