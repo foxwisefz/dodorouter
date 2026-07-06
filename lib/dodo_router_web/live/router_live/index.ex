@@ -36,12 +36,12 @@ defmodule DodoRouterWeb.RouterLive.Index do
 
   @impl true
   def handle_info({DodoRouterWeb.RouterLive.FormComponent, {:saved, router, api_key}}, socket) do
-    socket =
-      socket
-      |> stream_insert(:routers, router, at: 0)
-      |> assign(:show_api_key, api_key)
-
-    {:noreply, socket}
+    # Send the user straight into their new router; the one-time key is
+    # carried in the flash and rendered by the show page's key banner.
+    {:noreply,
+     socket
+     |> put_flash(:new_api_key, api_key)
+     |> push_navigate(to: ~p"/routers/#{router}")}
   end
 
   def handle_info({DodoRouterWeb.RouterLive.FormComponent, {:saved, router}}, socket) do

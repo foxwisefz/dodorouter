@@ -38,6 +38,7 @@ defmodule DodoRouterWeb.RouterLive.Show do
       |> assign(:connect_collapsed, length(recent_logs) > 0)
       |> assign(:provider_keys, provider_keys)
       |> assign(:steps_list, router.routing_steps)
+      |> assign(:new_api_key, Phoenix.Flash.get(socket.assigns.flash, :new_api_key))
       |> stream(:routing_steps, router.routing_steps)
       |> stream(:recent_logs, recent_logs)
 
