@@ -249,6 +249,42 @@ defmodule DodoRouterWeb.LogLiveTest do
       refute html =~ ~r/<details[^>]*reasoning-block[^>]*\sopen[\s>]/
     end
 
+    test "final response sections start expanded, history stays collapsed", %{
+      conn: conn,
+      user: user
+    } do
+      {router, _api_key} = RoutersFixtures.router_fixture(user)
+
+      log =
+        LogsFixtures.log_fixture(router, %{
+          request_body:
+            Jason.encode!(%{
+              "messages" => [
+                %{"role" => "user", "content" => "## Earlier heading\n\nold context"},
+                %{"role" => "user", "content" => "write the report"}
+              ]
+            }),
+          response_body:
+            Jason.encode!(%{
+              "choices" => [
+                %{
+                  "finish_reason" => "stop",
+                  "message" => %{
+                    "role" => "assistant",
+                    "content" => "## Findings\n\nAll good.\n\n## Next steps\n\nShip it."
+                  }
+                }
+              ]
+            })
+        })
+
+      {:ok, _live, html} = live(conn, ~p"/logs/#{log.request_id}")
+
+      # the response's sections are open; the history message's are not
+      assert html =~ ~r/<details class="md-section" open/
+      assert html =~ ~r/<details class="md-section">/
+    end
+
     test "detail page renders no duplicate element ids", %{conn: conn, user: user} do
       {router, _api_key} = RoutersFixtures.router_fixture(user)
 

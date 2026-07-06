@@ -440,7 +440,7 @@ defmodule DodoRouterWeb.PromptComponents do
           <div class="px-3 pb-2.5 text-xs leading-relaxed text-base-content/60 whitespace-pre-wrap">{@message.reasoning_content}</div>
         </details>
         <div class="max-w-none">
-          <MarkdownRenderer.render content={@message.content} />
+          <MarkdownRenderer.render content={@message.content} open_sections={@response} />
         </div>
 
         <%= if @message.tool_calls && @message.tool_calls != [] do %>
