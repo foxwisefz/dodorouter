@@ -675,7 +675,16 @@ defmodule DodoRouterWeb.RouterLive.Show do
             </div>
             
     <!-- Code snippet -->
-            <div class="code-block">
+            <div class="code-block relative group/snippet">
+              <button
+                id="copy-snippet"
+                phx-hook="CopyButton"
+                data-copy={snippet(@api_format, @code_language, base_url(), @router.slug)}
+                class="absolute top-2 right-2 flex items-center gap-1 px-2 py-1 rounded-md bg-base-100/80 border border-base-300/50 text-[11px] text-base-content/60 hover:text-base-content transition-colors"
+                title="Copy snippet"
+              >
+                <.icon name="hero-clipboard" class="size-3.5" /> Copy
+              </button>
               <pre class="text-xs text-base-content/80"><code><%= raw(snippet(@api_format, @code_language, base_url(), @router.slug)) %></code></pre>
             </div>
 

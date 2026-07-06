@@ -21,12 +21,13 @@ defmodule DodoRouterWeb.RouterShowLiveTest do
       assert html =~ router.slug
     end
 
-    test "shows API usage snippet", %{conn: conn, router: router} do
+    test "shows API usage snippet with a copy button", %{conn: conn, router: router} do
       # Connect is expanded by default on a router with no traffic yet
-      {:ok, _live, html} = live(conn, ~p"/routers/#{router.id}")
+      {:ok, live, html} = live(conn, ~p"/routers/#{router.id}")
 
       assert html =~ "curl"
       assert html =~ router.slug
+      assert has_element?(live, "#copy-snippet[phx-hook=CopyButton][data-copy]")
     end
 
     test "fresh router shows the getting-started checklist and open Connect panel", %{
