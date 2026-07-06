@@ -99,7 +99,9 @@ defmodule DodoRouterWeb.RouterShowLiveTest do
 
     test "adding a step auto-assigns the matching key", %{conn: conn, router: router, user: user} do
       key =
-        DodoRouter.ProvidersFixtures.provider_key_fixture(user, %{"provider_slug" => "zai_standard"})
+        DodoRouter.ProvidersFixtures.provider_key_fixture(user, %{
+          "provider_slug" => "zai_standard"
+        })
 
       {:ok, live, _html} = live(conn, ~p"/routers/#{router.id}/routing")
 
@@ -119,7 +121,9 @@ defmodule DodoRouterWeb.RouterShowLiveTest do
       user: user
     } do
       key =
-        DodoRouter.ProvidersFixtures.provider_key_fixture(user, %{"provider_slug" => "zai_standard"})
+        DodoRouter.ProvidersFixtures.provider_key_fixture(user, %{
+          "provider_slug" => "zai_standard"
+        })
 
       {:ok, step} =
         DodoRouter.Routers.create_routing_step(router, %{"provider" => "zai", "model" => "glm-5"})

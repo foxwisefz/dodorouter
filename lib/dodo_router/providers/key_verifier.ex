@@ -63,7 +63,13 @@ defmodule DodoRouter.Providers.KeyVerifier do
     {url, headers, params} = probe_request(style, base, api_key)
 
     opts =
-      [url: url, headers: headers, params: params, receive_timeout: @receive_timeout, retry: false]
+      [
+        url: url,
+        headers: headers,
+        params: params,
+        receive_timeout: @receive_timeout,
+        retry: false
+      ]
       |> Keyword.merge(req_opts)
 
     case Req.get(opts) do

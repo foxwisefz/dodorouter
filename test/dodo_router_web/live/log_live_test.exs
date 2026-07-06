@@ -350,7 +350,9 @@ defmodule DodoRouterWeb.LogLiveTest do
           http_status: 502,
           request_body: Jason.encode!(%{"messages" => [%{"role" => "user", "content" => "hi"}]}),
           response_body:
-            Jason.encode!(%{"error" => %{"message" => "All providers failed", "type" => "upstream_error"}}),
+            Jason.encode!(%{
+              "error" => %{"message" => "All providers failed", "type" => "upstream_error"}
+            }),
           attempted_steps: [
             %{
               "provider" => "anthropic",

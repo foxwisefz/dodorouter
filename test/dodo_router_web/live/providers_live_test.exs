@@ -109,7 +109,10 @@ defmodule DodoRouterWeb.ProvidersLiveTest do
 
   describe "key verification" do
     test "saved keys verify asynchronously and show a status badge", %{conn: conn, user: user} do
-      key = DodoRouter.ProvidersFixtures.provider_key_fixture(user, %{"provider_slug" => "zai_standard"})
+      key =
+        DodoRouter.ProvidersFixtures.provider_key_fixture(user, %{
+          "provider_slug" => "zai_standard"
+        })
 
       {:ok, live, html} = live(conn, ~p"/providers")
 

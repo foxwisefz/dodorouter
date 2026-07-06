@@ -454,7 +454,8 @@ defmodule DodoRouterWeb.LogLive.Show do
                     </h3>
                   </div>
                   <p :if={client_error_message(@log)} class="text-sm text-base-content/80 mb-3">
-                    Returned to your client: <span class="font-mono">{client_error_message(@log)}</span>
+                    Returned to your client:
+                    <span class="font-mono">{client_error_message(@log)}</span>
                   </p>
                   <div class="space-y-1">
                     <div

@@ -806,7 +806,9 @@ defmodule DodoRouterWeb.RouterLive.Show do
                         <option value="">-- Select API Key --</option>
                         <%= for key <- matching_keys(@provider_keys, step) do %>
                           <option value={key.id} selected={step.provider_key_id == key.id}>
-                            {key.label} ({Providers.compact_key_hint(key.key_hint)}){key_status_suffix(key)}
+                            {key.label} ({Providers.compact_key_hint(key.key_hint)}){key_status_suffix(
+                              key
+                            )}
                           </option>
                         <% end %>
                       </select>
@@ -1076,7 +1078,9 @@ defmodule DodoRouterWeb.RouterLive.Show do
                 <% [key | _] -> %>
                   <p id="step-key-hint" class="text-xs text-base-content/50 mt-1.5">
                     Will use your key
-                    <span class="font-mono">{key.label} ({Providers.compact_key_hint(key.key_hint)})</span>
+                    <span class="font-mono">
+                      {key.label} ({Providers.compact_key_hint(key.key_hint)})
+                    </span>
                     — change it on the chain afterwards if needed.
                   </p>
               <% end %>
@@ -1616,9 +1620,14 @@ defmodule DodoRouterWeb.RouterLive.Show do
 
   defp selected_key_problem(provider_keys, step) do
     case Enum.find(provider_keys, &(&1.id == step.provider_key_id)) do
-      %{status: "invalid"} -> "This key is failing authentication — requests through it will fail."
-      %{status: "quota_exceeded"} -> "This key is out of credits or quota."
-      _ -> nil
+      %{status: "invalid"} ->
+        "This key is failing authentication — requests through it will fail."
+
+      %{status: "quota_exceeded"} ->
+        "This key is out of credits or quota."
+
+      _ ->
+        nil
     end
   end
 

@@ -73,7 +73,9 @@ defmodule DodoRouter.Providers.KeyHealth do
   @spec transition(String.t() | nil, class()) :: {String.t() | :unchanged, map()}
   def transition(_current, :ok) do
     now = DateTime.utc_now()
-    {"valid", %{last_ok_at: now, last_error_class: nil, last_error_at: nil, last_error_detail: nil}}
+
+    {"valid",
+     %{last_ok_at: now, last_error_class: nil, last_error_at: nil, last_error_detail: nil}}
   end
 
   def transition(_current, :auth_invalid), do: flip("invalid", :auth_invalid)
