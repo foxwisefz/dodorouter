@@ -31,10 +31,17 @@ defmodule DodoRouterWeb.ProvidersLive.Index do
 
   @impl true
   def handle_params(params, _uri, socket) do
+    return_to =
+      case params["return_to"] do
+        "/routers/" <> _ = path -> path
+        _ -> nil
+      end
+
     socket =
       socket
       |> assign(:highlighted_key_id, params["highlight"])
       |> assign(:filtered_provider, params["provider"])
+      |> assign(:return_to, return_to)
 
     {:noreply, socket}
   end
@@ -254,6 +261,19 @@ defmodule DodoRouterWeb.ProvidersLive.Index do
       <div class="mb-8">
         <h1 class="text-2xl font-bold">Providers</h1>
         <p class="text-base-content/50 text-sm">Connect your LLM provider API keys</p>
+      </div>
+
+      <div
+        :if={@return_to}
+        id="return-to-router"
+        class="mb-6 flex items-center justify-between gap-3 rounded-xl border border-primary/30 bg-primary/5 px-4 py-3"
+      >
+        <p class="text-sm text-base-content/70">
+          You're setting up a router — add a key below, then continue where you left off.
+        </p>
+        <.link navigate={@return_to} class="btn btn-primary btn-sm shrink-0">
+          Continue setup →
+        </.link>
       </div>
       
     <!-- Provider Filter -->

@@ -89,4 +89,19 @@ defmodule DodoRouterWeb.ProvidersLiveTest do
       assert has_element?(live, "input[name=\"provider_key[api_key]\"]")
     end
   end
+
+  test "shows a continue-setup banner when arriving from a router", %{conn: conn, user: user} do
+    {router, _} = DodoRouter.RoutersFixtures.router_fixture(user)
+
+    {:ok, live, _html} = live(conn, ~p"/providers?return_to=/routers/#{router.id}")
+
+    assert has_element?(live, "#return-to-router")
+    assert has_element?(live, "#return-to-router a[href='/routers/#{router.id}']")
+  end
+
+  test "ignores non-router return_to values", %{conn: conn} do
+    {:ok, live, _html} = live(conn, ~p"/providers?return_to=https://evil.example")
+
+    refute has_element?(live, "#return-to-router")
+  end
 end
