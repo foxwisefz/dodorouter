@@ -1,0 +1,888 @@
+---
+layout: base.njk
+title: Docs — DodoRouter
+description: Complete reference and setup guide for DodoRouter — the OpenAI- and Anthropic-compatible LLM proxy with automatic provider fallback. Covers the API, the dashboard, self-hosting, and connecting Claude Code, OpenCode, Forge, and Codex CLI.
+---
+
+<div class="mx-auto max-w-7xl px-6 md:px-12 lg:px-20 py-12 md:py-16">
+  <div class="lg:grid lg:grid-cols-[240px_1fr] lg:gap-12">
+
+    <!-- Sidebar TOC -->
+    <aside class="hidden lg:block">
+      <nav class="sticky top-8 max-h-[calc(100vh-4rem)] overflow-y-auto pb-8 text-sm">
+        <p class="font-semibold text-foreground mb-3">DodoRouter Docs</p>
+        <ul class="space-y-1 text-muted-foreground">
+          <li><a href="#overview" class="block py-1 hover:text-foreground transition-colors">Overview</a></li>
+          <li><a href="#quickstart" class="block py-1 hover:text-foreground transition-colors">Quickstart (hosted)</a></li>
+          <li><a href="#self-hosting" class="block py-1 hover:text-foreground transition-colors">Self-hosting</a></li>
+          <li><a href="#concepts" class="block py-1 hover:text-foreground transition-colors">Core concepts</a></li>
+          <li><a href="#api-reference" class="block py-1 hover:text-foreground transition-colors">API reference</a></li>
+          <li><a href="#providers" class="block py-1 hover:text-foreground transition-colors">Supported providers</a></li>
+          <li><a href="#models-pricing" class="block py-1 hover:text-foreground transition-colors">Models &amp; pricing</a></li>
+          <li><a href="#dashboard" class="block py-1 hover:text-foreground transition-colors">Dashboard guide</a></li>
+          <li><a href="#integrations" class="block py-1 hover:text-foreground transition-colors">Connect a coding agent</a></li>
+          <li class="pl-3 space-y-1 border-l border-border ml-1">
+            <li><a href="#claude-code" class="block py-0.5 hover:text-foreground transition-colors">Claude Code</a></li>
+            <li><a href="#opencode" class="block py-0.5 hover:text-foreground transition-colors">OpenCode</a></li>
+            <li><a href="#forge" class="block py-0.5 hover:text-foreground transition-colors">Forge</a></li>
+            <li><a href="#codex-cli" class="block py-0.5 hover:text-foreground transition-colors">Codex CLI</a></li>
+          </li>
+          <li><a href="#deployment" class="block py-1 hover:text-foreground transition-colors">Deployment</a></li>
+          <li><a href="#troubleshooting" class="block py-1 hover:text-foreground transition-colors">Troubleshooting &amp; FAQ</a></li>
+          <li><a href="#license" class="block py-1 hover:text-foreground transition-colors">License</a></li>
+        </ul>
+      </nav>
+    </aside>
+
+    <!-- Content -->
+    <div class="min-w-0 max-w-3xl">
+
+      <div class="mb-10">
+        <div class="inline-flex items-center gap-2 rounded-full border border-border bg-background px-4 py-1.5 text-sm text-muted-foreground font-body mb-5">
+          <span class="relative flex h-2 w-2">
+            <span class="absolute inline-flex h-full w-full animate-ping rounded-full bg-go opacity-75"></span>
+            <span class="relative inline-flex h-2 w-2 rounded-full bg-go"></span>
+          </span>
+          Every endpoint on this page was tested against a live instance
+        </div>
+        <h1 class="font-display text-4xl md:text-5xl leading-[1.05] tracking-tight text-foreground">Documentation</h1>
+        <p class="mt-4 text-lg text-muted-foreground leading-relaxed">
+          DodoRouter is an LLM proxy and router. Point any OpenAI-, Anthropic-, or Responses-API client at it once,
+          and it forwards your requests through a fallback chain of providers you configure &mdash; retrying the next
+          provider automatically on rate limits, outages, or context overflows &mdash; while logging every request.
+        </p>
+      </div>
+
+      <!-- OVERVIEW -->
+      <section id="overview" class="scroll-mt-8 mb-14">
+        <h2 class="font-display text-2xl text-foreground mb-4 pb-2 border-b border-border">Overview</h2>
+        <p class="text-muted-foreground leading-relaxed mb-4">
+          A DodoRouter deployment has one account, any number of <strong class="text-foreground font-medium">routers</strong>,
+          and a pool of <strong class="text-foreground font-medium">provider keys</strong> (your OpenAI, Anthropic, z.ai,
+          Moonshot, etc. credentials). Each router has its own DodoRouter API key and its own ordered list of
+          <strong class="text-foreground font-medium">routing steps</strong> &mdash; ordered pairs of (provider, model) that
+          DodoRouter tries in sequence.
+        </p>
+        <p class="text-muted-foreground leading-relaxed mb-4">
+          Your client (a script, an SDK, or a coding-agent CLI like Claude Code) talks to DodoRouter using a
+          completely standard OpenAI or Anthropic request. DodoRouter ignores the <code class="bg-secondary rounded px-1.5 py-0.5 text-[0.85em]">model</code>
+          field you send and instead dispatches to routing step&nbsp;1. If that provider call fails in a way that's safe to
+          retry (rate limit, 5xx, timeout, context overflow, auth error), DodoRouter automatically moves to step&nbsp;2, then
+          step&nbsp;3, and so on, only returning an error once every step has failed. The response is converted back to
+          the format your client expects, so the client never has to know which provider actually served the request.
+        </p>
+        <div class="rounded-xl border border-border bg-secondary/30 p-5 my-6">
+          <p class="text-sm font-semibold text-foreground mb-2">Request flow</p>
+          <p class="text-sm text-muted-foreground font-mono leading-relaxed">
+            your client &rarr; DodoRouter (<code class="bg-secondary rounded px-1 py-0.5">/r/&#123;router&#125;/v1/...</code>)<br/>
+            &nbsp;&nbsp;&nbsp;&nbsp;&rarr; step 1: provider A / model X &nbsp;<span class="text-error">✗ 429 rate limited</span><br/>
+            &nbsp;&nbsp;&nbsp;&nbsp;&rarr; step 2: provider B / model Y &nbsp;<span class="text-go">✓ 200 success</span><br/>
+            &larr; response, converted back to your client's format
+          </p>
+        </div>
+        <p class="text-muted-foreground leading-relaxed">
+          DodoRouter is a Phoenix (Elixir) application. It ships as a hosted service at
+          <a href="https://api.dodorouter.com" class="text-accent hover:underline">api.dodorouter.com</a> and as
+          self-hostable open source at
+          <a href="https://github.com/foxwise-ai/dodorouter" target="_blank" rel="noopener noreferrer" class="text-accent hover:underline">github.com/foxwise-ai/dodorouter</a>.
+        </p>
+      </section>
+
+      <!-- QUICKSTART -->
+      <section id="quickstart" class="scroll-mt-8 mb-14">
+        <h2 class="font-display text-2xl text-foreground mb-4 pb-2 border-b border-border">Quickstart (hosted)</h2>
+        <p class="text-muted-foreground leading-relaxed mb-4">
+          This walks through the exact steps on the hosted instance at <code class="bg-secondary rounded px-1.5 py-0.5 text-[0.85em]">api.dodorouter.com</code>.
+          Everything here also works identically on a self-hosted instance &mdash; just swap the base URL.
+        </p>
+
+        <h3 class="font-display text-lg text-foreground mt-6 mb-2">1. Create an account</h3>
+        <p class="text-muted-foreground leading-relaxed mb-2">
+          Go to <a href="https://api.dodorouter.com/users/register" class="text-accent hover:underline">api.dodorouter.com/users/register</a>
+          and enter your email. DodoRouter uses passwordless, magic-link login: there's no password to set at this
+          step, just an email address and agreement to the Terms of Service.
+        </p>
+        <p class="text-muted-foreground leading-relaxed mb-2">
+          DodoRouter emails you a one-time login link. Open it and click <strong class="text-foreground font-medium">Continue to DodoRouter</strong> &mdash;
+          this both confirms your account and logs you in. (If you'd rather use a password day-to-day, you can set
+          one later under <strong class="text-foreground font-medium">Settings</strong>; magic-link login keeps working either way.)
+        </p>
+
+        <h3 class="font-display text-lg text-foreground mt-6 mb-2">2. Create a router</h3>
+        <p class="text-muted-foreground leading-relaxed mb-2">
+          On first login you're dropped straight into <strong class="text-foreground font-medium">New Router</strong>. Give it a name
+          (e.g. <code class="bg-secondary rounded px-1.5 py-0.5 text-[0.85em]">my-agent</code>) &mdash; a URL-safe slug is derived from it automatically.
+          Saving generates your router's API key, shown <strong class="text-foreground font-medium">once</strong> in a banner. Copy it now; DodoRouter
+          only ever stores a salted hash, so if you lose it you'll need to regenerate a new one from the
+          <strong class="text-foreground font-medium">API Keys</strong> page (which invalidates the old one).
+        </p>
+
+        <h3 class="font-display text-lg text-foreground mt-6 mb-2">3. Add a provider API key</h3>
+        <p class="text-muted-foreground leading-relaxed mb-2">
+          Go to <strong class="text-foreground font-medium">Providers</strong>, pick a provider (e.g. OpenAI or Anthropic), click
+          <strong class="text-foreground font-medium">Add Key</strong>, and paste in your API key from that provider. DodoRouter verifies
+          it in the background and shows a green check once confirmed valid.
+        </p>
+
+        <h3 class="font-display text-lg text-foreground mt-6 mb-2">4. Add a routing step</h3>
+        <p class="text-muted-foreground leading-relaxed mb-2">
+          Open your router, and under <strong class="text-foreground font-medium">Routing Chain</strong> click
+          <strong class="text-foreground font-medium">Add Step</strong>. Choose the provider, then the model (pick from the list, synced
+          from live provider catalogs, or choose <strong class="text-foreground font-medium">Custom&hellip;</strong> to type an exact model id).
+          Add a second and third step with different providers if you want automatic fallback &mdash; that's the whole point.
+        </p>
+
+        <h3 class="font-display text-lg text-foreground mt-6 mb-2">5. Send your first request</h3>
+        <p class="text-muted-foreground leading-relaxed mb-3">
+          Use the router's API key as a Bearer token. The <code class="bg-secondary rounded px-1.5 py-0.5 text-[0.85em]">model</code>
+          value you send doesn't matter &mdash; DodoRouter always uses whatever model is configured on the routing step &mdash;
+          so <code class="bg-secondary rounded px-1.5 py-0.5 text-[0.85em]">"default"</code> is a fine placeholder.
+        </p>
+        <div class="code-block p-4 my-3"><pre class="whitespace-pre-wrap">curl https://api.dodorouter.com/r/my-agent/v1/chat/completions \
+  -H "Authorization: Bearer sk-dodo-YOUR_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "default",
+    "messages": [{"role": "user", "content": "Hello!"}]
+  }'</pre></div>
+        <p class="text-muted-foreground leading-relaxed">
+          Verified response shape (this exact request was run against a live DodoRouter instance while writing this page):
+        </p>
+        <div class="code-block p-4 my-3"><pre class="whitespace-pre-wrap">{
+  "choices": [{
+    "finish_reason": "stop",
+    "index": 0,
+    "message": { "content": "Hello! How can I help you today?", "role": "assistant" }
+  }],
+  "model": "gpt-5.5",
+  "usage": { "completion_tokens": 10, "prompt_tokens": 13, "total_tokens": 23,
+             "prompt_tokens_details": { "cached_tokens": 0 } }
+}</pre></div>
+        <p class="text-muted-foreground leading-relaxed mt-3">
+          Every request also gets logged in real time under <strong class="text-foreground font-medium">Logs</strong>, with full
+          request/response bodies, timing breakdown, token usage, and cost.
+        </p>
+      </section>
+
+      <!-- SELF-HOSTING -->
+      <section id="self-hosting" class="scroll-mt-8 mb-14">
+        <h2 class="font-display text-2xl text-foreground mb-4 pb-2 border-b border-border">Self-hosting</h2>
+        <p class="text-muted-foreground leading-relaxed mb-4">
+          DodoRouter is a standard Phoenix 1.8 application backed by PostgreSQL. Source:
+          <a href="https://github.com/foxwise-ai/dodorouter" target="_blank" rel="noopener noreferrer" class="text-accent hover:underline">github.com/foxwise-ai/dodorouter</a>.
+          License terms are covered in <a href="#license" class="text-accent hover:underline">License</a> below &mdash; in short,
+          free to self-host and modify, but you can't resell it as your own competing hosted service.
+        </p>
+
+        <h3 class="font-display text-lg text-foreground mt-6 mb-2">Prerequisites</h3>
+        <ul class="list-disc pl-5 text-muted-foreground leading-relaxed space-y-1 mb-4">
+          <li>Elixir 1.15+ and a matching Erlang/OTP</li>
+          <li>PostgreSQL 12+</li>
+          <li>An <a href="https://infisical.com" target="_blank" rel="noopener noreferrer" class="text-accent hover:underline">Infisical</a> project (free tier is fine) &mdash; see the callout below, this is currently required, not optional</li>
+        </ul>
+
+        <div class="rounded-xl border border-warn/40 bg-warn/5 p-5 my-5">
+          <p class="text-sm font-semibold text-foreground mb-1.5">⚠ Infisical is currently required</p>
+          <p class="text-sm text-muted-foreground leading-relaxed">
+            Every provider API key you add (OpenAI, Anthropic, z.ai, &hellip;) is stored via
+            <a href="https://infisical.com" target="_blank" rel="noopener noreferrer" class="text-accent hover:underline">Infisical</a>,
+            a secrets manager &mdash; there is currently no local/plaintext fallback in the code. Without
+            <code class="bg-secondary rounded px-1.5 py-0.5 text-[0.85em]">INFISICAL_TOKEN</code> and
+            <code class="bg-secondary rounded px-1.5 py-0.5 text-[0.85em]">INFISICAL_PROJECT_ID</code> set, the app boots fine and the
+            dashboard loads, but clicking <strong class="text-foreground font-medium">Add Key</strong> on the Providers page will fail
+            with "Failed to store API key securely" &mdash; so you won't be able to configure any provider, and no
+            requests will succeed. Sign up at Infisical, create a project, create a Machine Identity with a Universal
+            Auth client, and use that identity's access token as <code class="bg-secondary rounded px-1.5 py-0.5 text-[0.85em]">INFISICAL_TOKEN</code>.
+          </p>
+        </div>
+
+        <h3 class="font-display text-lg text-foreground mt-6 mb-2">1. Clone and install</h3>
+        <div class="code-block p-4 my-3"><pre>git clone https://github.com/foxwise-ai/dodorouter.git
+cd dodorouter
+mix deps.get</pre></div>
+
+        <h3 class="font-display text-lg text-foreground mt-6 mb-2">2. Configure environment variables</h3>
+        <p class="text-muted-foreground leading-relaxed mb-2">For local development, export these before starting the server (e.g. in <code class="bg-secondary rounded px-1.5 py-0.5 text-[0.85em]">.envrc</code> with <a href="https://direnv.net" target="_blank" rel="noopener noreferrer" class="text-accent hover:underline">direnv</a>, or a <code class="bg-secondary rounded px-1.5 py-0.5 text-[0.85em]">.env</code> you source):</p>
+        <div class="code-block p-4 my-3"><pre># Database — defaults match config/dev.exs; override if yours differs
+export DB_USERNAME=postgres
+export DB_PASSWORD=postgres
+export DB_HOSTNAME=localhost
+export DB_PORT=5432
+export DB_NAME=dodo_router_dev
+
+# Infisical — required, see callout above
+export INFISICAL_TOKEN="&lt;your machine identity access token&gt;"
+export INFISICAL_PROJECT_ID="&lt;your infisical project id&gt;"
+export INFISICAL_ENVIRONMENT=dev   # optional, defaults to "prod"</pre></div>
+
+        <h3 class="font-display text-lg text-foreground mt-6 mb-2">3. Set up the database</h3>
+        <div class="code-block p-4 my-3"><pre>mix ecto.setup</pre></div>
+
+        <h3 class="font-display text-lg text-foreground mt-6 mb-2">4. Start the server</h3>
+        <div class="code-block p-4 my-3"><pre>mix phx.server</pre></div>
+        <p class="text-muted-foreground leading-relaxed mb-2">
+          Visit <code class="bg-secondary rounded px-1.5 py-0.5 text-[0.85em]">http://localhost:4000</code>. Register an account, confirm via
+          the magic-link email &mdash; in dev, DodoRouter uses Swoosh's local mailbox instead of sending real email, so
+          open <code class="bg-secondary rounded px-1.5 py-0.5 text-[0.85em]">http://localhost:4000/dev/mailbox</code> to read it. From there,
+          follow the same steps as the <a href="#quickstart" class="text-accent hover:underline">Quickstart</a> above.
+        </p>
+        <p class="text-muted-foreground leading-relaxed">
+          Verified: <code class="bg-secondary rounded px-1.5 py-0.5 text-[0.85em]">GET /health</code> returns
+          <code class="bg-secondary rounded px-1.5 py-0.5 text-[0.85em]">&#123;"status":"ok"&#125;</code> once the DB connection is healthy, and
+          <code class="bg-secondary rounded px-1.5 py-0.5 text-[0.85em]">GET /api/version</code> returns the running app version, e.g.
+          <code class="bg-secondary rounded px-1.5 py-0.5 text-[0.85em]">&#123;"version":"0.1.75"&#125;</code> &mdash; handy for confirming the app booted and for health-check probes.
+        </p>
+
+        <h3 class="font-display text-lg text-foreground mt-6 mb-2">Production environment variables</h3>
+        <div class="overflow-x-auto my-3">
+          <table class="w-full text-sm border-collapse">
+            <thead>
+              <tr class="border-b border-border text-left text-foreground">
+                <th class="py-2 pr-4 font-medium">Variable</th>
+                <th class="py-2 pr-4 font-medium">Required</th>
+                <th class="py-2 font-medium">Notes</th>
+              </tr>
+            </thead>
+            <tbody class="text-muted-foreground align-top">
+              <tr class="border-b border-border"><td class="py-2 pr-4 font-mono text-xs">DATABASE_URL</td><td class="py-2 pr-4">Yes</td><td class="py-2">e.g. <span class="font-mono text-xs">ecto://user:pass@host/dodo_router_prod</span></td></tr>
+              <tr class="border-b border-border"><td class="py-2 pr-4 font-mono text-xs">SECRET_KEY_BASE</td><td class="py-2 pr-4">Yes</td><td class="py-2">Generate with <span class="font-mono text-xs">mix phx.gen.secret</span></td></tr>
+              <tr class="border-b border-border"><td class="py-2 pr-4 font-mono text-xs">PHX_HOST</td><td class="py-2 pr-4">Yes</td><td class="py-2">Your public domain</td></tr>
+              <tr class="border-b border-border"><td class="py-2 pr-4 font-mono text-xs">PHX_SERVER</td><td class="py-2 pr-4">Yes</td><td class="py-2">Set to <span class="font-mono text-xs">true</span> to actually start the endpoint under a release</td></tr>
+              <tr class="border-b border-border"><td class="py-2 pr-4 font-mono text-xs">PORT</td><td class="py-2 pr-4">No</td><td class="py-2">Defaults to 4000</td></tr>
+              <tr class="border-b border-border"><td class="py-2 pr-4 font-mono text-xs">INFISICAL_TOKEN</td><td class="py-2 pr-4">Yes*</td><td class="py-2">*Required for provider-key storage to work at all (see callout above)</td></tr>
+              <tr class="border-b border-border"><td class="py-2 pr-4 font-mono text-xs">INFISICAL_PROJECT_ID</td><td class="py-2 pr-4">Yes*</td><td class="py-2">Paired with the token above</td></tr>
+              <tr class="border-b border-border"><td class="py-2 pr-4 font-mono text-xs">INFISICAL_ENVIRONMENT</td><td class="py-2 pr-4">No</td><td class="py-2">Defaults to <span class="font-mono text-xs">prod</span></td></tr>
+              <tr class="border-b border-border"><td class="py-2 pr-4 font-mono text-xs">RESEND_API_KEY</td><td class="py-2 pr-4">No</td><td class="py-2">Transactional email (magic links). Without it in prod, mail simply won't send</td></tr>
+              <tr class="border-b border-border"><td class="py-2 pr-4 font-mono text-xs">EMAIL_FROM</td><td class="py-2 pr-4">No</td><td class="py-2">Defaults to <span class="font-mono text-xs">noreply@dodorouter.com</span></td></tr>
+              <tr class="border-b border-border"><td class="py-2 pr-4 font-mono text-xs">STRIPE_SECRET_KEY</td><td class="py-2 pr-4">No</td><td class="py-2">Only set this if you want the $19/mo billing paywall enabled. Unset = billing disabled, everyone has full access</td></tr>
+              <tr class="border-b border-border"><td class="py-2 pr-4 font-mono text-xs">STRIPE_WEBHOOK_SECRET</td><td class="py-2 pr-4">No</td><td class="py-2">Required only alongside <span class="font-mono text-xs">STRIPE_SECRET_KEY</span></td></tr>
+              <tr class="border-b border-border"><td class="py-2 pr-4 font-mono text-xs">ECTO_IPV6</td><td class="py-2 pr-4">No</td><td class="py-2">Set to <span class="font-mono text-xs">true</span> to enable IPv6 for the DB socket</td></tr>
+              <tr><td class="py-2 pr-4 font-mono text-xs">POOL_SIZE</td><td class="py-2 pr-4">No</td><td class="py-2">Ecto pool size, defaults to 10</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="text-muted-foreground leading-relaxed mt-3">
+          For deploy specifics (hot code upgrades, systemd, Castle release management), see the project's own
+          <code class="bg-secondary rounded px-1.5 py-0.5 text-[0.85em]">AGENTS.md</code> in the repo &mdash; those are maintainer-facing
+          operational details rather than user-facing setup, so we won't duplicate them here.
+        </p>
+      </section>
+
+      <!-- CONCEPTS -->
+      <section id="concepts" class="scroll-mt-8 mb-14">
+        <h2 class="font-display text-2xl text-foreground mb-4 pb-2 border-b border-border">Core concepts</h2>
+
+        <h3 class="font-display text-lg text-foreground mt-6 mb-2">Routers</h3>
+        <p class="text-muted-foreground leading-relaxed mb-2">
+          A router is the unit a client connects to. Each has a unique slug (used in the URL path), its own API key,
+          and its own routing chain. Most people create one router per application or environment (e.g.
+          <code class="bg-secondary rounded px-1.5 py-0.5 text-[0.85em]">my-agent-prod</code>, <code class="bg-secondary rounded px-1.5 py-0.5 text-[0.85em]">my-agent-staging</code>),
+          since the routing chain, session grouping, and logs are all scoped per router.
+        </p>
+
+        <h3 class="font-display text-lg text-foreground mt-6 mb-2">Routing steps &amp; fallback</h3>
+        <p class="text-muted-foreground leading-relaxed mb-2">
+          Each router has an ordered list of steps. A step is: provider + model, optionally a temperature/max_tokens
+          override, a reasoning-effort level, and which of your provider keys to use. DodoRouter tries step 1 first.
+          If it fails with an error class that's safe to retry &mdash; rate limited, server error, timeout, auth error,
+          model unavailable, or context overflow &mdash; it moves to the next step, carrying over any partial content a
+          streaming provider had already produced so the next provider continues rather than starting over. It gives
+          up and returns an error only once every step has failed.
+        </p>
+        <p class="text-muted-foreground leading-relaxed mb-2">
+          There's one router-level toggle that changes this: <strong class="text-foreground font-medium">"Skip fallback on
+          context overflow"</strong>. Off by default (a request too big for step 1 tries step 2, which might have a
+          bigger context window). Turn it on if you'd rather fail fast on oversized requests than silently burn
+          quota retrying them against every provider in the chain.
+        </p>
+
+        <h3 class="font-display text-lg text-foreground mt-6 mb-2">Provider keys vs. router API keys</h3>
+        <p class="text-muted-foreground leading-relaxed mb-2">
+          These are two different kinds of key and it's easy to mix them up:
+        </p>
+        <ul class="list-disc pl-5 text-muted-foreground leading-relaxed space-y-1 mb-2">
+          <li><strong class="text-foreground font-medium">Provider keys</strong> (Providers page) &mdash; your upstream
+            credentials: an OpenAI key, an Anthropic key, a z.ai key, etc. DodoRouter uses these to call the actual
+            LLM provider. You attach one to each routing step.</li>
+          <li><strong class="text-foreground font-medium">Router API keys</strong> (API Keys page) &mdash; the key
+            <em>your</em> client uses to call DodoRouter itself, in the form <code class="bg-secondary rounded px-1.5 py-0.5 text-[0.85em]">sk-dodo-&hellip;</code>.
+            One per router. Regenerating it immediately invalidates the old one.</li>
+        </ul>
+
+        <h3 class="font-display text-lg text-foreground mt-6 mb-2">Plan types: standard vs. coding subscriptions</h3>
+        <p class="text-muted-foreground leading-relaxed mb-2">
+          z.ai and Moonshot (Kimi) both offer a flat-rate "coding" subscription plan alongside their regular
+          pay-as-you-go API, each with its own base URL and, for cost tracking, $0 marginal per-token pricing.
+          When adding a routing step for these providers, you'll see both a standard key option and a "coding" one;
+          pick whichever matches the credential you added on the Providers page.
+        </p>
+
+        <h3 class="font-display text-lg text-foreground mt-6 mb-2">Reasoning effort</h3>
+        <p class="text-muted-foreground leading-relaxed mb-2">
+          Reasoning models expose "how hard to think" differently per provider &mdash; a string like
+          <code class="bg-secondary rounded px-1.5 py-0.5 text-[0.85em]">reasoning_effort</code> for OpenAI, a token budget for Anthropic
+          extended thinking, a thinking budget for Gemini, or a plain on/off toggle for DeepSeek/z.ai/Moonshot-style
+          models. Set a canonical level per routing step &mdash; <code class="bg-secondary rounded px-1.5 py-0.5 text-[0.85em]">none, minimal,
+          low, medium, high, xhigh, max</code> &mdash; and DodoRouter translates it into whatever the upstream provider
+          actually expects. If your client already sends its own reasoning parameter in the request, that always
+          wins over the routing step's default.
+        </p>
+
+        <h3 class="font-display text-lg text-foreground mt-6 mb-2">Sessions</h3>
+        <p class="text-muted-foreground leading-relaxed mb-2">
+          Sessions group related requests (e.g. every call in one coding-agent conversation) under a shared id, purely
+          for the Logs UI &mdash; DodoRouter doesn't use sessions for routing decisions. Send an
+          <code class="bg-secondary rounded px-1.5 py-0.5 text-[0.85em]">X-Session-Id</code> header (and optionally
+          <code class="bg-secondary rounded px-1.5 py-0.5 text-[0.85em]">X-Session-Name</code> for a human-readable label) with each
+          request, and they'll show up grouped under <strong class="text-foreground font-medium">Sessions</strong> on that router.
+          The header name is configurable per router (Router &rarr; Edit &rarr; "Session header", default
+          <code class="bg-secondary rounded px-1.5 py-0.5 text-[0.85em]">x-session-id</code>) &mdash; useful if a client library already sends
+          its own conversation-id header under a different name and you'd rather reuse that than add a new one.
+        </p>
+
+        <h3 class="font-display text-lg text-foreground mt-6 mb-2">Recordings</h3>
+        <p class="text-muted-foreground leading-relaxed mb-2">
+          A recording is an explicit start/stop capture window, separate from sessions &mdash; useful for bracketing
+          "everything that happened during this one debugging run" or a scripted test, regardless of session id.
+          Start one from the dashboard or via <code class="bg-secondary rounded px-1.5 py-0.5 text-[0.85em]">POST /recordings/start</code>,
+          make your requests, stop it, then review exactly that batch under Recordings.
+        </p>
+
+        <h3 class="font-display text-lg text-foreground mt-6 mb-2">Logs &amp; replay</h3>
+        <p class="text-muted-foreground leading-relaxed">
+          Every proxied request is logged with full request/response bodies (large payloads are truncated for
+          storage, flagged as such), token usage, cost, latency breakdown (total / provider time / TTFB / upload),
+          and the full fallback trace if more than one step was attempted. From any log you can
+          <strong class="text-foreground font-medium">Replay</strong> the same conversation against a different
+          provider/model/reasoning-effort and get a side-by-side diff &mdash; handy for "would a cheaper model have
+          handled this the same way?" comparisons.
+        </p>
+      </section>
+
+      <!-- API REFERENCE -->
+      <section id="api-reference" class="scroll-mt-8 mb-14">
+        <h2 class="font-display text-2xl text-foreground mb-4 pb-2 border-b border-border">API reference</h2>
+
+        <h3 class="font-display text-lg text-foreground mt-6 mb-2">Base URL &amp; authentication</h3>
+        <p class="text-muted-foreground leading-relaxed mb-2">
+          All proxy endpoints are scoped per router: <code class="bg-secondary rounded px-1.5 py-0.5 text-[0.85em]">&#123;base_url&#125;/r/&#123;router_slug&#125;/v1/&hellip;</code>.
+          In every example on this page, <code class="bg-secondary rounded px-1.5 py-0.5 text-[0.85em]">&#123;base_url&#125;</code> is
+          <code class="bg-secondary rounded px-1.5 py-0.5 text-[0.85em]">https://api.dodorouter.com</code> for the hosted service (or your own
+          domain if self-hosted), and <code class="bg-secondary rounded px-1.5 py-0.5 text-[0.85em]">&#123;router&#125;</code> is your router's slug &mdash;
+          swap both in before running any command below. Authenticate with your router's API key, either as a Bearer
+          token or, if your client library doesn't support custom bearer tokens, as
+          <code class="bg-secondary rounded px-1.5 py-0.5 text-[0.85em]">x-api-key</code>:
+        </p>
+        <div class="code-block p-4 my-3"><pre>Authorization: Bearer sk-dodo-YOUR_KEY
+# or:
+x-api-key: sk-dodo-YOUR_KEY</pre></div>
+        <p class="text-muted-foreground leading-relaxed">
+          A missing or invalid key returns <code class="bg-secondary rounded px-1.5 py-0.5 text-[0.85em]">401</code> with
+          <code class="bg-secondary rounded px-1.5 py-0.5 text-[0.85em]">&#123;"error":&#123;"message":"Invalid API key",&hellip;&#125;&#125;</code> (verified). On the
+          hosted service, a router whose owner has no active subscription returns <code class="bg-secondary rounded px-1.5 py-0.5 text-[0.85em]">402</code> instead
+          &mdash; not applicable to self-hosted instances unless you've enabled billing yourself.
+        </p>
+
+        <h3 class="font-display text-lg text-foreground mt-6 mb-2">Endpoints</h3>
+        <div class="overflow-x-auto my-3">
+          <table class="w-full text-sm border-collapse">
+            <thead>
+              <tr class="border-b border-border text-left text-foreground">
+                <th class="py-2 pr-4 font-medium">Method &amp; path</th>
+                <th class="py-2 font-medium">Purpose</th>
+              </tr>
+            </thead>
+            <tbody class="text-muted-foreground align-top">
+              <tr class="border-b border-border"><td class="py-2 pr-4 font-mono text-xs whitespace-nowrap">POST /r/&#123;slug&#125;/v1/chat/completions</td><td class="py-2">OpenAI Chat Completions format, sync or streaming</td></tr>
+              <tr class="border-b border-border"><td class="py-2 pr-4 font-mono text-xs whitespace-nowrap">POST /r/&#123;slug&#125;/v1/messages</td><td class="py-2">Anthropic Messages format, sync or streaming</td></tr>
+              <tr class="border-b border-border"><td class="py-2 pr-4 font-mono text-xs whitespace-nowrap">POST /r/&#123;slug&#125;/v1/responses</td><td class="py-2">OpenAI Responses API format, sync or streaming</td></tr>
+              <tr class="border-b border-border"><td class="py-2 pr-4 font-mono text-xs whitespace-nowrap">GET /r/&#123;slug&#125;/v1/models</td><td class="py-2">Returns a single synthetic model entry named after the router slug (for clients that require a models list before use)</td></tr>
+              <tr class="border-b border-border"><td class="py-2 pr-4 font-mono text-xs whitespace-nowrap">POST /r/&#123;slug&#125;/recordings/start</td><td class="py-2">Start a recording, optional <span class="font-mono text-xs">&#123;"name":"&hellip;"&#125;</span> body</td></tr>
+              <tr class="border-b border-border"><td class="py-2 pr-4 font-mono text-xs whitespace-nowrap">GET /r/&#123;slug&#125;/recordings/active</td><td class="py-2">Currently active recording, or 404</td></tr>
+              <tr class="border-b border-border"><td class="py-2 pr-4 font-mono text-xs whitespace-nowrap">POST /r/&#123;slug&#125;/recordings/active/stop</td><td class="py-2">Stop the active recording</td></tr>
+              <tr class="border-b border-border"><td class="py-2 pr-4 font-mono text-xs whitespace-nowrap">POST /v1/chat/completions</td><td class="py-2">Legacy endpoint, identical behavior to the router-scoped chat/completions route above, kept for backwards compatibility</td></tr>
+              <tr class="border-b border-border"><td class="py-2 pr-4 font-mono text-xs whitespace-nowrap">GET /health</td><td class="py-2">No auth. <span class="font-mono text-xs">&#123;"status":"ok"&#125;</span>, 503 if DB is unreachable or the instance is draining for a hot upgrade</td></tr>
+              <tr><td class="py-2 pr-4 font-mono text-xs whitespace-nowrap">GET /api/version</td><td class="py-2">No auth. Running app version</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="text-sm text-muted-foreground leading-relaxed mt-2">
+          Every proxy response also carries <code class="bg-secondary rounded px-1.5 py-0.5 text-[0.85em]">x-request-id</code>,
+          <code class="bg-secondary rounded px-1.5 py-0.5 text-[0.85em]">x-timing-total-ms</code>, and
+          <code class="bg-secondary rounded px-1.5 py-0.5 text-[0.85em]">x-timing-provider-ms</code> response headers.
+        </p>
+
+        <h3 class="font-display text-lg text-foreground mt-6 mb-2">The <code class="bg-secondary rounded px-1.5 py-0.5">model</code> field is ignored</h3>
+        <p class="text-muted-foreground leading-relaxed">
+          This trips people up, so it's worth stating plainly: whatever <code class="bg-secondary rounded px-1.5 py-0.5 text-[0.85em]">model</code>
+          you put in the request body is discarded. DodoRouter always substitutes the model configured on the
+          routing step it's currently attempting. Send <code class="bg-secondary rounded px-1.5 py-0.5 text-[0.85em]">"default"</code>, your
+          router's slug, or anything else &mdash; it makes no functional difference. To control which model actually
+          answers, edit the router's routing chain, not the request.
+        </p>
+
+        <h3 class="font-display text-lg text-foreground mt-6 mb-2">Chat Completions (OpenAI format)</h3>
+        <div class="code-block p-4 my-3"><pre class="whitespace-pre-wrap">curl {base_url}/r/{router}/v1/chat/completions \
+  -H "Authorization: Bearer sk-dodo-YOUR_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "default",
+    "stream": false,
+    "messages": [{"role": "user", "content": "Reply with exactly the word: pong"}]
+  }'</pre></div>
+        <p class="text-muted-foreground leading-relaxed mb-2 text-sm">Verified live response:</p>
+        <div class="code-block p-4 my-3"><pre class="whitespace-pre-wrap">{
+  "choices": [{"finish_reason": "stop", "index": 0,
+               "message": {"content": "pong", "role": "assistant"}}],
+  "model": "gpt-5.5",
+  "usage": {"completion_tokens": 5, "prompt_tokens": 13, "total_tokens": 18,
+            "prompt_tokens_details": {"cached_tokens": 0}}
+}</pre></div>
+        <p class="text-muted-foreground leading-relaxed mb-2">
+          With <code class="bg-secondary rounded px-1.5 py-0.5 text-[0.85em]">"stream": true</code>, the response is a standard OpenAI-style
+          SSE stream of <code class="bg-secondary rounded px-1.5 py-0.5 text-[0.85em]">chat.completion.chunk</code> deltas terminated by
+          <code class="bg-secondary rounded px-1.5 py-0.5 text-[0.85em]">data: [DONE]</code> &mdash; verified working, including tool-call streaming.
+        </p>
+
+        <h3 class="font-display text-lg text-foreground mt-6 mb-2">Messages (Anthropic format)</h3>
+        <p class="text-muted-foreground leading-relaxed mb-2">
+          Full bidirectional conversion, including tool_use / tool_result blocks, system prompts (string or block
+          array, with <code class="bg-secondary rounded px-1.5 py-0.5 text-[0.85em]">cache_control</code> preserved), and multi-block content.
+        </p>
+        <div class="code-block p-4 my-3"><pre class="whitespace-pre-wrap">curl {base_url}/r/{router}/v1/messages \
+  -H "Authorization: Bearer sk-dodo-YOUR_KEY" \
+  -H "Content-Type: application/json" \
+  -H "anthropic-version: 2023-06-01" \
+  -d '{
+    "model": "claude-sonnet-4-5",
+    "max_tokens": 100,
+    "messages": [{"role": "user", "content": "Reply with exactly the word: pong"}]
+  }'</pre></div>
+        <p class="text-muted-foreground leading-relaxed mb-2 text-sm">Verified live response:</p>
+        <div class="code-block p-4 my-3"><pre class="whitespace-pre-wrap">{
+  "id": "msg_5a8d090908f8feb21be52ef0", "type": "message", "role": "assistant",
+  "content": [{"type": "text", "text": "pong"}],
+  "model": "gpt-5.5", "stop_reason": "end_turn", "stop_sequence": null,
+  "usage": {"input_tokens": 13, "output_tokens": 5}
+}</pre></div>
+        <p class="text-muted-foreground leading-relaxed">
+          Note the <code class="bg-secondary rounded px-1.5 py-0.5 text-[0.85em]">model</code> in the response is whatever the winning routing
+          step actually used (<code class="bg-secondary rounded px-1.5 py-0.5 text-[0.85em]">gpt-5.5</code> here) &mdash; not the
+          <code class="bg-secondary rounded px-1.5 py-0.5 text-[0.85em]">claude-sonnet-4-5</code> requested, consistent with
+          <a href="#api-reference" class="text-accent hover:underline">the model field being ignored</a>. This is exactly how you'd
+          point <a href="#claude-code" class="text-accent hover:underline">Claude Code</a> at non-Anthropic models through DodoRouter.
+        </p>
+
+        <h3 class="font-display text-lg text-foreground mt-6 mb-2">Responses API</h3>
+        <p class="text-muted-foreground leading-relaxed mb-2">
+          Used by Codex-style clients. Both sync and streaming are supported and verified:
+        </p>
+        <div class="code-block p-4 my-3"><pre class="whitespace-pre-wrap">curl {base_url}/r/{router}/v1/responses \
+  -H "Authorization: Bearer sk-dodo-YOUR_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"model": "default", "input": "Reply with exactly the word: pong"}'</pre></div>
+        <p class="text-muted-foreground leading-relaxed mb-2">
+          With <code class="bg-secondary rounded px-1.5 py-0.5 text-[0.85em]">"stream": true</code>, DodoRouter emits the full item
+          lifecycle a strict Responses-API client expects:
+          <code class="bg-secondary rounded px-1.5 py-0.5 text-[0.85em]">response.created</code> &rarr;
+          <code class="bg-secondary rounded px-1.5 py-0.5 text-[0.85em]">response.output_item.added</code> &rarr;
+          <code class="bg-secondary rounded px-1.5 py-0.5 text-[0.85em]">response.content_part.added</code> &rarr;
+          one or more <code class="bg-secondary rounded px-1.5 py-0.5 text-[0.85em]">response.output_text.delta</code> &rarr;
+          <code class="bg-secondary rounded px-1.5 py-0.5 text-[0.85em]">response.output_text.done</code> &rarr;
+          <code class="bg-secondary rounded px-1.5 py-0.5 text-[0.85em]">response.content_part.done</code> &rarr;
+          <code class="bg-secondary rounded px-1.5 py-0.5 text-[0.85em]">response.output_item.done</code> &rarr;
+          <code class="bg-secondary rounded px-1.5 py-0.5 text-[0.85em]">response.completed</code>. Verified with a real
+          <a href="#codex-cli" class="text-accent hover:underline">Codex CLI</a> streaming run &mdash; text now renders live in the
+          terminal instead of the client logging <code class="bg-secondary rounded px-1.5 py-0.5 text-[0.85em]">OutputTextDelta
+          without active item</code> and stalling (an earlier gap in this event sequence, now fixed).
+        </p>
+
+        <h3 class="font-display text-lg text-foreground mt-6 mb-2">Error format</h3>
+        <div class="overflow-x-auto my-3">
+          <table class="w-full text-sm border-collapse">
+            <thead>
+              <tr class="border-b border-border text-left text-foreground">
+                <th class="py-2 pr-4 font-medium">Status</th>
+                <th class="py-2 font-medium">When</th>
+              </tr>
+            </thead>
+            <tbody class="text-muted-foreground align-top">
+              <tr class="border-b border-border"><td class="py-2 pr-4 font-mono text-xs">400</td><td class="py-2">No routing steps configured on the router, or every attempted step failed with a context-overflow error (request too big for every configured model)</td></tr>
+              <tr class="border-b border-border"><td class="py-2 pr-4 font-mono text-xs">401</td><td class="py-2">Missing/invalid router API key</td></tr>
+              <tr class="border-b border-border"><td class="py-2 pr-4 font-mono text-xs">402</td><td class="py-2">Hosted service only: router's owner has no active subscription</td></tr>
+              <tr class="border-b border-border"><td class="py-2 pr-4 font-mono text-xs">502</td><td class="py-2">Every routing step was attempted and every one failed (non-context-overflow reasons)</td></tr>
+              <tr><td class="py-2 pr-4 font-mono text-xs">200 + SSE error event</td><td class="py-2">Streaming request where at least one chunk was already sent to the client before every step failed &mdash; can't change the HTTP status mid-stream, so the error arrives as an SSE event in the format matching the endpoint (OpenAI/Anthropic/Responses)</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="text-muted-foreground leading-relaxed">
+          Verified: a bad API key against a running instance returns HTTP <code class="bg-secondary rounded px-1.5 py-0.5 text-[0.85em]">401</code>.
+        </p>
+      </section>
+
+      <!-- PROVIDERS -->
+      <section id="providers" class="scroll-mt-8 mb-14">
+        <h2 class="font-display text-2xl text-foreground mb-4 pb-2 border-b border-border">Supported providers</h2>
+        <p class="text-muted-foreground leading-relaxed mb-4">
+          Each row is a distinct adapter. Where a provider offers both a pay-as-you-go API and a flat-rate coding
+          subscription, they're listed as separate key types since they use different base URLs and pricing.
+        </p>
+        <div class="overflow-x-auto my-3">
+          <table class="w-full text-sm border-collapse">
+            <thead>
+              <tr class="border-b border-border text-left text-foreground">
+                <th class="py-2 pr-4 font-medium">Provider</th>
+                <th class="py-2 pr-4 font-medium">Key type(s)</th>
+                <th class="py-2 pr-4 font-medium">Auth</th>
+                <th class="py-2 font-medium">Notes</th>
+              </tr>
+            </thead>
+            <tbody class="text-muted-foreground align-top">
+              <tr class="border-b border-border"><td class="py-2 pr-4 font-medium text-foreground">OpenAI</td><td class="py-2 pr-4 font-mono text-xs">openai</td><td class="py-2 pr-4">Bearer</td><td class="py-2">GPT-4o/4.1, o1/o3, GPT-5.x</td></tr>
+              <tr class="border-b border-border"><td class="py-2 pr-4 font-medium text-foreground">OpenAI Codex (ChatGPT)</td><td class="py-2 pr-4 font-mono text-xs">openai-codex</td><td class="py-2 pr-4">OAuth (device flow, in-app)</td><td class="py-2">Uses your ChatGPT plan's included usage rather than per-token billing; cost tracked as $0</td></tr>
+              <tr class="border-b border-border"><td class="py-2 pr-4 font-medium text-foreground">Anthropic</td><td class="py-2 pr-4 font-mono text-xs">anthropic</td><td class="py-2 pr-4">x-api-key</td><td class="py-2">Claude models</td></tr>
+              <tr class="border-b border-border"><td class="py-2 pr-4 font-medium text-foreground">Anthropic (Claude Pro/Max)</td><td class="py-2 pr-4 font-mono text-xs">anthropic_oauth</td><td class="py-2 pr-4">Bearer setup-token</td><td class="py-2">Paste a token from <span class="font-mono text-xs">claude setup-token</span> (run the Claude Code CLI's own command); flat-rate, no per-token cost</td></tr>
+              <tr class="border-b border-border"><td class="py-2 pr-4 font-medium text-foreground">Google Gemini</td><td class="py-2 pr-4 font-mono text-xs">google</td><td class="py-2 pr-4">Query param</td><td class="py-2">Gemini 1.5/2.x family</td></tr>
+              <tr class="border-b border-border"><td class="py-2 pr-4 font-medium text-foreground">Groq</td><td class="py-2 pr-4 font-mono text-xs">groq</td><td class="py-2 pr-4">Bearer</td><td class="py-2">Fast inference on open models</td></tr>
+              <tr class="border-b border-border"><td class="py-2 pr-4 font-medium text-foreground">Mistral</td><td class="py-2 pr-4 font-mono text-xs">mistral</td><td class="py-2 pr-4">Bearer</td><td class="py-2">Mistral/Codestral family</td></tr>
+              <tr class="border-b border-border"><td class="py-2 pr-4 font-medium text-foreground">Cohere</td><td class="py-2 pr-4 font-mono text-xs">cohere</td><td class="py-2 pr-4">Bearer</td><td class="py-2">Command family, Cohere's v2 chat API</td></tr>
+              <tr class="border-b border-border"><td class="py-2 pr-4 font-medium text-foreground">DeepSeek</td><td class="py-2 pr-4 font-mono text-xs">deepseek</td><td class="py-2 pr-4">Bearer</td><td class="py-2">deepseek-chat, deepseek-reasoner</td></tr>
+              <tr class="border-b border-border"><td class="py-2 pr-4 font-medium text-foreground">Moonshot / Kimi</td><td class="py-2 pr-4 font-mono text-xs">moonshot</td><td class="py-2 pr-4">Bearer</td><td class="py-2">Pay-as-you-go API</td></tr>
+              <tr class="border-b border-border"><td class="py-2 pr-4 font-medium text-foreground">Moonshot / Kimi Code</td><td class="py-2 pr-4 font-mono text-xs">moonshot_coding</td><td class="py-2 pr-4">Bearer</td><td class="py-2">Flat-rate coding subscription plan, $0 marginal cost</td></tr>
+              <tr class="border-b border-border"><td class="py-2 pr-4 font-medium text-foreground">xAI (Grok)</td><td class="py-2 pr-4 font-mono text-xs">xai</td><td class="py-2 pr-4">Bearer</td><td class="py-2">Grok family</td></tr>
+              <tr class="border-b border-border"><td class="py-2 pr-4 font-medium text-foreground">z.ai (GLM)</td><td class="py-2 pr-4 font-mono text-xs">zai_standard</td><td class="py-2 pr-4">Bearer</td><td class="py-2">Pay-as-you-go API</td></tr>
+              <tr><td class="py-2 pr-4 font-medium text-foreground">z.ai Coding Plan</td><td class="py-2 pr-4 font-mono text-xs">zai_coding</td><td class="py-2 pr-4">Bearer</td><td class="py-2">Flat-rate coding subscription plan, $0 marginal cost</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="text-muted-foreground leading-relaxed mt-3">
+          Every adapter normalizes provider-specific quirks so the fallback chain "just works": each provider signals
+          a context-window overflow differently (Anthropic returns a 400 with "prompt is too long" in the message;
+          z.ai returns HTTP 200 with <code class="bg-secondary rounded px-1.5 py-0.5 text-[0.85em]">finish_reason:
+          "model_context_window_exceeded"</code>; OpenAI uses an explicit error code) and DodoRouter detects all of
+          these and treats them the same way &mdash; as a fallback-eligible error, unless you've turned on
+          <a href="#concepts" class="text-accent hover:underline">"Skip fallback on context overflow"</a>. Cache-token
+          reporting (for cost and cache-hit-rate tracking) is likewise normalized across each provider's own field
+          names.
+        </p>
+      </section>
+
+      <!-- MODELS & PRICING -->
+      <section id="models-pricing" class="scroll-mt-8 mb-14">
+        <h2 class="font-display text-2xl text-foreground mb-4 pb-2 border-b border-border">Models &amp; pricing</h2>
+        <p class="text-muted-foreground leading-relaxed mb-2">
+          DodoRouter syncs a model catalog from <a href="https://models.dev" target="_blank" rel="noopener noreferrer" class="text-accent hover:underline">models.dev</a>,
+          an open model database, giving you context-window size, per-million-token pricing (input, output, cache
+          read, cache write), capability flags (vision, function calling, prompt caching, etc.), and which reasoning
+          effort levels a model actually accepts. This is what powers the model dropdown when you add a routing
+          step &mdash; pick a known model and DodoRouter already knows its limits and price, or choose
+          <strong class="text-foreground font-medium">Custom&hellip;</strong> to type any model id it doesn't have listed yet (it'll still
+          route correctly; you just won't get cost estimation for an unknown model).
+        </p>
+        <p class="text-muted-foreground leading-relaxed">
+          Subscription-based keys (<code class="bg-secondary rounded px-1.5 py-0.5 text-[0.85em]">openai-codex</code>,
+          <code class="bg-secondary rounded px-1.5 py-0.5 text-[0.85em]">anthropic_oauth</code>,
+          <code class="bg-secondary rounded px-1.5 py-0.5 text-[0.85em]">moonshot_coding</code>,
+          <code class="bg-secondary rounded px-1.5 py-0.5 text-[0.85em]">zai_coding</code>) are costed at $0/token in the dashboard &mdash;
+          you're already paying a flat monthly fee for that usage, so DodoRouter shows requests through them as
+          "included in plan" rather than computing a per-token dollar amount.
+        </p>
+      </section>
+
+      <!-- DASHBOARD GUIDE -->
+      <section id="dashboard" class="scroll-mt-8 mb-14">
+        <h2 class="font-display text-2xl text-foreground mb-4 pb-2 border-b border-border">Dashboard guide</h2>
+        <p class="text-muted-foreground leading-relaxed mb-4">
+          Everything below lives in the left sidebar once you're logged in.
+        </p>
+
+        <h3 class="font-display text-lg text-foreground mt-6 mb-2">Dashboard</h3>
+        <p class="text-muted-foreground leading-relaxed mb-2">
+          A live, auto-refreshing (every 5s) overview for whichever router you select: request volume over the last
+          hour, success rate, p95 latency, token usage, cache-hit rate, the router's routing chain at a glance, and
+          a recent-requests table.
+        </p>
+
+        <h3 class="font-display text-lg text-foreground mt-6 mb-2">Routers</h3>
+        <p class="text-muted-foreground leading-relaxed mb-2">
+          Create/rename/delete routers, and open a router's own page &mdash; which is where you'll spend most of your
+          setup time. On a router's page you get: a live-updating "Connect" panel with ready-to-copy code snippets
+          (cURL / Python / Node, in whichever of the three API formats you pick), the routing-chain editor (add
+          steps, reorder them with up/down arrows, assign a specific provider key per step, toggle context-overflow
+          behavior), recent logs, and a setup checklist that walks you through the four things a router needs before
+          it can serve a request: a provider key, a routing step, a key assigned to that step, and a first request.
+        </p>
+
+        <h3 class="font-display text-lg text-foreground mt-6 mb-2">Providers</h3>
+        <p class="text-muted-foreground leading-relaxed mb-2">
+          Add/rename/delete provider API keys, grouped by provider. Each key shows a live status badge &mdash; verified
+          valid (green), invalid (red), out of quota (amber), or not-yet-verified (click to check) &mdash; so a routing
+          step referencing a broken key is visibly flagged before you find out the hard way in production.
+        </p>
+
+        <h3 class="font-display text-lg text-foreground mt-6 mb-2">API Keys</h3>
+        <p class="text-muted-foreground leading-relaxed mb-2">
+          One card per router showing its endpoint URL and masked key prefix, with a one-click
+          <strong class="text-foreground font-medium">Regenerate</strong> (old key stops working immediately; new one is
+          shown once).
+        </p>
+
+        <h3 class="font-display text-lg text-foreground mt-6 mb-2">Logs</h3>
+        <p class="text-muted-foreground leading-relaxed mb-2">
+          Every request, live-streamed in as it happens. Filter by router or favorites. Each log opens into full
+          detail: conversation view, raw request/response JSON, per-attempt fallback trace, timing, cost, and a
+          <strong class="text-foreground font-medium">Replay</strong> action that reruns the same conversation against a different
+          model and diffs the two results (inline diff, side-by-side, or raw JSON).
+        </p>
+
+        <h3 class="font-display text-lg text-foreground mt-6 mb-2">Sessions &amp; Recordings</h3>
+        <p class="text-muted-foreground leading-relaxed">
+          Reached from a router's page. Sessions group requests by your <code class="bg-secondary rounded px-1.5 py-0.5 text-[0.85em]">x-session-id</code> header;
+          Recordings are explicit start/stop capture windows started from the dashboard or the
+          <a href="#api-reference" class="text-accent hover:underline">recordings API</a>. Both give you a scoped log
+          list with their own stat tiles (requests, tokens, avg latency, success rate).
+        </p>
+      </section>
+
+      <!-- INTEGRATIONS -->
+      <section id="integrations" class="scroll-mt-8 mb-14">
+        <h2 class="font-display text-2xl text-foreground mb-4 pb-2 border-b border-border">Connect a coding agent</h2>
+        <p class="text-muted-foreground leading-relaxed mb-6">
+          Every configuration below was actually run against a live DodoRouter instance while writing this page &mdash;
+          not copied from each tool's generic docs. Replace <code class="bg-secondary rounded px-1.5 py-0.5 text-[0.85em]">sk-dodo-YOUR_KEY</code>
+          and the router slug with your own.
+        </p>
+
+        <h3 id="claude-code" class="scroll-mt-8 font-display text-xl text-foreground mt-8 mb-2">Claude Code</h3>
+        <p class="text-muted-foreground leading-relaxed mb-2">
+          Claude Code talks the Anthropic Messages API, so point it at your router's <code class="bg-secondary rounded px-1.5 py-0.5 text-[0.85em]">/v1/messages</code>-serving
+          base and pass your DodoRouter key as the auth token:
+        </p>
+        <div class="code-block p-4 my-3"><pre>export ANTHROPIC_BASE_URL="{base_url}/r/{router}"
+export ANTHROPIC_AUTH_TOKEN="sk-dodo-YOUR_KEY"
+claude</pre></div>
+        <p class="text-muted-foreground leading-relaxed mb-2">
+          Verified: <code class="bg-secondary rounded px-1.5 py-0.5 text-[0.85em]">claude -p "Reply with exactly the single word: pong"</code> with the
+          env vars above returned <code class="bg-secondary rounded px-1.5 py-0.5 text-[0.85em]">pong</code>. Since
+          <a href="#api-reference" class="text-accent hover:underline">DodoRouter ignores the requested model</a>, Claude Code will
+          actually run whatever provider/model your routing chain resolves to first &mdash; including non-Anthropic
+          models &mdash; while still speaking Anthropic's wire format to Claude Code itself. This is also how you route
+          Claude Code's usage through a fallback chain for reliability, even if every step in that chain is Claude
+          models via different keys.
+        </p>
+        <p class="text-muted-foreground leading-relaxed">
+          To make this permanent for a project, add the same two variables to that project's
+          <code class="bg-secondary rounded px-1.5 py-0.5 text-[0.85em]">.claude/settings.json</code> under an <code class="bg-secondary rounded px-1.5 py-0.5 text-[0.85em]">"env"</code> key instead of
+          exporting them in your shell.
+        </p>
+
+        <h3 id="opencode" class="scroll-mt-8 font-display text-xl text-foreground mt-8 mb-2">OpenCode</h3>
+        <p class="text-muted-foreground leading-relaxed mb-2">
+          OpenCode's provider system supports any OpenAI-compatible endpoint via the
+          <code class="bg-secondary rounded px-1.5 py-0.5 text-[0.85em]">@ai-sdk/openai-compatible</code> package. Add a custom provider to
+          <code class="bg-secondary rounded px-1.5 py-0.5 text-[0.85em]">opencode.jsonc</code> (either project-local or
+          <code class="bg-secondary rounded px-1.5 py-0.5 text-[0.85em]">~/.config/opencode/opencode.jsonc</code> for all projects):
+        </p>
+        <div class="code-block p-4 my-3"><pre class="whitespace-pre-wrap">{
+  "$schema": "https://opencode.ai/config.json",
+  "provider": {
+    "dodorouter": {
+      "npm": "@ai-sdk/openai-compatible",
+      "options": {
+        "baseURL": "{base_url}/r/{router}/v1",
+        "apiKey": "sk-dodo-YOUR_KEY"
+      },
+      "models": {
+        "default": { "name": "DodoRouter" }
+      }
+    }
+  }
+}</pre></div>
+        <p class="text-muted-foreground leading-relaxed mb-2">Then run it against that provider/model:</p>
+        <div class="code-block p-4 my-3"><pre>opencode run -m dodorouter/default "Reply with exactly the single word: pong"</pre></div>
+        <p class="text-muted-foreground leading-relaxed">
+          Verified: returned <code class="bg-secondary rounded px-1.5 py-0.5 text-[0.85em]">pong</code>. The model key
+          (<code class="bg-secondary rounded px-1.5 py-0.5 text-[0.85em]">default</code> above) can be any label &mdash; it isn't sent upstream
+          as a real model id, since DodoRouter substitutes whatever the routing chain resolves to. Add more entries
+          under <code class="bg-secondary rounded px-1.5 py-0.5 text-[0.85em]">"models"</code> if you want several OpenCode-visible "models" that
+          all point at the same DodoRouter provider but happen to carry different display names.
+        </p>
+
+        <h3 id="forge" class="scroll-mt-8 font-display text-xl text-foreground mt-8 mb-2">Forge</h3>
+        <p class="text-muted-foreground leading-relaxed mb-2">
+          Forge has a built-in <code class="bg-secondary rounded px-1.5 py-0.5 text-[0.85em]">openai_compatible</code> provider slot. The
+          easiest path is the interactive menu:
+        </p>
+        <div class="code-block p-4 my-3"><pre>forge provider login
+# choose "openai_compatible", then enter your base URL and API key when prompted</pre></div>
+        <p class="text-muted-foreground leading-relaxed mb-2">
+          This writes an entry to <code class="bg-secondary rounded px-1.5 py-0.5 text-[0.85em]">~/.forge/.credentials.json</code> shaped like this
+          (confirmed from a real, already-configured Forge installation pointed at DodoRouter):
+        </p>
+        <div class="code-block p-4 my-3"><pre class="whitespace-pre-wrap">{
+  "id": "openai_compatible",
+  "auth_details": { "api_key": "sk-dodo-YOUR_KEY" },
+  "url_params": { "OPENAI_URL": "{base_url}/r/{router}/v1" }
+}</pre></div>
+        <p class="text-muted-foreground leading-relaxed mb-2">
+          and sets in <code class="bg-secondary rounded px-1.5 py-0.5 text-[0.85em]">~/.forge/.forge.toml</code>:
+        </p>
+        <div class="code-block p-4 my-3"><pre>[session]
+provider_id = "openai_compatible"
+model_id = "default"</pre></div>
+        <p class="text-muted-foreground leading-relaxed mb-2">
+          Then run <code class="bg-secondary rounded px-1.5 py-0.5 text-[0.85em]">forge</code> as usual, or non-interactively with
+          <code class="bg-secondary rounded px-1.5 py-0.5 text-[0.85em]">forge -p "your prompt"</code>.
+        </p>
+        <div class="rounded-xl border border-warn/40 bg-warn/5 p-5 my-5">
+          <p class="text-sm font-semibold text-foreground mb-1.5">Verified with a caveat</p>
+          <p class="text-sm text-muted-foreground leading-relaxed">
+            We pointed a real Forge installation at a live DodoRouter router using exactly this config and it
+            connected, authenticated, and completed several successful tool-calling turns (each logged by DodoRouter
+            as HTTP 200 with the correct content). During one longer automated run, Forge's own client logged
+            "Empty completion received" and retried repeatedly on a turn where DodoRouter's logs show it actually
+            returned a perfectly valid response (right content, <code class="bg-secondary rounded px-1.5 py-0.5 text-[0.85em]">finish_reason:
+            "stop"</code>). That looks like an intermittent client-side parsing hiccup in Forge rather than anything
+            DodoRouter did wrong, and it's exactly the config the project's own maintainers run day-to-day against
+            the hosted service &mdash; but if you hit a similar stall, check the request in DodoRouter's
+            <a href="#dashboard" class="text-accent hover:underline">Logs</a> before assuming the request failed.
+          </p>
+        </div>
+
+        <h3 id="codex-cli" class="scroll-mt-8 font-display text-xl text-foreground mt-8 mb-2">Codex CLI</h3>
+        <p class="text-muted-foreground leading-relaxed mb-2">
+          OpenAI's Codex CLI supports custom model providers in <code class="bg-secondary rounded px-1.5 py-0.5 text-[0.85em]">~/.codex/config.toml</code>:
+        </p>
+        <div class="code-block p-4 my-3"><pre class="whitespace-pre-wrap">model = "default"
+model_provider = "dodorouter"
+
+[model_providers.dodorouter]
+name = "DodoRouter"
+base_url = "{base_url}/r/{router}/v1"
+env_key = "DODO_API_KEY"</pre></div>
+        <p class="text-muted-foreground leading-relaxed mb-2">
+          <code class="bg-secondary rounded px-1.5 py-0.5 text-[0.85em]">env_key</code> names an environment variable Codex reads the API key
+          from, so the key itself never has to live in the config file:
+        </p>
+        <div class="code-block p-4 my-3"><pre>export DODO_API_KEY="sk-dodo-YOUR_KEY"
+codex exec "Reply with exactly the single word: pong"</pre></div>
+        <p class="text-muted-foreground leading-relaxed">
+          Verified: Codex CLI's default streaming mode renders the response live in the terminal
+          (<code class="bg-secondary rounded px-1.5 py-0.5 text-[0.85em]">codex\npong</code>), and DodoRouter's own logs confirm the underlying
+          completion (<code class="bg-secondary rounded px-1.5 py-0.5 text-[0.85em]">"pong"</code>,
+          <code class="bg-secondary rounded px-1.5 py-0.5 text-[0.85em]">finish_reason: "stop"</code>, HTTP 200, tokens billed correctly). An
+          earlier version of DodoRouter's streamed <code class="bg-secondary rounded px-1.5 py-0.5 text-[0.85em]">/v1/responses</code> didn't
+          emit the item-lifecycle events (<code class="bg-secondary rounded px-1.5 py-0.5 text-[0.85em]">response.output_item.added</code> /
+          <code class="bg-secondary rounded px-1.5 py-0.5 text-[0.85em]">response.content_part.added</code>) Codex CLI's client strictly
+          requires before a text delta, which caused it to log <code class="bg-secondary rounded px-1.5 py-0.5 text-[0.85em]">OutputTextDelta
+          without active item</code> and stall &mdash; that's now fixed (see <a href="#api-reference" class="text-accent hover:underline">Responses API</a>
+          above for the full event sequence). All four integrations in this list are clean.
+        </p>
+      </section>
+
+      <!-- DEPLOYMENT -->
+      <section id="deployment" class="scroll-mt-8 mb-14">
+        <h2 class="font-display text-2xl text-foreground mb-4 pb-2 border-b border-border">Deployment</h2>
+        <p class="text-muted-foreground leading-relaxed mb-2">
+          DodoRouter ships as an Elixir release (<code class="bg-secondary rounded px-1.5 py-0.5 text-[0.85em]">mix release</code>) with full
+          ERTS included, so a deployed instance doesn't need Elixir/Erlang installed on the target machine &mdash; just
+          PostgreSQL reachable and the environment variables from
+          <a href="#self-hosting" class="text-accent hover:underline">Self-hosting</a> set.
+        </p>
+        <p class="text-muted-foreground leading-relaxed mb-2">
+          A minimal production boot looks like:
+        </p>
+        <div class="code-block p-4 my-3"><pre>MIX_ENV=prod mix release
+DATABASE_URL=ecto://user:pass@host/dodo_router_prod \
+SECRET_KEY_BASE=$(mix phx.gen.secret) \
+PHX_HOST=your-domain.com \
+PHX_SERVER=true \
+INFISICAL_TOKEN=&hellip; INFISICAL_PROJECT_ID=&hellip; \
+_build/prod/rel/dodo_router/bin/dodo_router start</pre></div>
+        <p class="text-muted-foreground leading-relaxed">
+          Run database migrations before starting a new version:
+          <code class="bg-secondary rounded px-1.5 py-0.5 text-[0.85em]">bin/dodo_router eval DodoRouter.Release.migrate</code>. Health-check
+          your deployment against <code class="bg-secondary rounded px-1.5 py-0.5 text-[0.85em]">GET /health</code>, which returns 503 both when the
+          database is unreachable and while the instance is intentionally draining connections during a graceful
+          shutdown &mdash; point your load balancer's health check at it so it stops sending traffic during a rolling
+          deploy.
+        </p>
+      </section>
+
+      <!-- TROUBLESHOOTING -->
+      <section id="troubleshooting" class="scroll-mt-8 mb-14">
+        <h2 class="font-display text-2xl text-foreground mb-4 pb-2 border-b border-border">Troubleshooting &amp; FAQ</h2>
+
+        <div class="space-y-5">
+          <div>
+            <p class="font-medium text-foreground mb-1">"No routing configured for router '&hellip;'"</p>
+            <p class="text-muted-foreground leading-relaxed text-sm">The router has zero routing steps. Add at least one on the router's page under Routing Chain.</p>
+          </div>
+          <div>
+            <p class="font-medium text-foreground mb-1">"Failed to store API key securely" when adding a provider key</p>
+            <p class="text-muted-foreground leading-relaxed text-sm">
+              Self-hosted only: <code class="bg-secondary rounded px-1.5 py-0.5 text-[0.85em]">INFISICAL_TOKEN</code> / <code class="bg-secondary rounded px-1.5 py-0.5 text-[0.85em]">INFISICAL_PROJECT_ID</code>
+              aren't set or are invalid. See the callout in <a href="#self-hosting" class="text-accent hover:underline">Self-hosting</a>.
+            </p>
+          </div>
+          <div>
+            <p class="font-medium text-foreground mb-1">401 Invalid API key</p>
+            <p class="text-muted-foreground leading-relaxed text-sm">
+              You're using a provider key (from the Providers page) where a router API key is expected, or vice
+              versa &mdash; see <a href="#concepts" class="text-accent hover:underline">Provider keys vs. router API keys</a>. Also check
+              you didn't regenerate the router's key since your client last read it.
+            </p>
+          </div>
+          <div>
+            <p class="font-medium text-foreground mb-1">402 Payment Required</p>
+            <p class="text-muted-foreground leading-relaxed text-sm">Hosted service only: the account owning this router doesn't have an active subscription. Visit Billing to subscribe. Doesn't apply to self-hosted instances unless you've configured Stripe billing yourself.</p>
+          </div>
+          <div>
+            <p class="font-medium text-foreground mb-1">400 "Input exceeds context window of this model"</p>
+            <p class="text-muted-foreground leading-relaxed text-sm">
+              Every routing step failed with a context-overflow error &mdash; either you only have one step and its
+              model's context window is too small, or you've enabled
+              <a href="#concepts" class="text-accent hover:underline">"Skip fallback on context overflow"</a> and the first step alone
+              couldn't fit the request. Add a step with a larger context window, or disable that toggle so DodoRouter
+              tries the rest of the chain.
+            </p>
+          </div>
+          <div>
+            <p class="font-medium text-foreground mb-1">502 "All providers failed"</p>
+            <p class="text-muted-foreground leading-relaxed text-sm">Every step in the chain returned a non-recoverable error. Open the request in Logs &rarr; it shows the per-step error for each attempt, which is almost always more specific than the top-level message.</p>
+          </div>
+          <div>
+            <p class="font-medium text-foreground mb-1">A routing step shows "invalid" or "out of credits" next to its assigned key</p>
+            <p class="text-muted-foreground leading-relaxed text-sm">DodoRouter tracks key health from real dispatch outcomes. Fix or replace the key on the Providers page; the warning links straight there.</p>
+          </div>
+          <div>
+            <p class="font-medium text-foreground mb-1">Do I need to send a real model name?</p>
+            <p class="text-muted-foreground leading-relaxed text-sm">No &mdash; see <a href="#api-reference" class="text-accent hover:underline">The model field is ignored</a>. DodoRouter always uses the model configured on the routing step it's attempting.</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- LICENSE -->
+      <section id="license" class="scroll-mt-8 mb-8">
+        <h2 class="font-display text-2xl text-foreground mb-4 pb-2 border-b border-border">License</h2>
+        <p class="text-muted-foreground leading-relaxed mb-2">
+          DodoRouter is source-available under the
+          <a href="https://osaasy.dev" target="_blank" rel="noopener noreferrer" class="text-accent hover:underline">O'Saasy License</a>.
+          In short: you're free to use, modify, self-host, and even sell copies of it &mdash; the one thing you can't do
+          is turn around and offer it as a competing hosted/managed service where the software itself is the product.
+          See the full license text in the repository for the exact terms.
+        </p>
+        <p class="text-muted-foreground leading-relaxed">&copy; {{ "now" | date }} Foxwise AI.</p>
+      </section>
+
+      <div class="rounded-2xl border border-border bg-secondary/30 p-6 mt-12 text-center">
+        <p class="text-foreground font-medium mb-1">Didn't find what you needed?</p>
+        <p class="text-muted-foreground text-sm mb-4">The source is the ground truth &mdash; open an issue or a PR on GitHub.</p>
+        <a href="https://github.com/foxwise-ai/dodorouter" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-2 rounded-full border border-border bg-background px-5 py-2.5 text-sm font-medium text-foreground transition-colors hover:bg-secondary">
+          github.com/foxwise-ai/dodorouter
+        </a>
+      </div>
+
+    </div>
+  </div>
+</div>

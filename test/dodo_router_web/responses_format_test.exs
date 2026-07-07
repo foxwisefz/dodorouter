@@ -201,6 +201,75 @@ defmodule DodoRouterWeb.ResponsesFormatTest do
   end
 
   describe "convert_sse_chunk/2" do
+    test "emits output_item.added and content_part.added before the first output_text.delta" do
+      # Regression test: Responses API clients (e.g. Codex CLI) track an "active
+      # item" client-side and reject a delta that arrives before an
+      # output_item.added/content_part.added pair for it, logging something like
+      # "OutputTextDelta without active item" — even though DodoRouter's own
+      # request/response was entirely correct. See the docs' Codex CLI section.
+      openai_chunk =
+        "data: " <>
+          Jason.encode!(%{
+            "choices" => [%{"delta" => %{"content" => "Hello"}}]
+          }) <> "\n\n"
+
+      assert {:ok, events} =
+               ResponsesFormat.convert_sse_chunk(openai_chunk, "lifecycle-start-#{unique()}")
+
+      assert [item_added, content_part_added, delta] = events
+      assert item_added =~ "event: response.output_item.added"
+      assert content_part_added =~ "event: response.content_part.added"
+      assert delta =~ "event: response.output_text.delta"
+      assert delta =~ "Hello"
+    end
+
+    test "does not repeat output_item.added/content_part.added on later deltas of the same stream" do
+      request_id = "lifecycle-repeat-#{unique()}"
+
+      first_chunk =
+        "data: " <> Jason.encode!(%{"choices" => [%{"delta" => %{"content" => "Hel"}}]}) <> "\n\n"
+
+      second_chunk =
+        "data: " <> Jason.encode!(%{"choices" => [%{"delta" => %{"content" => "lo"}}]}) <> "\n\n"
+
+      assert {:ok, [_item_added, _part_added, _delta1]} =
+               ResponsesFormat.convert_sse_chunk(first_chunk, request_id)
+
+      assert {:ok, [delta2]} = ResponsesFormat.convert_sse_chunk(second_chunk, request_id)
+      assert delta2 =~ "event: response.output_text.delta"
+      assert delta2 =~ "lo"
+    end
+
+    test "emits output_text.done/content_part.done/output_item.done with the full text on finish_reason" do
+      request_id = "lifecycle-done-#{unique()}"
+
+      first_chunk =
+        "data: " <> Jason.encode!(%{"choices" => [%{"delta" => %{"content" => "Hi"}}]}) <> "\n\n"
+
+      final_chunk =
+        "data: " <>
+          Jason.encode!(%{"choices" => [%{"delta" => %{}, "finish_reason" => "stop"}]}) <> "\n\n"
+
+      assert {:ok, _} = ResponsesFormat.convert_sse_chunk(first_chunk, request_id)
+      assert {:ok, events} = ResponsesFormat.convert_sse_chunk(final_chunk, request_id)
+
+      assert [text_done, part_done, item_done] = events
+      assert text_done =~ "event: response.output_text.done"
+      assert text_done =~ "Hi"
+      assert part_done =~ "event: response.content_part.done"
+      assert item_done =~ "event: response.output_item.done"
+    end
+
+    test "emits nothing on finish_reason if no item was ever started" do
+      request_id = "lifecycle-empty-#{unique()}"
+
+      final_chunk =
+        "data: " <>
+          Jason.encode!(%{"choices" => [%{"delta" => %{}, "finish_reason" => "stop"}]}) <> "\n\n"
+
+      assert :skip = ResponsesFormat.convert_sse_chunk(final_chunk, request_id)
+    end
+
     test "converts OpenAI SSE content delta to Responses API output_text.delta" do
       openai_chunk =
         "data: " <>
@@ -208,8 +277,8 @@ defmodule DodoRouterWeb.ResponsesFormatTest do
             "choices" => [%{"delta" => %{"content" => "Hello"}}]
           }) <> "\n\n"
 
-      assert {:ok, events} = ResponsesFormat.convert_sse_chunk(openai_chunk, "test-id")
-      assert length(events) == 1
+      assert {:ok, events} =
+               ResponsesFormat.convert_sse_chunk(openai_chunk, "content-delta-#{unique()}")
 
       assert events
              |> Enum.any?(fn e ->
@@ -224,11 +293,14 @@ defmodule DodoRouterWeb.ResponsesFormatTest do
             "choices" => [%{"delta" => %{"role" => "assistant"}}]
           }) <> "\n\n"
 
-      assert :skip = ResponsesFormat.convert_sse_chunk(openai_chunk, "test-id")
+      assert :skip = ResponsesFormat.convert_sse_chunk(openai_chunk, "empty-delta-#{unique()}")
     end
 
     test "skips [DONE] markers" do
-      assert :skip = ResponsesFormat.convert_sse_chunk("data: [DONE]\n\n", "test-id")
+      assert :skip =
+               ResponsesFormat.convert_sse_chunk("data: [DONE]\n\n", "done-marker-#{unique()}")
     end
   end
+
+  defp unique, do: System.unique_integer([:positive])
 end
