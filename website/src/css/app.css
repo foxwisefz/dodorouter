@@ -475,3 +475,206 @@ html.js [data-reveal]:not(.revealed) .reveal-rise {
 @media (prefers-reduced-motion: reduce) {
   .reveal-rise { opacity: 1 !important; transform: none !important; transition: none !important; }
 }
+
+/* ──────────────────────────────────────────────────────────────
+   Docs — typographic system for markdown-authored content.
+   Content is authored in plain Markdown (so it doubles as the
+   llms.txt / llms-full.txt source of truth); these are element
+   selectors, not utility classes, since Tailwind classes can't be
+   embedded in markdown body text.
+   ────────────────────────────────────────────────────────────── */
+
+.docs-prose {
+  color: var(--color-foreground);
+  font-size: 0.9375rem;
+  line-height: 1.75;
+}
+.docs-prose > * + * { margin-top: 1.15em; }
+
+.docs-prose h1 {
+  font-family: var(--font-display);
+  font-size: 2.75rem;
+  line-height: 1.05;
+  letter-spacing: -0.01em;
+  margin-bottom: 0.35em;
+  color: var(--color-foreground);
+}
+.docs-prose h2 {
+  font-family: var(--font-body);
+  font-weight: 700;
+  font-size: 1.375rem;
+  letter-spacing: -0.01em;
+  color: var(--color-foreground);
+  margin-top: 2.75em !important;
+  padding-top: 1.5em;
+  border-top: 1px solid var(--color-border);
+  scroll-margin-top: 6rem;
+}
+.docs-prose > h2:first-of-type,
+.docs-prose > p:first-of-type + h2 {
+  border-top: none;
+  padding-top: 0;
+}
+.docs-prose h3 {
+  font-family: var(--font-body);
+  font-weight: 600;
+  font-size: 1.0625rem;
+  color: var(--color-foreground);
+  margin-top: 2em !important;
+  scroll-margin-top: 6rem;
+}
+.docs-prose h4 {
+  font-family: var(--font-body);
+  font-weight: 600;
+  font-size: 0.9375rem;
+  color: var(--color-foreground);
+  margin-top: 1.5em !important;
+}
+.docs-prose p { color: var(--color-muted-foreground); }
+.docs-prose strong { color: var(--color-foreground); font-weight: 600; }
+.docs-prose em { color: var(--color-foreground); }
+.docs-prose a {
+  color: var(--color-accent);
+  text-decoration: none;
+  border-bottom: 1px solid hsl(239, 84%, 67%, 0.3);
+  transition: border-color 0.15s ease;
+}
+.docs-prose a:hover { border-color: var(--color-accent); }
+.docs-prose a.docs-card,
+.docs-prose a.docs-card:hover { border-bottom: none; }
+.docs-prose a.docs-card p { margin-top: 0; }
+.docs-prose > ul, .docs-prose > ol { color: var(--color-muted-foreground); padding-left: 1.375em; }
+.docs-prose ul { list-style: disc; }
+.docs-prose ol { list-style: decimal; }
+.docs-prose li { padding-left: 0.25em; }
+.docs-prose li + li { margin-top: 0.4em; }
+.docs-prose li::marker { color: hsl(0, 0%, 80%); }
+.docs-prose li > p { margin-top: 0.4em; }
+.docs-prose code:not(pre code) {
+  background: var(--color-secondary);
+  border-radius: 0.3em;
+  padding: 0.15em 0.4em;
+  font-size: 0.85em;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+  color: var(--color-foreground);
+  white-space: nowrap;
+}
+.docs-prose pre {
+  background: hsl(220, 14%, 10%);
+  border-radius: 0.75rem;
+  padding: 1.15rem 1.3rem;
+  overflow-x: auto;
+  font-size: 0.8125rem;
+  line-height: 1.7;
+  color: hsl(0, 0%, 85%);
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+}
+.docs-prose pre code { background: none; padding: 0; color: inherit; font-size: inherit; white-space: pre; }
+.docs-prose blockquote {
+  border-left: 3px solid var(--color-accent);
+  padding-left: 1.1em;
+  color: var(--color-muted-foreground);
+}
+.docs-prose blockquote p { margin-top: 0; }
+.docs-table-scroll { overflow-x: auto; }
+.docs-prose table { width: 100%; border-collapse: collapse; font-size: 0.85em; }
+.docs-prose thead th {
+  text-align: left;
+  font-weight: 600;
+  color: var(--color-foreground);
+  border-bottom: 1px solid var(--color-border);
+  padding: 0.65em 1.25em 0.65em 0;
+  white-space: nowrap;
+}
+.docs-prose tbody td {
+  padding: 0.65em 1.25em 0.65em 0;
+  border-bottom: 1px solid var(--color-border);
+  color: var(--color-muted-foreground);
+  vertical-align: top;
+}
+.docs-prose tbody tr:last-child td { border-bottom: none; }
+.docs-prose td:first-child, .docs-prose td:nth-child(2) { white-space: nowrap; }
+.docs-prose hr { border: none; border-top: 1px solid var(--color-border); margin: 2.5em 0; }
+
+/* Anchor links revealed on heading hover (markdown-it-anchor adds the id;
+   this just gives a visible, clickable "#" without cluttering the text). */
+.docs-prose h2, .docs-prose h3 { position: relative; }
+.docs-prose h2 > a.header-anchor, .docs-prose h3 > a.header-anchor {
+  position: absolute;
+  left: -1.1em;
+  opacity: 0;
+  color: var(--color-muted-foreground);
+  text-decoration: none;
+  border-bottom: none;
+  transition: opacity 0.15s ease;
+  font-weight: 400;
+}
+.docs-prose h2:hover > a.header-anchor, .docs-prose h3:hover > a.header-anchor { opacity: 1; }
+
+/* Callouts — hand-authored as raw HTML inside markdown source (blank-line
+   delimited so markdown-it treats them as HTML blocks and leaves their
+   contents alone). Two flavors: neutral info, and warning. */
+.docs-callout {
+  border-radius: 0.9rem;
+  border: 1px solid var(--color-border);
+  background: hsl(0, 0%, 97%);
+  padding: 1.1rem 1.3rem;
+  font-size: 0.875rem;
+}
+.docs-callout-warn {
+  border-color: hsl(38, 92%, 50%, 0.35);
+  background: hsl(38, 92%, 50%, 0.07);
+}
+.docs-callout-title {
+  font-weight: 600;
+  font-size: 0.875rem;
+  color: var(--color-foreground);
+  margin-bottom: 0.4em;
+  display: flex;
+  align-items: center;
+  gap: 0.4em;
+}
+.docs-callout p { color: var(--color-muted-foreground); margin: 0; }
+.docs-callout code {
+  background: hsl(0, 0%, 100%);
+  border: 1px solid var(--color-border);
+  border-radius: 0.3em;
+  padding: 0.1em 0.35em;
+  font-size: 0.85em;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+  color: var(--color-foreground);
+}
+.docs-callout-warn code { background: hsl(38, 92%, 96%); }
+
+/* Sidebar nav */
+.docs-nav-link {
+  display: block;
+  padding: 0.32rem 0.6rem;
+  border-radius: 0.5rem;
+  font-size: 0.8125rem;
+  color: var(--color-muted-foreground);
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+.docs-nav-link:hover { color: var(--color-foreground); background: hsl(0, 0%, 96%); }
+.docs-nav-link[data-active="true"] {
+  color: var(--color-foreground);
+  background: hsl(239, 84%, 67%, 0.08);
+  font-weight: 600;
+}
+.docs-nav-section-label {
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: hsl(184, 5%, 62%);
+  padding: 0 0.6rem;
+}
+
+/* Mobile docs nav disclosure (zero-JS via <details>) */
+.docs-mobile-nav[open] > summary .docs-mobile-chevron { transform: rotate(180deg); }
+.docs-mobile-chevron { transition: transform 0.2s ease; }
+
+/* Copy-page button feedback state, toggled by a tiny inline script */
+.docs-copy-btn[data-copied="true"] .docs-copy-label-default { display: none; }
+.docs-copy-btn[data-copied="true"] .docs-copy-label-copied { display: inline; }
+.docs-copy-label-copied { display: none; }

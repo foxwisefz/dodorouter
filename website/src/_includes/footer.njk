@@ -22,8 +22,15 @@
         <a href="https://api.dodorouter.com/terms" class="text-sm text-muted-foreground transition-colors hover:text-foreground">Terms</a>
       </div>
     </div>
-    <div class="mt-8 border-t border-border pt-6 text-center">
+    <div class="mt-8 border-t border-border pt-6 flex flex-col items-center gap-2 text-center">
       <p class="text-xs text-muted-foreground">&copy; {{ "now" | date }} Foxwise AI. All rights reserved.</p>
+      <p class="text-xs text-muted-foreground">
+        Using an AI agent? Point it at
+        <a href="/llms.txt" class="text-foreground hover:text-accent transition-colors">/llms.txt</a>
+        for a condensed docs index, or
+        <a href="/llms-full.txt" class="text-foreground hover:text-accent transition-colors">/llms-full.txt</a>
+        for the complete reference.
+      </p>
     </div>
   </div>
 </footer>

@@ -1,0 +1,12 @@
+{% for section in docsSectionOrder %}
+<div class="mb-5">
+  <p class="docs-nav-section-label mb-1.5">{{ section }}</p>
+  <ul class="space-y-0.5">
+    {% for p in collections.docsPages %}
+      {% if p.data.section == section %}
+      <li><a href="{{ p.url }}" class="docs-nav-link" data-active="{{ 'true' if p.url == page.url else 'false' }}">{{ p.data.navTitle or p.data.title }}</a></li>
+      {% endif %}
+    {% endfor %}
+  </ul>
+</div>
+{% endfor %}

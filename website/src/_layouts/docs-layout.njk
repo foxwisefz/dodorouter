@@ -1,0 +1,122 @@
+---
+layout: base.njk
+---
+<div class="border-b border-border bg-secondary/20">
+  <div class="mx-auto max-w-7xl px-6 md:px-12 lg:px-20 py-3 flex items-center justify-between gap-4">
+    <div class="flex items-center gap-2 text-sm min-w-0">
+      <a href="/docs/" class="font-semibold text-foreground shrink-0">Docs</a>
+      <span class="text-border shrink-0">/</span>
+      <span class="text-muted-foreground truncate">{{ title }}</span>
+    </div>
+    <div class="hidden sm:flex items-center gap-5 text-sm text-muted-foreground shrink-0">
+      <a href="/llms.txt" class="hover:text-foreground transition-colors" title="Condensed docs index for AI agents">llms.txt</a>
+      <a href="https://github.com/foxwise-ai/dodorouter" target="_blank" rel="noopener noreferrer" class="hover:text-foreground transition-colors">GitHub</a>
+    </div>
+  </div>
+</div>
+
+<div class="mx-auto max-w-7xl px-6 md:px-12 lg:px-20 py-10 md:py-14">
+
+  <details class="docs-mobile-nav lg:hidden mb-8 rounded-xl border border-border">
+    <summary class="flex items-center justify-between px-4 py-3 cursor-pointer text-sm font-medium text-foreground list-none">
+      <span>Browse docs</span>
+      <svg class="docs-mobile-chevron h-4 w-4 text-muted-foreground" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+    </summary>
+    <nav class="px-4 pb-4 pt-1 border-t border-border">
+      {% include "docs-nav.njk" %}
+    </nav>
+  </details>
+
+  <div class="lg:grid lg:grid-cols-[220px_1fr_200px] lg:gap-12 xl:gap-16">
+
+    <aside class="hidden lg:block">
+      <nav class="sticky top-8 max-h-[calc(100vh-4rem)] overflow-y-auto pb-8 pr-2">
+        {% include "docs-nav.njk" %}
+      </nav>
+    </aside>
+
+    <div class="min-w-0 max-w-2xl">
+      <div class="flex items-center gap-2 mb-7">
+        <button
+          type="button"
+          class="docs-copy-btn inline-flex items-center gap-1.5 rounded-full border border-border bg-background px-3.5 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-secondary"
+          data-md-url="{{ page.url | mdTwinUrl }}"
+        >
+          <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+          <span class="docs-copy-label-default">Copy page</span>
+          <span class="docs-copy-label-copied">Copied!</span>
+        </button>
+        <a
+          href="{{ page.url | mdTwinUrl }}"
+          class="inline-flex items-center gap-1.5 rounded-full border border-border bg-background px-3.5 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-secondary"
+          title="Raw Markdown — friendly for AI agents and curl"
+        >
+          <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16v16H4z"></path><path d="M8 8h8M8 12h8M8 16h5"></path></svg>
+          View as Markdown
+        </a>
+      </div>
+
+      <article class="docs-prose">
+        {{ content | safe }}
+      </article>
+
+      {% set idx = collections.docsPages | findIndexByUrl(page.url) %}
+      {% set prevPage = collections.docsPages[idx - 1] if idx > 0 else null %}
+      {% set nextPage = collections.docsPages[idx + 1] if idx > -1 else null %}
+      {% if prevPage or nextPage %}
+      <div class="mt-14 pt-8 border-t border-border flex items-start justify-between gap-4">
+        <div>
+          {% if prevPage %}
+          <a href="{{ prevPage.url }}" class="group block">
+            <span class="block text-xs text-muted-foreground mb-0.5">Previous</span>
+            <span class="block text-sm font-medium text-foreground group-hover:text-accent transition-colors">&larr; {{ prevPage.data.navTitle or prevPage.data.title }}</span>
+          </a>
+          {% endif %}
+        </div>
+        <div class="text-right">
+          {% if nextPage %}
+          <a href="{{ nextPage.url }}" class="group block">
+            <span class="block text-xs text-muted-foreground mb-0.5">Next</span>
+            <span class="block text-sm font-medium text-foreground group-hover:text-accent transition-colors">{{ nextPage.data.navTitle or nextPage.data.title }} &rarr;</span>
+          </a>
+          {% endif %}
+        </div>
+      </div>
+      {% endif %}
+    </div>
+
+    <aside class="hidden xl:block">
+      {% set toc = content | headings %}
+      {% if toc.length %}
+      <nav class="sticky top-8 text-sm">
+        <p class="text-xs font-semibold text-foreground uppercase tracking-wide mb-3">On this page</p>
+        <ul class="space-y-1.5 border-l border-border">
+          {% for h in toc %}
+          <li><a href="#{{ h.id }}" class="block text-muted-foreground hover:text-foreground transition-colors -ml-px border-l-2 border-transparent hover:border-accent text-xs leading-snug {{ 'pl-6' if h.level == 3 else 'pl-3' }}">{{ h.text }}</a></li>
+          {% endfor %}
+        </ul>
+      </nav>
+      {% endif %}
+    </aside>
+
+  </div>
+</div>
+
+<script>
+(function () {
+  document.querySelectorAll(".docs-copy-btn").forEach(function (btn) {
+    btn.addEventListener("click", async function () {
+      var url = btn.getAttribute("data-md-url");
+      try {
+        var res = await fetch(url);
+        var text = await res.text();
+        await navigator.clipboard.writeText(text);
+      } catch (e) {
+        return;
+      }
+      btn.setAttribute("data-copied", "true");
+      setTimeout(function () { btn.removeAttribute("data-copied"); }, 2000);
+    });
+  });
+})();
+</script>
