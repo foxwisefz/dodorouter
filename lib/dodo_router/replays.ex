@@ -282,12 +282,14 @@ defmodule DodoRouter.Replays do
   # Plan-specific catalogs (e.g. moonshot_coding) live under the KEY slug;
   # they take precedence over the provider's global entries on id collisions.
   defp models_for(key, provider) do
+    catalog_provider = normalize_models_provider(provider)
+
     plan_catalog =
-      if key.provider_slug == provider,
+      if key.provider_slug == catalog_provider,
         do: [],
         else: Models.list_models_by_provider(key.provider_slug)
 
-    catalog = plan_catalog ++ Models.list_models_by_provider(provider)
+    catalog = plan_catalog ++ Models.list_models_by_provider(catalog_provider)
 
     catalog_entries =
       Enum.map(catalog, fn model ->
@@ -311,6 +313,9 @@ defmodule DodoRouter.Replays do
     |> Enum.uniq_by(& &1.id)
     |> Enum.sort_by(& &1.id)
   end
+
+  defp normalize_models_provider("openai-codex"), do: "openai"
+  defp normalize_models_provider(slug), do: slug
 
   defp to_number(nil), do: nil
   defp to_number(%Decimal{} = decimal), do: Decimal.to_float(decimal)
