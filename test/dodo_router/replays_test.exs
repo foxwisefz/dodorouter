@@ -408,6 +408,25 @@ defmodule DodoRouter.ReplaysTest do
       assert "kimi-k2.6" in model_ids
     end
 
+    test "Codex keys offer models from the OpenAI catalog", ctx do
+      {:ok, _} =
+        DodoRouter.Models.create_model(%{
+          provider_slug: "openai",
+          model_id: "gpt-5.6-sol",
+          display_name: "GPT-5.6 Sol"
+        })
+
+      codex_key =
+        ProvidersFixtures.provider_key_fixture(ctx.user, %{provider_slug: "openai-codex"})
+
+      target =
+        ctx.user
+        |> Replays.list_targets()
+        |> Enum.find(&(&1.provider_key.id == codex_key.id))
+
+      assert Enum.any?(target.models, &(&1.id == "gpt-5.6-sol"))
+    end
+
     test "returns no targets for a user without keys", _ctx do
       keyless_user = AccountsFixtures.user_fixture()
       assert Replays.list_targets(keyless_user) == []
