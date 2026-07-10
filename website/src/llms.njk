@@ -1,0 +1,21 @@
+---
+eleventyExcludeFromCollections: true
+permalink: "/llms.txt"
+---
+# DodoRouter
+
+> DodoRouter is an OpenAI- and Anthropic-compatible LLM proxy with automatic provider fallback. Point any client at it once; it retries the next configured provider automatically on rate limits, outages, or context overflows, converts the response back to your client's format, and logs every request.
+
+This file follows the [llms.txt](https://llmstxt.org) convention: a condensed, link-based index for AI agents and LLMs. For the complete documentation concatenated as plain Markdown in one file (no need to follow links), fetch [{{ site.url | safe }}/llms-full.txt]({{ site.url | safe }}/llms-full.txt) instead. Every page linked below also has its own raw-Markdown twin at the same URL with `.md` appended (e.g. `{{ site.url | safe }}/docs/quickstart.md`).
+
+{% for section in docsSectionOrder %}
+## {{ section | safe }}
+
+{% for p in collections.docsPages %}{% if p.data.section == section %}- [{{ p.data.title | safe }}]({{ site.url | safe }}{{ p.url | safe }}): {{ p.data.description | safe }}
+{% endif %}{% endfor %}
+{% endfor %}
+## Optional
+
+- [Full documentation, one file]({{ site.url | safe }}/llms-full.txt): every page above, concatenated as plain Markdown.
+- [Source code](https://github.com/foxwise-ai/dodorouter): the Elixir/Phoenix implementation — the ground truth when this file and the code disagree.
+- [Hosted service]({{ site.url | safe }}): register, subscribe, and manage routers without self-hosting.

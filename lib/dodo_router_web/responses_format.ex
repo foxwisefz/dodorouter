@@ -118,23 +118,129 @@ defmodule DodoRouterWeb.ResponsesFormat do
     end
   end
 
+  # Responses API streaming clients (e.g. Codex CLI) track an "active item"
+  # client-side and require response.output_item.added + response.content_part.added
+  # before the first response.output_text.delta for that item — otherwise they
+  # reject the delta as "without active item". Chunks arrive one at a time with
+  # no shared accumulator, so item-started/text-so-far state is tracked in the
+  # process dictionary, keyed by request_id (each request is handled by a single
+  # process, and request_id is unique per request, so this can't collide).
   defp convert_openai_chunk_to_responses_events(chunk, request_id) do
     delta = get_in(chunk, ["choices", Access.at(0), "delta"]) || %{}
     content = delta["content"]
+    finish_reason = get_in(chunk, ["choices", Access.at(0), "finish_reason"])
 
-    if is_binary(content) and content != "" do
-      event_data = %{
-        "type" => "response.output_text.delta",
+    text_events =
+      if is_binary(content) and content != "" do
+        accumulate_output_text(request_id, content)
+        lifecycle_start_events(request_id) ++ [output_text_delta_event(request_id, content)]
+      else
+        []
+      end
+
+    done_events =
+      if finish_reason && item_started?(request_id) do
+        lifecycle_done_events(request_id)
+      else
+        []
+      end
+
+    text_events ++ done_events
+  end
+
+  defp item_started_key(request_id), do: {:responses_item_started, request_id}
+  defp output_text_key(request_id), do: {:responses_output_text, request_id}
+
+  defp item_started?(request_id), do: Process.get(item_started_key(request_id), false)
+
+  defp accumulate_output_text(request_id, content) do
+    key = output_text_key(request_id)
+    Process.put(key, Process.get(key, "") <> content)
+  end
+
+  defp output_text_delta_event(request_id, content) do
+    event_data = %{
+      "type" => "response.output_text.delta",
+      "item_id" => "msg_#{request_id}",
+      "output_index" => 0,
+      "content_index" => 0,
+      "delta" => content
+    }
+
+    "event: response.output_text.delta\ndata: #{Jason.encode!(event_data)}\n\n"
+  end
+
+  defp lifecycle_start_events(request_id) do
+    if item_started?(request_id) do
+      []
+    else
+      Process.put(item_started_key(request_id), true)
+
+      item_added = %{
+        "type" => "response.output_item.added",
+        "output_index" => 0,
+        "item" => %{
+          "type" => "message",
+          "id" => "msg_#{request_id}",
+          "status" => "in_progress",
+          "role" => "assistant",
+          "content" => []
+        }
+      }
+
+      part_added = %{
+        "type" => "response.content_part.added",
         "item_id" => "msg_#{request_id}",
         "output_index" => 0,
         "content_index" => 0,
-        "delta" => content
+        "part" => %{"type" => "output_text", "text" => "", "annotations" => []}
       }
 
-      ["event: response.output_text.delta\ndata: #{Jason.encode!(event_data)}\n\n"]
-    else
-      []
+      [
+        "event: response.output_item.added\ndata: #{Jason.encode!(item_added)}\n\n",
+        "event: response.content_part.added\ndata: #{Jason.encode!(part_added)}\n\n"
+      ]
     end
+  end
+
+  defp lifecycle_done_events(request_id) do
+    full_text = Process.get(output_text_key(request_id), "")
+    Process.delete(item_started_key(request_id))
+    Process.delete(output_text_key(request_id))
+
+    text_done = %{
+      "type" => "response.output_text.done",
+      "item_id" => "msg_#{request_id}",
+      "output_index" => 0,
+      "content_index" => 0,
+      "text" => full_text
+    }
+
+    part_done = %{
+      "type" => "response.content_part.done",
+      "item_id" => "msg_#{request_id}",
+      "output_index" => 0,
+      "content_index" => 0,
+      "part" => %{"type" => "output_text", "text" => full_text, "annotations" => []}
+    }
+
+    item_done = %{
+      "type" => "response.output_item.done",
+      "output_index" => 0,
+      "item" => %{
+        "type" => "message",
+        "id" => "msg_#{request_id}",
+        "status" => "completed",
+        "role" => "assistant",
+        "content" => [%{"type" => "output_text", "text" => full_text, "annotations" => []}]
+      }
+    }
+
+    [
+      "event: response.output_text.done\ndata: #{Jason.encode!(text_done)}\n\n",
+      "event: response.content_part.done\ndata: #{Jason.encode!(part_done)}\n\n",
+      "event: response.output_item.done\ndata: #{Jason.encode!(item_done)}\n\n"
+    ]
   end
 
   defp convert_input_to_messages(nil), do: []

@@ -1,0 +1,18 @@
+---
+eleventyExcludeFromCollections: true
+permalink: "/llms-full.txt"
+---
+# DodoRouter — complete documentation
+
+> Every page under {{ site.url | safe }}/docs, concatenated as plain Markdown in reading order. See {{ site.url | safe }}/llms.txt for a condensed, link-only index instead of this full text.
+
+{% for p in collections.docsPages %}
+---
+
+# {{ p.data.title | safe }}
+
+Source: {{ site.url | safe }}{{ p.url | safe }}
+
+{{ p.inputPath | rawMarkdownBody | safe }}
+
+{% endfor %}

@@ -1,0 +1,9 @@
+---
+eleventyExcludeFromCollections: true
+pagination:
+  data: collections.docsPages
+  size: 1
+  alias: docPage
+permalink: "{{ docPage.url | mdTwinUrl }}"
+---
+{{ docPage.inputPath | rawMarkdownBody | safe }}
