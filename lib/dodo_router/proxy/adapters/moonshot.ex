@@ -257,7 +257,7 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
       |> maybe_default("frequency_penalty", nil)
       |> maybe_default("presence_penalty", nil)
       |> maybe_default("stop", nil)
-      |> clamp_temperature()
+      |> normalize_temperature(step)
       |> handle_tool_choice_required()
       |> normalize_tool_call_arguments()
       |> sanitize_tool_names()
@@ -287,6 +287,22 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
 
   defp maybe_default(map, key, default) do
     if Map.has_key?(map, key), do: map, else: Map.put(map, key, default)
+  end
+
+  # Kimi K2.5+ (kimi-k2.5, kimi-k2.6, kimi-k2.7-code, ...) and the coding-plan
+  # kimi-for-coding model pin temperature server-side and reject any explicit
+  # value with "invalid temperature: only X is allowed for this model" — the
+  # docs say to omit the parameter entirely, so we strip it (including step
+  # defaults) rather than clamp.
+  defp fixed_temperature_model?(model) when is_binary(model),
+    do: String.starts_with?(model, "kimi-k2.") or model == "kimi-for-coding"
+
+  defp fixed_temperature_model?(_), do: false
+
+  defp normalize_temperature(body, %RoutingStep{model: model}) do
+    if fixed_temperature_model?(model),
+      do: Map.delete(body, "temperature"),
+      else: clamp_temperature(body)
   end
 
   # Moonshot temperature range is [0, 1], OpenAI is [0, 2]
