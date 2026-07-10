@@ -119,6 +119,81 @@ defmodule DodoRouter.Proxy.Adapters.MoonshotTest do
       refute Map.has_key?(assistant_msg, "reasoning_content")
     end
 
+    test "strips client temperature for kimi-k2.5 (fixed-temperature model)" do
+      request = %{
+        "messages" => [%{"role" => "user", "content" => "Hi"}],
+        "temperature" => 0.4
+      }
+
+      step = %RoutingStep{provider: "moonshot", model: "kimi-k2.5"}
+
+      body = Moonshot.build_request_body(request, step)
+
+      refute Map.has_key?(body, "temperature")
+    end
+
+    test "strips client temperature for kimi-k2.6 (fixed-temperature model)" do
+      request = %{
+        "messages" => [%{"role" => "user", "content" => "Hi"}],
+        "temperature" => 0.4
+      }
+
+      step = %RoutingStep{provider: "moonshot", model: "kimi-k2.6", reasoning_effort: "minimal"}
+
+      body = Moonshot.build_request_body(request, step)
+
+      refute Map.has_key?(body, "temperature")
+    end
+
+    test "strips client temperature for kimi-for-coding" do
+      request = %{
+        "messages" => [%{"role" => "user", "content" => "Hi"}],
+        "temperature" => 0.6
+      }
+
+      step = %RoutingStep{provider: "moonshot", model: "kimi-for-coding", plan_type: "coding"}
+
+      body = Moonshot.build_request_body(request, step)
+
+      refute Map.has_key?(body, "temperature")
+    end
+
+    test "strips step default temperature for fixed-temperature models" do
+      request = %{"messages" => [%{"role" => "user", "content" => "Hi"}]}
+
+      step = %RoutingStep{provider: "moonshot", model: "kimi-k2.5", temperature: 0.7}
+
+      body = Moonshot.build_request_body(request, step)
+
+      refute Map.has_key?(body, "temperature")
+    end
+
+    test "still clamps temperature for models that accept it" do
+      request = %{
+        "messages" => [%{"role" => "user", "content" => "Hi"}],
+        "temperature" => 1.5
+      }
+
+      step = %RoutingStep{provider: "moonshot", model: "kimi-k2"}
+
+      body = Moonshot.build_request_body(request, step)
+
+      assert body["temperature"] == 1.0
+    end
+
+    test "passes through in-range temperature for moonshot-v1 models" do
+      request = %{
+        "messages" => [%{"role" => "user", "content" => "Hi"}],
+        "temperature" => 0.4
+      }
+
+      step = %RoutingStep{provider: "moonshot", model: "moonshot-v1-8k"}
+
+      body = Moonshot.build_request_body(request, step)
+
+      assert body["temperature"] == 0.4
+    end
+
     test "sets thinking type to enabled by default for kimi-k2.5" do
       request = %{"messages" => [%{"role" => "user", "content" => "Hi"}]}
 

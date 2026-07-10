@@ -66,6 +66,27 @@ defmodule DodoRouter.ReplaysTest do
       assert request["messages"] == [%{"role" => "user", "content" => "hi"}]
     end
 
+    test "replayed body temperature is stripped by the Moonshot adapter for fixed-temp kimi models",
+         ctx do
+      assert {:ok, request} = Replays.prepare_request(ctx.source, "kimi-k2.6")
+      assert request["temperature"] == 0.7
+
+      # Replay steps leave temperature nil so the body's value passes through;
+      # the adapter must still drop it for models that pin temperature server-side.
+      step = %DodoRouter.Routers.RoutingStep{
+        id: Ecto.UUID.generate(),
+        router_id: ctx.router.id,
+        position: 0,
+        provider: "moonshot",
+        model: "kimi-k2.6"
+      }
+
+      body = DodoRouter.Proxy.Adapters.Moonshot.build_request_body(request, step)
+
+      refute Map.has_key?(body, "temperature")
+      assert body["model"] == "kimi-k2.6"
+    end
+
     test "blocks replay when the stored request content was truncated", ctx do
       truncated =
         LogsFixtures.log_fixture(ctx.router, %{
