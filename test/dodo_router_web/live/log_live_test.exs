@@ -96,6 +96,17 @@ defmodule DodoRouterWeb.LogLiveTest do
     end
   end
 
+  describe "Create evaluation entry point" do
+    test "links a request to the evaluation builder", %{conn: conn, user: user} do
+      {router, _api_key} = RoutersFixtures.router_fixture(user)
+      log = LogsFixtures.log_fixture(router)
+
+      {:ok, live, _html} = live(conn, ~p"/logs/#{log.request_id}")
+
+      assert has_element?(live, "#create-eval-button[href='/logs/#{log.id}/evals/new']")
+    end
+  end
+
   describe "Show" do
     test "subscription-covered requests say plan instead of $0.0000", %{conn: conn, user: user} do
       {router, _api_key} = RoutersFixtures.router_fixture(user)

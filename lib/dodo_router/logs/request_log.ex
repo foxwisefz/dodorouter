@@ -65,6 +65,7 @@ defmodule DodoRouter.Logs.RequestLog do
     # Replay linkage: set when this log was produced by re-running another log
     belongs_to :replayed_from, __MODULE__
     has_many :replays, __MODULE__, foreign_key: :replayed_from_id
+    has_many :evaluations, DodoRouter.Logs.Evaluation
 
     # Message index the replay was anchored at (nil = whole thread). Stored
     # explicitly: an anchor at the last user message doesn't shorten the

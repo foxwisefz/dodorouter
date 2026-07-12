@@ -151,6 +151,13 @@ defmodule DodoRouterWeb.LogLive.Show do
           <code class="text-sm text-base-content/60">{@log.request_id}</code>
         </div>
         <.link
+          id="create-eval-button"
+          navigate={~p"/logs/#{@log.id}/evals/new"}
+          class="btn btn-ghost btn-sm gap-2"
+        >
+          <.icon name="hero-beaker" class="w-4 h-4" /> Create eval
+        </.link>
+        <.link
           :if={@log.replayed_from_id}
           id="replay-of-link"
           navigate={~p"/logs/#{@log.replayed_from_id}/replay?replay=#{@log.id}"}
