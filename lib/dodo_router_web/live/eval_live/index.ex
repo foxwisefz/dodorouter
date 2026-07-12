@@ -43,7 +43,7 @@ defmodule DodoRouterWeb.EvalLive.Index do
             <div class="flex items-start justify-between gap-3">
               <h2 class="font-semibold group-hover:text-primary">{evaluation.name}</h2>
               <span class="rounded-full bg-base-200 px-2 py-1 text-xs">
-                {length(evaluation.runs)} runs
+                {evaluation.run_count} runs
               </span>
             </div>
             <p class="mt-3 line-clamp-2 text-sm text-base-content/55">{evaluation.criteria}</p>

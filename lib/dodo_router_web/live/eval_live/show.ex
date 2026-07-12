@@ -72,9 +72,10 @@ defmodule DodoRouterWeb.EvalLive.Show do
     socket
     |> assign(:page_title, evaluation.name)
     |> assign(:evaluation, evaluation)
+    |> assign(:batch_runs, Evaluations.latest_batch_runs(evaluation))
     |> assign(:summary, Evaluations.summary(evaluation))
     |> assign(:rankings, Evaluations.rankings(evaluation))
-    |> assign(:running?, evaluation.benchmark_status == "running")
+    |> assign(:running?, Evaluations.benchmark_running?(evaluation))
   end
 
   @impl true
@@ -136,7 +137,7 @@ defmodule DodoRouterWeb.EvalLive.Show do
 
         <div id="eval-summary" class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <.stat
-            label="Total runs"
+            label="Latest batch runs"
             value={to_string(@summary.runs)}
             detail={"#{@summary.completed} successful"}
           />
@@ -148,7 +149,7 @@ defmodule DodoRouterWeb.EvalLive.Show do
           <.stat
             label="Average time"
             value={duration(@summary.avg_latency)}
-            detail="Candidate generation latency"
+            detail={"Batch cost " <> money(@summary.total_cost_usd)}
           />
           <.stat
             label="Errored runs"
@@ -164,8 +165,10 @@ defmodule DodoRouterWeb.EvalLive.Show do
           >
             <div class="mb-6 flex items-center justify-between">
               <div>
-                <h2 class="font-semibold">Quality trend</h2>
-                <p class="text-sm text-base-content/45">Score consistency across judge runs</p>
+                <h2 class="font-semibold">Score consistency</h2>
+                <p class="text-sm text-base-content/45">
+                  Judge scores per repetition, latest batch
+                </p>
               </div>
               <span class="text-xs text-base-content/40">0–100</span>
             </div>
@@ -188,17 +191,11 @@ defmodule DodoRouterWeb.EvalLive.Show do
                   class="text-success/50"
                 />
                 <text x="60" y="80" class="fill-success text-[11px]">Pass 70</text>
+                <%!-- Dots only: repetitions are independent samples, and a
+                connecting line would imply a time trend that doesn't exist. --%>
                 <g :for={{ranking, index} <- Enum.with_index(@rankings)}>
-                  <polyline
-                    fill="none"
-                    stroke={chart_color(index)}
-                    stroke-width="3"
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    points={chart_points(@evaluation.runs, ranking)}
-                  />
                   <circle
-                    :for={{run, point_index} <- chart_runs(@evaluation.runs, ranking)}
+                    :for={{run, point_index} <- chart_runs(@batch_runs, ranking)}
                     cx={chart_x(point_index, max(ranking.total, 2))}
                     cy={chart_y(run.score)}
                     r="5"
@@ -290,7 +287,12 @@ defmodule DodoRouterWeb.EvalLive.Show do
         </section>
 
         <section class="space-y-3">
-          <h2 class="text-lg font-semibold">Run history</h2>
+          <div>
+            <h2 class="text-lg font-semibold">Run history</h2>
+            <p class="text-sm text-base-content/45">
+              All benchmark executions; stats above cover only the latest.
+            </p>
+          </div>
           <div id="eval-runs" class="space-y-3">
             <div
               :if={@evaluation.runs == []}
@@ -395,6 +397,8 @@ defmodule DodoRouterWeb.EvalLive.Show do
   defp score(value), do: "#{value}/100"
   defp percent(nil), do: "—"
   defp percent(value), do: "#{value}%"
+  defp money(nil), do: "—"
+  defp money(value), do: "$" <> Decimal.to_string(Decimal.round(value, 4), :normal)
   defp duration(nil), do: "—"
   defp duration(value) when value >= 1_000, do: "#{Float.round(value / 1_000, 1)}s"
   defp duration(value), do: "#{value}ms"
@@ -413,14 +417,6 @@ defmodule DodoRouterWeb.EvalLive.Show do
     )
     |> Enum.sort_by(& &1.repetition)
     |> Enum.with_index()
-  end
-
-  defp chart_points(runs, ranking) do
-    runs
-    |> chart_runs(ranking)
-    |> Enum.map_join(" ", fn {run, index} ->
-      "#{chart_x(index, max(ranking.total, 2))},#{chart_y(run.score)}"
-    end)
   end
 
   defp chart_x(index, total), do: 70 + index * 790 / max(total - 1, 1)

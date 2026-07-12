@@ -23,6 +23,10 @@ defmodule DodoRouter.Logs.EvaluationRun do
     field :candidate_latency_ms, :integer
     field :candidate_cost_usd, :decimal
     field :candidate_output, :string
+    field :judge_cost_usd, :decimal
+    # Groups the runs of one benchmark execution; re-runs get a fresh batch
+    # so aggregates don't mix executions. Nil on rows from before batching.
+    field :batch_id, :binary_id
 
     belongs_to :evaluation, DodoRouter.Logs.Evaluation
     belongs_to :judge_log, DodoRouter.Logs.RequestLog
@@ -54,6 +58,8 @@ defmodule DodoRouter.Logs.EvaluationRun do
       :candidate_latency_ms,
       :candidate_cost_usd,
       :candidate_output,
+      :judge_cost_usd,
+      :batch_id,
       :evaluation_id,
       :judge_log_id
     ])

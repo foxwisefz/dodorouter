@@ -132,7 +132,8 @@ defmodule DodoRouter.Proxy do
       request_headers: encode_redacted_headers(client_headers),
       response_headers: encode_redacted_headers(result.response_headers),
       replayed_from_id: Keyword.get(opts, :replayed_from_id),
-      replay_from_index: Keyword.get(opts, :replay_from_index)
+      replay_from_index: Keyword.get(opts, :replay_from_index),
+      traffic_type: Keyword.get(opts, :traffic_type, "proxy")
     }
 
     # :sync callers (e.g. replay) need the persisted row back before returning

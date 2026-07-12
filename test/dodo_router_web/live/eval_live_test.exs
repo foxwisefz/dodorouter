@@ -61,6 +61,30 @@ defmodule DodoRouterWeb.EvalLiveTest do
     assert {:error, {:live_redirect, %{to: "/evals"}}} = live(conn, ~p"/evals/#{missing_id}")
   end
 
+  test "denies access to another user's evaluation", %{conn: conn} do
+    other_user = DodoRouter.AccountsFixtures.user_fixture()
+    {other_router, _api_key} = RoutersFixtures.router_fixture(other_user)
+    other_key = ProvidersFixtures.provider_key_fixture(other_user)
+    other_log = LogsFixtures.log_fixture(other_router)
+
+    {:ok, evaluation} =
+      Evaluations.create_evaluation(other_user, other_log, %{
+        name: "Not yours",
+        criteria: "Be correct",
+        judge_model: "test-model",
+        judge_provider_key_id: other_key.id,
+        candidate_targets: [
+          %{
+            "provider_key_id" => other_key.id,
+            "provider" => "test_provider",
+            "model" => "test-model"
+          }
+        ]
+      })
+
+    assert {:error, {:live_redirect, %{to: "/evals"}}} = live(conn, ~p"/evals/#{evaluation.id}")
+  end
+
   test "run history links to candidate and judge logs", %{conn: conn, user: user} do
     {router, _api_key} = RoutersFixtures.router_fixture(user)
     provider_key = ProvidersFixtures.provider_key_fixture(user)

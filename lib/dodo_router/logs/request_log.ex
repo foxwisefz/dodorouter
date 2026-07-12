@@ -12,6 +12,7 @@ defmodule DodoRouter.Logs.RequestLog do
     field :request_id, Ecto.UUID
     field :status, :string
     field :http_status, :integer
+    field :traffic_type, :string, default: "proxy"
 
     # Routing info
     field :attempted_steps, {:array, :map}, default: []
@@ -82,6 +83,7 @@ defmodule DodoRouter.Logs.RequestLog do
       :request_id,
       :status,
       :http_status,
+      :traffic_type,
       :attempted_steps,
       :final_provider,
       :final_model,

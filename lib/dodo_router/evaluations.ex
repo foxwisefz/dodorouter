@@ -5,20 +5,27 @@ defmodule DodoRouter.Evaluations do
 
   alias DodoRouter.Accounts.User
   alias DodoRouter.Logs.{Evaluation, EvaluationRun}
-  alias DodoRouter.{Proxy, Replays, Repo}
+  alias DodoRouter.{Providers, Proxy, Replays, Repo}
 
   @prompt_version "v1"
   @benchmark_concurrency 3
+  # Character budget per SOURCE block in the judge prompt, so a long source
+  # conversation can't overflow the judge model's context window.
+  @judge_source_limit 40_000
 
   def list_evaluations(%User{} = user) do
+    run_counts =
+      from(r in EvaluationRun,
+        where: r.evaluation_id == parent_as(:evaluation).id,
+        select: count()
+      )
+
     from(e in Evaluation,
+      as: :evaluation,
       where: e.evaluated_by_id == ^user.id,
       order_by: [desc: e.inserted_at],
-      preload: [
-        request_log: :router,
-        judge_provider_key: [],
-        runs: ^from(r in EvaluationRun, order_by: [asc: r.inserted_at])
-      ]
+      select_merge: %{run_count: subquery(run_counts)},
+      preload: [request_log: :router]
     )
     |> Repo.all()
   end
@@ -62,11 +69,42 @@ defmodule DodoRouter.Evaluations do
 
     %Evaluation{}
     |> Evaluation.changeset(attrs)
+    |> validate_key_ownership(user)
     |> Repo.insert()
   end
 
-  def run(%User{} = user, %Evaluation{} = evaluation) do
+  # The UI only offers the user's own keys, but the ids arrive as client
+  # params — reject anything the user doesn't own before it's persisted.
+  defp validate_key_ownership(%Ecto.Changeset{valid?: false} = changeset, _user), do: changeset
+
+  defp validate_key_ownership(changeset, user) do
+    judge_key = Ecto.Changeset.get_field(changeset, :judge_provider_key_id)
+    targets = Ecto.Changeset.get_field(changeset, :candidate_targets) || []
+
+    changeset
+    |> validate_owned_keys(user, :judge_provider_key_id, List.wrap(judge_key))
+    |> validate_owned_keys(user, :candidate_targets, Enum.map(targets, & &1["provider_key_id"]))
+  end
+
+  defp validate_owned_keys(changeset, user, field, key_ids) do
+    owned? = fn id ->
+      is_binary(id) and match?({:ok, _}, Ecto.UUID.cast(id)) and
+        Providers.get_provider_key(user, id) != nil
+    end
+
+    if Enum.all?(key_ids, owned?) do
+      changeset
+    else
+      Ecto.Changeset.add_error(changeset, field, "must reference your own provider keys")
+    end
+  end
+
+  def run(%User{} = user, %Evaluation{} = evaluation, opts \\ []) do
     evaluation = get_evaluation!(user, evaluation.id)
+    batch_id = Keyword.get_lazy(opts, :batch_id, fn -> Ecto.UUID.generate() end)
+
+    evaluation =
+      evaluation |> Ecto.Changeset.change(last_batch_id: batch_id) |> Repo.update!()
 
     jobs =
       for target <- evaluation.candidate_targets,
@@ -77,7 +115,7 @@ defmodule DodoRouter.Evaluations do
       jobs
       |> Task.async_stream(
         fn {target, repetition} ->
-          result = safe_run_candidate(user, evaluation, target, repetition)
+          result = safe_run_candidate(user, evaluation, target, repetition, batch_id)
 
           Phoenix.PubSub.broadcast(
             DodoRouter.PubSub,
@@ -99,8 +137,8 @@ defmodule DodoRouter.Evaluations do
     {:ok, results}
   end
 
-  defp safe_run_candidate(user, evaluation, target, repetition) do
-    run_candidate(user, evaluation, target, repetition)
+  defp safe_run_candidate(user, evaluation, target, repetition, batch_id) do
+    run_candidate(user, evaluation, target, repetition, batch_id)
   rescue
     exception ->
       {:error,
@@ -113,27 +151,70 @@ defmodule DodoRouter.Evaluations do
   def enqueue(%User{} = user, %Evaluation{} = evaluation) do
     evaluation = get_evaluation!(user, evaluation.id)
 
-    if evaluation.benchmark_status == "running" and evaluation.runs != [] do
+    if benchmark_running?(evaluation) do
       {:error, :already_running}
     else
-      evaluation |> Ecto.Changeset.change(benchmark_status: "running") |> Repo.update!()
+      batch_id = Ecto.UUID.generate()
+
+      evaluation
+      |> Ecto.Changeset.change(benchmark_status: "running", last_batch_id: batch_id)
+      |> Repo.update!()
 
       Task.Supervisor.start_child(available_task_supervisor(), fn ->
-        result = run(user, evaluation)
-        status = benchmark_status(result)
-        evaluation |> Ecto.Changeset.change(benchmark_status: status) |> Repo.update!()
+        case register_benchmark(evaluation.id) do
+          :ok ->
+            result = run(user, evaluation, batch_id: batch_id)
+            status = benchmark_status(result)
+            evaluation |> Ecto.Changeset.change(benchmark_status: status) |> Repo.update!()
 
-        Phoenix.PubSub.broadcast(
-          DodoRouter.PubSub,
-          "evaluation:#{evaluation.id}",
-          {:benchmark_finished, result}
-        )
+            Phoenix.PubSub.broadcast(
+              DodoRouter.PubSub,
+              "evaluation:#{evaluation.id}",
+              {:benchmark_finished, result}
+            )
+
+          :already_running ->
+            :ok
+        end
       end)
 
       :ok
     end
   end
 
+  @doc """
+  Whether a benchmark process for this evaluation is alive right now.
+
+  The registry is the source of truth: a `benchmark_status` of "running"
+  can be left behind by a restart mid-benchmark, and must not lock the
+  evaluation out of re-running forever. Falls back to the stored status
+  only when the registry isn't in the supervision tree yet (hot upgrade).
+  """
+  def benchmark_running?(%Evaluation{} = evaluation) do
+    case Process.whereis(DodoRouter.EvaluationRegistry) do
+      nil -> evaluation.benchmark_status == "running"
+      _pid -> Registry.lookup(DodoRouter.EvaluationRegistry, evaluation.id) != []
+    end
+  end
+
+  # Registered from inside the benchmark task so the entry dies with it.
+  # Best-effort :ok when the registry is missing (hot-upgrade window).
+  defp register_benchmark(evaluation_id) do
+    case Process.whereis(DodoRouter.EvaluationRegistry) do
+      nil ->
+        :ok
+
+      _pid ->
+        case Registry.register(DodoRouter.EvaluationRegistry, evaluation_id, nil) do
+          {:ok, _} -> :ok
+          {:error, {:already_registered, _}} -> :already_running
+        end
+    end
+  end
+
+  # TODO(2026-07): hot-upgrade bridge only — remove (together with the
+  # registry fallbacks) once a release containing these children is the
+  # permanent baseline everywhere.
   @doc false
   def available_task_supervisor(preferred \\ DodoRouter.EvaluationTaskSupervisor) do
     if Process.whereis(preferred) do
@@ -143,119 +224,180 @@ defmodule DodoRouter.Evaluations do
     end
   end
 
-  defp run_candidate(user, evaluation, target, repetition) do
+  defp run_candidate(user, evaluation, target, repetition, batch_id) do
     started_at = System.monotonic_time(:millisecond)
-    key_id = target["provider_key_id"]
-    model = target["model"]
 
     case create_run(evaluation, %{
-           candidate_provider_key_id: key_id,
+           candidate_provider_key_id: target["provider_key_id"],
            candidate_provider: target["provider"],
-           candidate_model: model,
-           repetition: repetition
+           candidate_model: target["model"],
+           repetition: repetition,
+           batch_id: batch_id
          }) do
       {:ok, run} ->
-        case Replays.replay(user, evaluation.request_log, %{
-               provider_key_id: key_id,
-               model: model
-             }) do
-          {:ok, candidate_log} ->
-            if candidate_successful?(candidate_log) do
-              run =
-                update_run!(run, %{
-                  status: "running",
-                  candidate_log_id: candidate_log.id,
-                  candidate_latency_ms: candidate_log.latency_ms,
-                  candidate_cost_usd: candidate_log.estimated_cost_usd,
-                  candidate_output: candidate_log.response_body
-                })
-
-              judge_candidate(user, evaluation, run, candidate_log, started_at)
-            else
-              {:error,
-               update_run!(run, %{
-                 status: "failed",
-                 error: candidate_error_message(candidate_log),
-                 candidate_log_id: candidate_log.id,
-                 candidate_latency_ms: candidate_log.latency_ms,
-                 candidate_cost_usd: candidate_log.estimated_cost_usd,
-                 candidate_output: candidate_log.response_body,
-                 duration_ms: System.monotonic_time(:millisecond) - started_at
-               })}
-            end
-
-          {:error, reason} ->
-            {:error,
-             update_run!(run, %{
-               status: "failed",
-               error: "Candidate generation error: #{inspect(reason)}",
-               duration_ms: System.monotonic_time(:millisecond) - started_at
-             })}
-        end
+        with_run_failure_guard(run, fn ->
+          generate_and_judge(user, evaluation, run, target, started_at)
+        end)
 
       {:error, changeset} ->
         {:error, changeset}
     end
   end
 
-  defp judge_candidate(user, evaluation, run, candidate_log, started_at) do
-    with {:ok, step} <-
-           Replays.build_step(
-             user,
-             evaluation.request_log.router_id,
-             evaluation.judge_provider_key_id,
-             evaluation.judge_model
-           ) do
-      request = judge_request(evaluation, candidate_log)
+  @doc false
+  def with_run_failure_guard(run, fun) do
+    fun.()
+  rescue
+    exception ->
+      {:error,
+       update_run!(run, %{
+         status: "failed",
+         error: "Run crashed: #{Exception.message(exception)}"
+       })}
+  catch
+    kind, reason ->
+      {:error,
+       update_run!(run, %{status: "failed", error: "Run crashed: #{inspect({kind, reason})}"})}
+  end
 
-      case Proxy.dispatch(evaluation.request_log.router, request,
-             steps: [step],
-             log_mode: :sync,
-             request_id: Ecto.UUID.generate()
-           ) do
-        {:ok, response, meta} ->
-          raw = response_content(response)
-          duration = System.monotonic_time(:millisecond) - started_at
-          judge_log_id = get_in(meta, [:log, Access.key(:id)])
+  defp generate_and_judge(user, evaluation, run, target, started_at) do
+    case Replays.replay(user, evaluation.request_log, %{
+           provider_key_id: target["provider_key_id"],
+           model: target["model"],
+           traffic_type: "evaluation_candidate"
+         }) do
+      {:ok, candidate_log} ->
+        candidate_content = extract_message_content(candidate_log.response_body)
 
-          case parse_judgement(raw) do
-            {:ok, judgement} ->
-              {:ok,
-               update_run!(run, %{
-                 status: "completed",
-                 score: judgement.score,
-                 passed: judgement.passed,
-                 summary: judgement.summary,
-                 criterion_scores: judgement.criterion_scores,
-                 issues: judgement.issues,
-                 raw_judge_response: raw,
-                 duration_ms: duration,
-                 judge_log_id: judge_log_id
-               })}
+        cond do
+          not candidate_successful?(candidate_log) ->
+            {:error,
+             update_run!(run, %{
+               status: "failed",
+               error: candidate_error_message(candidate_log),
+               candidate_log_id: candidate_log.id,
+               candidate_latency_ms: candidate_log.latency_ms,
+               candidate_cost_usd: candidate_log.estimated_cost_usd,
+               candidate_output: candidate_log.response_body,
+               duration_ms: System.monotonic_time(:millisecond) - started_at
+             })}
 
-            {:error, reason} ->
-              {:error,
-               update_run!(run, %{
-                 status: "failed",
-                 error: reason,
-                 raw_judge_response: raw,
-                 duration_ms: duration,
-                 judge_log_id: judge_log_id
-               })}
-          end
+          candidate_content == nil ->
+            {:error,
+             update_run!(run, %{
+               status: "failed",
+               error: "Candidate response contained no message content",
+               candidate_log_id: candidate_log.id,
+               candidate_latency_ms: candidate_log.latency_ms,
+               candidate_cost_usd: candidate_log.estimated_cost_usd,
+               duration_ms: System.monotonic_time(:millisecond) - started_at
+             })}
 
-        error ->
-          {:error,
-           update_run!(run, %{
-             status: "failed",
-             error: proxy_error_message(error),
-             duration_ms: System.monotonic_time(:millisecond) - started_at
-           })}
-      end
+          true ->
+            run =
+              update_run!(run, %{
+                status: "running",
+                candidate_log_id: candidate_log.id,
+                candidate_latency_ms: candidate_log.latency_ms,
+                candidate_cost_usd: candidate_log.estimated_cost_usd,
+                candidate_output: candidate_content
+              })
+
+            judge_candidate(user, evaluation, run, candidate_content, started_at)
+        end
+
+      {:error, reason} ->
+        {:error,
+         update_run!(run, %{
+           status: "failed",
+           error: "Candidate generation error: #{inspect(reason)}",
+           duration_ms: System.monotonic_time(:millisecond) - started_at
+         })}
     end
   end
 
-  def summary(%Evaluation{runs: runs}) do
+  defp judge_candidate(user, evaluation, run, candidate_content, started_at) do
+    case Replays.build_step(
+           user,
+           evaluation.request_log.router_id,
+           evaluation.judge_provider_key_id,
+           evaluation.judge_model
+         ) do
+      {:ok, step} ->
+        request = judge_request(evaluation, candidate_content)
+
+        case Proxy.dispatch(evaluation.request_log.router, request,
+               steps: [step],
+               log_mode: :sync,
+               request_id: Ecto.UUID.generate(),
+               traffic_type: "evaluation_judge"
+             ) do
+          {:ok, response, meta} ->
+            raw = response_content(response)
+            duration = System.monotonic_time(:millisecond) - started_at
+            judge_log = if is_map(meta), do: Map.get(meta, :log)
+
+            judge_attrs = %{
+              raw_judge_response: raw,
+              duration_ms: duration,
+              judge_log_id: judge_log && judge_log.id,
+              judge_cost_usd: judge_log && judge_log.estimated_cost_usd
+            }
+
+            case parse_judgement(raw) do
+              {:ok, judgement} ->
+                {:ok,
+                 update_run!(
+                   run,
+                   Map.merge(judge_attrs, %{
+                     status: "completed",
+                     score: judgement.score,
+                     passed: judgement.passed,
+                     summary: judgement.summary,
+                     criterion_scores: judgement.criterion_scores,
+                     issues: judgement.issues
+                   })
+                 )}
+
+              {:error, reason} ->
+                {:error,
+                 update_run!(run, Map.merge(judge_attrs, %{status: "failed", error: reason}))}
+            end
+
+          error ->
+            {:error,
+             update_run!(run, %{
+               status: "failed",
+               error: proxy_error_message(error),
+               duration_ms: System.monotonic_time(:millisecond) - started_at
+             })}
+        end
+
+      {:error, reason} ->
+        {:error,
+         update_run!(run, %{
+           status: "failed",
+           error: "Judge setup error: #{inspect(reason)}",
+           duration_ms: System.monotonic_time(:millisecond) - started_at
+         })}
+    end
+  end
+
+  @doc """
+  The runs of the most recent benchmark execution.
+
+  Aggregates cover only these: mixing batches would blend results from
+  different points in time (and different judge prompt iterations) into
+  one misleading average. Runs from before batching (nil `last_batch_id`)
+  are treated as one legacy batch.
+  """
+  def latest_batch_runs(%Evaluation{runs: runs, last_batch_id: nil}), do: runs
+
+  def latest_batch_runs(%Evaluation{runs: runs, last_batch_id: batch_id}),
+    do: Enum.filter(runs, &(&1.batch_id == batch_id))
+
+  def summary(%Evaluation{} = evaluation) do
+    runs = latest_batch_runs(evaluation)
     completed = Enum.filter(runs, &(&1.status == "completed" and is_integer(&1.score)))
     scores = Enum.map(completed, & &1.score)
 
@@ -274,12 +416,26 @@ defmodule DodoRouter.Evaluations do
         if(completed == [],
           do: nil,
           else: round(Enum.count(completed, & &1.passed) / length(completed) * 100)
-        )
+        ),
+      total_cost_usd: total_cost(runs)
     }
   end
 
-  def rankings(%Evaluation{runs: runs}) do
+  # Candidate and judge spend for the batch, failed runs included — the
+  # money is spent either way.
+  defp total_cost(runs) do
     runs
+    |> Enum.flat_map(&[&1.candidate_cost_usd, &1.judge_cost_usd])
+    |> Enum.reject(&is_nil/1)
+    |> case do
+      [] -> nil
+      costs -> Enum.reduce(costs, Decimal.new(0), &Decimal.add/2)
+    end
+  end
+
+  def rankings(%Evaluation{} = evaluation) do
+    evaluation
+    |> latest_batch_runs()
     |> Enum.group_by(&{&1.candidate_provider, &1.candidate_model})
     |> Enum.map(fn {{provider, model}, target_runs} ->
       completed = Enum.filter(target_runs, &(&1.status == "completed" and is_integer(&1.score)))
@@ -344,7 +500,7 @@ defmodule DodoRouter.Evaluations do
   defp update_run!(run, attrs), do: run |> EvaluationRun.changeset(attrs) |> Repo.update!()
 
   @doc false
-  def judge_request(evaluation, candidate_log) do
+  def judge_request(evaluation, candidate_content) do
     %{
       "model" => evaluation.judge_model,
       "response_format" => %{"type" => "json_object"},
@@ -356,7 +512,7 @@ defmodule DodoRouter.Evaluations do
         },
         %{
           "role" => "user",
-          "content" => judge_prompt(evaluation, evaluation.request_log, candidate_log)
+          "content" => judge_prompt(evaluation, evaluation.request_log, candidate_content)
         }
       ]
     }
@@ -386,7 +542,11 @@ defmodule DodoRouter.Evaluations do
       "Candidate provider returned an error (HTTP #{candidate_log.http_status || "unknown"})"
   end
 
-  defp judge_prompt(evaluation, source, candidate_log) do
+  # The judge must stay blind to candidate identity: LLM judges show brand
+  # and self-preference bias, so neither the model name, provider envelope,
+  # nor sampling params may appear in the prompt — only the conversation
+  # and the candidate's message content.
+  defp judge_prompt(evaluation, source, candidate_content) do
     """
     Score the assistant response from 0 to 100 against the criteria. Intent match and completeness matter most. A score of 70 or above passes.
 
@@ -400,18 +560,52 @@ defmodule DodoRouter.Evaluations do
     #{evaluation.bad_examples || "None"}
 
     <SOURCE_REQUEST>
-    #{source.request_body}
+    #{source.request_body |> source_conversation() |> truncate_middle(@judge_source_limit)}
     </SOURCE_REQUEST>
     <SOURCE_RESPONSE>
-    #{candidate_log.response_body}
+    #{truncate_middle(candidate_content || "", @judge_source_limit)}
     </SOURCE_RESPONSE>
 
     Return exactly: {"score": 0-100, "passed": true|false, "summary": "concise rationale", "criterion_scores": {"intent_match": 0-100, "completeness": 0-100, "appropriateness": 0-100, "accuracy": 0-100}, "issues": ["specific issue"]}
     """
   end
 
-  defp response_content(%{"choices" => [%{"message" => %{"content" => content}} | _]}),
-    do: content
+  defp source_conversation(request_body) do
+    with body when is_binary(body) <- request_body,
+         {:ok, %{"messages" => messages}} when is_list(messages) <- Jason.decode(body) do
+      Jason.encode!(messages, pretty: true)
+    else
+      _ -> request_body || ""
+    end
+  end
+
+  @doc false
+  def extract_message_content(response_body) when is_binary(response_body) do
+    case Jason.decode(response_body) do
+      {:ok, decoded} -> response_content(decoded)
+      _ -> nil
+    end
+  end
+
+  def extract_message_content(_), do: nil
+
+  defp truncate_middle(text, max) do
+    length = String.length(text)
+
+    if length <= max do
+      text
+    else
+      keep = div(max, 2)
+
+      String.slice(text, 0, keep) <>
+        "\n[... truncated #{length - 2 * keep} characters ...]\n" <>
+        String.slice(text, length - keep, keep)
+    end
+  end
+
+  defp response_content(%{"choices" => [%{"message" => %{"content" => content}} | _]})
+       when is_binary(content),
+       do: content
 
   defp response_content(_), do: nil
 

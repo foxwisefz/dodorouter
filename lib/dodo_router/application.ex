@@ -23,6 +23,9 @@ defmodule DodoRouter.Application do
       {Phoenix.PubSub, name: DodoRouter.PubSub},
       {Task.Supervisor, name: DodoRouter.KeyHealthTaskSupervisor},
       {Task.Supervisor, name: DodoRouter.EvaluationTaskSupervisor},
+      # Tracks live benchmark processes; the entry dying with its process is
+      # what lets evaluations recover from a restart mid-benchmark.
+      {Registry, keys: :unique, name: DodoRouter.EvaluationRegistry},
       DodoRouter.Activity,
       # Start to serve requests, typically the last entry
       DodoRouterWeb.Endpoint
