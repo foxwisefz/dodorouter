@@ -15,7 +15,10 @@ defmodule DodoRouterWeb.EvalLive.Show do
          |> push_navigate(to: ~p"/evals")}
 
       evaluation ->
-        socket = load(socket, evaluation)
+        socket =
+          socket
+          |> assign(:show_errored, MapSet.new())
+          |> load(evaluation)
 
         if params["run"] == "true" do
           {:ok, start_benchmark(socket)}
@@ -28,6 +31,17 @@ defmodule DodoRouterWeb.EvalLive.Show do
   @impl true
   def handle_event("run", _params, socket) do
     {:noreply, start_benchmark(socket)}
+  end
+
+  def handle_event("toggle_errored", %{"batch" => batch_dom_id}, socket) do
+    shown = socket.assigns.show_errored
+
+    shown =
+      if MapSet.member?(shown, batch_dom_id),
+        do: MapSet.delete(shown, batch_dom_id),
+        else: MapSet.put(shown, batch_dom_id)
+
+    {:noreply, assign(socket, :show_errored, shown)}
   end
 
   @impl true
@@ -73,9 +87,37 @@ defmodule DodoRouterWeb.EvalLive.Show do
     |> assign(:page_title, evaluation.name)
     |> assign(:evaluation, evaluation)
     |> assign(:batch_runs, Evaluations.latest_batch_runs(evaluation))
+    |> assign(:batches, group_batches(evaluation))
     |> assign(:summary, Evaluations.summary(evaluation))
     |> assign(:rankings, Evaluations.rankings(evaluation))
     |> assign(:running?, Evaluations.benchmark_running?(evaluation))
+  end
+
+  # One section per benchmark execution, latest first. Runs recorded before
+  # batching (nil batch_id) collapse into a single "legacy" group.
+  defp group_batches(evaluation) do
+    {latest, earlier} =
+      evaluation.runs
+      |> Enum.group_by(& &1.batch_id)
+      |> Enum.map(fn {batch_id, runs} ->
+        %{
+          id: batch_id,
+          dom_id: batch_id || "legacy",
+          latest?: batch_id != nil and batch_id == evaluation.last_batch_id,
+          started_at: runs |> Enum.map(& &1.inserted_at) |> Enum.min(DateTime),
+          runs: Enum.sort_by(runs, &{&1.candidate_provider, &1.candidate_model, &1.repetition}),
+          errored: Enum.count(runs, &(&1.status == "failed"))
+        }
+      end)
+      |> Enum.split_with(& &1.latest?)
+
+    latest ++ Enum.sort_by(earlier, & &1.started_at, {:desc, DateTime})
+  end
+
+  defp visible_runs(batch, show_errored) do
+    if MapSet.member?(show_errored, batch.dom_id),
+      do: batch.runs,
+      else: Enum.reject(batch.runs, &(&1.status == "failed"))
   end
 
   @impl true
@@ -123,13 +165,13 @@ defmodule DodoRouterWeb.EvalLive.Show do
             <div>
               <div class="font-semibold">Live benchmark</div>
               <div class="text-sm text-base-content/50">
-                {@summary.runs} of {planned_runs(@evaluation)} candidate runs finished. Scores and rankings update as each result lands.
+                {min(@summary.runs, planned_runs(@evaluation))} of {planned_runs(@evaluation)} candidate runs finished. Scores and rankings update as each result lands.
               </div>
             </div>
           </div>
           <progress
             class="progress progress-primary mt-4 w-full"
-            value={@summary.runs}
+            value={min(@summary.runs, planned_runs(@evaluation))}
             max={planned_runs(@evaluation)}
           >
           </progress>
@@ -293,85 +335,119 @@ defmodule DodoRouterWeb.EvalLive.Show do
               All benchmark executions; stats above cover only the latest.
             </p>
           </div>
-          <div id="eval-runs" class="space-y-3">
+          <div id="eval-runs" class="space-y-6">
             <div
-              :if={@evaluation.runs == []}
+              :if={@batches == []}
               id="runs-empty"
               class="rounded-2xl border border-dashed border-base-300 p-10 text-center text-base-content/45"
             >
               No judge runs yet.
             </div>
-            <article
-              :for={run <- Enum.reverse(@evaluation.runs)}
-              id={"run-#{run.id}"}
-              class="rounded-2xl border border-base-300/60 bg-base-100 p-5 shadow-sm"
-            >
-              <div class="flex flex-wrap items-center justify-between gap-3">
-                <div class="flex items-center gap-3">
-                  <span class={[
-                    "grid size-12 place-items-center rounded-xl text-lg font-bold",
-                    run.passed && "bg-success/10 text-success",
-                    run.status == "completed" && !run.passed && "bg-warning/10 text-warning",
-                    run.status == "failed" && "bg-error/10 text-error"
-                  ]}>
-                    {run.score || "—"}
+            <div :for={batch <- @batches} id={"batch-#{batch.dom_id}"} class="space-y-3">
+              <div class="flex flex-wrap items-center justify-between gap-2">
+                <div class="flex items-center gap-2 text-sm">
+                  <span class="font-semibold">
+                    {if batch.latest?, do: "Latest batch", else: "Batch"}
                   </span>
-                  <div>
-                    <div class="font-medium">
-                      {run.candidate_provider} / {run.candidate_model} · run {run.repetition}
-                    </div>
-                    <div class="text-sm text-base-content/60">
-                      {run.summary || run.error || run_status_label(run)}
-                    </div>
-                    <div class="text-xs text-base-content/45">
-                      {run.duration_ms || "—"} ms · prompt {run.judge_prompt_version}
-                    </div>
-                  </div>
-                </div>
-                <div class="flex flex-wrap items-center justify-end gap-2">
-                  <.link
-                    :if={run.candidate_log_id}
-                    navigate={~p"/logs/#{run.candidate_log_id}"}
-                    class="btn btn-ghost btn-sm gap-1.5"
-                  >
-                    <.icon name="hero-chat-bubble-left-right" class="size-4" /> Candidate log
-                  </.link>
-                  <.link
-                    :if={run.judge_log_id}
-                    navigate={~p"/logs/#{run.judge_log_id}"}
-                    class="btn btn-ghost btn-sm gap-1.5"
-                  >
-                    <.icon name="hero-scale" class="size-4" /> Judge log
-                  </.link>
-                  <span class={[
-                    "rounded-full px-2.5 py-1 text-xs font-semibold",
-                    run.passed && "bg-success/10 text-success",
-                    !run.passed && "bg-base-200"
-                  ]}>
-                    {run_status_label(run)}
+                  <span class="text-base-content/45">
+                    {Calendar.strftime(batch.started_at, "%b %-d, %H:%M UTC")}
+                  </span>
+                  <span class="rounded-full bg-base-200 px-2 py-0.5 text-xs">
+                    {length(batch.runs)} runs
                   </span>
                 </div>
+                <button
+                  :if={batch.errored > 0}
+                  id={"toggle-errored-#{batch.dom_id}"}
+                  type="button"
+                  phx-click="toggle_errored"
+                  phx-value-batch={batch.dom_id}
+                  class="btn btn-ghost btn-xs gap-1 text-base-content/60"
+                >
+                  <.icon name="hero-exclamation-triangle" class="size-3.5" />
+                  {if MapSet.member?(@show_errored, batch.dom_id),
+                    do: "Hide",
+                    else: "Show"} {batch.errored} errored
+                </button>
               </div>
-              <div
-                :if={map_size(run.criterion_scores) > 0}
-                class="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4"
+              <p
+                :if={visible_runs(batch, @show_errored) == []}
+                class="rounded-2xl border border-dashed border-base-300 p-6 text-center text-sm text-base-content/45"
               >
-                <div :for={{criterion, value} <- run.criterion_scores}>
-                  <div class="mb-1 flex justify-between text-xs">
-                    <span>{humanize(criterion)}</span><span>{value}</span>
+                Every run in this batch errored — use the toggle above to inspect them.
+              </p>
+              <article
+                :for={run <- visible_runs(batch, @show_errored)}
+                id={"run-#{run.id}"}
+                class="rounded-2xl border border-base-300/60 bg-base-100 p-5 shadow-sm"
+              >
+                <div class="flex flex-wrap items-center justify-between gap-3">
+                  <div class="flex items-center gap-3">
+                    <span class={[
+                      "grid size-12 place-items-center rounded-xl text-lg font-bold",
+                      run.passed && "bg-success/10 text-success",
+                      run.status == "completed" && !run.passed && "bg-warning/10 text-warning",
+                      run.status == "failed" && "bg-error/10 text-error"
+                    ]}>
+                      {run.score || "—"}
+                    </span>
+                    <div>
+                      <div class="font-medium">
+                        {run.candidate_provider} / {run.candidate_model} · run {run.repetition}
+                      </div>
+                      <div class="text-sm text-base-content/60">
+                        {run.summary || run.error || run_status_label(run)}
+                      </div>
+                      <div class="text-xs text-base-content/45">
+                        {run.duration_ms || "—"} ms · prompt {run.judge_prompt_version}
+                      </div>
+                    </div>
                   </div>
-                  <div class="h-2 overflow-hidden rounded-full bg-base-200">
-                    <div class="h-full rounded-full bg-primary" style={"width: #{value}%"}></div>
+                  <div class="flex flex-wrap items-center justify-end gap-2">
+                    <.link
+                      :if={run.candidate_log_id}
+                      navigate={~p"/logs/#{run.candidate_log_id}"}
+                      class="btn btn-ghost btn-sm gap-1.5"
+                    >
+                      <.icon name="hero-chat-bubble-left-right" class="size-4" /> Candidate log
+                    </.link>
+                    <.link
+                      :if={run.judge_log_id}
+                      navigate={~p"/logs/#{run.judge_log_id}"}
+                      class="btn btn-ghost btn-sm gap-1.5"
+                    >
+                      <.icon name="hero-scale" class="size-4" /> Judge log
+                    </.link>
+                    <span class={[
+                      "rounded-full px-2.5 py-1 text-xs font-semibold",
+                      run.passed && "bg-success/10 text-success",
+                      !run.passed && "bg-base-200"
+                    ]}>
+                      {run_status_label(run)}
+                    </span>
                   </div>
                 </div>
-              </div>
-              <ul
-                :if={run.issues != []}
-                class="mt-4 list-disc space-y-1 pl-5 text-sm text-base-content/60"
-              >
-                <li :for={issue <- run.issues}>{issue}</li>
-              </ul>
-            </article>
+                <div
+                  :if={map_size(run.criterion_scores) > 0}
+                  class="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4"
+                >
+                  <div :for={{criterion, value} <- run.criterion_scores}>
+                    <div class="mb-1 flex justify-between text-xs">
+                      <span>{humanize(criterion)}</span><span>{value}</span>
+                    </div>
+                    <div class="h-2 overflow-hidden rounded-full bg-base-200">
+                      <div class="h-full rounded-full bg-primary" style={"width: #{value}%"}></div>
+                    </div>
+                  </div>
+                </div>
+                <ul
+                  :if={run.issues != []}
+                  class="mt-4 list-disc space-y-1 pl-5 text-sm text-base-content/60"
+                >
+                  <li :for={issue <- run.issues}>{issue}</li>
+                </ul>
+              </article>
+            </div>
           </div>
         </section>
       </div>

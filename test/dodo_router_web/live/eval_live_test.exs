@@ -121,8 +121,77 @@ defmodule DodoRouterWeb.EvalLiveTest do
 
     {:ok, live, _html} = live(conn, ~p"/evals/#{evaluation.id}")
 
+    # Errored runs are collapsed by default; reveal them first.
+    live |> element("#toggle-errored-legacy") |> render_click()
+
     assert has_element?(live, "#eval-runs a[href='/logs/#{candidate.id}']", "Candidate log")
     assert has_element?(live, "#eval-runs a[href='/logs/#{judge.id}']", "Judge log")
     assert has_element?(live, "#eval-runs", "Errored")
+  end
+
+  test "groups run history by batch and hides errored runs behind a toggle",
+       %{conn: conn, user: user} do
+    {router, _api_key} = RoutersFixtures.router_fixture(user)
+    provider_key = ProvidersFixtures.provider_key_fixture(user)
+    log = LogsFixtures.log_fixture(router)
+
+    {:ok, evaluation} =
+      Evaluations.create_evaluation(user, log, %{
+        name: "Batched history",
+        criteria: "Be useful",
+        judge_model: "test-model",
+        judge_provider_key_id: provider_key.id,
+        candidate_targets: [
+          %{
+            "provider_key_id" => provider_key.id,
+            "provider" => "test_provider",
+            "model" => "test-model"
+          }
+        ]
+      })
+
+    old_batch = Ecto.UUID.generate()
+    new_batch = Ecto.UUID.generate()
+
+    insert_run = fn attrs ->
+      %EvaluationRun{}
+      |> EvaluationRun.changeset(
+        Map.merge(
+          %{
+            evaluation_id: evaluation.id,
+            candidate_provider: "test_provider",
+            candidate_model: "test-model",
+            repetition: 1
+          },
+          attrs
+        )
+      )
+      |> Repo.insert!()
+    end
+
+    _old_run = insert_run.(%{status: "completed", score: 60, passed: false, batch_id: old_batch})
+    scored = insert_run.(%{status: "completed", score: 90, passed: true, batch_id: new_batch})
+    errored = insert_run.(%{status: "failed", error: "boom", batch_id: new_batch, repetition: 2})
+
+    evaluation
+    |> Ecto.Changeset.change(last_batch_id: new_batch)
+    |> Repo.update!()
+
+    {:ok, live, _html} = live(conn, ~p"/evals/#{evaluation.id}")
+
+    # One section per batch, latest first with its own label.
+    assert has_element?(live, "#batch-#{new_batch}", "Latest batch")
+    assert has_element?(live, "#batch-#{old_batch}")
+
+    # Errored runs stay collapsed until toggled, scored runs show right away.
+    assert has_element?(live, "#run-#{scored.id}")
+    refute has_element?(live, "#run-#{errored.id}")
+    assert has_element?(live, "#toggle-errored-#{new_batch}", "1 errored")
+
+    live |> element("#toggle-errored-#{new_batch}") |> render_click()
+    assert has_element?(live, "#run-#{errored.id}")
+
+    live |> element("#toggle-errored-#{new_batch}") |> render_click()
+    refute has_element?(live, "#run-#{errored.id}")
   end
 end
