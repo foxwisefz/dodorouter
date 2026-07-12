@@ -18,6 +18,7 @@ defmodule DodoRouterWeb.EvalLive.Show do
         socket =
           socket
           |> assign(:show_errored, MapSet.new())
+          |> assign(:selected_series, nil)
           |> load(evaluation)
 
         if params["run"] == "true" do
@@ -42,6 +43,11 @@ defmodule DodoRouterWeb.EvalLive.Show do
         else: MapSet.put(shown, batch_dom_id)
 
     {:noreply, assign(socket, :show_errored, shown)}
+  end
+
+  def handle_event("select_series", %{"series" => key}, socket) do
+    selected = if socket.assigns.selected_series == key, do: nil, else: key
+    {:noreply, assign(socket, :selected_series, selected)}
   end
 
   @impl true
@@ -83,15 +89,85 @@ defmodule DodoRouterWeb.EvalLive.Show do
   end
 
   defp load(socket, evaluation) do
+    batch_runs = Evaluations.latest_batch_runs(evaluation)
+    rankings = Evaluations.rankings(evaluation)
+
     socket
     |> assign(:page_title, evaluation.name)
     |> assign(:evaluation, evaluation)
-    |> assign(:batch_runs, Evaluations.latest_batch_runs(evaluation))
+    |> assign(:batch_runs, batch_runs)
     |> assign(:batches, group_batches(evaluation))
     |> assign(:summary, Evaluations.summary(evaluation))
-    |> assign(:rankings, Evaluations.rankings(evaluation))
+    |> assign(:rankings, rankings)
+    |> assign(:chart_series, chart_series(batch_runs, rankings))
     |> assign(:running?, Evaluations.benchmark_running?(evaluation))
   end
+
+  # One entry per ranked model: its scored runs positioned by repetition
+  # slot (so an errored repetition leaves a visible gap in the line) and
+  # its errored runs, which render as ✕ marks in a lane below the axis.
+  defp chart_series(batch_runs, rankings) do
+    slots =
+      batch_runs
+      |> Enum.map(& &1.repetition)
+      |> Enum.reject(&is_nil/1)
+      |> Enum.max(fn -> length(batch_runs) end)
+      |> max(2)
+
+    rankings
+    |> Enum.with_index()
+    |> Enum.map(fn {ranking, index} ->
+      points =
+        batch_runs
+        |> Enum.filter(
+          &(&1.candidate_provider == ranking.provider and
+              &1.candidate_model == ranking.model)
+        )
+        |> Enum.sort_by(& &1.repetition)
+        |> Enum.with_index()
+        |> Enum.map(fn {run, idx} ->
+          %{
+            run: run,
+            x: chart_x((run.repetition || idx + 1) - 1, slots),
+            scored?: run.status == "completed" and is_integer(run.score)
+          }
+        end)
+
+      %{
+        key: "#{ranking.provider}|#{ranking.model}",
+        provider: ranking.provider,
+        model: ranking.model,
+        color: chart_color(index),
+        points: points
+      }
+    end)
+  end
+
+  defp scored_points(series), do: Enum.filter(series.points, & &1.scored?)
+  defp errored_points(series), do: Enum.reject(series.points, & &1.scored?)
+
+  defp polyline_points(series) do
+    series
+    |> scored_points()
+    |> Enum.map_join(" ", fn point -> "#{point.x},#{chart_y(point.run.score)}" end)
+  end
+
+  defp errored_mark_path(x) do
+    "M #{x - 5} 251 L #{x + 5} 261 M #{x - 5} 261 L #{x + 5} 251"
+  end
+
+  defp series_counts(series) do
+    scored = "#{length(scored_points(series))} scored"
+
+    case length(errored_points(series)) do
+      0 -> scored
+      errored -> scored <> " · #{errored} errored"
+    end
+  end
+
+  defp series_opacity(nil, _key), do: "1"
+  defp series_opacity(key, key), do: "1"
+  defp series_opacity(_selected, _key), do: "0.15"
 
   # One section per benchmark execution, latest first. Runs recorded before
   # batching (nil batch_id) collapse into a single "legacy" group.
@@ -233,19 +309,51 @@ defmodule DodoRouterWeb.EvalLive.Show do
                   class="text-success/50"
                 />
                 <text x="60" y="80" class="fill-success text-[11px]">Pass 70</text>
-                <%!-- Dots only: repetitions are independent samples, and a
-                connecting line would imply a time trend that doesn't exist. --%>
-                <g :for={{ranking, index} <- Enum.with_index(@rankings)}>
+                <g
+                  :for={{series, index} <- Enum.with_index(@chart_series)}
+                  id={"chart-series-#{index}"}
+                  class="series cursor-pointer"
+                  opacity={series_opacity(@selected_series, series.key)}
+                  phx-click="select_series"
+                  phx-value-series={series.key}
+                >
+                  <polyline
+                    :if={scored_points(series) != []}
+                    fill="none"
+                    stroke={series.color}
+                    stroke-width="3"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    points={polyline_points(series)}
+                  />
                   <circle
-                    :for={{run, point_index} <- chart_runs(@batch_runs, ranking)}
-                    cx={chart_x(point_index, max(ranking.total, 2))}
-                    cy={chart_y(run.score)}
+                    :for={point <- scored_points(series)}
+                    cx={point.x}
+                    cy={chart_y(point.run.score)}
                     r="5"
-                    fill={chart_color(index)}
+                    fill={series.color}
                   >
-                    <title>{ranking.model}: {run.score}</title>
+                    <title>{series.model} · run {point.run.repetition}: {point.run.score}</title>
                   </circle>
+                  <path
+                    :for={point <- errored_points(series)}
+                    class="errored-mark"
+                    d={errored_mark_path(point.x)}
+                    stroke={series.color}
+                    stroke-width="2.5"
+                    fill="none"
+                  >
+                    <title>{series.model} · run {point.run.repetition}: errored</title>
+                  </path>
                 </g>
+                <text
+                  :if={Enum.any?(@chart_series, &(errored_points(&1) != []))}
+                  x="18"
+                  y="260"
+                  class="fill-base-content/40 text-[11px]"
+                >
+                  err
+                </text>
                 <text
                   :for={tick <- [0, 25, 50, 75, 100]}
                   x="18"
@@ -255,12 +363,31 @@ defmodule DodoRouterWeb.EvalLive.Show do
                   {tick}
                 </text>
               </svg>
-              <div class="mt-3 flex flex-wrap gap-3">
-                <span
-                  :for={{ranking, index} <- Enum.with_index(@rankings)}
-                  class="flex items-center gap-1.5 text-xs"
+              <div class="mt-3 flex flex-wrap items-center gap-2">
+                <button
+                  :for={{series, index} <- Enum.with_index(@chart_series)}
+                  id={"chart-legend-#{index}"}
+                  type="button"
+                  phx-click="select_series"
+                  phx-value-series={series.key}
+                  class={[
+                    "flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs transition",
+                    @selected_series == series.key && "border-primary/40 bg-primary/10",
+                    @selected_series != series.key && "border-transparent hover:bg-base-200"
+                  ]}
                 >
-                  <i class="size-2.5 rounded-full" style={"background: #{chart_color(index)}"}></i>{ranking.provider} / {ranking.model}
+                  <i class="size-2.5 rounded-full" style={"background: #{series.color}"}></i>
+                  <span>{series.provider} / {series.model}</span>
+                  <span class="text-base-content/45">{series_counts(series)}</span>
+                </button>
+                <span
+                  :if={@chart_series != []}
+                  class="ml-auto flex items-center gap-3 text-xs text-base-content/45"
+                >
+                  <span class="flex items-center gap-1">
+                    <i class="inline-block size-2.5 rounded-full bg-base-content/60"></i> scored
+                  </span>
+                  <span class="flex items-center gap-1 font-semibold">✕ errored</span>
                 </span>
               </div>
               <div :if={@rankings == []} class="py-10 text-center text-sm text-base-content/40">
@@ -484,16 +611,6 @@ defmodule DodoRouterWeb.EvalLive.Show do
   defp run_status_label(%{status: "completed"}), do: "Not passed"
   defp run_status_label(run), do: String.capitalize(run.status)
   defp planned_runs(evaluation), do: length(evaluation.candidate_targets) * evaluation.repetitions
-
-  defp chart_runs(runs, ranking) do
-    runs
-    |> Enum.filter(
-      &(&1.status == "completed" and &1.candidate_provider == ranking.provider and
-          &1.candidate_model == ranking.model)
-    )
-    |> Enum.sort_by(& &1.repetition)
-    |> Enum.with_index()
-  end
 
   defp chart_x(index, total), do: 70 + index * 790 / max(total - 1, 1)
   defp chart_y(nil), do: 240

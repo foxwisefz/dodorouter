@@ -194,4 +194,96 @@ defmodule DodoRouterWeb.EvalLiveTest do
     live |> element("#toggle-errored-#{new_batch}") |> render_click()
     refute has_element?(live, "#run-#{errored.id}")
   end
+
+  test "chart draws lines, marks errored runs, and pins a series on click",
+       %{conn: conn, user: user} do
+    {router, _api_key} = RoutersFixtures.router_fixture(user)
+    provider_key = ProvidersFixtures.provider_key_fixture(user)
+    log = LogsFixtures.log_fixture(router)
+
+    {:ok, evaluation} =
+      Evaluations.create_evaluation(user, log, %{
+        name: "Chart",
+        criteria: "Be useful",
+        judge_model: "test-model",
+        judge_provider_key_id: provider_key.id,
+        candidate_targets: [
+          %{
+            "provider_key_id" => provider_key.id,
+            "provider" => "test_provider",
+            "model" => "model-a"
+          },
+          %{
+            "provider_key_id" => provider_key.id,
+            "provider" => "test_provider",
+            "model" => "model-b"
+          }
+        ],
+        repetitions: 2
+      })
+
+    batch = Ecto.UUID.generate()
+
+    insert_run = fn attrs ->
+      %EvaluationRun{}
+      |> EvaluationRun.changeset(
+        Map.merge(
+          %{
+            evaluation_id: evaluation.id,
+            candidate_provider: "test_provider",
+            batch_id: batch
+          },
+          attrs
+        )
+      )
+      |> Repo.insert!()
+    end
+
+    insert_run.(%{
+      candidate_model: "model-a",
+      repetition: 1,
+      status: "completed",
+      score: 90,
+      passed: true
+    })
+
+    insert_run.(%{
+      candidate_model: "model-a",
+      repetition: 2,
+      status: "completed",
+      score: 88,
+      passed: true
+    })
+
+    insert_run.(%{
+      candidate_model: "model-b",
+      repetition: 1,
+      status: "completed",
+      score: 70,
+      passed: true
+    })
+
+    insert_run.(%{candidate_model: "model-b", repetition: 2, status: "failed", error: "boom"})
+
+    evaluation
+    |> Ecto.Changeset.change(last_batch_id: batch)
+    |> Repo.update!()
+
+    {:ok, live, _html} = live(conn, ~p"/evals/#{evaluation.id}")
+
+    # Rankings sort by average: model-a (89) is series 0, model-b (70) is 1.
+    assert has_element?(live, "#chart-series-0 polyline")
+    assert has_element?(live, "#chart-series-1 path.errored-mark")
+    assert has_element?(live, "#chart-legend-0", "2 scored")
+    assert has_element?(live, "#chart-legend-1", "1 errored")
+
+    # Clicking a legend entry pins its series and dims the others.
+    live |> element("#chart-legend-0") |> render_click()
+    assert has_element?(live, "#chart-series-0[opacity='1']")
+    assert has_element?(live, "#chart-series-1[opacity='0.15']")
+
+    # Clicking again unpins.
+    live |> element("#chart-legend-0") |> render_click()
+    assert has_element?(live, "#chart-series-1[opacity='1']")
+  end
 end
