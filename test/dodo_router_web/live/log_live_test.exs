@@ -3,8 +3,9 @@ defmodule DodoRouterWeb.LogLiveTest do
 
   import Phoenix.LiveViewTest
 
-  alias DodoRouter.{Logs, RoutersFixtures}
+  alias DodoRouter.{Evaluations, Logs, RoutersFixtures}
   alias DodoRouter.LogsFixtures
+  alias DodoRouter.ProvidersFixtures
 
   setup :register_and_log_in_user
 
@@ -104,6 +105,35 @@ defmodule DodoRouterWeb.LogLiveTest do
       {:ok, live, _html} = live(conn, ~p"/logs/#{log.request_id}")
 
       assert has_element?(live, "#create-eval-button[href='/logs/#{log.id}/evals/new']")
+    end
+
+    test "links a request to evaluations created from it", %{conn: conn, user: user} do
+      {router, _api_key} = RoutersFixtures.router_fixture(user)
+      provider_key = ProvidersFixtures.provider_key_fixture(user)
+      log = LogsFixtures.log_fixture(router)
+
+      {:ok, evaluation} =
+        Evaluations.create_evaluation(user, log, %{
+          name: "Answer quality",
+          criteria: "Be correct",
+          judge_model: "test-model",
+          judge_provider_key_id: provider_key.id,
+          candidate_targets: [
+            %{
+              "provider_key_id" => provider_key.id,
+              "provider" => "test_provider",
+              "model" => "test-model"
+            }
+          ]
+        })
+
+      {:ok, live, _html} = live(conn, ~p"/logs/#{log.id}")
+
+      assert has_element?(
+               live,
+               "#log-evaluations a[href='/evals/#{evaluation.id}']",
+               "Answer quality"
+             )
     end
   end
 

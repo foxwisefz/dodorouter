@@ -83,6 +83,17 @@ defmodule DodoRouter.EvaluationsTest do
              "all_providers_failed"
   end
 
+  test "provider error logs are not valid candidate answers" do
+    refute Evaluations.candidate_successful?(%DodoRouter.Logs.RequestLog{
+             status: "error",
+             http_status: 400,
+             response_body: Jason.encode!(%{"detail" => "model is not supported"})
+           })
+
+    assert Evaluations.candidate_successful?(%DodoRouter.Logs.RequestLog{status: "success"})
+    assert Evaluations.candidate_successful?(%DodoRouter.Logs.RequestLog{status: "fallback"})
+  end
+
   test "generates every candidate repetition before judging it" do
     user = AccountsFixtures.user_fixture()
     {router, _key} = RoutersFixtures.router_fixture(user)

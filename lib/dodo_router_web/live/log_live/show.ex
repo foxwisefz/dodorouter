@@ -1,6 +1,7 @@
 defmodule DodoRouterWeb.LogLive.Show do
   use DodoRouterWeb, :live_view
 
+  alias DodoRouter.Evaluations
   alias DodoRouter.Logs
   alias DodoRouter.Logs.MessageNormalizer
   alias DodoRouter.Logs.Provenance
@@ -70,6 +71,7 @@ defmodule DodoRouterWeb.LogLive.Show do
       |> assign(:expanded_messages, MapSet.new())
       |> assign(:truncation_flags, log.truncation_flags || [])
       |> assign(:finish_reason, extract_finish_reason(log.response_body))
+      |> assign(:evaluations, Evaluations.list_for_log(socket.assigns.current_user, log.id))
       |> assign(:replay_count, Logs.replay_counts([log.id]) |> Map.get(log.id, 0))
 
     {:ok, socket}
@@ -149,6 +151,16 @@ defmodule DodoRouterWeb.LogLive.Show do
         <div class="flex-1">
           <h1 class="text-2xl font-bold">Request Details</h1>
           <code class="text-sm text-base-content/60">{@log.request_id}</code>
+        </div>
+        <div id="log-evaluations" class="flex flex-wrap items-center justify-end gap-1.5">
+          <.link
+            :for={evaluation <- @evaluations}
+            navigate={~p"/evals/#{evaluation.id}"}
+            class="btn btn-ghost btn-sm gap-1.5 text-primary"
+            title={"Open evaluation: #{evaluation.name}"}
+          >
+            <.icon name="hero-chart-bar-square" class="size-4" /> {evaluation.name}
+          </.link>
         </div>
         <.link
           id="create-eval-button"

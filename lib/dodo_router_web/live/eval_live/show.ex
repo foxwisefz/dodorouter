@@ -151,7 +151,7 @@ defmodule DodoRouterWeb.EvalLive.Show do
             detail="Candidate generation latency"
           />
           <.stat
-            label="Failed runs"
+            label="Errored runs"
             value={to_string(@summary.failed)}
             detail={percent(@summary.pass_rate) <> " pass rate"}
           />
@@ -319,20 +319,36 @@ defmodule DodoRouterWeb.EvalLive.Show do
                       {run.candidate_provider} / {run.candidate_model} · run {run.repetition}
                     </div>
                     <div class="text-sm text-base-content/60">
-                      {run.summary || run.error || String.capitalize(run.status)}
+                      {run.summary || run.error || run_status_label(run)}
                     </div>
                     <div class="text-xs text-base-content/45">
                       {run.duration_ms || "—"} ms · prompt {run.judge_prompt_version}
                     </div>
                   </div>
                 </div>
-                <span class={[
-                  "rounded-full px-2.5 py-1 text-xs font-semibold",
-                  run.passed && "bg-success/10 text-success",
-                  !run.passed && "bg-base-200"
-                ]}>
-                  {if run.passed, do: "Passed", else: String.capitalize(run.status)}
-                </span>
+                <div class="flex flex-wrap items-center justify-end gap-2">
+                  <.link
+                    :if={run.candidate_log_id}
+                    navigate={~p"/logs/#{run.candidate_log_id}"}
+                    class="btn btn-ghost btn-sm gap-1.5"
+                  >
+                    <.icon name="hero-chat-bubble-left-right" class="size-4" /> Candidate log
+                  </.link>
+                  <.link
+                    :if={run.judge_log_id}
+                    navigate={~p"/logs/#{run.judge_log_id}"}
+                    class="btn btn-ghost btn-sm gap-1.5"
+                  >
+                    <.icon name="hero-scale" class="size-4" /> Judge log
+                  </.link>
+                  <span class={[
+                    "rounded-full px-2.5 py-1 text-xs font-semibold",
+                    run.passed && "bg-success/10 text-success",
+                    !run.passed && "bg-base-200"
+                  ]}>
+                    {run_status_label(run)}
+                  </span>
+                </div>
               </div>
               <div
                 :if={map_size(run.criterion_scores) > 0}
@@ -383,6 +399,10 @@ defmodule DodoRouterWeb.EvalLive.Show do
   defp duration(value) when value >= 1_000, do: "#{Float.round(value / 1_000, 1)}s"
   defp duration(value), do: "#{value}ms"
   defp humanize(value), do: value |> String.replace("_", " ") |> String.capitalize()
+  defp run_status_label(%{status: "failed"}), do: "Errored"
+  defp run_status_label(%{status: "completed", passed: true}), do: "Passed"
+  defp run_status_label(%{status: "completed"}), do: "Not passed"
+  defp run_status_label(run), do: String.capitalize(run.status)
   defp planned_runs(evaluation), do: length(evaluation.candidate_targets) * evaluation.repetitions
 
   defp chart_runs(runs, ranking) do

@@ -23,6 +23,14 @@ defmodule DodoRouter.Evaluations do
     |> Repo.all()
   end
 
+  def list_for_log(%User{} = user, request_log_id) do
+    from(e in Evaluation,
+      where: e.evaluated_by_id == ^user.id and e.request_log_id == ^request_log_id,
+      order_by: [desc: e.inserted_at]
+    )
+    |> Repo.all()
+  end
+
   def get_evaluation(%User{} = user, id) do
     from(e in Evaluation,
       where: e.id == ^id and e.evaluated_by_id == ^user.id,
@@ -152,22 +160,35 @@ defmodule DodoRouter.Evaluations do
                model: model
              }) do
           {:ok, candidate_log} ->
-            run =
-              update_run!(run, %{
-                status: "running",
-                candidate_log_id: candidate_log.id,
-                candidate_latency_ms: candidate_log.latency_ms,
-                candidate_cost_usd: candidate_log.estimated_cost_usd,
-                candidate_output: candidate_log.response_body
-              })
+            if candidate_successful?(candidate_log) do
+              run =
+                update_run!(run, %{
+                  status: "running",
+                  candidate_log_id: candidate_log.id,
+                  candidate_latency_ms: candidate_log.latency_ms,
+                  candidate_cost_usd: candidate_log.estimated_cost_usd,
+                  candidate_output: candidate_log.response_body
+                })
 
-            judge_candidate(user, evaluation, run, candidate_log, started_at)
+              judge_candidate(user, evaluation, run, candidate_log, started_at)
+            else
+              {:error,
+               update_run!(run, %{
+                 status: "failed",
+                 error: candidate_error_message(candidate_log),
+                 candidate_log_id: candidate_log.id,
+                 candidate_latency_ms: candidate_log.latency_ms,
+                 candidate_cost_usd: candidate_log.estimated_cost_usd,
+                 candidate_output: candidate_log.response_body,
+                 duration_ms: System.monotonic_time(:millisecond) - started_at
+               })}
+            end
 
           {:error, reason} ->
             {:error,
              update_run!(run, %{
                status: "failed",
-               error: "Candidate generation failed: #{inspect(reason)}",
+               error: "Candidate generation error: #{inspect(reason)}",
                duration_ms: System.monotonic_time(:millisecond) - started_at
              })}
         end
@@ -348,6 +369,22 @@ defmodule DodoRouter.Evaluations do
 
   def proxy_error_message({:error, reason}), do: inspect(reason)
   def proxy_error_message(error), do: inspect(error)
+
+  @doc false
+  def candidate_successful?(%{status: status}), do: status in ["success", "fallback"]
+
+  defp candidate_error_message(candidate_log) do
+    detail =
+      with body when is_binary(body) <- candidate_log.response_body,
+           {:ok, decoded} <- Jason.decode(body) do
+        decoded["detail"] || get_in(decoded, ["error", "message"]) || decoded["message"]
+      else
+        _ -> nil
+      end
+
+    detail ||
+      "Candidate provider returned an error (HTTP #{candidate_log.http_status || "unknown"})"
+  end
 
   defp judge_prompt(evaluation, source, candidate_log) do
     """
