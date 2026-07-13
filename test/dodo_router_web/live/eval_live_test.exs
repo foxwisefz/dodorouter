@@ -293,4 +293,50 @@ defmodule DodoRouterWeb.EvalLiveTest do
     live |> element("#chart-legend-1") |> render_click()
     assert has_element?(live, "#chart-legend-errored-1.text-error")
   end
+
+  test "chart spreads legacy runs with duplicate repetition numbers", %{conn: conn, user: user} do
+    {router, _api_key} = RoutersFixtures.router_fixture(user)
+    provider_key = ProvidersFixtures.provider_key_fixture(user)
+    log = LogsFixtures.log_fixture(router)
+
+    {:ok, evaluation} =
+      Evaluations.create_evaluation(user, log, %{
+        name: "Legacy pool",
+        criteria: "Be useful",
+        judge_model: "test-model",
+        judge_provider_key_id: provider_key.id,
+        candidate_targets: [
+          %{
+            "provider_key_id" => provider_key.id,
+            "provider" => "test_provider",
+            "model" => "test-model"
+          }
+        ]
+      })
+
+    # Two pre-batching executions: batch_id nil, colliding repetition numbers.
+    for score <- [90, 80] do
+      %EvaluationRun{}
+      |> EvaluationRun.changeset(%{
+        evaluation_id: evaluation.id,
+        candidate_provider: "test_provider",
+        candidate_model: "test-model",
+        repetition: 1,
+        status: "completed",
+        score: score,
+        passed: true
+      })
+      |> Repo.insert!()
+    end
+
+    {:ok, live, _html} = live(conn, ~p"/evals/#{evaluation.id}")
+
+    # LazyHTML drops inline-SVG children, so pull the circle positions out
+    # of the rendered markup directly. The chart is the only circle source.
+    cx_values =
+      Regex.scan(~r/<circle\s+cx="([\d.]+)"/, render(live), capture: :all_but_first)
+
+    assert length(cx_values) == 2
+    assert length(Enum.uniq(cx_values)) == 2
+  end
 end

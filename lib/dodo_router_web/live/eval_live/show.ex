@@ -106,39 +106,58 @@ defmodule DodoRouterWeb.EvalLive.Show do
   # One entry per ranked model: scored runs positioned by repetition slot
   # (so an errored repetition leaves a visible gap in the line). Errored
   # runs stay off the chart — they surface as legend counts only.
+  #
+  # Repetition slots only work when a series has each repetition once. A
+  # legacy pool (nil batch_id) can mix several executions, so repetition
+  # numbers collide — those series fall back to chronological slots to
+  # keep every run at its own x position.
   defp chart_series(batch_runs, rankings) do
+    positioned =
+      Enum.map(rankings, fn ranking ->
+        runs =
+          batch_runs
+          |> Enum.filter(
+            &(&1.candidate_provider == ranking.provider and
+                &1.candidate_model == ranking.model)
+          )
+          |> Enum.sort_by(&{&1.repetition, &1.inserted_at, &1.id})
+
+        repetitions = Enum.map(runs, & &1.repetition)
+
+        unique_repetitions? =
+          Enum.all?(repetitions, &is_integer/1) and
+            length(Enum.uniq(repetitions)) == length(repetitions)
+
+        points =
+          runs
+          |> Enum.with_index()
+          |> Enum.map(fn {run, idx} ->
+            %{
+              run: run,
+              slot: if(unique_repetitions?, do: run.repetition - 1, else: idx),
+              scored?: run.status == "completed" and is_integer(run.score)
+            }
+          end)
+
+        {ranking, points}
+      end)
+
     slots =
-      batch_runs
-      |> Enum.map(& &1.repetition)
-      |> Enum.reject(&is_nil/1)
-      |> Enum.max(fn -> length(batch_runs) end)
+      positioned
+      |> Enum.flat_map(fn {_ranking, points} -> Enum.map(points, & &1.slot) end)
+      |> Enum.max(fn -> 1 end)
+      |> Kernel.+(1)
       |> max(2)
 
-    rankings
+    positioned
     |> Enum.with_index()
-    |> Enum.map(fn {ranking, index} ->
-      points =
-        batch_runs
-        |> Enum.filter(
-          &(&1.candidate_provider == ranking.provider and
-              &1.candidate_model == ranking.model)
-        )
-        |> Enum.sort_by(& &1.repetition)
-        |> Enum.with_index()
-        |> Enum.map(fn {run, idx} ->
-          %{
-            run: run,
-            x: chart_x((run.repetition || idx + 1) - 1, slots),
-            scored?: run.status == "completed" and is_integer(run.score)
-          }
-        end)
-
+    |> Enum.map(fn {{ranking, points}, index} ->
       %{
         key: "#{ranking.provider}|#{ranking.model}",
         provider: ranking.provider,
         model: ranking.model,
         color: chart_color(index),
-        points: points
+        points: Enum.map(points, &Map.put(&1, :x, chart_x(&1.slot, slots)))
       }
     end)
   end
