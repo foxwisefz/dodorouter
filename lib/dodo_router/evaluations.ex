@@ -278,6 +278,7 @@ defmodule DodoRouter.Evaluations do
                candidate_log_id: candidate_log.id,
                candidate_latency_ms: candidate_log.latency_ms,
                candidate_cost_usd: candidate_log.estimated_cost_usd,
+               candidate_list_cost_usd: candidate_log.list_cost_usd,
                candidate_output: candidate_log.response_body,
                duration_ms: System.monotonic_time(:millisecond) - started_at
              })}
@@ -290,6 +291,7 @@ defmodule DodoRouter.Evaluations do
                candidate_log_id: candidate_log.id,
                candidate_latency_ms: candidate_log.latency_ms,
                candidate_cost_usd: candidate_log.estimated_cost_usd,
+               candidate_list_cost_usd: candidate_log.list_cost_usd,
                duration_ms: System.monotonic_time(:millisecond) - started_at
              })}
 
@@ -300,6 +302,7 @@ defmodule DodoRouter.Evaluations do
                 candidate_log_id: candidate_log.id,
                 candidate_latency_ms: candidate_log.latency_ms,
                 candidate_cost_usd: candidate_log.estimated_cost_usd,
+                candidate_list_cost_usd: candidate_log.list_cost_usd,
                 candidate_output: candidate_content
               })
 
@@ -341,7 +344,8 @@ defmodule DodoRouter.Evaluations do
               raw_judge_response: raw,
               duration_ms: duration,
               judge_log_id: judge_log && judge_log.id,
-              judge_cost_usd: judge_log && judge_log.estimated_cost_usd
+              judge_cost_usd: judge_log && judge_log.estimated_cost_usd,
+              judge_list_cost_usd: judge_log && judge_log.list_cost_usd
             }
 
             case parse_judgement(raw) do
@@ -417,7 +421,8 @@ defmodule DodoRouter.Evaluations do
           do: nil,
           else: round(Enum.count(completed, & &1.passed) / length(completed) * 100)
         ),
-      total_cost_usd: total_cost(runs)
+      total_cost_usd: total_cost(runs),
+      total_list_cost_usd: total_list_cost(runs)
     }
   end
 
@@ -426,8 +431,25 @@ defmodule DodoRouter.Evaluations do
   defp total_cost(runs) do
     runs
     |> Enum.flat_map(&[&1.candidate_cost_usd, &1.judge_cost_usd])
-    |> Enum.reject(&is_nil/1)
-    |> case do
+    |> sum_costs()
+  end
+
+  # Same spend at API list prices — the comparison number when plan-based
+  # keys report $0. Coalesced per run: rows recorded before list prices
+  # were captured fall back to their actual cost.
+  defp total_list_cost(runs) do
+    runs
+    |> Enum.flat_map(
+      &[
+        &1.candidate_list_cost_usd || &1.candidate_cost_usd,
+        &1.judge_list_cost_usd || &1.judge_cost_usd
+      ]
+    )
+    |> sum_costs()
+  end
+
+  defp sum_costs(costs) do
+    case Enum.reject(costs, &is_nil/1) do
       [] -> nil
       costs -> Enum.reduce(costs, Decimal.new(0), &Decimal.add/2)
     end
@@ -456,10 +478,23 @@ defmodule DodoRouter.Evaluations do
             do: nil,
             else: round(Enum.count(completed, & &1.passed) / length(completed) * 100)
           ),
-        avg_latency: average(latencies)
+        avg_latency: average(latencies),
+        avg_cost:
+          completed
+          |> Enum.map(&(&1.candidate_list_cost_usd || &1.candidate_cost_usd))
+          |> Enum.reject(&is_nil/1)
+          |> decimal_average()
       }
     end)
     |> Enum.sort_by(&(&1.average || -1), :desc)
+  end
+
+  defp decimal_average([]), do: nil
+
+  defp decimal_average(values) do
+    values
+    |> Enum.reduce(Decimal.new(0), &Decimal.add/2)
+    |> Decimal.div(length(values))
   end
 
   def parse_judgement(raw) when is_binary(raw) do

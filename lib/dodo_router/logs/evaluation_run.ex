@@ -24,6 +24,10 @@ defmodule DodoRouter.Logs.EvaluationRun do
     field :candidate_cost_usd, :decimal
     field :candidate_output, :string
     field :judge_cost_usd, :decimal
+    # API list-price counterparts of the two cost fields, copied from the
+    # linked logs so plan-based ($0) runs stay cost-comparable.
+    field :candidate_list_cost_usd, :decimal
+    field :judge_list_cost_usd, :decimal
     # Groups the runs of one benchmark execution; re-runs get a fresh batch
     # so aggregates don't mix executions. Nil on rows from before batching.
     field :batch_id, :binary_id
@@ -59,6 +63,8 @@ defmodule DodoRouter.Logs.EvaluationRun do
       :candidate_cost_usd,
       :candidate_output,
       :judge_cost_usd,
+      :candidate_list_cost_usd,
+      :judge_list_cost_usd,
       :batch_id,
       :evaluation_id,
       :judge_log_id

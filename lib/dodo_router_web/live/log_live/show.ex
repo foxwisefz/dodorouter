@@ -414,9 +414,15 @@ defmodule DodoRouterWeb.LogLive.Show do
                 <%= if plan_covered?(@log) do %>
                   <span
                     class="text-success"
-                    title="Served through a subscription/coding-plan key — no marginal per-token cost"
+                    title="Served through a subscription/coding-plan key — no marginal per-token cost. The figure is what the same tokens would cost at pay-as-you-go API list prices."
                   >
                     included in plan
+                    <span
+                      :if={@log.list_cost_usd && Decimal.gt?(@log.list_cost_usd, 0)}
+                      class="font-mono text-base-content/45"
+                    >
+                      ~${Decimal.round(@log.list_cost_usd, 4)} at API rates
+                    </span>
                   </span>
                 <% else %>
                   <span class="font-mono">

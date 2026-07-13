@@ -179,6 +179,43 @@ defmodule DodoRouterWeb.LogLiveTest do
       assert html2 =~ "$0.0000"
     end
 
+    test "plan-covered requests show what they would cost at API rates",
+         %{conn: conn, user: user} do
+      {router, _api_key} = RoutersFixtures.router_fixture(user)
+
+      plan_step = %{
+        "provider" => "zai",
+        "provider_key_slug" => "zai_coding",
+        "model" => "glm-4.7",
+        "status" => "success",
+        "latency_ms" => 100
+      }
+
+      log =
+        LogsFixtures.log_fixture(router, %{
+          estimated_cost_usd: Decimal.new(0),
+          list_cost_usd: Decimal.new("0.0123"),
+          attempted_steps: [plan_step]
+        })
+
+      {:ok, _live, html} = live(conn, ~p"/logs/#{log.request_id}")
+
+      assert html =~ "included in plan"
+      assert html =~ "~$0.0123 at API rates"
+
+      # Legacy plan-covered logs without a captured list cost stay unchanged.
+      legacy_log =
+        LogsFixtures.log_fixture(router, %{
+          estimated_cost_usd: Decimal.new(0),
+          attempted_steps: [plan_step]
+        })
+
+      {:ok, _live, legacy_html} = live(conn, ~p"/logs/#{legacy_log.request_id}")
+
+      assert legacy_html =~ "included in plan"
+      refute legacy_html =~ "at API rates"
+    end
+
     test "shows the requested model when the router served a different one", %{
       conn: conn,
       user: user

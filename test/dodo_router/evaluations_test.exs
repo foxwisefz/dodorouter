@@ -42,7 +42,8 @@ defmodule DodoRouter.EvaluationsTest do
              best: nil,
              avg_latency: nil,
              pass_rate: nil,
-             total_cost_usd: nil
+             total_cost_usd: nil,
+             total_list_cost_usd: nil
            }
   end
 
@@ -246,6 +247,106 @@ defmodule DodoRouter.EvaluationsTest do
 
     summary = Evaluations.summary(%Evaluation{runs: runs})
     assert Decimal.equal?(summary.total_cost_usd, Decimal.new("0.035"))
+  end
+
+  test "aggregates price plan-based runs at API list rates with per-run fallback" do
+    runs = [
+      # Plan-based run: $0 actual, real list prices captured.
+      %EvaluationRun{
+        status: "completed",
+        score: 80,
+        passed: true,
+        candidate_provider: "test_provider",
+        candidate_model: "test-model",
+        candidate_cost_usd: Decimal.new("0"),
+        candidate_list_cost_usd: Decimal.new("0.020"),
+        judge_cost_usd: Decimal.new("0.010"),
+        judge_list_cost_usd: Decimal.new("0.010")
+      },
+      # Legacy run recorded before list prices existed: falls back to actual.
+      %EvaluationRun{
+        status: "completed",
+        score: 90,
+        passed: true,
+        candidate_provider: "test_provider",
+        candidate_model: "test-model",
+        candidate_cost_usd: Decimal.new("0.030")
+      }
+    ]
+
+    evaluation = %Evaluation{runs: runs}
+
+    summary = Evaluations.summary(evaluation)
+    assert Decimal.equal?(summary.total_cost_usd, Decimal.new("0.040"))
+    assert Decimal.equal?(summary.total_list_cost_usd, Decimal.new("0.060"))
+
+    assert [%{avg_cost: avg_cost}] = Evaluations.rankings(evaluation)
+    assert Decimal.equal?(avg_cost, Decimal.new("0.025"))
+  end
+
+  test "benchmark runs capture list cost so plan-based candidates stay comparable" do
+    user = AccountsFixtures.user_fixture()
+    {router, _key} = RoutersFixtures.router_fixture(user)
+    metered_key = ProvidersFixtures.provider_key_fixture(user)
+
+    plan_key =
+      ProvidersFixtures.provider_key_fixture(user, %{provider_slug: "test_provider_coding"})
+
+    # Plan catalog: $0. Metered catalog: the real API list price.
+    {:ok, _plan_row} =
+      DodoRouter.Models.create_model(%{
+        provider_slug: "test_provider_coding",
+        model_id: "test-model",
+        display_name: "Test Model (plan)",
+        input_price_per_million: Decimal.new("0"),
+        output_price_per_million: Decimal.new("0")
+      })
+
+    {:ok, _metered_row} =
+      DodoRouter.Models.create_model(%{
+        provider_slug: "test_provider",
+        model_id: "test-model",
+        display_name: "Test Model",
+        input_price_per_million: Decimal.new("1.0"),
+        output_price_per_million: Decimal.new("2.0")
+      })
+
+    log =
+      LogsFixtures.log_fixture(router, %{
+        request_body:
+          Jason.encode!(%{
+            "model" => "original-model",
+            "messages" => [%{"role" => "user", "content" => "Say hello"}]
+          })
+      })
+
+    {:ok, evaluation} =
+      Evaluations.create_evaluation(user, log, %{
+        name: "Plan cost seam",
+        criteria: "Say hello",
+        judge_model: "test-model",
+        judge_provider_key_id: metered_key.id,
+        candidate_targets: [
+          %{
+            "provider_key_id" => plan_key.id,
+            "provider" => "test_provider",
+            "model" => "test-model"
+          }
+        ],
+        repetitions: 1
+      })
+
+    assert {:ok, _} = Evaluations.run(user, evaluation)
+
+    loaded = Evaluations.get_evaluation!(user, evaluation.id)
+    assert [run] = loaded.runs
+
+    # The plan key made the run free, but the would-cost figure survives.
+    assert Decimal.equal?(run.candidate_cost_usd, Decimal.new("0"))
+    assert Decimal.compare(run.candidate_list_cost_usd, Decimal.new("0")) == :gt
+
+    # The judge ran on a metered key: list price equals actual price.
+    assert Decimal.equal?(run.judge_list_cost_usd, run.judge_cost_usd)
   end
 
   test "benchmark_running? trusts the registry over a stale running status" do

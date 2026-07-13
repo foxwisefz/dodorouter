@@ -60,6 +60,10 @@ defmodule DodoRouter.Logs.RequestLog do
 
     # Cost
     field :estimated_cost_usd, :decimal
+    # Pay-as-you-go API list price for the same tokens: equals
+    # estimated_cost_usd on metered keys, the would-have-cost figure on
+    # plan/subscription keys, nil when no metered pricing exists.
+    field :list_cost_usd, :decimal
 
     belongs_to :router, DodoRouter.Routers.Router
 
@@ -104,6 +108,7 @@ defmodule DodoRouter.Logs.RequestLog do
       :request_headers,
       :response_headers,
       :estimated_cost_usd,
+      :list_cost_usd,
       :inserted_at,
       :session_id,
       :session_name,

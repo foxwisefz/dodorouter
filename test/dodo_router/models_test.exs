@@ -123,6 +123,29 @@ defmodule DodoRouter.ModelsTest do
     end
   end
 
+  describe "get_metered_model/2" do
+    test "resolves plan-catalog alias ids to their metered rows" do
+      {:ok, metered} =
+        Models.create_model(%{
+          provider_slug: "moonshot",
+          model_id: "kimi-k2.5",
+          display_name: "Kimi K2.5",
+          input_price_per_million: Decimal.new("0.6"),
+          output_price_per_million: Decimal.new("3.0")
+        })
+
+      # Literal id wins when it exists.
+      assert Models.get_metered_model("moonshot", "kimi-k2.5").id == metered.id
+
+      # kimi-for-coding's "k2p5" (k2 point 5) is metered "kimi-k2.5".
+      assert Models.get_metered_model("moonshot", "k2p5").id == metered.id
+
+      # Unknown ids without an alias stay nil.
+      assert Models.get_metered_model("moonshot", "k2p9") == nil
+      assert Models.get_metered_model("zai", "k2p5") == nil
+    end
+  end
+
   describe "calculate_cost/3" do
     test "calculates cost based on per-million pricing" do
       model = %Model{

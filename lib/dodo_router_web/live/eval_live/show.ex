@@ -273,7 +273,7 @@ defmodule DodoRouterWeb.EvalLive.Show do
           <.stat
             label="Average time"
             value={duration(@summary.avg_latency)}
-            detail={"Batch cost " <> money(@summary.total_cost_usd)}
+            detail={batch_cost_detail(@summary)}
           />
           <.stat
             label="Errored runs"
@@ -421,6 +421,9 @@ defmodule DodoRouterWeb.EvalLive.Show do
                   <th>Pass rate</th>
                   <th>Runs</th>
                   <th>Avg time</th>
+                  <th title="Average generation cost per run at pay-as-you-go API list prices">
+                    Avg cost
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -433,9 +436,10 @@ defmodule DodoRouterWeb.EvalLive.Show do
                   <td>{percent(ranking.pass_rate)}</td>
                   <td>{ranking.successful}/{ranking.total}</td>
                   <td>{duration(ranking.avg_latency)}</td>
+                  <td class="font-mono text-xs">{money(ranking.avg_cost)}</td>
                 </tr>
                 <tr :if={@rankings == []}>
-                  <td colspan="8" class="py-10 text-center text-base-content/40">
+                  <td colspan="9" class="py-10 text-center text-base-content/40">
                     No completed model runs yet.
                   </td>
                 </tr>
@@ -591,6 +595,20 @@ defmodule DodoRouterWeb.EvalLive.Show do
   defp percent(value), do: "#{value}%"
   defp money(nil), do: "—"
   defp money(value), do: "$" <> Decimal.to_string(Decimal.round(value, 4), :normal)
+
+  # Plan-based keys report $0 actual spend; when the API list-price total
+  # diverges, show it as the comparison number.
+  defp batch_cost_detail(summary) do
+    base = "Batch cost " <> money(summary.total_cost_usd)
+
+    if summary.total_list_cost_usd && summary.total_cost_usd &&
+         not Decimal.eq?(summary.total_list_cost_usd, summary.total_cost_usd) do
+      base <> " · ~" <> money(summary.total_list_cost_usd) <> " at API rates"
+    else
+      base
+    end
+  end
+
   defp duration(nil), do: "—"
   defp duration(value) when value >= 1_000, do: "#{Float.round(value / 1_000, 1)}s"
   defp duration(value), do: "#{value}ms"

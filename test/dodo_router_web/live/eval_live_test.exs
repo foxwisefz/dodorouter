@@ -294,6 +294,104 @@ defmodule DodoRouterWeb.EvalLiveTest do
     assert has_element?(live, "#chart-legend-errored-1.text-error")
   end
 
+  test "shows would-cost at API rates when plan-based runs make batches free",
+       %{conn: conn, user: user} do
+    {router, _api_key} = RoutersFixtures.router_fixture(user)
+    provider_key = ProvidersFixtures.provider_key_fixture(user)
+    log = LogsFixtures.log_fixture(router)
+
+    {:ok, evaluation} =
+      Evaluations.create_evaluation(user, log, %{
+        name: "Would cost",
+        criteria: "Be useful",
+        judge_model: "test-model",
+        judge_provider_key_id: provider_key.id,
+        candidate_targets: [
+          %{
+            "provider_key_id" => provider_key.id,
+            "provider" => "test_provider",
+            "model" => "test-model"
+          }
+        ]
+      })
+
+    batch = Ecto.UUID.generate()
+
+    %EvaluationRun{}
+    |> EvaluationRun.changeset(%{
+      evaluation_id: evaluation.id,
+      candidate_provider: "test_provider",
+      candidate_model: "test-model",
+      repetition: 1,
+      batch_id: batch,
+      status: "completed",
+      score: 90,
+      passed: true,
+      candidate_cost_usd: Decimal.new("0"),
+      candidate_list_cost_usd: Decimal.new("0.02"),
+      judge_cost_usd: Decimal.new("0.01"),
+      judge_list_cost_usd: Decimal.new("0.01")
+    })
+    |> Repo.insert!()
+
+    evaluation
+    |> Ecto.Changeset.change(last_batch_id: batch)
+    |> Repo.update!()
+
+    {:ok, live, _html} = live(conn, ~p"/evals/#{evaluation.id}")
+
+    # Actual spend $0.01, would-cost $0.03 — the hint shows both.
+    assert has_element?(live, "#eval-summary", "at API rates")
+    # Rankings price the candidate at list rates.
+    assert has_element?(live, "#model-rankings", "$0.0200")
+  end
+
+  test "omits the API-rates hint when actual and list costs match", %{conn: conn, user: user} do
+    {router, _api_key} = RoutersFixtures.router_fixture(user)
+    provider_key = ProvidersFixtures.provider_key_fixture(user)
+    log = LogsFixtures.log_fixture(router)
+
+    {:ok, evaluation} =
+      Evaluations.create_evaluation(user, log, %{
+        name: "Metered",
+        criteria: "Be useful",
+        judge_model: "test-model",
+        judge_provider_key_id: provider_key.id,
+        candidate_targets: [
+          %{
+            "provider_key_id" => provider_key.id,
+            "provider" => "test_provider",
+            "model" => "test-model"
+          }
+        ]
+      })
+
+    batch = Ecto.UUID.generate()
+
+    %EvaluationRun{}
+    |> EvaluationRun.changeset(%{
+      evaluation_id: evaluation.id,
+      candidate_provider: "test_provider",
+      candidate_model: "test-model",
+      repetition: 1,
+      batch_id: batch,
+      status: "completed",
+      score: 90,
+      passed: true,
+      candidate_cost_usd: Decimal.new("0.02"),
+      candidate_list_cost_usd: Decimal.new("0.02")
+    })
+    |> Repo.insert!()
+
+    evaluation
+    |> Ecto.Changeset.change(last_batch_id: batch)
+    |> Repo.update!()
+
+    {:ok, live, _html} = live(conn, ~p"/evals/#{evaluation.id}")
+
+    refute has_element?(live, "#eval-summary", "at API rates")
+  end
+
   test "chart spreads legacy runs with duplicate repetition numbers", %{conn: conn, user: user} do
     {router, _api_key} = RoutersFixtures.router_fixture(user)
     provider_key = ProvidersFixtures.provider_key_fixture(user)

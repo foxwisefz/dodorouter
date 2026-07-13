@@ -10,8 +10,13 @@ defmodule DodoRouter.Proxy.Adapters.TestProvider do
   use DodoRouter.Proxy.Adapter.Registry,
     slug: "test_provider",
     display_name: "Test Provider",
-    key_slugs: ["test_provider"],
-    endpoints: %{"test_provider" => "http://localhost:9999"},
+    # The extra coding slug lets tests exercise plan-based keys
+    # (key slug != provider) end to end without a real provider.
+    key_slugs: ["test_provider", "test_provider_coding"],
+    endpoints: %{
+      "test_provider" => "http://localhost:9999",
+      "test_provider_coding" => "http://localhost:9999"
+    },
     models: ~w(test-model),
     color: "gray",
     short_description: "Test provider for integration tests"

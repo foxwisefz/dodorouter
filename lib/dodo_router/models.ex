@@ -21,6 +21,32 @@ defmodule DodoRouter.Models do
     Repo.get_by(Model, provider_slug: provider_slug, model_id: model_id)
   end
 
+  # Coding-plan catalogs sometimes alias models the metered API lists under
+  # different ids (kimi-for-coding's "k2p5" is metered "kimi-k2.5" — the p
+  # is "point"). Consulted only after the literal id misses, and only for
+  # list-price lookups.
+  @metered_aliases %{
+    "moonshot" => %{
+      "k2p5" => "kimi-k2.5",
+      "k2p6" => "kimi-k2.6",
+      "k2p7" => "kimi-k2.7-code"
+    }
+  }
+
+  @doc """
+  The metered (pay-as-you-go) catalog row for a model, resolving
+  plan-catalog alias ids when the literal id has no metered row.
+
+  Backs list-price ("would cost") calculations for plan-based traffic.
+  """
+  def get_metered_model(provider_slug, model_id) do
+    get_model_by_id(provider_slug, model_id) ||
+      case get_in(@metered_aliases, [provider_slug, model_id]) do
+        nil -> nil
+        aliased_id -> get_model_by_id(provider_slug, aliased_id)
+      end
+  end
+
   def get_model!(id), do: Repo.get!(Model, id)
 
   @doc """
