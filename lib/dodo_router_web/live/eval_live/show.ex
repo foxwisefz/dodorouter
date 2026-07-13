@@ -103,9 +103,9 @@ defmodule DodoRouterWeb.EvalLive.Show do
     |> assign(:running?, Evaluations.benchmark_running?(evaluation))
   end
 
-  # One entry per ranked model: its scored runs positioned by repetition
-  # slot (so an errored repetition leaves a visible gap in the line) and
-  # its errored runs, which render as ✕ marks in a lane below the axis.
+  # One entry per ranked model: scored runs positioned by repetition slot
+  # (so an errored repetition leaves a visible gap in the line). Errored
+  # runs stay off the chart — they surface as legend counts only.
   defp chart_series(batch_runs, rankings) do
     slots =
       batch_runs
@@ -150,19 +150,6 @@ defmodule DodoRouterWeb.EvalLive.Show do
     series
     |> scored_points()
     |> Enum.map_join(" ", fn point -> "#{point.x},#{chart_y(point.run.score)}" end)
-  end
-
-  defp errored_mark_path(x) do
-    "M #{x - 5} 251 L #{x + 5} 261 M #{x - 5} 261 L #{x + 5} 251"
-  end
-
-  defp series_counts(series) do
-    scored = "#{length(scored_points(series))} scored"
-
-    case length(errored_points(series)) do
-      0 -> scored
-      errored -> scored <> " · #{errored} errored"
-    end
   end
 
   defp series_opacity(nil, _key), do: "1"
@@ -335,25 +322,7 @@ defmodule DodoRouterWeb.EvalLive.Show do
                   >
                     <title>{series.model} · run {point.run.repetition}: {point.run.score}</title>
                   </circle>
-                  <path
-                    :for={point <- errored_points(series)}
-                    class="errored-mark"
-                    d={errored_mark_path(point.x)}
-                    stroke={series.color}
-                    stroke-width="2.5"
-                    fill="none"
-                  >
-                    <title>{series.model} · run {point.run.repetition}: errored</title>
-                  </path>
                 </g>
-                <text
-                  :if={Enum.any?(@chart_series, &(errored_points(&1) != []))}
-                  x="18"
-                  y="260"
-                  class="fill-base-content/40 text-[11px]"
-                >
-                  err
-                </text>
                 <text
                   :for={tick <- [0, 25, 50, 75, 100]}
                   x="18"
@@ -378,17 +347,18 @@ defmodule DodoRouterWeb.EvalLive.Show do
                 >
                   <i class="size-2.5 rounded-full" style={"background: #{series.color}"}></i>
                   <span>{series.provider} / {series.model}</span>
-                  <span class="text-base-content/45">{series_counts(series)}</span>
-                </button>
-                <span
-                  :if={@chart_series != []}
-                  class="ml-auto flex items-center gap-3 text-xs text-base-content/45"
-                >
-                  <span class="flex items-center gap-1">
-                    <i class="inline-block size-2.5 rounded-full bg-base-content/60"></i> scored
+                  <span class="text-base-content/45">{length(scored_points(series))} scored</span>
+                  <span
+                    :if={errored_points(series) != []}
+                    id={"chart-legend-errored-#{index}"}
+                    class={[
+                      "text-error/70",
+                      @selected_series == series.key && "font-semibold text-error"
+                    ]}
+                  >
+                    · {length(errored_points(series))} errored
                   </span>
-                  <span class="flex items-center gap-1 font-semibold">✕ errored</span>
-                </span>
+                </button>
               </div>
               <div :if={@rankings == []} class="py-10 text-center text-sm text-base-content/40">
                 Run the benchmark to compare model consistency.

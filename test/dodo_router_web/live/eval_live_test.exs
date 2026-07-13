@@ -273,9 +273,11 @@ defmodule DodoRouterWeb.EvalLiveTest do
 
     # Rankings sort by average: model-a (89) is series 0, model-b (70) is 1.
     assert has_element?(live, "#chart-series-0 polyline")
-    assert has_element?(live, "#chart-series-1 path.errored-mark")
     assert has_element?(live, "#chart-legend-0", "2 scored")
     assert has_element?(live, "#chart-legend-1", "1 errored")
+
+    # Errored runs never render as chart marks — legend counts only.
+    refute has_element?(live, "#quality-consistency-chart .errored-mark")
 
     # Clicking a legend entry pins its series and dims the others.
     live |> element("#chart-legend-0") |> render_click()
@@ -285,5 +287,10 @@ defmodule DodoRouterWeb.EvalLiveTest do
     # Clicking again unpins.
     live |> element("#chart-legend-0") |> render_click()
     assert has_element?(live, "#chart-series-1[opacity='1']")
+
+    # Pinning a series with failures highlights its errored count.
+    refute has_element?(live, "#chart-legend-errored-1.text-error")
+    live |> element("#chart-legend-1") |> render_click()
+    assert has_element?(live, "#chart-legend-errored-1.text-error")
   end
 end
