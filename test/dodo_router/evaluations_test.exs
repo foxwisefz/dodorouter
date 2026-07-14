@@ -41,7 +41,6 @@ defmodule DodoRouter.EvaluationsTest do
              average: nil,
              best: nil,
              avg_latency: nil,
-             pass_rate: nil,
              total_cost_usd: nil,
              total_list_cost_usd: nil
            }
@@ -123,12 +122,11 @@ defmodule DodoRouter.EvaluationsTest do
     assert String.length(prompt) < 150_000
   end
 
-  test "passed defaults to the 70-point threshold when the judge omits it" do
-    assert {:ok, %{passed: true}} =
-             Evaluations.parse_judgement(~s({"score": 85, "summary": "solid"}))
+  test "tolerates extra judge fields like the retired passed verdict" do
+    assert {:ok, judgement} =
+             Evaluations.parse_judgement(~s({"score": 85, "passed": true, "summary": "solid"}))
 
-    assert {:ok, %{passed: false}} =
-             Evaluations.parse_judgement(~s({"score": 60, "summary": "weak"}))
+    refute Map.has_key?(judgement, :passed)
   end
 
   test "formats all-providers-failed proxy errors without crashing" do
@@ -238,7 +236,6 @@ defmodule DodoRouter.EvaluationsTest do
       %EvaluationRun{
         status: "completed",
         score: 80,
-        passed: true,
         candidate_cost_usd: Decimal.new("0.010"),
         judge_cost_usd: Decimal.new("0.020")
       },
@@ -255,7 +252,6 @@ defmodule DodoRouter.EvaluationsTest do
       %EvaluationRun{
         status: "completed",
         score: 80,
-        passed: true,
         candidate_provider: "test_provider",
         candidate_model: "test-model",
         candidate_cost_usd: Decimal.new("0"),
@@ -267,7 +263,6 @@ defmodule DodoRouter.EvaluationsTest do
       %EvaluationRun{
         status: "completed",
         score: 90,
-        passed: true,
         candidate_provider: "test_provider",
         candidate_model: "test-model",
         candidate_cost_usd: Decimal.new("0.030")

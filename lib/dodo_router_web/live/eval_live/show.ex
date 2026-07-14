@@ -288,7 +288,7 @@ defmodule DodoRouterWeb.EvalLive.Show do
           <.stat
             label="Errored runs"
             value={to_string(@summary.failed)}
-            detail={percent(@summary.pass_rate) <> " pass rate"}
+            detail={"out of #{@summary.runs} batch runs"}
           />
         </div>
 
@@ -315,16 +315,6 @@ defmodule DodoRouterWeb.EvalLive.Show do
               >
                 <line x1="55" y1="20" x2="55" y2="240" stroke="currentColor" class="text-base-300" />
                 <line x1="55" y1="240" x2="880" y2="240" stroke="currentColor" class="text-base-300" />
-                <line
-                  x1="55"
-                  y1="86"
-                  x2="880"
-                  y2="86"
-                  stroke="currentColor"
-                  stroke-dasharray="6 6"
-                  class="text-success/50"
-                />
-                <text x="60" y="80" class="fill-success text-[11px]">Pass 70</text>
                 <g
                   :for={{series, index} <- Enum.with_index(@chart_series)}
                   id={"chart-series-#{index}"}
@@ -428,7 +418,6 @@ defmodule DodoRouterWeb.EvalLive.Show do
                   <th>Avg score</th>
                   <th>Std dev</th>
                   <th>Range</th>
-                  <th>Pass rate</th>
                   <th>Runs</th>
                   <th>Avg time</th>
                   <th title="Average generation cost per run at pay-as-you-go API list prices">
@@ -443,13 +432,12 @@ defmodule DodoRouterWeb.EvalLive.Show do
                   <td class="font-semibold text-success">{ranking.average || "—"}</td>
                   <td class={deviation_class(ranking.stddev)}>{ranking.stddev}</td>
                   <td>{ranking.min || "—"}–{ranking.max || "—"}</td>
-                  <td>{percent(ranking.pass_rate)}</td>
                   <td>{ranking.successful}/{ranking.total}</td>
                   <td>{duration(ranking.avg_latency)}</td>
                   <td class="font-mono text-xs">{money(ranking.avg_cost)}</td>
                 </tr>
                 <tr :if={@rankings == []}>
-                  <td colspan="9" class="py-10 text-center text-base-content/40">
+                  <td colspan="8" class="py-10 text-center text-base-content/40">
                     No completed model runs yet.
                   </td>
                 </tr>
@@ -515,8 +503,7 @@ defmodule DodoRouterWeb.EvalLive.Show do
                   <div class="flex items-center gap-3">
                     <span class={[
                       "grid size-12 place-items-center rounded-xl text-lg font-bold",
-                      run.passed && "bg-success/10 text-success",
-                      run.status == "completed" && !run.passed && "bg-warning/10 text-warning",
+                      run.status == "completed" && "bg-primary/10 text-primary",
                       run.status == "failed" && "bg-error/10 text-error"
                     ]}>
                       {run.score || "—"}
@@ -550,8 +537,8 @@ defmodule DodoRouterWeb.EvalLive.Show do
                     </.link>
                     <span class={[
                       "rounded-full px-2.5 py-1 text-xs font-semibold",
-                      run.passed && "bg-success/10 text-success",
-                      !run.passed && "bg-base-200"
+                      run.status == "completed" && "bg-primary/10 text-primary",
+                      run.status != "completed" && "bg-base-200"
                     ]}>
                       {run_status_label(run)}
                     </span>
@@ -601,8 +588,6 @@ defmodule DodoRouterWeb.EvalLive.Show do
 
   defp score(nil), do: "—"
   defp score(value), do: "#{value}/100"
-  defp percent(nil), do: "—"
-  defp percent(value), do: "#{value}%"
   defp money(nil), do: "—"
   defp money(value), do: "$" <> Decimal.to_string(Decimal.round(value, 4), :normal)
 
@@ -624,8 +609,7 @@ defmodule DodoRouterWeb.EvalLive.Show do
   defp duration(value), do: "#{value}ms"
   defp humanize(value), do: value |> String.replace("_", " ") |> String.capitalize()
   defp run_status_label(%{status: "failed"}), do: "Errored"
-  defp run_status_label(%{status: "completed", passed: true}), do: "Passed"
-  defp run_status_label(%{status: "completed"}), do: "Not passed"
+  defp run_status_label(%{status: "completed"}), do: "Scored"
   defp run_status_label(run), do: String.capitalize(run.status)
   defp planned_runs(evaluation), do: length(evaluation.candidate_targets) * evaluation.repetitions
 

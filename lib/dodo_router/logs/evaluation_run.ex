@@ -9,6 +9,8 @@ defmodule DodoRouter.Logs.EvaluationRun do
     field :status, :string, default: "pending"
     field :score, :integer
     field :max_score, :integer, default: 100
+    # Deprecated: pass/fail was removed with judge prompt v2; no longer
+    # written. Column kept for hot-upgrade safety — drop in a later deploy.
     field :passed, :boolean
     field :summary, :string
     field :criterion_scores, :map, default: %{}
@@ -46,7 +48,6 @@ defmodule DodoRouter.Logs.EvaluationRun do
       :status,
       :score,
       :max_score,
-      :passed,
       :summary,
       :criterion_scores,
       :issues,

@@ -268,8 +268,8 @@ defmodule DodoRouterWeb.EvalLiveTest do
       |> Repo.insert!()
     end
 
-    _old_run = insert_run.(%{status: "completed", score: 60, passed: false, batch_id: old_batch})
-    scored = insert_run.(%{status: "completed", score: 90, passed: true, batch_id: new_batch})
+    _old_run = insert_run.(%{status: "completed", score: 60, batch_id: old_batch})
+    scored = insert_run.(%{status: "completed", score: 90, batch_id: new_batch})
     errored = insert_run.(%{status: "failed", error: "boom", batch_id: new_batch, repetition: 2})
 
     evaluation
@@ -342,24 +342,21 @@ defmodule DodoRouterWeb.EvalLiveTest do
       candidate_model: "model-a",
       repetition: 1,
       status: "completed",
-      score: 90,
-      passed: true
+      score: 90
     })
 
     insert_run.(%{
       candidate_model: "model-a",
       repetition: 2,
       status: "completed",
-      score: 88,
-      passed: true
+      score: 88
     })
 
     insert_run.(%{
       candidate_model: "model-b",
       repetition: 1,
       status: "completed",
-      score: 70,
-      passed: true
+      score: 70
     })
 
     insert_run.(%{candidate_model: "model-b", repetition: 2, status: "failed", error: "boom"})
@@ -425,7 +422,6 @@ defmodule DodoRouterWeb.EvalLiveTest do
       batch_id: batch,
       status: "completed",
       score: 90,
-      passed: true,
       candidate_cost_usd: Decimal.new("0"),
       candidate_list_cost_usd: Decimal.new("0.02"),
       judge_cost_usd: Decimal.new("0.01"),
@@ -476,7 +472,6 @@ defmodule DodoRouterWeb.EvalLiveTest do
       batch_id: batch,
       status: "completed",
       score: 90,
-      passed: true,
       candidate_cost_usd: Decimal.new("0.02"),
       candidate_list_cost_usd: Decimal.new("0.02")
     })
@@ -520,8 +515,7 @@ defmodule DodoRouterWeb.EvalLiveTest do
         candidate_model: "test-model",
         repetition: 1,
         status: "completed",
-        score: score,
-        passed: true
+        score: score
       })
       |> Repo.insert!()
     end

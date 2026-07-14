@@ -7,7 +7,9 @@ defmodule DodoRouter.Evaluations do
   alias DodoRouter.Logs.{Evaluation, EvaluationRun}
   alias DodoRouter.{Providers, Proxy, Replays, Repo}
 
-  @prompt_version "v1"
+  # v2: dropped the pass/fail verdict — scores and their distributions
+  # carry the comparison; a binary threshold added noise, not signal.
+  @prompt_version "v2"
   @benchmark_concurrency 3
   # Character budget per SOURCE block in the judge prompt, so a long source
   # conversation can't overflow the judge model's context window.
@@ -356,7 +358,6 @@ defmodule DodoRouter.Evaluations do
                    Map.merge(judge_attrs, %{
                      status: "completed",
                      score: judgement.score,
-                     passed: judgement.passed,
                      summary: judgement.summary,
                      criterion_scores: judgement.criterion_scores,
                      issues: judgement.issues
@@ -416,11 +417,6 @@ defmodule DodoRouter.Evaluations do
         |> Enum.map(& &1.candidate_latency_ms)
         |> Enum.reject(&is_nil/1)
         |> average(),
-      pass_rate:
-        if(completed == [],
-          do: nil,
-          else: round(Enum.count(completed, & &1.passed) / length(completed) * 100)
-        ),
       total_cost_usd: total_cost(runs),
       total_list_cost_usd: total_list_cost(runs)
     }
@@ -473,11 +469,6 @@ defmodule DodoRouter.Evaluations do
         min: if(scores == [], do: nil, else: Enum.min(scores)),
         max: if(scores == [], do: nil, else: Enum.max(scores)),
         stddev: stddev(scores),
-        pass_rate:
-          if(completed == [],
-            do: nil,
-            else: round(Enum.count(completed, & &1.passed) / length(completed) * 100)
-          ),
         avg_latency: average(latencies),
         avg_cost:
           completed
@@ -512,7 +503,6 @@ defmodule DodoRouter.Evaluations do
       {:ok,
        %{
          score: score,
-         passed: Map.get(decoded, "passed", score >= 70) == true,
          summary: summary,
          criterion_scores: normalize_scores(decoded["criterion_scores"]),
          issues: Enum.filter(decoded["issues"] || [], &is_binary/1)
@@ -583,7 +573,7 @@ defmodule DodoRouter.Evaluations do
   # and the candidate's message content.
   defp judge_prompt(evaluation, source, candidate_content) do
     """
-    Score the assistant response from 0 to 100 against the criteria. Intent match and completeness matter most. A score of 70 or above passes.
+    Score the assistant response from 0 to 100 against the criteria. Intent match and completeness matter most.
 
     CRITERIA:
     #{evaluation.criteria}
@@ -601,7 +591,7 @@ defmodule DodoRouter.Evaluations do
     #{truncate_middle(candidate_content || "", @judge_source_limit)}
     </SOURCE_RESPONSE>
 
-    Return exactly: {"score": 0-100, "passed": true|false, "summary": "concise rationale", "criterion_scores": {"intent_match": 0-100, "completeness": 0-100, "appropriateness": 0-100, "accuracy": 0-100}, "issues": ["specific issue"]}
+    Return exactly: {"score": 0-100, "summary": "concise rationale", "criterion_scores": {"intent_match": 0-100, "completeness": 0-100, "appropriateness": 0-100, "accuracy": 0-100}, "issues": ["specific issue"]}
     """
   end
 
