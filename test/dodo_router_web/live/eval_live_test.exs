@@ -538,6 +538,64 @@ defmodule DodoRouterWeb.EvalLiveTest do
     assert has_element?(live, "#rubric-feedback", "brevity matters")
   end
 
+  test "plots quality vs speed with the efficient frontier ringed", %{conn: conn, user: user} do
+    {router, _api_key} = RoutersFixtures.router_fixture(user)
+    provider_key = ProvidersFixtures.provider_key_fixture(user)
+    log = LogsFixtures.log_fixture(router)
+
+    {:ok, evaluation} =
+      Evaluations.create_evaluation(user, log, %{
+        name: "Tradeoff",
+        criteria: "Be useful",
+        judge_model: "test-model",
+        judge_provider_key_id: provider_key.id,
+        candidate_targets: [
+          %{
+            "provider_key_id" => provider_key.id,
+            "provider" => "test_provider",
+            "model" => "model-a"
+          }
+        ]
+      })
+
+    batch = Ecto.UUID.generate()
+
+    insert_run = fn model, score, latency ->
+      %EvaluationRun{}
+      |> EvaluationRun.changeset(%{
+        evaluation_id: evaluation.id,
+        candidate_provider: "test_provider",
+        candidate_model: model,
+        repetition: 1,
+        batch_id: batch,
+        status: "completed",
+        score: score,
+        candidate_latency_ms: latency
+      })
+      |> Repo.insert!()
+    end
+
+    # model-a: best score, slower. model-b: worse but fastest. Both are
+    # efficient. model-c is slower AND worse than both — dominated.
+    insert_run.("model-a", 90, 2000)
+    insert_run.("model-b", 70, 1000)
+    insert_run.("model-c", 60, 3000)
+
+    evaluation
+    |> Ecto.Changeset.change(last_batch_id: batch)
+    |> Repo.update!()
+
+    {:ok, live, _html} = live(conn, ~p"/evals/#{evaluation.id}")
+
+    assert has_element?(live, "#quality-speed-chart")
+
+    # Rankings order (by avg score): model-a = 0, model-b = 1, model-c = 2.
+    assert has_element?(live, "#speed-point-0.pareto")
+    assert has_element?(live, "#speed-point-1.pareto")
+    assert has_element?(live, "#speed-point-2")
+    refute has_element?(live, "#speed-point-2.pareto")
+  end
+
   test "chart spreads legacy runs with duplicate repetition numbers", %{conn: conn, user: user} do
     {router, _api_key} = RoutersFixtures.router_fixture(user)
     provider_key = ProvidersFixtures.provider_key_fixture(user)

@@ -417,6 +417,89 @@ defmodule DodoRouterWeb.EvalLive.Show do
         </div>
 
         <section
+          :if={speed_points(@rankings) != []}
+          id="quality-speed-section"
+          class="rounded-2xl border border-base-300/60 bg-base-100 p-6 shadow-sm"
+        >
+          <div class="mb-6 flex items-center justify-between">
+            <div>
+              <h2 class="font-semibold">Quality vs. speed</h2>
+              <p class="text-sm text-base-content/45">
+                Latest batch averages — up and left wins. Ringed models are the efficient
+                frontier: no faster option scores higher.
+              </p>
+            </div>
+            <span class="text-xs text-base-content/40">score / avg time</span>
+          </div>
+          <div id="quality-speed-chart" class="overflow-x-auto">
+            <svg
+              viewBox="0 0 900 280"
+              class="min-w-[760px] w-full"
+              role="img"
+              aria-label="Average score versus average latency by model"
+            >
+              <line x1="55" y1="20" x2="55" y2="240" stroke="currentColor" class="text-base-300" />
+              <line x1="55" y1="240" x2="880" y2="240" stroke="currentColor" class="text-base-300" />
+              <text
+                :for={tick <- [0, 25, 50, 75, 100]}
+                x="18"
+                y={chart_y(tick) + 4}
+                class="fill-base-content/40 text-[11px]"
+              >
+                {tick}
+              </text>
+              <text
+                :for={{label, x} <- speed_ticks(@rankings)}
+                x={x}
+                y="258"
+                text-anchor="middle"
+                class="fill-base-content/40 text-[11px]"
+              >
+                {label}
+              </text>
+              <g
+                :for={{ranking, index} <- speed_points(@rankings)}
+                id={"speed-point-#{index}"}
+                class={["series cursor-pointer", pareto?(ranking, @rankings) && "pareto"]}
+                opacity={series_opacity(@selected_series, "#{ranking.provider}|#{ranking.model}")}
+                phx-click="select_series"
+                phx-value-series={"#{ranking.provider}|#{ranking.model}"}
+              >
+                <circle
+                  :if={pareto?(ranking, @rankings)}
+                  cx={speed_x(ranking.avg_latency, @rankings)}
+                  cy={chart_y(ranking.average)}
+                  r="11"
+                  fill="none"
+                  stroke={chart_color(index)}
+                  stroke-width="1.5"
+                  stroke-dasharray="3 3"
+                />
+                <circle
+                  cx={speed_x(ranking.avg_latency, @rankings)}
+                  cy={chart_y(ranking.average)}
+                  r="7"
+                  fill={chart_color(index)}
+                >
+                  <title>
+                    {ranking.provider} / {ranking.model} · score {ranking.average} · {duration(
+                      ranking.avg_latency
+                    )} · {money(ranking.avg_cost)}
+                  </title>
+                </circle>
+                <text
+                  x={speed_x(ranking.avg_latency, @rankings) + 14}
+                  y={chart_y(ranking.average) + 4}
+                  class="fill-base-content/60 text-[11px]"
+                >
+                  {ranking.model}
+                </text>
+              </g>
+            </svg>
+          </div>
+        </section>
+
+        <section
           id="model-rankings"
           class="overflow-hidden rounded-2xl border border-base-300/60 bg-base-100 shadow-sm"
         >
@@ -643,6 +726,43 @@ defmodule DodoRouterWeb.EvalLive.Show do
   defp run_status_label(%{status: "completed"}), do: "Scored"
   defp run_status_label(run), do: String.capitalize(run.status)
   defp planned_runs(evaluation), do: length(evaluation.candidate_targets) * evaluation.repetitions
+
+  # Quality-vs-speed scatter: one point per ranked model that has both an
+  # average score and an average latency. Indexes are kept from the full
+  # rankings list so colors match the consistency chart and legend.
+  defp speed_points(rankings) do
+    rankings
+    |> Enum.with_index()
+    |> Enum.filter(fn {ranking, _index} -> ranking.average && ranking.avg_latency end)
+  end
+
+  # On the efficient frontier: no other model is at least as good on both
+  # axes and strictly better on one.
+  defp pareto?(ranking, rankings) do
+    not Enum.any?(rankings, fn other ->
+      other.average != nil && other.avg_latency != nil &&
+        other.average >= ranking.average && other.avg_latency <= ranking.avg_latency &&
+        (other.average > ranking.average || other.avg_latency < ranking.avg_latency)
+    end)
+  end
+
+  defp max_latency(rankings) do
+    rankings
+    |> Enum.map(& &1.avg_latency)
+    |> Enum.reject(&is_nil/1)
+    |> Enum.max(fn -> 1 end)
+    |> max(1)
+  end
+
+  defp speed_x(latency, rankings), do: 70 + latency / max_latency(rankings) * 780
+
+  defp speed_ticks(rankings) do
+    max = max_latency(rankings)
+
+    for fraction <- [0.25, 0.5, 0.75, 1.0] do
+      {duration(round(max * fraction)), 70 + fraction * 780}
+    end
+  end
 
   defp chart_x(index, total), do: 70 + index * 790 / max(total - 1, 1)
   defp chart_y(nil), do: 240
