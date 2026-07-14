@@ -129,6 +129,54 @@ defmodule DodoRouter.EvaluationsTest do
     refute Map.has_key?(judgement, :passed)
   end
 
+  test "extracts the judge's reasoning and rubric gaps" do
+    raw =
+      Jason.encode!(%{
+        "reasoning" => "Criterion one is met because the reply greets the user.",
+        "score" => 88,
+        "summary" => "Good",
+        "rubric_gaps" => ["Criteria do not say whether brevity matters", 42]
+      })
+
+    assert {:ok, judgement} = Evaluations.parse_judgement(raw)
+    assert judgement.reasoning =~ "greets the user"
+    # Non-string entries from a sloppy judge are dropped, like issues.
+    assert judgement.rubric_gaps == ["Criteria do not say whether brevity matters"]
+
+    # Judges on the old contract yield empty feedback, not crashes.
+    assert {:ok, legacy} = Evaluations.parse_judgement(~s({"score": 70, "summary": "ok"}))
+    assert legacy.reasoning == nil
+    assert legacy.rubric_gaps == []
+  end
+
+  test "judge prompt demands reasoning before the score and invites rubric feedback" do
+    evaluation = %Evaluation{
+      judge_model: "judge-model",
+      criteria: "Be correct",
+      request_log: %RequestLog{request_body: "{}"}
+    }
+
+    [_system, %{"content" => prompt}] =
+      Evaluations.judge_request(evaluation, "An answer")["messages"]
+
+    assert prompt =~ "reasoning"
+    assert prompt =~ "rubric_gaps"
+  end
+
+  test "summarizes rubric gaps across a batch" do
+    runs = [
+      %EvaluationRun{status: "completed", rubric_gaps: ["No length guidance", "Tone undefined"]},
+      %EvaluationRun{status: "completed", rubric_gaps: ["No length guidance"]},
+      %EvaluationRun{status: "completed", rubric_gaps: []},
+      %EvaluationRun{status: "failed", rubric_gaps: []}
+    ]
+
+    assert %{flagged: 2, scored: 3, gaps: gaps} = Evaluations.rubric_feedback(runs)
+    assert "No length guidance" in gaps
+    assert "Tone undefined" in gaps
+    assert length(gaps) == 2
+  end
+
   test "formats all-providers-failed proxy errors without crashing" do
     attempts = [%{provider: "moonshot", error: "bad_request", http_status: 400}]
 

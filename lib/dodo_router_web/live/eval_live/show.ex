@@ -100,6 +100,7 @@ defmodule DodoRouterWeb.EvalLive.Show do
     |> assign(:summary, Evaluations.summary(evaluation))
     |> assign(:rankings, rankings)
     |> assign(:chart_series, chart_series(batch_runs, rankings))
+    |> assign(:rubric_feedback, Evaluations.rubric_feedback(batch_runs))
     |> assign(:running?, Evaluations.benchmark_running?(evaluation))
   end
 
@@ -390,6 +391,22 @@ defmodule DodoRouterWeb.EvalLive.Show do
             <p class="mt-3 whitespace-pre-wrap text-sm leading-6 text-base-content/70">
               {@evaluation.criteria}
             </p>
+            <div
+              :if={@rubric_feedback.flagged > 0}
+              id="rubric-feedback"
+              class="mt-4 rounded-xl bg-warning/10 p-4 text-sm ring-1 ring-warning/20"
+            >
+              <div class="flex items-center gap-2 font-semibold text-warning">
+                <.icon name="hero-exclamation-triangle" class="size-4" />
+                The judge flagged rubric gaps in {@rubric_feedback.flagged} of {@rubric_feedback.scored} scored runs
+              </div>
+              <ul class="mt-2 list-disc space-y-1 pl-5 text-base-content/70">
+                <li :for={gap <- Enum.take(@rubric_feedback.gaps, 5)}>{gap}</li>
+              </ul>
+              <p class="mt-2 text-xs text-base-content/50">
+                Consider tightening the criteria or adding examples, then duplicate this evaluation.
+              </p>
+            </div>
             <.link
               navigate={~p"/logs/#{@evaluation.request_log.id}"}
               class="mt-5 inline-flex items-center gap-1 text-sm font-medium text-primary hover:underline"
@@ -563,6 +580,20 @@ defmodule DodoRouterWeb.EvalLive.Show do
                 >
                   <li :for={issue <- run.issues}>{issue}</li>
                 </ul>
+                <details :if={run.reasoning} class="group mt-4">
+                  <summary class="cursor-pointer text-sm font-medium text-base-content/60 hover:text-base-content">
+                    <.icon
+                      name="hero-chevron-right"
+                      class="size-3.5 transition-transform group-open:rotate-90"
+                    /> Judge reasoning
+                  </summary>
+                  <div class="mt-2 rounded-xl bg-base-200/50 p-4 text-sm leading-6 text-base-content/70 whitespace-pre-wrap">
+                    {run.reasoning}
+                    <div :if={run.rubric_gaps != []} class="mt-3 text-warning">
+                      Rubric gaps: {Enum.join(run.rubric_gaps, " · ")}
+                    </div>
+                  </div>
+                </details>
               </article>
             </div>
           </div>

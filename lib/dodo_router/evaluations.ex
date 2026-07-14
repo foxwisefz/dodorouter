@@ -9,7 +9,11 @@ defmodule DodoRouter.Evaluations do
 
   # v2: dropped the pass/fail verdict — scores and their distributions
   # carry the comparison; a binary threshold added noise, not signal.
-  @prompt_version "v2"
+  # v3: judge reasons before scoring (rationale-then-score improves judge
+  # accuracy and gives the user something to audit) and reports gaps in
+  # the rubric itself, so a thin rubric surfaces instead of silently
+  # producing confident-looking numbers.
+  @prompt_version "v3"
   @benchmark_concurrency 3
   # Character budget per SOURCE block in the judge prompt, so a long source
   # conversation can't overflow the judge model's context window.
@@ -359,8 +363,10 @@ defmodule DodoRouter.Evaluations do
                      status: "completed",
                      score: judgement.score,
                      summary: judgement.summary,
+                     reasoning: judgement.reasoning,
                      criterion_scores: judgement.criterion_scores,
-                     issues: judgement.issues
+                     issues: judgement.issues,
+                     rubric_gaps: judgement.rubric_gaps
                    })
                  )}
 
@@ -504,8 +510,10 @@ defmodule DodoRouter.Evaluations do
        %{
          score: score,
          summary: summary,
+         reasoning: if(is_binary(decoded["reasoning"]), do: decoded["reasoning"]),
          criterion_scores: normalize_scores(decoded["criterion_scores"]),
-         issues: Enum.filter(decoded["issues"] || [], &is_binary/1)
+         issues: Enum.filter(decoded["issues"] || [], &is_binary/1),
+         rubric_gaps: Enum.filter(decoded["rubric_gaps"] || [], &is_binary/1)
        }}
     else
       _ -> {:error, "Judge returned an invalid structured response"}
@@ -513,6 +521,22 @@ defmodule DodoRouter.Evaluations do
   end
 
   def parse_judgement(_), do: {:error, "Judge returned no response"}
+
+  @doc """
+  How often the judge flagged the rubric as insufficient across the given
+  runs, with the distinct gaps it named. The signal that an evaluation's
+  criteria or examples need work before its scores deserve trust.
+  """
+  def rubric_feedback(runs) do
+    scored = Enum.filter(runs, &(&1.status == "completed"))
+    flagged = Enum.filter(scored, &(&1.rubric_gaps != []))
+
+    %{
+      scored: length(scored),
+      flagged: length(flagged),
+      gaps: flagged |> Enum.flat_map(& &1.rubric_gaps) |> Enum.uniq()
+    }
+  end
 
   defp create_run(evaluation, attrs) do
     %EvaluationRun{}
@@ -573,7 +597,7 @@ defmodule DodoRouter.Evaluations do
   # and the candidate's message content.
   defp judge_prompt(evaluation, source, candidate_content) do
     """
-    Score the assistant response from 0 to 100 against the criteria. Intent match and completeness matter most.
+    Score the assistant response from 0 to 100 against the criteria. Intent match and completeness matter most. First work through the response against each criterion in the reasoning field, then score — the score must follow from the reasoning. If the criteria or examples are too vague or incomplete to judge confidently, name what is missing in rubric_gaps (empty array if the rubric was sufficient).
 
     CRITERIA:
     #{evaluation.criteria}
@@ -591,7 +615,7 @@ defmodule DodoRouter.Evaluations do
     #{truncate_middle(candidate_content || "", @judge_source_limit)}
     </SOURCE_RESPONSE>
 
-    Return exactly: {"score": 0-100, "summary": "concise rationale", "criterion_scores": {"intent_match": 0-100, "completeness": 0-100, "appropriateness": 0-100, "accuracy": 0-100}, "issues": ["specific issue"]}
+    Return exactly: {"reasoning": "assessment of the response against each criterion", "score": 0-100, "summary": "concise rationale", "criterion_scores": {"intent_match": 0-100, "completeness": 0-100, "appropriateness": 0-100, "accuracy": 0-100}, "issues": ["specific issue"], "rubric_gaps": ["what the criteria failed to specify, if anything"]}
     """
   end
 

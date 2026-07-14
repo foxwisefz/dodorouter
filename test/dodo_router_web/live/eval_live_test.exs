@@ -486,6 +486,58 @@ defmodule DodoRouterWeb.EvalLiveTest do
     refute has_element?(live, "#eval-summary", "at API rates")
   end
 
+  test "surfaces judge reasoning and rubric gaps", %{conn: conn, user: user} do
+    {router, _api_key} = RoutersFixtures.router_fixture(user)
+    provider_key = ProvidersFixtures.provider_key_fixture(user)
+    log = LogsFixtures.log_fixture(router)
+
+    {:ok, evaluation} =
+      Evaluations.create_evaluation(user, log, %{
+        name: "Judge feedback",
+        criteria: "Be useful",
+        judge_model: "test-model",
+        judge_provider_key_id: provider_key.id,
+        candidate_targets: [
+          %{
+            "provider_key_id" => provider_key.id,
+            "provider" => "test_provider",
+            "model" => "test-model"
+          }
+        ]
+      })
+
+    batch = Ecto.UUID.generate()
+
+    run =
+      %EvaluationRun{}
+      |> EvaluationRun.changeset(%{
+        evaluation_id: evaluation.id,
+        candidate_provider: "test_provider",
+        candidate_model: "test-model",
+        repetition: 1,
+        batch_id: batch,
+        status: "completed",
+        score: 88,
+        reasoning: "The reply addresses the request head-on and stays factual.",
+        rubric_gaps: ["Criteria never say whether brevity matters"]
+      })
+      |> Repo.insert!()
+
+    evaluation
+    |> Ecto.Changeset.change(last_batch_id: batch)
+    |> Repo.update!()
+
+    {:ok, live, _html} = live(conn, ~p"/evals/#{evaluation.id}")
+
+    # The judge's reasoning is available (collapsed) on the run card.
+    assert has_element?(live, "#run-#{run.id} details", "Judge reasoning")
+    assert has_element?(live, "#run-#{run.id}", "stays factual")
+
+    # Rubric feedback rolls up onto the criteria card.
+    assert has_element?(live, "#rubric-feedback", "1 of 1 scored runs")
+    assert has_element?(live, "#rubric-feedback", "brevity matters")
+  end
+
   test "chart spreads legacy runs with duplicate repetition numbers", %{conn: conn, user: user} do
     {router, _api_key} = RoutersFixtures.router_fixture(user)
     provider_key = ProvidersFixtures.provider_key_fixture(user)

@@ -15,6 +15,10 @@ defmodule DodoRouter.Logs.EvaluationRun do
     field :summary, :string
     field :criterion_scores, :map, default: %{}
     field :issues, {:array, :string}, default: []
+    # The judge's step-by-step assessment, produced before the score.
+    field :reasoning, :string
+    # What the judge found missing/ambiguous in the rubric itself.
+    field :rubric_gaps, {:array, :string}, default: []
     field :raw_judge_response, :string
     field :error, :string
     field :duration_ms, :integer
@@ -51,6 +55,8 @@ defmodule DodoRouter.Logs.EvaluationRun do
       :summary,
       :criterion_scores,
       :issues,
+      :reasoning,
+      :rubric_gaps,
       :raw_judge_response,
       :error,
       :duration_ms,
