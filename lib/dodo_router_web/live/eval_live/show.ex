@@ -4,9 +4,11 @@ defmodule DodoRouterWeb.EvalLive.Show do
   alias DodoRouter.Evaluations
 
   @impl true
-  def mount(%{"id" => id} = params, _session, socket) do
+  def mount(%{"id" => id}, _session, socket) do
     if connected?(socket), do: Phoenix.PubSub.subscribe(DodoRouter.PubSub, "evaluation:#{id}")
 
+    # Mount must stay side-effect free: benchmarks start only from explicit
+    # actions, never from navigating (or refreshing, or reconnecting).
     case Evaluations.get_evaluation(socket.assigns.current_user, id) do
       nil ->
         {:ok,
@@ -15,17 +17,11 @@ defmodule DodoRouterWeb.EvalLive.Show do
          |> push_navigate(to: ~p"/evals")}
 
       evaluation ->
-        socket =
-          socket
-          |> assign(:show_errored, MapSet.new())
-          |> assign(:selected_series, nil)
-          |> load(evaluation)
-
-        if params["run"] == "true" do
-          {:ok, start_benchmark(socket)}
-        else
-          {:ok, socket}
-        end
+        {:ok,
+         socket
+         |> assign(:show_errored, MapSet.new())
+         |> assign(:selected_series, nil)
+         |> load(evaluation)}
     end
   end
 

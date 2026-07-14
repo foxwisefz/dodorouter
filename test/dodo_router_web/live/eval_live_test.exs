@@ -50,9 +50,44 @@ defmodule DodoRouterWeb.EvalLiveTest do
 
     {path, _flash} = assert_redirect(live)
     assert String.starts_with?(path, "/evals/")
+    # The save action enqueues the benchmark itself — no run flag in the
+    # URL, so refreshing the destination can never start another run.
+    refute path =~ "run="
+
+    evaluation_id = path |> String.trim_leading("/evals/") |> URI.parse() |> Map.fetch!(:path)
+    evaluation = Evaluations.get_evaluation!(user, evaluation_id)
+    assert evaluation.benchmark_status == "running"
 
     assert {:ok, show_live, _html} = live(conn, URI.parse(path).path)
     assert has_element?(show_live, "#eval-summary")
+  end
+
+  test "mounting the evaluation page never starts a benchmark", %{conn: conn, user: user} do
+    {router, _api_key} = RoutersFixtures.router_fixture(user)
+    provider_key = ProvidersFixtures.provider_key_fixture(user)
+    log = LogsFixtures.log_fixture(router)
+
+    {:ok, evaluation} =
+      Evaluations.create_evaluation(user, log, %{
+        name: "No side effects",
+        criteria: "Be useful",
+        judge_model: "test-model",
+        judge_provider_key_id: provider_key.id,
+        candidate_targets: [
+          %{
+            "provider_key_id" => provider_key.id,
+            "provider" => "test_provider",
+            "model" => "test-model"
+          }
+        ]
+      })
+
+    # Legacy bookmarked URL with the old run flag: must be inert.
+    {:ok, _live, _html} = live(conn, ~p"/evals/#{evaluation.id}?run=true")
+
+    reloaded = Evaluations.get_evaluation!(user, evaluation.id)
+    assert reloaded.benchmark_status == "draft"
+    assert reloaded.runs == []
   end
 
   test "duplicates an evaluation into a prefilled builder", %{conn: conn, user: user} do

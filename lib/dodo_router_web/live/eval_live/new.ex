@@ -164,10 +164,14 @@ defmodule DodoRouterWeb.EvalLive.New do
 
     case Evaluations.create_evaluation(socket.assigns.current_user, socket.assigns.log, params) do
       {:ok, evaluation} ->
+        # Enqueue here, from the explicit save action: a run flag in the
+        # destination URL would re-trigger a paid benchmark on refresh.
+        Evaluations.enqueue(socket.assigns.current_user, evaluation)
+
         {:noreply,
          socket
          |> put_flash(:info, "Benchmark queued")
-         |> push_navigate(to: ~p"/evals/#{evaluation.id}?run=true")}
+         |> push_navigate(to: ~p"/evals/#{evaluation.id}")}
 
       {:error, changeset} ->
         {:noreply, assign(socket, :form, to_form(changeset))}
