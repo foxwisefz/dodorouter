@@ -595,7 +595,7 @@ defmodule DodoRouterWeb.EvalLiveTest do
 
     batch = Ecto.UUID.generate()
 
-    insert_run = fn model, score, latency ->
+    insert_run = fn model, score, latency, cost ->
       %EvaluationRun{}
       |> EvaluationRun.changeset(%{
         evaluation_id: evaluation.id,
@@ -605,16 +605,18 @@ defmodule DodoRouterWeb.EvalLiveTest do
         batch_id: batch,
         status: "completed",
         score: score,
-        candidate_latency_ms: latency
+        candidate_latency_ms: latency,
+        candidate_cost_usd: cost
       })
       |> Repo.insert!()
     end
 
-    # model-a: best score, slower. model-b: worse but fastest. Both are
-    # efficient. model-c is slower AND worse than both — dominated.
-    insert_run.("model-a", 90, 2000)
-    insert_run.("model-b", 70, 1000)
-    insert_run.("model-c", 60, 3000)
+    # model-a: best score, slower, priciest. model-b: worse but fastest.
+    # model-c: slower AND worse than both (speed-dominated) — but the
+    # cheapest, so it joins the frontier when the axis switches to cost.
+    insert_run.("model-a", 90, 2000, Decimal.new("0.05"))
+    insert_run.("model-b", 70, 1000, Decimal.new("0.02"))
+    insert_run.("model-c", 60, 3000, Decimal.new("0.005"))
 
     evaluation
     |> Ecto.Changeset.change(last_batch_id: batch)
@@ -628,6 +630,14 @@ defmodule DodoRouterWeb.EvalLiveTest do
     assert has_element?(live, "#speed-point-0.pareto")
     assert has_element?(live, "#speed-point-1.pareto")
     assert has_element?(live, "#speed-point-2")
+    refute has_element?(live, "#speed-point-2.pareto")
+
+    # Switching the axis to cost recomputes the frontier: the cheap slow
+    # model becomes efficient.
+    live |> element("#tradeoff-axis-cost") |> render_click()
+    assert has_element?(live, "#speed-point-2.pareto")
+
+    live |> element("#tradeoff-axis-speed") |> render_click()
     refute has_element?(live, "#speed-point-2.pareto")
   end
 

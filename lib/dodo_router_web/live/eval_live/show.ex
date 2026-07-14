@@ -21,6 +21,7 @@ defmodule DodoRouterWeb.EvalLive.Show do
          socket
          |> assign(:show_errored, MapSet.new())
          |> assign(:selected_series, nil)
+         |> assign(:tradeoff_axis, :speed)
          |> load(evaluation)}
     end
   end
@@ -44,6 +45,10 @@ defmodule DodoRouterWeb.EvalLive.Show do
   def handle_event("select_series", %{"series" => key}, socket) do
     selected = if socket.assigns.selected_series == key, do: nil, else: key
     {:noreply, assign(socket, :selected_series, selected)}
+  end
+
+  def handle_event("tradeoff_axis", %{"axis" => axis}, socket) when axis in ~w(speed cost) do
+    {:noreply, assign(socket, :tradeoff_axis, String.to_existing_atom(axis))}
   end
 
   @impl true
@@ -413,19 +418,50 @@ defmodule DodoRouterWeb.EvalLive.Show do
         </div>
 
         <section
-          :if={speed_points(@rankings) != []}
+          :if={tradeoff_points(@rankings, :speed) != [] or tradeoff_points(@rankings, :cost) != []}
           id="quality-speed-section"
           class="rounded-2xl border border-base-300/60 bg-base-100 p-6 shadow-sm"
         >
           <div class="mb-6 flex items-center justify-between">
             <div>
-              <h2 class="font-semibold">Quality vs. speed</h2>
+              <h2 class="font-semibold">
+                Quality vs. {if @tradeoff_axis == :cost, do: "cost", else: "speed"}
+              </h2>
               <p class="text-sm text-base-content/45">
                 Latest batch averages — up and left wins. Ringed models are the efficient
-                frontier: no faster option scores higher.
+                frontier: {if @tradeoff_axis == :cost,
+                  do: "no cheaper option scores higher.",
+                  else: "no faster option scores higher."}
               </p>
             </div>
-            <span class="text-xs text-base-content/40">score / avg time</span>
+            <div class="flex rounded-lg bg-base-200 p-0.5 text-xs">
+              <button
+                id="tradeoff-axis-speed"
+                type="button"
+                phx-click="tradeoff_axis"
+                phx-value-axis="speed"
+                class={[
+                  "rounded-md px-2.5 py-1 transition",
+                  @tradeoff_axis == :speed && "bg-base-100 font-semibold shadow-sm",
+                  @tradeoff_axis != :speed && "text-base-content/50"
+                ]}
+              >
+                Speed
+              </button>
+              <button
+                id="tradeoff-axis-cost"
+                type="button"
+                phx-click="tradeoff_axis"
+                phx-value-axis="cost"
+                class={[
+                  "rounded-md px-2.5 py-1 transition",
+                  @tradeoff_axis == :cost && "bg-base-100 font-semibold shadow-sm",
+                  @tradeoff_axis != :cost && "text-base-content/50"
+                ]}
+              >
+                Cost
+              </button>
+            </div>
           </div>
           <div id="quality-speed-chart" class="overflow-x-auto">
             <svg
@@ -445,7 +481,7 @@ defmodule DodoRouterWeb.EvalLive.Show do
                 {tick}
               </text>
               <text
-                :for={{label, x} <- speed_ticks(@rankings)}
+                :for={{label, x} <- tradeoff_ticks(@rankings, @tradeoff_axis)}
                 x={x}
                 y="258"
                 text-anchor="middle"
@@ -454,16 +490,19 @@ defmodule DodoRouterWeb.EvalLive.Show do
                 {label}
               </text>
               <g
-                :for={{ranking, index} <- speed_points(@rankings)}
+                :for={{ranking, index} <- tradeoff_points(@rankings, @tradeoff_axis)}
                 id={"speed-point-#{index}"}
-                class={["series cursor-pointer", pareto?(ranking, @rankings) && "pareto"]}
+                class={[
+                  "series cursor-pointer",
+                  pareto?(ranking, @rankings, @tradeoff_axis) && "pareto"
+                ]}
                 opacity={series_opacity(@selected_series, "#{ranking.provider}|#{ranking.model}")}
                 phx-click="select_series"
                 phx-value-series={"#{ranking.provider}|#{ranking.model}"}
               >
                 <circle
-                  :if={pareto?(ranking, @rankings)}
-                  cx={speed_x(ranking.avg_latency, @rankings)}
+                  :if={pareto?(ranking, @rankings, @tradeoff_axis)}
+                  cx={tradeoff_x(ranking, @rankings, @tradeoff_axis)}
                   cy={chart_y(ranking.average)}
                   r="11"
                   fill="none"
@@ -472,7 +511,7 @@ defmodule DodoRouterWeb.EvalLive.Show do
                   stroke-dasharray="3 3"
                 />
                 <circle
-                  cx={speed_x(ranking.avg_latency, @rankings)}
+                  cx={tradeoff_x(ranking, @rankings, @tradeoff_axis)}
                   cy={chart_y(ranking.average)}
                   r="7"
                   fill={chart_color(index)}
@@ -484,7 +523,7 @@ defmodule DodoRouterWeb.EvalLive.Show do
                   </title>
                 </circle>
                 <text
-                  x={speed_x(ranking.avg_latency, @rankings) + 14}
+                  x={tradeoff_x(ranking, @rankings, @tradeoff_axis) + 14}
                   y={chart_y(ranking.average) + 4}
                   class="fill-base-content/60 text-[11px]"
                 >
@@ -723,42 +762,57 @@ defmodule DodoRouterWeb.EvalLive.Show do
   defp run_status_label(run), do: String.capitalize(run.status)
   defp planned_runs(evaluation), do: length(evaluation.candidate_targets) * evaluation.repetitions
 
-  # Quality-vs-speed scatter: one point per ranked model that has both an
-  # average score and an average latency. Indexes are kept from the full
-  # rankings list so colors match the consistency chart and legend.
-  defp speed_points(rankings) do
+  # Quality tradeoff scatter: one point per ranked model that has both an
+  # average score and a value on the chosen axis (speed or cost). Indexes
+  # are kept from the full rankings list so colors match the consistency
+  # chart and legend.
+  defp tradeoff_points(rankings, axis) do
     rankings
     |> Enum.with_index()
-    |> Enum.filter(fn {ranking, _index} -> ranking.average && ranking.avg_latency end)
+    |> Enum.filter(fn {ranking, _index} -> ranking.average && axis_value(ranking, axis) end)
   end
+
+  defp axis_value(ranking, :speed), do: ranking.avg_latency
+  defp axis_value(ranking, :cost), do: ranking.avg_cost && Decimal.to_float(ranking.avg_cost)
 
   # On the efficient frontier: no other model is at least as good on both
   # axes and strictly better on one.
-  defp pareto?(ranking, rankings) do
+  defp pareto?(ranking, rankings, axis) do
+    value = axis_value(ranking, axis)
+
     not Enum.any?(rankings, fn other ->
-      other.average != nil && other.avg_latency != nil &&
-        other.average >= ranking.average && other.avg_latency <= ranking.avg_latency &&
-        (other.average > ranking.average || other.avg_latency < ranking.avg_latency)
+      other_value = axis_value(other, axis)
+
+      other.average != nil && other_value != nil &&
+        other.average >= ranking.average && other_value <= value &&
+        (other.average > ranking.average || other_value < value)
     end)
   end
 
-  defp max_latency(rankings) do
+  defp max_axis(rankings, axis) do
     rankings
-    |> Enum.map(& &1.avg_latency)
+    |> Enum.map(&axis_value(&1, axis))
     |> Enum.reject(&is_nil/1)
     |> Enum.max(fn -> 1 end)
-    |> max(1)
-  end
-
-  defp speed_x(latency, rankings), do: 70 + latency / max_latency(rankings) * 780
-
-  defp speed_ticks(rankings) do
-    max = max_latency(rankings)
-
-    for fraction <- [0.25, 0.5, 0.75, 1.0] do
-      {duration(round(max * fraction)), 70 + fraction * 780}
+    |> case do
+      max when max > 0 -> max
+      _zero -> 1
     end
   end
+
+  defp tradeoff_x(ranking, rankings, axis),
+    do: 70 + axis_value(ranking, axis) / max_axis(rankings, axis) * 780
+
+  defp tradeoff_ticks(rankings, axis) do
+    max = max_axis(rankings, axis)
+
+    for fraction <- [0.25, 0.5, 0.75, 1.0] do
+      {axis_tick_label(max * fraction, axis), 70 + fraction * 780}
+    end
+  end
+
+  defp axis_tick_label(value, :speed), do: duration(round(value))
+  defp axis_tick_label(value, :cost), do: money(Decimal.from_float(value))
 
   defp chart_x(index, total), do: 70 + index * 790 / max(total - 1, 1)
   defp chart_y(nil), do: 240
