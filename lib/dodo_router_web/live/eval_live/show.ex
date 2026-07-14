@@ -225,16 +225,26 @@ defmodule DodoRouterWeb.EvalLive.Show do
               </div>
             </div>
           </div>
-          <button
-            id="run-eval-button"
-            phx-click="run"
-            disabled={@running?}
-            class="btn btn-primary gap-2"
-          >
-            <.icon name="hero-play" class="size-4" /> {if @running?,
-              do: "Benchmark running…",
-              else: "Run again"}
-          </button>
+          <div class="flex items-center gap-2">
+            <.link
+              id="duplicate-eval-button"
+              navigate={~p"/logs/#{@evaluation.request_log_id}/evals/new?from=#{@evaluation.id}"}
+              class="btn btn-ghost gap-2"
+              title="Start a new evaluation prefilled from this one"
+            >
+              <.icon name="hero-document-duplicate" class="size-4" /> Duplicate
+            </.link>
+            <button
+              id="run-eval-button"
+              phx-click="run"
+              disabled={@running?}
+              class="btn btn-primary gap-2"
+            >
+              <.icon name="hero-play" class="size-4" /> {if @running?,
+                do: "Benchmark running…",
+                else: "Run again"}
+            </button>
+          </div>
         </div>
 
         <div

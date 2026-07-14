@@ -55,6 +55,105 @@ defmodule DodoRouterWeb.EvalLiveTest do
     assert has_element?(show_live, "#eval-summary")
   end
 
+  test "duplicates an evaluation into a prefilled builder", %{conn: conn, user: user} do
+    {router, _api_key} = RoutersFixtures.router_fixture(user)
+    provider_key = ProvidersFixtures.provider_key_fixture(user)
+    log = LogsFixtures.log_fixture(router)
+
+    {:ok, evaluation} =
+      Evaluations.create_evaluation(user, log, %{
+        name: "Original",
+        criteria: "Should mention gentle shows.",
+        good_examples: "Mentions gentle shows early",
+        judge_model: "test-model",
+        judge_provider_key_id: provider_key.id,
+        candidate_targets: [
+          %{
+            "provider_key_id" => provider_key.id,
+            "provider" => "test_provider",
+            "model" => "test-model"
+          }
+        ],
+        repetitions: 5
+      })
+
+    # The show page offers duplication.
+    {:ok, show, _html} = live(conn, ~p"/evals/#{evaluation.id}")
+
+    assert has_element?(
+             show,
+             "#duplicate-eval-button[href='/logs/#{log.id}/evals/new?from=#{evaluation.id}']"
+           )
+
+    {:ok, new_live, html} = live(conn, ~p"/logs/#{log.id}/evals/new?from=#{evaluation.id}")
+
+    # Everything carries over, ready to modify.
+    assert html =~ "Copy of Original"
+    assert html =~ "Should mention gentle shows."
+    assert html =~ "Mentions gentle shows early"
+    assert has_element?(new_live, "#eval-form input[name='evaluation[repetitions]'][value='5']")
+
+    assert has_element?(
+             new_live,
+             "select[name='evaluation[judge_target]'] option[selected][value='#{provider_key.id}|test-model']"
+           )
+
+    assert has_element?(
+             new_live,
+             "#selected-candidates input[value='#{provider_key.id}|test-model']"
+           ) or has_element?(new_live, "#selected-candidates", "test-model")
+
+    # Submitting creates a NEW evaluation; the original is untouched.
+    new_live
+    |> form("#eval-form", %{
+      "evaluation" => %{
+        "name" => "Copy of Original",
+        "criteria" => "Should mention gentle shows, twice.",
+        "candidate_target_values" => ["#{provider_key.id}|test-model"],
+        "repetitions" => "5",
+        "judge_target" => "#{provider_key.id}|test-model"
+      }
+    })
+    |> render_submit()
+
+    {path, _flash} = assert_redirect(new_live)
+    assert String.starts_with?(path, "/evals/")
+    refute path =~ evaluation.id
+
+    original = Evaluations.get_evaluation!(user, evaluation.id)
+    assert original.criteria == "Should mention gentle shows."
+  end
+
+  test "ignores duplication from another user's evaluation", %{conn: conn, user: user} do
+    {router, _api_key} = RoutersFixtures.router_fixture(user)
+    log = LogsFixtures.log_fixture(router)
+
+    other_user = DodoRouter.AccountsFixtures.user_fixture()
+    {other_router, _} = RoutersFixtures.router_fixture(other_user)
+    other_key = ProvidersFixtures.provider_key_fixture(other_user)
+    other_log = LogsFixtures.log_fixture(other_router)
+
+    {:ok, foreign_eval} =
+      Evaluations.create_evaluation(other_user, other_log, %{
+        name: "Secret rubric",
+        criteria: "Confidential criteria",
+        judge_model: "test-model",
+        judge_provider_key_id: other_key.id,
+        candidate_targets: [
+          %{
+            "provider_key_id" => other_key.id,
+            "provider" => "test_provider",
+            "model" => "test-model"
+          }
+        ]
+      })
+
+    {:ok, _live, html} = live(conn, ~p"/logs/#{log.id}/evals/new?from=#{foreign_eval.id}")
+
+    refute html =~ "Secret rubric"
+    refute html =~ "Confidential criteria"
+  end
+
   test "redirects a stale evaluation URL instead of raising", %{conn: conn} do
     missing_id = Ecto.UUID.generate()
 

@@ -7,7 +7,7 @@ defmodule DodoRouterWeb.EvalLive.New do
   alias DodoRouter.Replays
 
   @impl true
-  def mount(%{"id" => id}, _session, socket) do
+  def mount(%{"id" => id} = params, _session, socket) do
     log = Logs.get_log!(socket.assigns.current_user, id)
     targets = Replays.list_targets(socket.assigns.current_user)
 
@@ -48,10 +48,23 @@ defmodule DodoRouterWeb.EvalLive.New do
         {target.provider_key.id, models}
       end)
 
+    source = duplication_source(socket.assigns.current_user, params["from"])
+
     form =
-      %Evaluation{name: "Evaluation of #{String.slice(log.request_id, 0, 8)}"}
+      prefill_evaluation(source, log)
       |> Evaluations.change_evaluation()
       |> to_form()
+
+    selected_targets =
+      case source do
+        nil ->
+          []
+
+        source ->
+          source.candidate_targets
+          |> Enum.map(&"#{&1["provider_key_id"]}|#{&1["model"]}")
+          |> Enum.filter(&Map.has_key?(target_lookup, &1))
+      end
 
     {:ok,
      socket
@@ -63,8 +76,40 @@ defmodule DodoRouterWeb.EvalLive.New do
      |> assign(:models_by_provider, models_by_provider)
      |> assign(:picker_models, [])
      |> assign(:picker_form, to_form(%{"provider" => "", "target" => ""}, as: :picker))
-     |> assign(:selected_targets, [])
+     |> assign(:selected_targets, selected_targets)
+     |> assign(:judge_target_value, judge_target_value(source, target_lookup))
      |> assign(:form, form)}
+  end
+
+  # Duplication seeds the builder from an existing evaluation instead of
+  # editing it in place: past scores are only meaningful relative to the
+  # rubric and targets that produced them, so a changed setup is a new
+  # evaluation. Scoped to the current user; anything else prefill-fails
+  # silently to a blank builder.
+  defp duplication_source(_user, nil), do: nil
+  defp duplication_source(user, from_id), do: Evaluations.get_evaluation(user, from_id)
+
+  defp prefill_evaluation(nil, log) do
+    %Evaluation{name: "Evaluation of #{String.slice(log.request_id, 0, 8)}"}
+  end
+
+  defp prefill_evaluation(source, _log) do
+    %Evaluation{
+      name: String.slice("Copy of #{source.name}", 0, 120),
+      criteria: source.criteria,
+      good_examples: source.good_examples,
+      bad_examples: source.bad_examples,
+      judge_model: source.judge_model,
+      judge_provider_key_id: source.judge_provider_key_id,
+      repetitions: source.repetitions
+    }
+  end
+
+  defp judge_target_value(nil, _target_lookup), do: nil
+
+  defp judge_target_value(source, target_lookup) do
+    value = "#{source.judge_provider_key_id}|#{source.judge_model}"
+    if Map.has_key?(target_lookup, value), do: value
   end
 
   @impl true
@@ -312,7 +357,7 @@ defmodule DodoRouterWeb.EvalLive.New do
                 <.input
                   name="evaluation[judge_target]"
                   type="select"
-                  value={nil}
+                  value={@judge_target_value}
                   label="Judge model"
                   options={@target_options}
                   prompt="Select a configured model"
