@@ -85,6 +85,9 @@ defmodule DodoRouterWeb.Router do
       live "/logs", LogLive.Index, :index
       live "/logs/:id", LogLive.Show, :show
       live "/logs/:id/replay", LogLive.Replay, :show
+      live "/logs/:id/evals/new", EvalLive.New, :new
+      live "/evals", EvalLive.Index, :index
+      live "/evals/:id", EvalLive.Show, :show
 
       live "/routers/:router_id/sessions", SessionLive.Index, :index
       live "/routers/:router_id/sessions/:session_id", SessionLive.Show, :show

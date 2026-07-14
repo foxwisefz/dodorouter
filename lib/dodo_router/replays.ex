@@ -57,7 +57,8 @@ defmodule DodoRouter.Replays do
         log_mode: :sync,
         replayed_from_id: root.id,
         replay_from_index: message_index,
-        request_id: request_id
+        request_id: request_id,
+        traffic_type: target[:traffic_type] || "proxy"
       ]
 
       case Proxy.dispatch(root.router, request, opts) do

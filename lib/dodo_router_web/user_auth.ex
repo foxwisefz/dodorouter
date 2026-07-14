@@ -30,13 +30,18 @@ defmodule DodoRouterWeb.UserAuth do
   end
 
   defp mount_current_user(socket, session) do
-    Phoenix.Component.assign_new(socket, :current_user, fn ->
-      if token = session["user_token"] do
-        case Accounts.get_user_by_session_token(token) do
-          {user, _inserted_at} -> user
-          nil -> nil
+    socket =
+      Phoenix.Component.assign_new(socket, :current_user, fn ->
+        if token = session["user_token"] do
+          case Accounts.get_user_by_session_token(token) do
+            {user, _inserted_at} -> user
+            nil -> nil
+          end
         end
-      end
+      end)
+
+    Phoenix.Component.assign_new(socket, :current_scope, fn ->
+      Scope.for_user(socket.assigns.current_user)
     end)
   end
 

@@ -12,6 +12,7 @@ defmodule DodoRouter.Logs.RequestLog do
     field :request_id, Ecto.UUID
     field :status, :string
     field :http_status, :integer
+    field :traffic_type, :string, default: "proxy"
 
     # Routing info
     field :attempted_steps, {:array, :map}, default: []
@@ -59,12 +60,17 @@ defmodule DodoRouter.Logs.RequestLog do
 
     # Cost
     field :estimated_cost_usd, :decimal
+    # Pay-as-you-go API list price for the same tokens: equals
+    # estimated_cost_usd on metered keys, the would-have-cost figure on
+    # plan/subscription keys, nil when no metered pricing exists.
+    field :list_cost_usd, :decimal
 
     belongs_to :router, DodoRouter.Routers.Router
 
     # Replay linkage: set when this log was produced by re-running another log
     belongs_to :replayed_from, __MODULE__
     has_many :replays, __MODULE__, foreign_key: :replayed_from_id
+    has_many :evaluations, DodoRouter.Logs.Evaluation
 
     # Message index the replay was anchored at (nil = whole thread). Stored
     # explicitly: an anchor at the last user message doesn't shorten the
@@ -81,6 +87,7 @@ defmodule DodoRouter.Logs.RequestLog do
       :request_id,
       :status,
       :http_status,
+      :traffic_type,
       :attempted_steps,
       :final_provider,
       :final_model,
@@ -101,6 +108,7 @@ defmodule DodoRouter.Logs.RequestLog do
       :request_headers,
       :response_headers,
       :estimated_cost_usd,
+      :list_cost_usd,
       :inserted_at,
       :session_id,
       :session_name,

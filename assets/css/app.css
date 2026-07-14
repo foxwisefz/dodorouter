@@ -695,3 +695,22 @@ input.input,
 }
 
 
+
+/* ============================================
+   Evaluation Chart - Hover Highlighting
+   ============================================ */
+
+/* Hovering one series dims the rest; a click pins the highlight via the
+   opacity attribute (CSS here intentionally outranks that attribute while
+   hovering, so exploration always works). */
+#quality-consistency-chart .series {
+  transition: opacity 0.15s ease;
+}
+
+#quality-consistency-chart svg:has(.series:hover) .series:not(:hover) {
+  opacity: 0.2;
+}
+
+#quality-consistency-chart svg .series:hover {
+  opacity: 1;
+}

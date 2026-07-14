@@ -138,6 +138,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const staticItems = [
     {label: "Dashboard", path: "/dashboard", icon: "home", keywords: ["home", "dashboard"]},
     {label: "Requests", path: "/logs", icon: "clock", keywords: ["logs", "requests", "log", "request"]},
+    {label: "Evaluations", path: "/evals", icon: "beaker", keywords: ["evals", "evaluation", "quality", "judge"]},
     {label: "Routers", path: "/routers", icon: "adjustments-horizontal", keywords: ["routers", "router"]},
     {label: "API Keys", path: "/api-keys", icon: "key", keywords: ["api", "keys", "key", "tokens"]},
     {label: "Providers", path: "/providers", icon: "server", keywords: ["providers", "provider"]},
@@ -147,6 +148,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const heroIcons = {
     "home": '<path stroke-linecap="round" stroke-linejoin="round" d="m2.25 12 8.954-8.955c.44-.439 1.152-.439 1.591 0L21.75 12M4.5 9.75v10.125c0 .621.504 1.125 1.125 1.125H9.75v-4.875c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21h4.125c.621 0 1.125-.504 1.125-1.125V9.75M8.25 21h8.25"/>',
     "clock": '<path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"/>',
+    "beaker": '<path stroke-linecap="round" stroke-linejoin="round" d="M14.25 6.087c0-.355.186-.676.401-.959.413-.548.667-1.2.682-1.904.007-.337-.263-.599-.599-.599h-5.468c-.336 0-.606.262-.599.599.015.704.269 1.356.682 1.904.215.283.401.604.401.959v2.913L3.42 19.018A1.125 1.125 0 0 0 4.372 20.75h15.256a1.125 1.125 0 0 0 .952-1.732L14.25 9V6.087Z"/>',
     "adjustments-horizontal": '<path stroke-linecap="round" stroke-linejoin="round" d="M10.5 6h9.75M10.5 6a1.5 1.5 0 1 1-3 0m3 0a1.5 1.5 0 1 0-3 0M3.75 6H7.5m3 12h9.75m-9.75 0a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m-3.75 0H7.5m9-6h3.75m-3.75 0a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m-9.75 0h9.75"/>',
     "key": '<path stroke-linecap="round" stroke-linejoin="round" d="M15.75 5.25a3 3 0 0 1 3 3m3 0a6 6 0 0 1-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25v2.25H6v2.25H2.25v-2.818c0-.597.237-1.17.659-1.591l6.499-6.499c.404-.404.527-1 .43-1.563A6 6 0 1 1 21.75 8.25Z"/>',
     "server": '<path stroke-linecap="round" stroke-linejoin="round" d="M21.75 17.25v-.228a4.5 4.5 0 0 0-.12-1.03l-2.268-9.64a3.375 3.375 0 0 0-3.285-2.602H7.923a3.375 3.375 0 0 0-3.285 2.602l-2.268 9.64a4.5 4.5 0 0 0-.12 1.03v.228m19.5 0a3 3 0 0 1-3 3H5.25a3 3 0 0 1-3-3m19.5 0a3 3 0 0 0-3-3H5.25a3 3 0 0 0-3 3m16.5 0h.008v.008h-.008v-.008Zm-3 0h.008v.008h-.008v-.008Z"/>',
@@ -336,4 +338,3 @@ if (process.env.NODE_ENV === "development") {
     window.liveReloader = reloader
   })
 }
-

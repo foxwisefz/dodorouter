@@ -83,7 +83,7 @@ defmodule DodoRouter.Proxy do
     last_step = List.last(result.attempted_steps)
 
     # Calculate cost using model pricing if available
-    estimated_cost = calculate_cost(last_step, usage)
+    %{estimated: estimated_cost, list: list_cost} = calculate_costs(last_step, usage)
 
     # Encode request/response for storage (truncate large payloads)
     {truncated_req, req_flags} = truncate_body(request)
@@ -129,10 +129,12 @@ defmodule DodoRouter.Proxy do
       recording_id: recording_id,
       truncation_flags: truncation_flags,
       estimated_cost_usd: estimated_cost,
+      list_cost_usd: list_cost,
       request_headers: encode_redacted_headers(client_headers),
       response_headers: encode_redacted_headers(result.response_headers),
       replayed_from_id: Keyword.get(opts, :replayed_from_id),
-      replay_from_index: Keyword.get(opts, :replay_from_index)
+      replay_from_index: Keyword.get(opts, :replay_from_index),
+      traffic_type: Keyword.get(opts, :traffic_type, "proxy")
     }
 
     # :sync callers (e.g. replay) need the persisted row back before returning
@@ -448,30 +450,35 @@ defmodule DodoRouter.Proxy do
   # covered by the flat plan fee, so marginal per-token cost is zero
   @subscription_key_slugs ~w(openai-codex anthropic_oauth)
 
-  defp calculate_cost(nil, _usage), do: nil
+  # Returns what the request actually cost (`estimated`) and what the same
+  # tokens would cost at pay-as-you-go API list prices (`list`). The two
+  # coincide for metered keys; they diverge on plan/subscription keys where
+  # the marginal cost is zero but the comparison number is not.
+  defp calculate_costs(nil, _usage), do: %{estimated: nil, list: nil}
 
-  defp calculate_cost(last_step, usage) do
+  defp calculate_costs(last_step, usage) do
     key_slug = last_step[:provider_key_slug]
     provider = last_step[:provider]
     model = last_step[:model]
+
+    list =
+      case lookup_metered_model(provider, model) do
+        nil -> nil
+        model_struct -> cost_from_model(model_struct, usage)
+      end
 
     # Plan-specific catalogs (e.g. moonshot_coding, priced $0 — subscription
     # traffic has no marginal per-token cost) win over platform pricing
     plan_row = key_slug != provider && lookup_model(key_slug, model)
 
-    cond do
-      match?(%{}, plan_row) ->
-        cost_from_model(plan_row, usage)
+    estimated =
+      cond do
+        match?(%{}, plan_row) -> cost_from_model(plan_row, usage)
+        key_slug in @subscription_key_slugs -> Decimal.new(0)
+        true -> list
+      end
 
-      key_slug in @subscription_key_slugs ->
-        Decimal.new(0)
-
-      true ->
-        case lookup_model(provider, model) do
-          nil -> nil
-          model_struct -> cost_from_model(model_struct, usage)
-        end
-    end
+    %{estimated: estimated, list: list}
   end
 
   defp cost_from_model(model_struct, usage) do
@@ -487,4 +494,8 @@ defmodule DodoRouter.Proxy do
   defp lookup_model(nil, _model), do: nil
   defp lookup_model(_slug, nil), do: nil
   defp lookup_model(slug, model), do: DodoRouter.Models.get_model_by_id(slug, model)
+
+  defp lookup_metered_model(nil, _model), do: nil
+  defp lookup_metered_model(_slug, nil), do: nil
+  defp lookup_metered_model(slug, model), do: DodoRouter.Models.get_metered_model(slug, model)
 end

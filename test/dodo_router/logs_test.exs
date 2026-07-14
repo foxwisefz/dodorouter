@@ -77,6 +77,20 @@ defmodule DodoRouter.LogsTest do
     end
   end
 
+  describe "list_logs/2" do
+    test "keeps evaluation traffic out of ordinary router logs" do
+      {router, _api_key} = RoutersFixtures.router_fixture()
+      proxy_log = LogsFixtures.log_fixture(router)
+      eval_log = LogsFixtures.log_fixture(router, %{traffic_type: "evaluation_candidate"})
+
+      listed_ids = router |> Logs.list_logs() |> Enum.map(& &1.id)
+
+      assert proxy_log.id in listed_ids
+      refute eval_log.id in listed_ids
+      assert Logs.get_log_by_request_id(eval_log.request_id).id == eval_log.id
+    end
+  end
+
   describe "list_sessions/2" do
     test "groups logs by session_id" do
       {router, _api_key} = RoutersFixtures.router_fixture()

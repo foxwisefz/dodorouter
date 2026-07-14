@@ -1,6 +1,7 @@
 defmodule DodoRouterWeb.LogLive.Show do
   use DodoRouterWeb, :live_view
 
+  alias DodoRouter.Evaluations
   alias DodoRouter.Logs
   alias DodoRouter.Logs.MessageNormalizer
   alias DodoRouter.Logs.Provenance
@@ -70,6 +71,7 @@ defmodule DodoRouterWeb.LogLive.Show do
       |> assign(:expanded_messages, MapSet.new())
       |> assign(:truncation_flags, log.truncation_flags || [])
       |> assign(:finish_reason, extract_finish_reason(log.response_body))
+      |> assign(:evaluations, Evaluations.list_for_log(socket.assigns.current_user, log.id))
       |> assign(:replay_count, Logs.replay_counts([log.id]) |> Map.get(log.id, 0))
 
     {:ok, socket}
@@ -150,6 +152,51 @@ defmodule DodoRouterWeb.LogLive.Show do
           <h1 class="text-2xl font-bold">Request Details</h1>
           <code class="text-sm text-base-content/60">{@log.request_id}</code>
         </div>
+        <details id="log-evaluations" class="group relative">
+          <summary class="btn btn-ghost btn-sm list-none gap-2 cursor-pointer">
+            <.icon name="hero-beaker" class="size-4" /> Evaluations
+            <span
+              :if={@evaluations != []}
+              class="rounded-full bg-primary/10 px-1.5 text-[10px] font-semibold text-primary"
+            >
+              {length(@evaluations)}
+            </span>
+            <.icon
+              name="hero-chevron-down"
+              class="size-3.5 transition-transform group-open:rotate-180"
+            />
+          </summary>
+          <div class="absolute right-0 z-50 mt-2 w-72 overflow-hidden rounded-xl border border-base-300/70 bg-base-100 shadow-xl">
+            <div class="px-3 pb-1 pt-3 text-[10px] font-semibold uppercase tracking-wider text-base-content/40">
+              Evaluations for this log
+            </div>
+            <div :if={@evaluations == []} class="px-3 py-3 text-sm text-base-content/45">
+              No evaluations yet
+            </div>
+            <.link
+              :for={evaluation <- @evaluations}
+              navigate={~p"/evals/#{evaluation.id}"}
+              class="flex items-center gap-3 px-3 py-2.5 text-sm transition hover:bg-base-200"
+              title={"Open evaluation: #{evaluation.name}"}
+            >
+              <span class="grid size-8 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary">
+                <.icon name="hero-chart-bar-square" class="size-4" />
+              </span>
+              <span class="min-w-0">
+                <span class="block truncate font-medium">{evaluation.name}</span><span class="block text-xs capitalize text-base-content/40">{evaluation.benchmark_status}</span>
+              </span>
+            </.link>
+            <div class="border-t border-base-300/60 p-2">
+              <.link
+                id="create-eval-button"
+                navigate={~p"/logs/#{@log.id}/evals/new"}
+                class="flex items-center gap-2 rounded-lg px-2.5 py-2 text-sm font-medium text-primary transition hover:bg-primary/5"
+              >
+                <.icon name="hero-plus" class="size-4" /> Create new evaluation
+              </.link>
+            </div>
+          </div>
+        </details>
         <.link
           :if={@log.replayed_from_id}
           id="replay-of-link"
@@ -367,9 +414,15 @@ defmodule DodoRouterWeb.LogLive.Show do
                 <%= if plan_covered?(@log) do %>
                   <span
                     class="text-success"
-                    title="Served through a subscription/coding-plan key — no marginal per-token cost"
+                    title="Served through a subscription/coding-plan key — no marginal per-token cost. The figure is what the same tokens would cost at pay-as-you-go API list prices."
                   >
                     included in plan
+                    <span
+                      :if={@log.list_cost_usd && Decimal.gt?(@log.list_cost_usd, 0)}
+                      class="font-mono text-base-content/45"
+                    >
+                      ~${Decimal.round(@log.list_cost_usd, 4)} at API rates
+                    </span>
                   </span>
                 <% else %>
                   <span class="font-mono">

@@ -138,6 +138,10 @@ defmodule DodoRouter.ProxyTest do
                Proxy.dispatch(ctx.router, ctx.request, steps: [ctx.step], log_mode: :sync)
 
       assert Decimal.eq?(log.estimated_cost_usd, Decimal.new(0))
+
+      # The would-cost figure prices the same tokens at metered API rates:
+      # 10 prompt tokens at $1/M plus 5 completion tokens at $2/M.
+      assert Decimal.eq?(log.list_cost_usd, Decimal.new("0.00002"))
     end
 
     test "falls back to the provider's platform pricing without a plan row", ctx do
@@ -145,6 +149,7 @@ defmodule DodoRouter.ProxyTest do
                Proxy.dispatch(ctx.router, ctx.request, steps: [ctx.step], log_mode: :sync)
 
       assert Decimal.compare(log.estimated_cost_usd, Decimal.new(0)) == :gt
+      assert Decimal.eq?(log.list_cost_usd, log.estimated_cost_usd)
     end
 
     test "subscription key slugs report zero cost even when platform pricing exists", ctx do
@@ -157,6 +162,26 @@ defmodule DodoRouter.ProxyTest do
                Proxy.dispatch(ctx.router, ctx.request, steps: [step], log_mode: :sync)
 
       assert Decimal.eq?(log.estimated_cost_usd, Decimal.new(0))
+      assert Decimal.compare(log.list_cost_usd, Decimal.new(0)) == :gt
+    end
+
+    test "list cost is nil when the model has no metered catalog row", ctx do
+      DodoRouter.Repo.delete_all(DodoRouter.Models.Model)
+
+      {:ok, _plan} =
+        DodoRouter.Models.create_model(%{
+          provider_slug: "moonshot_coding",
+          model_id: "test-model",
+          display_name: "Test Model (plan)",
+          input_price_per_million: Decimal.new("0"),
+          output_price_per_million: Decimal.new("0")
+        })
+
+      assert {:ok, _resp, %{log: log}} =
+               Proxy.dispatch(ctx.router, ctx.request, steps: [ctx.step], log_mode: :sync)
+
+      assert Decimal.eq?(log.estimated_cost_usd, Decimal.new(0))
+      assert log.list_cost_usd == nil
     end
   end
 

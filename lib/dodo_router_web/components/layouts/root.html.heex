@@ -233,6 +233,20 @@
               <span class="sidebar-label truncate">Logs</span>
             </a>
             <a
+              href={~p"/evals"}
+              title="Evaluations"
+              class={[
+                "sidebar-item flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm transition-colors",
+                String.starts_with?(@conn.request_path, "/evals") &&
+                  "font-medium text-accent bg-accent/10",
+                !String.starts_with?(@conn.request_path, "/evals") &&
+                  "text-base-content/60 hover:bg-secondary"
+              ]}
+            >
+              <.icon name="hero-beaker" class="size-4 shrink-0" />
+              <span class="sidebar-label truncate">Evaluations</span>
+            </a>
+            <a
               href={~p"/routers"}
               title="Routers"
               class={[
@@ -373,6 +387,18 @@
               ]}
             >
               <.icon name="hero-clock" class="size-4" /> Logs
+            </a>
+            <a
+              href={~p"/evals"}
+              class={[
+                "flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm transition-colors",
+                String.starts_with?(@conn.request_path, "/evals") &&
+                  "font-medium text-accent bg-accent/10",
+                !String.starts_with?(@conn.request_path, "/evals") &&
+                  "text-base-content/60 hover:bg-secondary"
+              ]}
+            >
+              <.icon name="hero-beaker" class="size-4" /> Evaluations
             </a>
             <a
               href={~p"/routers"}

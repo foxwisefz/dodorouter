@@ -3,8 +3,9 @@ defmodule DodoRouterWeb.LogLiveTest do
 
   import Phoenix.LiveViewTest
 
-  alias DodoRouter.{Logs, RoutersFixtures}
+  alias DodoRouter.{Evaluations, Logs, RoutersFixtures}
   alias DodoRouter.LogsFixtures
+  alias DodoRouter.ProvidersFixtures
 
   setup :register_and_log_in_user
 
@@ -96,6 +97,46 @@ defmodule DodoRouterWeb.LogLiveTest do
     end
   end
 
+  describe "Create evaluation entry point" do
+    test "links a request to the evaluation builder", %{conn: conn, user: user} do
+      {router, _api_key} = RoutersFixtures.router_fixture(user)
+      log = LogsFixtures.log_fixture(router)
+
+      {:ok, live, _html} = live(conn, ~p"/logs/#{log.request_id}")
+
+      assert has_element?(live, "#create-eval-button[href='/logs/#{log.id}/evals/new']")
+    end
+
+    test "links a request to evaluations created from it", %{conn: conn, user: user} do
+      {router, _api_key} = RoutersFixtures.router_fixture(user)
+      provider_key = ProvidersFixtures.provider_key_fixture(user)
+      log = LogsFixtures.log_fixture(router)
+
+      {:ok, evaluation} =
+        Evaluations.create_evaluation(user, log, %{
+          name: "Answer quality",
+          criteria: "Be correct",
+          judge_model: "test-model",
+          judge_provider_key_id: provider_key.id,
+          candidate_targets: [
+            %{
+              "provider_key_id" => provider_key.id,
+              "provider" => "test_provider",
+              "model" => "test-model"
+            }
+          ]
+        })
+
+      {:ok, live, _html} = live(conn, ~p"/logs/#{log.id}")
+
+      assert has_element?(
+               live,
+               "#log-evaluations a[href='/evals/#{evaluation.id}']",
+               "Answer quality"
+             )
+    end
+  end
+
   describe "Show" do
     test "subscription-covered requests say plan instead of $0.0000", %{conn: conn, user: user} do
       {router, _api_key} = RoutersFixtures.router_fixture(user)
@@ -136,6 +177,43 @@ defmodule DodoRouterWeb.LogLiveTest do
 
       {:ok, _live, html2} = live(conn, ~p"/logs/#{api_log.request_id}")
       assert html2 =~ "$0.0000"
+    end
+
+    test "plan-covered requests show what they would cost at API rates",
+         %{conn: conn, user: user} do
+      {router, _api_key} = RoutersFixtures.router_fixture(user)
+
+      plan_step = %{
+        "provider" => "zai",
+        "provider_key_slug" => "zai_coding",
+        "model" => "glm-4.7",
+        "status" => "success",
+        "latency_ms" => 100
+      }
+
+      log =
+        LogsFixtures.log_fixture(router, %{
+          estimated_cost_usd: Decimal.new(0),
+          list_cost_usd: Decimal.new("0.0123"),
+          attempted_steps: [plan_step]
+        })
+
+      {:ok, _live, html} = live(conn, ~p"/logs/#{log.request_id}")
+
+      assert html =~ "included in plan"
+      assert html =~ "~$0.0123 at API rates"
+
+      # Legacy plan-covered logs without a captured list cost stay unchanged.
+      legacy_log =
+        LogsFixtures.log_fixture(router, %{
+          estimated_cost_usd: Decimal.new(0),
+          attempted_steps: [plan_step]
+        })
+
+      {:ok, _live, legacy_html} = live(conn, ~p"/logs/#{legacy_log.request_id}")
+
+      assert legacy_html =~ "included in plan"
+      refute legacy_html =~ "at API rates"
     end
 
     test "shows the requested model when the router served a different one", %{

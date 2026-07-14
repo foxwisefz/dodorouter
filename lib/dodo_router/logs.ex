@@ -63,7 +63,7 @@ defmodule DodoRouter.Logs do
     offset = Keyword.get(opts, :offset, 0)
 
     from(l in RequestLog,
-      where: l.router_id == ^router.id,
+      where: l.router_id == ^router.id and l.traffic_type == "proxy",
       order_by: [desc: l.inserted_at],
       limit: ^limit,
       offset: ^offset,
@@ -85,7 +85,7 @@ defmodule DodoRouter.Logs do
     from(l in RequestLog,
       join: r in Router,
       on: l.router_id == r.id,
-      where: r.user_id == ^user.id,
+      where: r.user_id == ^user.id and l.traffic_type == "proxy",
       order_by: [desc: l.inserted_at],
       limit: ^limit,
       offset: ^offset,
@@ -228,7 +228,9 @@ defmodule DodoRouter.Logs do
 
     query =
       from l in RequestLog,
-        where: l.router_id == ^router.id and l.inserted_at >= ^since,
+        where:
+          l.router_id == ^router.id and l.inserted_at >= ^since and
+            l.traffic_type == "proxy",
         select: %{
           total_requests: count(l.id),
           successful_requests:
@@ -254,7 +256,8 @@ defmodule DodoRouter.Logs do
     # Count success + fallback as successful for the final provider (it handled the request)
     from(l in RequestLog,
       where:
-        l.router_id == ^router.id and l.inserted_at >= ^since and not is_nil(l.final_provider),
+        l.router_id == ^router.id and l.inserted_at >= ^since and
+          l.traffic_type == "proxy" and not is_nil(l.final_provider),
       group_by: l.final_provider,
       select: %{
         provider: l.final_provider,
@@ -276,7 +279,9 @@ defmodule DodoRouter.Logs do
     # Get all logs and aggregate from attempted_steps to capture all attempts
     logs =
       from(l in RequestLog,
-        where: l.router_id == ^router.id and l.inserted_at >= ^since,
+        where:
+          l.router_id == ^router.id and l.inserted_at >= ^since and
+            l.traffic_type == "proxy",
         select: l.attempted_steps
       )
       |> Repo.all()
@@ -310,7 +315,9 @@ defmodule DodoRouter.Logs do
 
     query =
       from l in RequestLog,
-        where: l.router_id == ^router.id and l.inserted_at >= ^since and not is_nil(l.latency_ms),
+        where:
+          l.router_id == ^router.id and l.inserted_at >= ^since and
+            l.traffic_type == "proxy" and not is_nil(l.latency_ms),
         select: %{
           p50: fragment("percentile_cont(0.5) WITHIN GROUP (ORDER BY ?)", l.latency_ms),
           p95: fragment("percentile_cont(0.95) WITHIN GROUP (ORDER BY ?)", l.latency_ms),
@@ -325,7 +332,7 @@ defmodule DodoRouter.Logs do
     since = DateTime.add(DateTime.utc_now(), -minutes * 60, :second)
 
     from(l in RequestLog,
-      where: l.router_id == ^router.id and l.inserted_at >= ^since,
+      where: l.router_id == ^router.id and l.inserted_at >= ^since and l.traffic_type == "proxy",
       group_by: fragment("date_trunc('minute', ?)", l.inserted_at),
       order_by: fragment("date_trunc('minute', ?)", l.inserted_at),
       select: %{
@@ -343,6 +350,7 @@ defmodule DodoRouter.Logs do
     from(l in RequestLog,
       where:
         l.router_id == ^router.id and l.inserted_at >= ^since and
+          l.traffic_type == "proxy" and
           l.status in ["error", "fallback"],
       group_by: [l.final_provider, l.final_model, l.status],
       order_by: [desc: count(l.id)],

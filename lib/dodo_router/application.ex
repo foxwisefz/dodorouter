@@ -22,6 +22,10 @@ defmodule DodoRouter.Application do
       {DNSCluster, query: Application.get_env(:dodo_router, :dns_cluster_query) || :ignore},
       {Phoenix.PubSub, name: DodoRouter.PubSub},
       {Task.Supervisor, name: DodoRouter.KeyHealthTaskSupervisor},
+      {Task.Supervisor, name: DodoRouter.EvaluationTaskSupervisor},
+      # Tracks live benchmark processes; the entry dying with its process is
+      # what lets evaluations recover from a restart mid-benchmark.
+      {Registry, keys: :unique, name: DodoRouter.EvaluationRegistry},
       DodoRouter.Activity,
       # Start to serve requests, typically the last entry
       DodoRouterWeb.Endpoint
