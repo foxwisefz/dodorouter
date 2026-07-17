@@ -21,6 +21,38 @@ defmodule DodoRouter.Proxy.Adapters.AnthropicTest do
       assert "system" not in roles
     end
 
+    test "extracts system message with content blocks to top-level system field" do
+      request = %{
+        "messages" => [
+          %{
+            "role" => "system",
+            "content" => [
+              %{
+                "type" => "text",
+                "text" => "You are helpful",
+                "cache_control" => %{"type" => "ephemeral", "ttl" => "1h"}
+              }
+            ]
+          },
+          %{"role" => "user", "content" => "hi"}
+        ]
+      }
+
+      step = %RoutingStep{model: "claude-sonnet-4-20250514"}
+      body = Anthropic.build_anthropic_request(request, step)
+
+      assert body["system"] == [
+               %{
+                 "type" => "text",
+                 "text" => "You are helpful",
+                 "cache_control" => %{"type" => "ephemeral", "ttl" => "1h"}
+               }
+             ]
+
+      roles = Enum.map(body["messages"], & &1["role"])
+      assert "system" not in roles
+    end
+
     test "does not add system field when no system message" do
       request = %{"messages" => [%{"role" => "user", "content" => "hi"}]}
       step = %RoutingStep{model: "claude-sonnet-4-20250514"}

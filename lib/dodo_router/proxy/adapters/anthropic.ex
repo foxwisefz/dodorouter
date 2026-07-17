@@ -264,18 +264,37 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
         {nil, nil, other}
 
       {system_msgs, other} ->
-        system_content = system_msgs |> Enum.map(& &1["content"]) |> Enum.join("\n\n")
-
-        # Preserve cache_control from the last system message that has it
-        cache_control =
-          Enum.find_value(Enum.reverse(system_msgs), fn
-            %{"cache_control" => cc} when cc != nil -> cc
-            _ -> nil
+        {system_content, cache_control} =
+          Enum.reduce(system_msgs, {"", nil}, fn msg, {acc_text, acc_cc} ->
+            {text, block_cc} = extract_system_content(msg["content"])
+            new_text = if acc_text == "", do: text, else: acc_text <> "\n\n" <> text
+            cc = msg["cache_control"] || block_cc || acc_cc
+            {new_text, cc}
           end)
 
         {system_content, cache_control, other}
     end
   end
+
+  defp extract_system_content(content) when is_binary(content), do: {content, nil}
+
+  defp extract_system_content(content) when is_list(content) do
+    text =
+      content
+      |> Enum.filter(&(&1["type"] == "text"))
+      |> Enum.map(& &1["text"])
+      |> Enum.join("\n")
+
+    cache_control =
+      Enum.find_value(Enum.reverse(content), fn
+        %{"cache_control" => cc} when cc != nil -> cc
+        _ -> nil
+      end)
+
+    {text, cache_control}
+  end
+
+  defp extract_system_content(_), do: {"", nil}
 
   defp convert_message_to_anthropic(%{"role" => "assistant", "tool_calls" => tool_calls} = msg)
        when is_list(tool_calls) do
