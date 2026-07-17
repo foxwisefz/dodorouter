@@ -449,6 +449,60 @@ defmodule DodoRouterWeb.ProxyIntegrationTest do
       assert String.contains?(full_content, "Hello")
     end
 
+    test "emits correct Anthropic SSE lifecycle event order", %{metadata: metadata} do
+      %{router: router, api_key: api_key} = create_router_with_test_provider(metadata)
+
+      {:ok, response} =
+        make_request(
+          "/r/#{router.slug}/v1/messages",
+          %{
+            "model" => "test-model",
+            "messages" => [%{"role" => "user", "content" => "Hello"}],
+            "max_tokens" => 1024
+          },
+          api_key,
+          metadata,
+          stream: true
+        )
+
+      assert response.status == 200
+      assert response.headers["content-type"] == ["text/event-stream; charset=utf-8"]
+
+      events = parse_anthropic_sse_events(response.body)
+      event_types = Enum.map(events, & &1["type"])
+
+      assert hd(event_types) == "message_start"
+      assert List.last(event_types) == "message_stop"
+
+      content_delta_index =
+        Enum.find_index(event_types, &(&1 == "content_block_delta"))
+
+      content_block_start_index =
+        Enum.find_index(event_types, &(&1 == "content_block_start"))
+
+      content_block_stop_index =
+        Enum.find_index(event_types, &(&1 == "content_block_stop"))
+
+      message_delta_index =
+        Enum.find_index(event_types, &(&1 == "message_delta"))
+
+      message_stop_index =
+        Enum.find_index(event_types, &(&1 == "message_stop"))
+
+      assert content_block_start_index < content_delta_index
+      assert content_block_stop_index > content_delta_index
+      assert message_delta_index < message_stop_index
+      assert message_stop_index == length(event_types) - 1
+
+      message_delta = Enum.at(events, message_delta_index)
+      assert message_delta["delta"]["stop_reason"] == "end_turn"
+      assert get_in(message_delta, ["usage", "output_tokens"]) == 5
+
+      message_start = Enum.at(events, 0)
+      assert get_in(message_start, ["message", "role"]) == "assistant"
+      assert get_in(message_start, ["message", "content"]) == []
+    end
+
     test "returns HTTP 200 SSE error when no routing configured", %{metadata: metadata} do
       {router, api_key} = RoutersFixtures.router_fixture()
 

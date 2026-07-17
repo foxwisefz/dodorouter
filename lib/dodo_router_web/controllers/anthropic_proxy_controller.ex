@@ -125,6 +125,8 @@ defmodule DodoRouterWeb.AnthropicProxyController do
          client_headers,
          recording_id
        ) do
+    model = openai_params["model"] || "unknown"
+
     conn =
       conn
       |> put_resp_content_type("text/event-stream")
@@ -136,6 +138,11 @@ defmodule DodoRouterWeb.AnthropicProxyController do
       chunk(conn, data)
       :ok
     end
+
+    # Anthropic streaming lifecycle requires message_start and
+    # content_block_start to precede any content_block_delta events.
+    :ok = send_chunk.(anthropic_message_start_event(model, request_id))
+    :ok = send_chunk.(anthropic_content_block_start_event())
 
     anthropic_send_chunk = fn openai_sse_data ->
       case AnthropicFormat.convert_sse_chunk(openai_sse_data) do
@@ -155,8 +162,13 @@ defmodule DodoRouterWeb.AnthropicProxyController do
            client_headers: client_headers
          ) do
       {:ok, openai_response, _timing} ->
-        msg_start = anthropic_message_start_event(openai_response, request_id)
-        :ok = send_chunk.(msg_start)
+        choice = get_in(openai_response, ["choices", Access.at(0)]) || %{}
+        stop_reason = convert_stop_reason(choice["finish_reason"])
+        usage = openai_response["usage"] || %{}
+
+        :ok = send_chunk.(anthropic_content_block_stop_event())
+        :ok = send_chunk.(anthropic_message_delta_event(stop_reason, usage))
+        :ok = send_chunk.(anthropic_message_stop_event())
         conn
 
       {:error, :no_routing_configured} ->
@@ -167,7 +179,8 @@ defmodule DodoRouterWeb.AnthropicProxyController do
               error: %{type: "configuration_error", message: "No routing configured"}
             }) <> "\n\n"
 
-        chunk(conn, error_event)
+        :ok = send_chunk.(error_event)
+        :ok = send_chunk.(anthropic_message_stop_event())
         conn
 
       {:error, :all_providers_failed, attempts} ->
@@ -192,35 +205,78 @@ defmodule DodoRouterWeb.AnthropicProxyController do
         error_event =
           "event: error\ndata: " <> Jason.encode!(error_payload) <> "\n\n"
 
-        chunk(conn, error_event)
+        :ok = send_chunk.(error_event)
+        :ok = send_chunk.(anthropic_message_stop_event())
         conn
     end
   end
 
-  defp anthropic_message_start_event(openai_response, request_id) do
-    message = get_in(openai_response, ["choices", Access.at(0), "message"]) || %{}
-    content = message["content"] || ""
-    usage = openai_response["usage"] || %{}
-
+  defp anthropic_message_start_event(model, request_id) do
     event_data = %{
       "type" => "message_start",
       "message" => %{
         "id" => "msg_#{request_id}",
         "type" => "message",
         "role" => "assistant",
-        "content" => [%{"type" => "text", "text" => content}],
-        "model" => openai_response["model"] || "unknown",
-        "stop_reason" => "end_turn",
+        "content" => [],
+        "model" => model,
+        "stop_reason" => nil,
         "stop_sequence" => nil,
         "usage" => %{
-          "input_tokens" => usage["prompt_tokens"] || 0,
-          "output_tokens" => usage["completion_tokens"] || 0
+          "input_tokens" => 0,
+          "output_tokens" => 0
         }
       }
     }
 
     "event: message_start\ndata: #{Jason.encode!(event_data)}\n\n"
   end
+
+  defp anthropic_content_block_start_event do
+    event_data = %{
+      "type" => "content_block_start",
+      "index" => 0,
+      "content_block" => %{
+        "type" => "text",
+        "text" => ""
+      }
+    }
+
+    "event: content_block_start\ndata: #{Jason.encode!(event_data)}\n\n"
+  end
+
+  defp anthropic_content_block_stop_event do
+    event_data = %{
+      "type" => "content_block_stop",
+      "index" => 0
+    }
+
+    "event: content_block_stop\ndata: #{Jason.encode!(event_data)}\n\n"
+  end
+
+  defp anthropic_message_delta_event(stop_reason, usage) do
+    event_data = %{
+      "type" => "message_delta",
+      "delta" => %{
+        "stop_reason" => stop_reason,
+        "stop_sequence" => nil
+      },
+      "usage" => %{
+        "output_tokens" => usage["completion_tokens"] || 0
+      }
+    }
+
+    "event: message_delta\ndata: #{Jason.encode!(event_data)}\n\n"
+  end
+
+  defp anthropic_message_stop_event do
+    "event: message_stop\ndata: #{Jason.encode!(%{"type" => "message_stop"})}\n\n"
+  end
+
+  defp convert_stop_reason("stop"), do: "end_turn"
+  defp convert_stop_reason("tool_calls"), do: "tool_use"
+  defp convert_stop_reason("length"), do: "max_tokens"
+  defp convert_stop_reason(other), do: other
 
   defp extract_session(conn) do
     router = conn.assigns.current_router
