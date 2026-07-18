@@ -91,6 +91,60 @@ defmodule DodoRouter.ProxyTest do
     end
   end
 
+  describe "dispatch/3 when the adapter raises mid-chain" do
+    setup do
+      user = AccountsFixtures.user_fixture()
+      {router, _api_key} = RoutersFixtures.router_fixture(user)
+      provider_key = ProvidersFixtures.provider_key_fixture(user)
+
+      step = %RoutingStep{
+        id: Ecto.UUID.generate(),
+        router_id: router.id,
+        position: 0,
+        provider: "test_provider",
+        model: "test-model",
+        plan_type: "standard",
+        provider_key: provider_key,
+        provider_key_id: provider_key.id
+      }
+
+      request = %{
+        "model" => "ignored-by-routing",
+        "messages" => [%{"role" => "user", "content" => "hi"}],
+        "__crash__" => true
+      }
+
+      %{router: router, step: step, request: request}
+    end
+
+    test "re-raises after decrementing activity and persisting an error log", ctx do
+      request_id = Ecto.UUID.generate()
+
+      assert_raise ArgumentError, "test adapter crash", fn ->
+        Proxy.dispatch(ctx.router, ctx.request,
+          steps: [ctx.step],
+          log_mode: :sync,
+          request_id: request_id
+        )
+      end
+
+      assert DodoRouter.Activity.get_router_counts(ctx.router.id) == {0, 0}
+
+      assert %RequestLog{status: "error"} = log = Logs.get_log_by_request_id(request_id)
+      assert log.response_body =~ "test adapter crash"
+    end
+
+    test "streaming dispatch also decrements activity on crash", ctx do
+      request = Map.put(ctx.request, "stream", true)
+
+      assert_raise ArgumentError, "test adapter crash", fn ->
+        Proxy.dispatch_streaming(ctx.router, request, fn _chunk -> :ok end, steps: [ctx.step])
+      end
+
+      assert DodoRouter.Activity.get_router_counts(ctx.router.id) == {0, 0}
+    end
+  end
+
   describe "plan-aware cost calculation" do
     setup do
       user = AccountsFixtures.user_fixture()
