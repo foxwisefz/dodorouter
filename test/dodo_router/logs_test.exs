@@ -135,6 +135,35 @@ defmodule DodoRouter.LogsTest do
       assert session
       assert session.request_count == 3
     end
+
+    test "sums actual and list cost per session and filters by :hours" do
+      {router, _api_key} = RoutersFixtures.router_fixture()
+
+      LogsFixtures.log_fixture(router, %{
+        session_id: "recent-session",
+        estimated_cost_usd: Decimal.new("0"),
+        list_cost_usd: Decimal.new("0.30")
+      })
+
+      LogsFixtures.log_fixture(router, %{
+        session_id: "recent-session",
+        estimated_cost_usd: Decimal.new("0.05"),
+        list_cost_usd: Decimal.new("0.10")
+      })
+
+      insert_log_at(router, DateTime.add(DateTime.utc_now(), -48 * 3600, :second), %{
+        session_id: "old-session"
+      })
+
+      [session] = Logs.list_sessions(router, hours: 24)
+
+      assert session.session_id == "recent-session"
+      assert Decimal.eq?(session.total_cost_usd, Decimal.new("0.05"))
+      assert Decimal.eq?(session.total_list_cost_usd, Decimal.new("0.40"))
+
+      all_ids = Logs.list_sessions(router) |> Enum.map(& &1.session_id) |> Enum.sort()
+      assert all_ids == ["old-session", "recent-session"]
+    end
   end
 
   describe "toggle_favorite/2" do
@@ -460,6 +489,54 @@ defmodule DodoRouter.LogsTest do
       # zero-filled elsewhere
       assert Decimal.eq?(Enum.at(alpha.values, earlier_index), Decimal.new(0))
       assert Decimal.eq?(Enum.at(beta.values, current_index), Decimal.new(0))
+    end
+  end
+
+  describe "list-price (would-cost) sums" do
+    test "plan traffic with zero actual cost still carries list_cost_usd through every aggregate" do
+      {router, _api_key} = RoutersFixtures.router_fixture()
+
+      current_bucket = current_hour_bucket()
+
+      # Subscription key pattern: marginal cost 0, list price recorded
+      insert_log_at(router, current_bucket, %{
+        final_provider: "openai-codex",
+        final_model: "chatgpt-5.5",
+        estimated_cost_usd: Decimal.new("0"),
+        list_cost_usd: Decimal.new("0.42")
+      })
+
+      # Cost never computed at all (no list price either)
+      insert_log_at(router, current_bucket, %{
+        final_provider: "openai-codex",
+        final_model: "chatgpt-5.5",
+        estimated_cost_usd: nil,
+        list_cost_usd: Decimal.new("0.08")
+      })
+
+      %{buckets: buckets, series: [codex]} =
+        Logs.spend_timeseries(router, bucket: :hour, hours: 2)
+
+      idx = Enum.find_index(buckets, &(DateTime.compare(&1, current_bucket) == :eq))
+
+      assert codex.provider == "openai-codex"
+      assert Decimal.eq?(Enum.at(codex.values, idx), Decimal.new("0"))
+      assert Decimal.eq?(Enum.at(codex.list_values, idx), Decimal.new("0.50"))
+
+      stats = Logs.stats(router, hours: 2)
+      assert Decimal.eq?(stats.total_cost_usd, Decimal.new("0"))
+      assert Decimal.eq?(stats.total_list_cost_usd, Decimal.new("0.50"))
+
+      [prov] = Logs.stats_by_provider(router, hours: 2)
+      assert Decimal.eq?(prov.total_list_cost_usd, Decimal.new("0.50"))
+
+      [model] = Logs.spend_by_model(router, hours: 2)
+      assert model.model == "chatgpt-5.5"
+      assert Decimal.eq?(model.list_cost_usd, Decimal.new("0.50"))
+
+      ts = Logs.timeseries(router, bucket: :hour, hours: 2)
+      bucket_row = Enum.find(ts, &(DateTime.compare(&1.bucket, current_bucket) == :eq))
+      assert Decimal.eq?(bucket_row.list_cost_usd, Decimal.new("0.50"))
     end
   end
 

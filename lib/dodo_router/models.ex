@@ -37,9 +37,14 @@ defmodule DodoRouter.Models do
   The metered (pay-as-you-go) catalog row for a model, resolving
   plan-catalog alias ids when the literal id has no metered row.
 
+  Router provider slugs that front another provider's catalog are normalized
+  first (e.g. "openai-codex" serves OpenAI models, priced under "openai").
+
   Backs list-price ("would cost") calculations for plan-based traffic.
   """
   def get_metered_model(provider_slug, model_id) do
+    provider_slug = normalize_provider_slug(provider_slug)
+
     get_model_by_id(provider_slug, model_id) ||
       case get_in(@metered_aliases, [provider_slug, model_id]) do
         nil -> nil

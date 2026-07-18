@@ -31,6 +31,7 @@ defmodule DodoRouterWeb.DashboardLive do
       |> assign(:selected_router, selected_router)
       |> assign(:range, valid_range(params["range"]))
       |> assign(:spend_view, "chart")
+      |> assign(:cost_basis, "actual")
       |> assign(:stats, nil)
       |> assign(:loading, false)
 
@@ -91,6 +92,15 @@ defmodule DodoRouterWeb.DashboardLive do
     {:noreply, assign(socket, :spend_view, view)}
   end
 
+  def handle_event("cost_basis", %{"basis" => basis}, socket) when basis in ~w(actual list) do
+    socket = assign(socket, :cost_basis, basis)
+
+    socket =
+      if socket.assigns.selected_router, do: load_stats(socket), else: socket
+
+    {:noreply, socket}
+  end
+
   @impl true
   def handle_info(:refresh, socket) do
     schedule_refresh()
@@ -122,6 +132,7 @@ defmodule DodoRouterWeb.DashboardLive do
 
   defp load_stats(socket) do
     router = socket.assigns.selected_router
+    basis = socket.assigns.cost_basis
     %{hours: hours, bucket: bucket} = @ranges[socket.assigns.range]
 
     timeseries = Logs.timeseries(router, hours: hours, bucket: bucket)
@@ -135,19 +146,32 @@ defmodule DodoRouterWeb.DashboardLive do
     |> assign(:stats, Logs.stats(router, hours: hours))
     |> assign(
       :stats_by_provider,
-      Enum.sort_by(by_provider, &decimal_float(&1.total_cost_usd), :desc)
+      Enum.sort_by(by_provider, &decimal_float(total_cost(&1, basis)), :desc)
     )
+    |> assign_recent_sessions(router, hours)
     |> assign(:latency_percentiles, Logs.latency_percentiles(router, hours: hours))
     |> assign(:cache_stats, Logs.cache_stats(router, hours: hours))
     |> assign(:spend_by_model, Logs.spend_by_model(router, hours: hours))
     |> assign(:bucket_labels, Enum.map(timeseries, &bucket_label(&1.bucket, bucket)))
     |> assign(:timeseries, timeseries)
-    |> assign(:spend_series, spend_chart_series(spend_ts, provider_colors))
+    |> assign(:spend_series, spend_chart_series(spend_ts, provider_colors, basis))
     |> assign(:spend_buckets, spend_ts.buckets)
     |> assign(:latency_series, latency_chart_series(latency_ts))
     |> assign(:provider_colors, provider_colors)
     |> assign(:selected_router_steps, Routers.list_routing_steps(router))
     |> assign(:recent_logs, Logs.list_logs(router, limit: 8))
+  end
+
+  defp assign_recent_sessions(socket, router, hours) do
+    sessions = Logs.list_sessions(router, hours: hours, limit: 6)
+
+    # The config hint only makes sense when the router has never seen a
+    # session, not merely when the selected range is quiet.
+    has_ever = sessions != [] or Logs.list_sessions(router, limit: 1) != []
+
+    socket
+    |> assign(:recent_sessions, sessions)
+    |> assign(:sessions_configured, has_ever)
   end
 
   # Colors follow the provider (alphabetical slot assignment), so a provider
@@ -160,16 +184,43 @@ defmodule DodoRouterWeb.DashboardLive do
     |> Map.new(fn {provider, idx} -> {provider, Charts.series_color(idx)} end)
   end
 
-  defp spend_chart_series(%{series: series}, provider_colors) do
+  defp spend_chart_series(%{series: series}, provider_colors, basis) do
     series
     |> Enum.map(fn s ->
+      values = if basis == "list", do: s.list_values, else: s.values
+
       %{
         name: s.provider,
         color: provider_colors[s.provider],
-        values: Enum.map(s.values, &decimal_float/1)
+        values: Enum.map(values, &decimal_float/1)
       }
     end)
     |> fold_series_overflow()
+  end
+
+  # Cost of an aggregate row (provider, session) under the selected basis:
+  # actual marginal spend, or what the same tokens would cost at
+  # pay-as-you-go list prices (plan traffic differs).
+  defp total_cost(row, "list"), do: row.total_list_cost_usd
+  defp total_cost(row, _), do: row.total_cost_usd
+
+  defp model_cost(row, "list"), do: row.list_cost_usd
+  defp model_cost(row, _), do: row.cost_usd
+
+  defp bucket_cost(bucket_row, "list"), do: bucket_row.list_cost_usd
+  defp bucket_cost(bucket_row, _), do: bucket_row.cost_usd
+
+  defp log_cost(log, "list"), do: Map.get(log, :list_cost_usd)
+  defp log_cost(log, _), do: Map.get(log, :estimated_cost_usd)
+
+  defp stats_cost(stats, "list"), do: stats.total_list_cost_usd
+  defp stats_cost(stats, _), do: stats.total_cost_usd
+
+  # Offer the Actual/List toggle only when list pricing is recorded at all.
+  defp has_list_pricing?(stats), do: decimal_float(stats.total_list_cost_usd) > 0
+
+  defp plan_savings(stats) do
+    decimal_float(stats.total_list_cost_usd) - decimal_float(stats.total_cost_usd)
   end
 
   # Never more than 8 hues: past that, the smallest series fold into "Other".
@@ -300,7 +351,28 @@ defmodule DodoRouterWeb.DashboardLive do
               {range}
             </button>
           </div>
-          <p class="text-xs text-base-content/40">{range_subtitle(@range)}</p>
+          <div class="flex items-center gap-3">
+            <div
+              :if={has_list_pricing?(@stats)}
+              id="cost-basis-picker"
+              class="inline-flex items-center rounded-lg border border-base-300/50 bg-base-100 p-0.5"
+            >
+              <button
+                :for={{basis, label} <- [{"actual", "Actual"}, {"list", "List price"}]}
+                phx-click="cost_basis"
+                phx-value-basis={basis}
+                title="Actual: what plan/API traffic really cost. List price: what the same tokens would cost at pay-as-you-go rates."
+                class={[
+                  "rounded-md px-3 py-1 text-xs font-semibold transition-colors",
+                  @cost_basis == basis && "bg-accent text-accent-content shadow-sm",
+                  @cost_basis != basis && "text-base-content/60 hover:text-base-content"
+                ]}
+              >
+                {label}
+              </button>
+            </div>
+            <p class="text-xs text-base-content/40">{range_subtitle(@range)}</p>
+          </div>
         </div>
 
         <div class={[
@@ -310,10 +382,10 @@ defmodule DodoRouterWeb.DashboardLive do
           <div class="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3 mb-4">
             <Charts.stat_tile
               id="kpi-spend"
-              label="Total Spend"
-              value={Charts.format_usd(@stats.total_cost_usd)}
-              subtext={avg_cost_subtext(@stats)}
-              spark={Enum.map(@timeseries, &decimal_float(&1.cost_usd))}
+              label={if @cost_basis == "list", do: "List Value", else: "Total Spend"}
+              value={Charts.format_usd(stats_cost(@stats, @cost_basis))}
+              subtext={spend_subtext(@stats, @cost_basis)}
+              spark={Enum.map(@timeseries, &decimal_float(bucket_cost(&1, @cost_basis)))}
             />
             <Charts.stat_tile
               id="kpi-requests"
@@ -362,7 +434,9 @@ defmodule DodoRouterWeb.DashboardLive do
               <div>
                 <p class="text-sm font-semibold text-base-content">Spend</p>
                 <p class="text-xs text-base-content/40">
-                  By provider, {String.downcase(range_subtitle(@range))}
+                  {if @cost_basis == "list", do: "List price", else: "Actual spend"} by provider, {String.downcase(
+                    range_subtitle(@range)
+                  )}
                 </p>
               </div>
               <div class="flex items-center gap-3">
@@ -469,7 +543,7 @@ defmodule DodoRouterWeb.DashboardLive do
               </div>
               <Charts.hbar_list
                 id="model-spend"
-                rows={model_rows(@spend_by_model)}
+                rows={model_rows(@spend_by_model, @cost_basis)}
                 empty_label="No model spend in this range"
               />
             </div>
@@ -511,7 +585,7 @@ defmodule DodoRouterWeb.DashboardLive do
                       </div>
                     </td>
                     <td class="py-2 pr-3 tabular-nums font-semibold">
-                      {Charts.format_usd(p.total_cost_usd)}
+                      {Charts.format_usd(total_cost(p, @cost_basis))}
                     </td>
                     <td class="py-2 pr-3 tabular-nums text-base-content/70">
                       {Charts.format_compact(p.total_requests)}
@@ -622,8 +696,8 @@ defmodule DodoRouterWeb.DashboardLive do
                         <% end %>
                       </td>
                       <td class="px-4 py-2 text-sm font-mono text-base-content/50 hidden md:table-cell">
-                        {if Map.get(log, :estimated_cost_usd),
-                          do: Charts.format_usd(log.estimated_cost_usd),
+                        {if log_cost(log, @cost_basis),
+                          do: Charts.format_usd(log_cost(log, @cost_basis)),
                           else: "-"}
                       </td>
                       <td class="px-4 py-2 text-sm font-mono text-base-content/50">
@@ -688,6 +762,90 @@ defmodule DodoRouterWeb.DashboardLive do
               </div>
             </div>
           </div>
+
+          <div
+            id="recent-sessions"
+            class="mt-4 rounded-lg border border-base-300/50 bg-base-100 overflow-hidden"
+          >
+            <div class="flex items-center justify-between border-b border-base-300/50 px-4 py-2.5">
+              <p class="text-sm font-semibold text-base-content">Recent Sessions</p>
+              <.link
+                navigate={~p"/routers/#{@selected_router.id}/sessions"}
+                class="text-xs text-primary hover:underline"
+              >
+                View all
+              </.link>
+            </div>
+            <%= if @recent_sessions != [] do %>
+              <table class="w-full text-left">
+                <thead>
+                  <tr class="border-b border-base-300/50 bg-secondary/30">
+                    <th class="px-4 py-2 text-xs font-medium text-base-content/50">Session</th>
+                    <th class="px-4 py-2 text-xs font-medium text-base-content/50">Requests</th>
+                    <th class="px-4 py-2 text-xs font-medium text-base-content/50 hidden sm:table-cell">
+                      Tokens
+                    </th>
+                    <th class="px-4 py-2 text-xs font-medium text-base-content/50">Spend</th>
+                    <th class="px-4 py-2 text-xs font-medium text-base-content/50 hidden md:table-cell">
+                      Avg Latency
+                    </th>
+                    <th class="px-4 py-2 text-xs font-medium text-base-content/50">Last Active</th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-base-300/30">
+                  <tr :for={s <- @recent_sessions} class="hover:bg-secondary/20 transition-colors">
+                    <td class="px-4 py-2 text-sm">
+                      <.link
+                        navigate={~p"/routers/#{@selected_router.id}/sessions/#{s.session_id}"}
+                        class="font-medium text-base-content hover:text-primary"
+                      >
+                        {session_label(s)}
+                      </.link>
+                    </td>
+                    <td class="px-4 py-2 text-sm tabular-nums text-base-content/70">
+                      {s.request_count}
+                    </td>
+                    <td class="px-4 py-2 text-sm tabular-nums text-base-content/70 hidden sm:table-cell">
+                      {Charts.format_compact(s.total_tokens)}
+                    </td>
+                    <td class="px-4 py-2 text-sm tabular-nums font-semibold">
+                      {Charts.format_usd(total_cost(s, @cost_basis))}
+                    </td>
+                    <td class="px-4 py-2 text-sm tabular-nums text-base-content/70 hidden md:table-cell">
+                      {Charts.format_ms(s.avg_latency_ms)}
+                    </td>
+                    <td class="px-4 py-2 text-sm font-mono text-base-content/50">
+                      {format_session_time(s.last_activity)}
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            <% else %>
+              <p class="px-4 py-6 text-center text-sm text-base-content/40">
+                {if @sessions_configured,
+                  do: "No session activity in this range",
+                  else: "No sessions yet"}
+              </p>
+            <% end %>
+            <div
+              :if={!@sessions_configured}
+              id="sessions-config-hint"
+              class="border-t border-base-300/50 bg-secondary/20 px-4 py-3"
+            >
+              <p class="text-xs text-base-content/50">
+                <span class="font-medium text-base-content/70">Tip:</span>
+                group related requests into sessions by sending a
+                <code class="rounded bg-base-200 px-1 py-0.5 font-mono text-[11px]">
+                  {@selected_router.session_header || "x-session-id"}
+                </code>
+                header with each proxy request — add
+                <code class="rounded bg-base-200 px-1 py-0.5 font-mono text-[11px]">
+                  {session_name_header(@selected_router.session_header || "x-session-id")}
+                </code>
+                to give it a readable name. The header name is configurable in the router's settings.
+              </p>
+            </div>
+          </div>
         </div>
       <% else %>
         <div class="rounded-lg border border-base-300/50 bg-base-100 p-8 text-center">
@@ -707,35 +865,68 @@ defmodule DodoRouterWeb.DashboardLive do
     """
   end
 
-  defp avg_cost_subtext(%{total_requests: 0}), do: "No requests yet"
+  defp spend_subtext(%{total_requests: 0}, _basis), do: "No requests yet"
 
-  defp avg_cost_subtext(%{total_requests: total, total_cost_usd: cost}) do
-    "#{Charts.format_usd(decimal_float(cost) / total)} avg/request"
+  defp spend_subtext(stats, "actual" = basis) do
+    savings = plan_savings(stats)
+
+    if savings > 0 do
+      "#{Charts.format_usd(savings)} saved by plans"
+    else
+      avg_cost_subtext(stats, basis)
+    end
+  end
+
+  defp spend_subtext(stats, basis), do: avg_cost_subtext(stats, basis)
+
+  defp avg_cost_subtext(%{total_requests: total} = stats, basis) do
+    "#{Charts.format_usd(decimal_float(stats_cost(stats, basis)) / total)} avg/request"
   end
 
   # Top 8 models by spend; nominal categories share slot-1 hue.
-  defp model_rows(spend_by_model) do
+  defp model_rows(spend_by_model, basis) do
     spend_by_model
-    |> Enum.filter(&(decimal_float(&1.cost_usd) > 0))
+    |> Enum.filter(&(decimal_float(model_cost(&1, basis)) > 0))
+    |> Enum.sort_by(&decimal_float(model_cost(&1, basis)), :desc)
     |> Enum.take(8)
     |> Enum.map(fn m ->
       %{
         name: m.model,
-        value: decimal_float(m.cost_usd),
-        display: Charts.format_usd(m.cost_usd),
+        value: decimal_float(model_cost(m, basis)),
+        display: Charts.format_usd(model_cost(m, basis)),
         subtext: "#{m.provider} · #{Charts.format_compact(m.total_requests)} requests"
       }
     end)
   end
 
   defp provider_segments(assigns) do
-    for p <- assigns.stats_by_provider, decimal_float(p.total_cost_usd) > 0 do
+    basis = assigns.cost_basis
+
+    for p <- assigns.stats_by_provider, decimal_float(total_cost(p, basis)) > 0 do
       %{
         name: p.provider,
-        value: decimal_float(p.total_cost_usd),
-        display: Charts.format_usd(p.total_cost_usd),
+        value: decimal_float(total_cost(p, basis)),
+        display: Charts.format_usd(total_cost(p, basis)),
         color: assigns.provider_colors[p.provider]
       }
+    end
+  end
+
+  defp session_label(%{session_name: name}) when is_binary(name) and name != "", do: name
+
+  defp session_label(%{session_id: id}) do
+    if String.length(id) > 18, do: String.slice(id, 0, 18) <> "…", else: id
+  end
+
+  # Mirrors ProxyController.derive_session_name_header/1
+  defp session_name_header("x-session-id"), do: "x-session-name"
+  defp session_name_header(header), do: header <> "-name"
+
+  defp format_session_time(dt) do
+    if Date.compare(DateTime.to_date(dt), Date.utc_today()) == :eq do
+      Calendar.strftime(dt, "%H:%M")
+    else
+      Calendar.strftime(dt, "%b %d, %H:%M")
     end
   end
 
