@@ -2,10 +2,32 @@ defmodule DodoRouter.LogsTest do
   use DodoRouter.DataCase, async: true
 
   alias DodoRouter.Logs
+  alias DodoRouter.Logs.RequestLog
   alias DodoRouter.Recordings
+  alias DodoRouter.Repo
   alias DodoRouter.AccountsFixtures
   alias DodoRouter.LogsFixtures
   alias DodoRouter.RoutersFixtures
+
+  # Logs.create_log/1 always stamps inserted_at with the current time, so
+  # timeseries tests that need logs in specific buckets must insert directly.
+  defp insert_log_at(router, inserted_at, attrs \\ %{}) do
+    attrs =
+      router
+      |> LogsFixtures.valid_log_attributes(attrs)
+      |> Map.put(:inserted_at, inserted_at)
+
+    {:ok, log} =
+      %RequestLog{}
+      |> RequestLog.changeset(attrs)
+      |> Repo.insert()
+
+    log
+  end
+
+  defp current_hour_bucket do
+    %{DateTime.utc_now() | minute: 0, second: 0, microsecond: {0, 0}}
+  end
 
   describe "create_log/1" do
     test "creates log with session_id" do
@@ -112,6 +134,35 @@ defmodule DodoRouter.LogsTest do
 
       assert session
       assert session.request_count == 3
+    end
+
+    test "sums actual and list cost per session and filters by :hours" do
+      {router, _api_key} = RoutersFixtures.router_fixture()
+
+      LogsFixtures.log_fixture(router, %{
+        session_id: "recent-session",
+        estimated_cost_usd: Decimal.new("0"),
+        list_cost_usd: Decimal.new("0.30")
+      })
+
+      LogsFixtures.log_fixture(router, %{
+        session_id: "recent-session",
+        estimated_cost_usd: Decimal.new("0.05"),
+        list_cost_usd: Decimal.new("0.10")
+      })
+
+      insert_log_at(router, DateTime.add(DateTime.utc_now(), -48 * 3600, :second), %{
+        session_id: "old-session"
+      })
+
+      [session] = Logs.list_sessions(router, hours: 24)
+
+      assert session.session_id == "recent-session"
+      assert Decimal.eq?(session.total_cost_usd, Decimal.new("0.05"))
+      assert Decimal.eq?(session.total_list_cost_usd, Decimal.new("0.40"))
+
+      all_ids = Logs.list_sessions(router) |> Enum.map(& &1.session_id) |> Enum.sort()
+      assert all_ids == ["old-session", "recent-session"]
     end
   end
 
@@ -316,6 +367,226 @@ defmodule DodoRouter.LogsTest do
       assert stats.successful_requests == 2
       assert stats.fallback_requests == 1
       assert stats.error_requests == 1
+    end
+  end
+
+  describe "stats_by_provider/2" do
+    test "sums total_cost_usd and cache_read_tokens per provider" do
+      {router, _api_key} = RoutersFixtures.router_fixture()
+
+      LogsFixtures.log_fixture(router, %{
+        final_provider: "openai",
+        estimated_cost_usd: Decimal.new("1.25"),
+        cache_read_tokens: 10
+      })
+
+      LogsFixtures.log_fixture(router, %{
+        final_provider: "openai",
+        estimated_cost_usd: Decimal.new("0.75"),
+        cache_read_tokens: 20
+      })
+
+      LogsFixtures.log_fixture(router, %{
+        final_provider: "anthropic",
+        estimated_cost_usd: Decimal.new("2.00"),
+        cache_read_tokens: 5
+      })
+
+      results = Logs.stats_by_provider(router)
+
+      openai = Enum.find(results, &(&1.provider == "openai"))
+      anthropic = Enum.find(results, &(&1.provider == "anthropic"))
+
+      assert Decimal.eq?(openai.total_cost_usd, Decimal.new("2.00"))
+      assert openai.cache_read_tokens == 30
+
+      assert Decimal.eq?(anthropic.total_cost_usd, Decimal.new("2.00"))
+      assert anthropic.cache_read_tokens == 5
+    end
+  end
+
+  describe "timeseries/2" do
+    test "buckets counts, statuses, and cost, zero-filling empty buckets, oldest first" do
+      {router, _api_key} = RoutersFixtures.router_fixture()
+
+      current_bucket = current_hour_bucket()
+      earlier_bucket = DateTime.add(current_bucket, -2 * 3600, :second)
+
+      insert_log_at(router, current_bucket, %{
+        status: "success",
+        estimated_cost_usd: Decimal.new("1.50")
+      })
+
+      insert_log_at(router, current_bucket, %{
+        status: "error",
+        estimated_cost_usd: Decimal.new("2.50")
+      })
+
+      insert_log_at(router, earlier_bucket, %{
+        status: "fallback",
+        estimated_cost_usd: Decimal.new("0.50")
+      })
+
+      buckets = Logs.timeseries(router, bucket: :hour, hours: 3)
+
+      assert length(buckets) >= 3 and length(buckets) <= 4
+
+      bucket_starts = Enum.map(buckets, & &1.bucket)
+      assert bucket_starts == Enum.sort(bucket_starts, DateTime)
+
+      current = Enum.find(buckets, &(DateTime.compare(&1.bucket, current_bucket) == :eq))
+      earlier = Enum.find(buckets, &(DateTime.compare(&1.bucket, earlier_bucket) == :eq))
+
+      assert current.total == 2
+      assert current.success == 1
+      assert current.error == 1
+      assert current.fallback == 0
+      assert Decimal.eq?(current.cost_usd, Decimal.new("4.00"))
+
+      assert earlier.total == 1
+      assert earlier.fallback == 1
+      assert Decimal.eq?(earlier.cost_usd, Decimal.new("0.50"))
+
+      empty_buckets = buckets -- [current, earlier]
+      assert Enum.all?(empty_buckets, &(&1.total == 0))
+    end
+  end
+
+  describe "spend_timeseries/2" do
+    test "pivots spend by provider into sorted series with zero-filled buckets" do
+      {router, _api_key} = RoutersFixtures.router_fixture()
+
+      current_bucket = current_hour_bucket()
+      earlier_bucket = DateTime.add(current_bucket, -2 * 3600, :second)
+
+      insert_log_at(router, current_bucket, %{
+        final_provider: "alpha",
+        estimated_cost_usd: Decimal.new("1.00")
+      })
+
+      insert_log_at(router, earlier_bucket, %{
+        final_provider: "beta",
+        estimated_cost_usd: Decimal.new("2.00")
+      })
+
+      %{buckets: buckets, series: series} = Logs.spend_timeseries(router, bucket: :hour, hours: 3)
+
+      assert is_list(buckets)
+      assert Enum.map(series, & &1.provider) == ["alpha", "beta"]
+
+      current_index = Enum.find_index(buckets, &(DateTime.compare(&1, current_bucket) == :eq))
+      earlier_index = Enum.find_index(buckets, &(DateTime.compare(&1, earlier_bucket) == :eq))
+
+      alpha = Enum.find(series, &(&1.provider == "alpha"))
+      beta = Enum.find(series, &(&1.provider == "beta"))
+
+      assert length(alpha.values) == length(buckets)
+      assert length(beta.values) == length(buckets)
+
+      assert Decimal.eq?(Enum.at(alpha.values, current_index), Decimal.new("1.00"))
+      assert Decimal.eq?(Enum.at(beta.values, earlier_index), Decimal.new("2.00"))
+
+      # zero-filled elsewhere
+      assert Decimal.eq?(Enum.at(alpha.values, earlier_index), Decimal.new(0))
+      assert Decimal.eq?(Enum.at(beta.values, current_index), Decimal.new(0))
+    end
+  end
+
+  describe "list-price (would-cost) sums" do
+    test "plan traffic with zero actual cost still carries list_cost_usd through every aggregate" do
+      {router, _api_key} = RoutersFixtures.router_fixture()
+
+      current_bucket = current_hour_bucket()
+
+      # Subscription key pattern: marginal cost 0, list price recorded
+      insert_log_at(router, current_bucket, %{
+        final_provider: "openai-codex",
+        final_model: "chatgpt-5.5",
+        estimated_cost_usd: Decimal.new("0"),
+        list_cost_usd: Decimal.new("0.42")
+      })
+
+      # Cost never computed at all (no list price either)
+      insert_log_at(router, current_bucket, %{
+        final_provider: "openai-codex",
+        final_model: "chatgpt-5.5",
+        estimated_cost_usd: nil,
+        list_cost_usd: Decimal.new("0.08")
+      })
+
+      %{buckets: buckets, series: [codex]} =
+        Logs.spend_timeseries(router, bucket: :hour, hours: 2)
+
+      idx = Enum.find_index(buckets, &(DateTime.compare(&1, current_bucket) == :eq))
+
+      assert codex.provider == "openai-codex"
+      assert Decimal.eq?(Enum.at(codex.values, idx), Decimal.new("0"))
+      assert Decimal.eq?(Enum.at(codex.list_values, idx), Decimal.new("0.50"))
+
+      stats = Logs.stats(router, hours: 2)
+      assert Decimal.eq?(stats.total_cost_usd, Decimal.new("0"))
+      assert Decimal.eq?(stats.total_list_cost_usd, Decimal.new("0.50"))
+
+      [prov] = Logs.stats_by_provider(router, hours: 2)
+      assert Decimal.eq?(prov.total_list_cost_usd, Decimal.new("0.50"))
+
+      [model] = Logs.spend_by_model(router, hours: 2)
+      assert model.model == "chatgpt-5.5"
+      assert Decimal.eq?(model.list_cost_usd, Decimal.new("0.50"))
+
+      ts = Logs.timeseries(router, bucket: :hour, hours: 2)
+      bucket_row = Enum.find(ts, &(DateTime.compare(&1.bucket, current_bucket) == :eq))
+      assert Decimal.eq?(bucket_row.list_cost_usd, Decimal.new("0.50"))
+    end
+  end
+
+  describe "latency_timeseries/2" do
+    test "computes p50 per bucket and leaves empty buckets nil" do
+      {router, _api_key} = RoutersFixtures.router_fixture()
+
+      current_bucket = current_hour_bucket()
+
+      insert_log_at(router, current_bucket, %{latency_ms: 100})
+      insert_log_at(router, current_bucket, %{latency_ms: 200})
+      insert_log_at(router, current_bucket, %{latency_ms: 300})
+
+      buckets = Logs.latency_timeseries(router, bucket: :hour, hours: 3)
+
+      current = Enum.find(buckets, &(DateTime.compare(&1.bucket, current_bucket) == :eq))
+      others = buckets -- [current]
+
+      assert_in_delta current.p50, 200, 0.01
+      assert Enum.all?(others, &is_nil(&1.p50))
+    end
+  end
+
+  describe "spend_by_model/2" do
+    test "orders models by spend descending" do
+      {router, _api_key} = RoutersFixtures.router_fixture()
+
+      LogsFixtures.log_fixture(router, %{
+        final_model: "cheap-model",
+        final_provider: "openai",
+        estimated_cost_usd: Decimal.new("0.10"),
+        total_tokens: 100
+      })
+
+      LogsFixtures.log_fixture(router, %{
+        final_model: "pricey-model",
+        final_provider: "anthropic",
+        estimated_cost_usd: Decimal.new("5.00"),
+        total_tokens: 200
+      })
+
+      results = Logs.spend_by_model(router)
+
+      assert Enum.map(results, & &1.model) == ["pricey-model", "cheap-model"]
+
+      pricey = Enum.find(results, &(&1.model == "pricey-model"))
+      assert pricey.provider == "anthropic"
+      assert pricey.total_requests == 1
+      assert pricey.total_tokens == 200
+      assert Decimal.eq?(pricey.cost_usd, Decimal.new("5.00"))
     end
   end
 end

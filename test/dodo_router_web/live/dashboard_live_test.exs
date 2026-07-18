@@ -29,10 +29,15 @@ defmodule DodoRouterWeb.DashboardLiveTest do
       {router, _api_key} = RoutersFixtures.router_fixture(user)
       LogsFixtures.log_fixture(router)
 
-      {:ok, _live, html} = live(conn, ~p"/dashboard")
+      {:ok, live, html} = live(conn, ~p"/dashboard")
 
-      assert html =~ "Total Requests"
+      assert html =~ "Total Spend"
       assert html =~ "Success Rate"
+      assert has_element?(live, "#kpi-requests")
+      assert has_element?(live, "#spend-chart")
+      assert has_element?(live, "#requests-chart")
+      assert has_element?(live, "#latency-chart")
+      assert has_element?(live, "#provider-share")
     end
 
     test "can select different router", %{conn: conn, user: user} do
@@ -47,7 +52,96 @@ defmodule DodoRouterWeb.DashboardLiveTest do
       |> element("button[phx-value-router_id='#{router2.id}']")
       |> render_click()
 
-      assert_patch(live, ~p"/dashboard?router_id=#{router2.id}")
+      assert_patch(live, ~p"/dashboard?router_id=#{router2.id}&range=24h")
+    end
+
+    test "can change the time range", %{conn: conn, user: user} do
+      {router, _api_key} = RoutersFixtures.router_fixture(user)
+      LogsFixtures.log_fixture(router)
+
+      {:ok, live, _html} = live(conn, ~p"/dashboard")
+
+      live
+      |> element("#range-picker button[phx-value-range='7d']")
+      |> render_click()
+
+      assert_patch(live, ~p"/dashboard?range=7d&router_id=#{router.id}")
+      assert render(live) =~ "Last 7 days"
+    end
+
+    test "can switch spend to list-price basis for plan traffic", %{conn: conn, user: user} do
+      {router, _api_key} = RoutersFixtures.router_fixture(user)
+
+      # Subscription traffic: $0 actual, non-zero list price
+      LogsFixtures.log_fixture(router, %{
+        final_provider: "openai-codex",
+        final_model: "chatgpt-5.5",
+        estimated_cost_usd: Decimal.new("0"),
+        list_cost_usd: Decimal.new("0.42")
+      })
+
+      {:ok, live, html} = live(conn, ~p"/dashboard")
+
+      # Actual basis: plan model has no spend, toggle is offered
+      assert has_element?(live, "#cost-basis-picker")
+      assert html =~ "saved by plans"
+
+      live
+      |> element("#cost-basis-picker button[phx-value-basis='list']")
+      |> render_click()
+
+      html = render(live)
+      assert html =~ "List Value"
+      assert html =~ "chatgpt-5.5"
+    end
+
+    test "hides cost-basis toggle when no list pricing recorded", %{conn: conn, user: user} do
+      {router, _api_key} = RoutersFixtures.router_fixture(user)
+      LogsFixtures.log_fixture(router, %{estimated_cost_usd: Decimal.new("0.10")})
+
+      {:ok, live, _html} = live(conn, ~p"/dashboard")
+
+      refute has_element?(live, "#cost-basis-picker")
+    end
+
+    test "lists recent sessions with stats", %{conn: conn, user: user} do
+      {router, _api_key} = RoutersFixtures.router_fixture(user)
+
+      LogsFixtures.log_fixture(router, %{
+        session_id: "sess-abc",
+        session_name: "Refactor run",
+        estimated_cost_usd: Decimal.new("0.25")
+      })
+
+      {:ok, live, html} = live(conn, ~p"/dashboard")
+
+      assert has_element?(live, "#recent-sessions")
+      assert html =~ "Refactor run"
+      refute has_element?(live, "#sessions-config-hint")
+    end
+
+    test "shows session config hint when router never saw a session", %{conn: conn, user: user} do
+      {router, _api_key} = RoutersFixtures.router_fixture(user)
+      LogsFixtures.log_fixture(router)
+
+      {:ok, live, html} = live(conn, ~p"/dashboard")
+
+      assert has_element?(live, "#sessions-config-hint")
+      assert html =~ "x-session-id"
+      assert html =~ "x-session-name"
+    end
+
+    test "can toggle spend chart to table view", %{conn: conn, user: user} do
+      {router, _api_key} = RoutersFixtures.router_fixture(user)
+      LogsFixtures.log_fixture(router)
+
+      {:ok, live, _html} = live(conn, ~p"/dashboard")
+
+      live
+      |> element("button[phx-click='spend_view'][phx-value-view='table']")
+      |> render_click()
+
+      refute has_element?(live, "#spend-chart")
     end
   end
 end

@@ -24,7 +24,7 @@ defmodule DodoRouterWeb.DashboardLivePubSubTest do
         })
 
       {:ok, live, html} = live(conn, ~p"/dashboard")
-      assert html =~ "Total Requests"
+      assert html =~ "Total Spend"
 
       # Send refresh message (simulating the timer)
       send(live.pid, :refresh)

@@ -144,6 +144,21 @@ defmodule DodoRouter.ModelsTest do
       assert Models.get_metered_model("moonshot", "k2p9") == nil
       assert Models.get_metered_model("zai", "k2p5") == nil
     end
+
+    test "resolves router provider slugs that front another provider's catalog" do
+      {:ok, metered} =
+        Models.create_model(%{
+          provider_slug: "openai",
+          model_id: "gpt-5.5",
+          display_name: "GPT-5.5",
+          input_price_per_million: Decimal.new("2.5"),
+          output_price_per_million: Decimal.new("15.0")
+        })
+
+      # Codex traffic reports provider "openai-codex", but the metered
+      # catalog prices its models under "openai".
+      assert Models.get_metered_model("openai-codex", "gpt-5.5").id == metered.id
+    end
   end
 
   describe "calculate_cost/3" do

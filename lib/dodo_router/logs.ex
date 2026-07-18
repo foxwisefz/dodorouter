@@ -243,7 +243,8 @@ defmodule DodoRouter.Logs do
           cache_read_tokens: sum(l.cache_read_tokens),
           cache_write_tokens: sum(l.cache_write_tokens),
           avg_latency_ms: avg(l.latency_ms),
-          total_cost_usd: sum(l.estimated_cost_usd)
+          total_cost_usd: sum(l.estimated_cost_usd),
+          total_list_cost_usd: sum(l.list_cost_usd)
         }
 
     Repo.one(query) || empty_stats()
@@ -266,10 +267,203 @@ defmodule DodoRouter.Logs do
           count(fragment("CASE WHEN ? IN ('success', 'fallback') THEN 1 END", l.status)),
         error_requests: count(fragment("CASE WHEN ? = 'error' THEN 1 END", l.status)),
         total_tokens: sum(l.total_tokens),
-        avg_latency_ms: avg(l.latency_ms)
+        avg_latency_ms: avg(l.latency_ms),
+        total_cost_usd: sum(l.estimated_cost_usd),
+        total_list_cost_usd: sum(l.list_cost_usd),
+        cache_read_tokens: sum(l.cache_read_tokens)
       }
     )
     |> Repo.all()
+  end
+
+  @doc """
+  Bucketed time series of request counts by status, spend, and tokens.
+
+  Options: `:hours` (window, default 24) and `:bucket` (`:minute` | `:hour` | `:day`,
+  default `:hour`). Buckets with no traffic are zero-filled so charts render a
+  continuous axis. Ordered oldest → newest.
+  """
+  def timeseries(%Router{} = router, opts \\ []) do
+    {since, bucket} = window(opts)
+
+    rows =
+      from(l in RequestLog,
+        where:
+          l.router_id == ^router.id and l.inserted_at >= ^since and l.traffic_type == "proxy",
+        group_by: selected_as(:bucket),
+        select: %{
+          bucket:
+            selected_as(fragment("date_trunc(?, ?)", ^to_string(bucket), l.inserted_at), :bucket),
+          total: count(l.id),
+          success: count(fragment("CASE WHEN ? = 'success' THEN 1 END", l.status)),
+          fallback: count(fragment("CASE WHEN ? = 'fallback' THEN 1 END", l.status)),
+          error: count(fragment("CASE WHEN ? = 'error' THEN 1 END", l.status)),
+          cost_usd: sum(l.estimated_cost_usd),
+          list_cost_usd: sum(l.list_cost_usd),
+          total_tokens: sum(l.total_tokens)
+        }
+      )
+      |> Repo.all()
+      |> Map.new(&{normalize_bucket(&1.bucket), &1})
+
+    empty = %{
+      total: 0,
+      success: 0,
+      fallback: 0,
+      error: 0,
+      cost_usd: nil,
+      list_cost_usd: nil,
+      total_tokens: nil
+    }
+
+    for bucket_start <- bucket_range(since, bucket) do
+      rows
+      |> Map.get(bucket_start, empty)
+      |> Map.put(:bucket, bucket_start)
+    end
+  end
+
+  @doc """
+  Bucketed spend broken down by final provider, pivoted for stacked charts.
+
+  Returns `%{buckets: [DateTime], series: [%{provider, values, list_values}]}`
+  with one value per bucket (zero-filled). `values` sums actual spend
+  (`estimated_cost_usd`); `list_values` sums pay-as-you-go list prices
+  (`list_cost_usd`) — the "would cost" of plan/subscription traffic. Series are
+  sorted alphabetically so a provider keeps its position (and therefore its
+  color) across refreshes.
+  """
+  def spend_timeseries(%Router{} = router, opts \\ []) do
+    {since, bucket} = window(opts)
+
+    rows =
+      from(l in RequestLog,
+        where:
+          l.router_id == ^router.id and l.inserted_at >= ^since and
+            l.traffic_type == "proxy" and not is_nil(l.final_provider) and
+            (not is_nil(l.estimated_cost_usd) or not is_nil(l.list_cost_usd)),
+        group_by: [selected_as(:bucket), l.final_provider],
+        select: %{
+          bucket:
+            selected_as(fragment("date_trunc(?, ?)", ^to_string(bucket), l.inserted_at), :bucket),
+          provider: l.final_provider,
+          cost_usd: sum(l.estimated_cost_usd),
+          list_cost_usd: sum(l.list_cost_usd)
+        }
+      )
+      |> Repo.all()
+
+    buckets = bucket_range(since, bucket)
+    providers = rows |> Enum.map(& &1.provider) |> Enum.uniq() |> Enum.sort()
+
+    by_key = Map.new(rows, fn row -> {{normalize_bucket(row.bucket), row.provider}, row} end)
+
+    zero = Decimal.new(0)
+
+    series =
+      for provider <- providers do
+        row_at = &Map.get(by_key, {&1, provider})
+
+        %{
+          provider: provider,
+          values: Enum.map(buckets, fn b -> (row_at.(b) || %{})[:cost_usd] || zero end),
+          list_values: Enum.map(buckets, fn b -> (row_at.(b) || %{})[:list_cost_usd] || zero end)
+        }
+      end
+
+    %{buckets: buckets, series: series}
+  end
+
+  @doc """
+  Bucketed latency percentiles (p50/p95). Buckets with no traffic are `nil`,
+  not zero — a gap in the line, never a fake 0ms.
+  """
+  def latency_timeseries(%Router{} = router, opts \\ []) do
+    {since, bucket} = window(opts)
+
+    rows =
+      from(l in RequestLog,
+        where:
+          l.router_id == ^router.id and l.inserted_at >= ^since and
+            l.traffic_type == "proxy" and not is_nil(l.latency_ms),
+        group_by: selected_as(:bucket),
+        select: %{
+          bucket:
+            selected_as(fragment("date_trunc(?, ?)", ^to_string(bucket), l.inserted_at), :bucket),
+          p50: fragment("percentile_cont(0.5) WITHIN GROUP (ORDER BY ?)", l.latency_ms),
+          p95: fragment("percentile_cont(0.95) WITHIN GROUP (ORDER BY ?)", l.latency_ms)
+        }
+      )
+      |> Repo.all()
+      |> Map.new(&{normalize_bucket(&1.bucket), &1})
+
+    for bucket_start <- bucket_range(since, bucket) do
+      rows
+      |> Map.get(bucket_start, %{p50: nil, p95: nil})
+      |> Map.put(:bucket, bucket_start)
+    end
+  end
+
+  @doc """
+  Spend, requests, and tokens grouped by final model, highest spend first.
+  """
+  def spend_by_model(%Router{} = router, opts \\ []) do
+    hours = Keyword.get(opts, :hours, 24)
+    since = DateTime.add(DateTime.utc_now(), -hours * 3600, :second)
+
+    from(l in RequestLog,
+      where:
+        l.router_id == ^router.id and l.inserted_at >= ^since and
+          l.traffic_type == "proxy" and not is_nil(l.final_model),
+      group_by: [l.final_model, l.final_provider],
+      order_by: [desc: sum(l.estimated_cost_usd)],
+      select: %{
+        model: l.final_model,
+        provider: l.final_provider,
+        total_requests: count(l.id),
+        total_tokens: sum(l.total_tokens),
+        cost_usd: sum(l.estimated_cost_usd),
+        list_cost_usd: sum(l.list_cost_usd)
+      }
+    )
+    |> Repo.all()
+  end
+
+  defp window(opts) do
+    hours = Keyword.get(opts, :hours, 24)
+    bucket = Keyword.get(opts, :bucket, :hour)
+    since = DateTime.add(DateTime.utc_now(), -hours * 3600, :second)
+    {truncate_to_bucket(since, bucket), bucket}
+  end
+
+  # date_trunc comes back as NaiveDateTime for a naive timestamp column;
+  # normalize both sides to UTC DateTime at second precision so map keys line
+  # up (microsecond *precision* is part of struct equality).
+  defp normalize_bucket(%NaiveDateTime{} = ndt),
+    do: ndt |> DateTime.from_naive!("Etc/UTC") |> DateTime.truncate(:second)
+
+  defp normalize_bucket(%DateTime{} = dt), do: DateTime.truncate(dt, :second)
+
+  defp truncate_to_bucket(dt, :minute),
+    do: DateTime.truncate(%{dt | second: 0, microsecond: {0, 0}}, :second)
+
+  defp truncate_to_bucket(dt, :hour),
+    do: DateTime.truncate(%{dt | minute: 0, second: 0, microsecond: {0, 0}}, :second)
+
+  defp truncate_to_bucket(dt, :day),
+    do: DateTime.truncate(%{dt | hour: 0, minute: 0, second: 0, microsecond: {0, 0}}, :second)
+
+  defp bucket_seconds(:minute), do: 60
+  defp bucket_seconds(:hour), do: 3600
+  defp bucket_seconds(:day), do: 86_400
+
+  defp bucket_range(since, bucket) do
+    step = bucket_seconds(bucket)
+    now = DateTime.utc_now()
+
+    since
+    |> Stream.iterate(&DateTime.add(&1, step, :second))
+    |> Enum.take_while(&(DateTime.compare(&1, now) != :gt))
   end
 
   def stats_by_model(%Router{} = router, opts \\ []) do
@@ -395,6 +589,9 @@ defmodule DodoRouter.Logs do
 
   @doc """
   Lists distinct sessions for a router, ordered by most recent activity.
+
+  Options: `:limit`, `:offset`, and `:hours` to restrict to sessions with
+  activity inside a recent window (used by the dashboard).
   """
   def list_sessions(%Router{} = router, opts \\ []) do
     limit = Keyword.get(opts, :limit, 50)
@@ -412,10 +609,20 @@ defmodule DodoRouter.Logs do
         request_count: count(l.id),
         last_activity: max(l.inserted_at),
         total_tokens: sum(l.total_tokens),
-        avg_latency_ms: avg(l.latency_ms)
+        avg_latency_ms: avg(l.latency_ms),
+        total_cost_usd: sum(l.estimated_cost_usd),
+        total_list_cost_usd: sum(l.list_cost_usd)
       }
     )
+    |> maybe_filter_since_hours(opts[:hours])
     |> Repo.all()
+  end
+
+  defp maybe_filter_since_hours(query, nil), do: query
+
+  defp maybe_filter_since_hours(query, hours) do
+    since = DateTime.add(DateTime.utc_now(), -hours * 3600, :second)
+    where(query, [l], l.inserted_at >= ^since)
   end
 
   @doc """
@@ -511,7 +718,8 @@ defmodule DodoRouter.Logs do
       cache_read_tokens: 0,
       cache_write_tokens: 0,
       avg_latency_ms: nil,
-      total_cost_usd: nil
+      total_cost_usd: nil,
+      total_list_cost_usd: nil
     }
   end
 
