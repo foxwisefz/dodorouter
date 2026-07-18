@@ -2,9 +2,19 @@ defmodule DodoRouter.Activity do
   @moduledoc """
   Tracks in-flight requests per router for real-time activity display.
 
-  GenServer that maintains state of active requests. No persistence,
-  no TTL - requests are explicitly added and removed via event handlers.
-  State is keyed by router_id since router IDs are globally unique.
+  GenServer that maintains state of active requests, keyed by router_id
+  since router IDs are globally unique. Requests are explicitly added and
+  removed via event handlers, and each entry's owner process is monitored:
+  if the owner dies without reporting completion (adapter crash, kill
+  during hot upgrade, client abort), its entries are dropped automatically
+  so the counts can never leak.
+
+  State shape:
+
+      %{
+        routers: %{router_id => %{request_id => :primary | :fallback}},
+        owners: %{pid => %{ref: reference(), entries: MapSet.t({router_id, request_id})}}
+      }
   """
 
   use GenServer
@@ -15,9 +25,12 @@ defmodule DodoRouter.Activity do
 
   @doc """
   Track a new request as active on primary provider.
+
+  The calling process is monitored; entries whose owner dies are removed
+  automatically.
   """
   def request_started(router_id, request_id) do
-    GenServer.cast(__MODULE__, {:request_started, router_id, request_id})
+    GenServer.cast(__MODULE__, {:request_started, router_id, request_id, self()})
   end
 
   @doc """
@@ -58,48 +71,64 @@ defmodule DodoRouter.Activity do
   end
 
   @impl true
-  def init(state) do
-    {:ok, state}
+  def init(_state) do
+    {:ok, %{routers: %{}, owners: %{}}}
   end
 
   @impl true
-  def handle_cast({:request_started, router_id, request_id}, state) do
-    router_map = Map.get(state, router_id, %{})
-    new_router_map = Map.put(router_map, request_id, :primary)
-    {:noreply, Map.put(state, router_id, new_router_map)}
+  def handle_cast({:request_started, router_id, request_id, owner}, state) do
+    router_map = state.routers |> Map.get(router_id, %{}) |> Map.put(request_id, :primary)
+
+    {:noreply,
+     %{
+       state
+       | routers: Map.put(state.routers, router_id, router_map),
+         owners: add_owner_entry(state.owners, owner, {router_id, request_id})
+     }}
   end
 
   @impl true
   def handle_cast({:step_started, router_id, request_id, _step_index}, state) do
-    router_map = Map.get(state, router_id, %{})
-
-    new_router_map =
-      Map.update(router_map, request_id, :fallback, fn
+    router_map =
+      state.routers
+      |> Map.get(router_id, %{})
+      |> Map.update(request_id, :fallback, fn
         :primary -> :fallback
         status -> status
       end)
 
-    {:noreply, Map.put(state, router_id, new_router_map)}
+    {:noreply, %{state | routers: Map.put(state.routers, router_id, router_map)}}
   end
 
   @impl true
   def handle_cast({:request_completed, router_id, request_id}, state) do
-    router_map = Map.get(state, router_id, %{})
-    {_, new_router_map} = Map.pop(router_map, request_id)
+    {:noreply,
+     %{
+       state
+       | routers: remove_request(state.routers, router_id, request_id),
+         owners: remove_owner_entry(state.owners, {router_id, request_id})
+     }}
+  end
 
-    new_state =
-      if map_size(new_router_map) == 0 do
-        Map.delete(state, router_id)
-      else
-        Map.put(state, router_id, new_router_map)
-      end
+  @impl true
+  def handle_info({:DOWN, _ref, :process, pid, _reason}, state) do
+    case Map.pop(state.owners, pid) do
+      {nil, _owners} ->
+        {:noreply, state}
 
-    {:noreply, new_state}
+      {%{entries: entries}, owners} ->
+        routers =
+          Enum.reduce(entries, state.routers, fn {router_id, request_id}, acc ->
+            remove_request(acc, router_id, request_id)
+          end)
+
+        {:noreply, %{state | routers: routers, owners: owners}}
+    end
   end
 
   @impl true
   def handle_call({:get_router_counts, router_id}, _from, state) do
-    requests = Map.get(state, router_id, %{})
+    requests = Map.get(state.routers, router_id, %{})
 
     primary = Enum.count(requests, fn {_, status} -> status == :primary end)
     fallback = Enum.count(requests, fn {_, status} -> status == :fallback end)
@@ -111,7 +140,7 @@ defmodule DodoRouter.Activity do
   def handle_call({:get_routers_counts, router_ids}, _from, state) do
     result =
       Enum.into(router_ids, %{}, fn router_id ->
-        requests = Map.get(state, router_id, %{})
+        requests = Map.get(state.routers, router_id, %{})
 
         primary = Enum.count(requests, fn {_, status} -> status == :primary end)
         fallback = Enum.count(requests, fn {_, status} -> status == :fallback end)
@@ -126,7 +155,7 @@ defmodule DodoRouter.Activity do
   def handle_call({:get_total_active, router_ids}, _from, state) do
     count =
       Enum.reduce(router_ids, 0, fn router_id, acc ->
-        requests = Map.get(state, router_id, %{})
+        requests = Map.get(state.routers, router_id, %{})
         acc + map_size(requests)
       end)
 
@@ -135,9 +164,56 @@ defmodule DodoRouter.Activity do
 
   @impl true
   def code_change(_old_vsn, state, _extra) do
-    # Activity state is ephemeral (in-flight request counts).
-    # During a hot upgrade, we preserve the state so ongoing requests
-    # continue to be tracked correctly.
-    {:ok, state}
+    # Hot upgrade from the legacy shape %{router_id => %{request_id => status}}.
+    # Legacy entries carry no owner pid, so they are only removed by an explicit
+    # request_completed: requests in flight during the upgrade still resolve
+    # normally, while entries already leaked before the upgrade must be cleared
+    # manually (:sys.replace_state).
+    if Map.has_key?(state, :routers) do
+      {:ok, state}
+    else
+      {:ok, %{routers: state, owners: %{}}}
+    end
+  end
+
+  defp add_owner_entry(owners, owner, entry) do
+    case owners do
+      %{^owner => %{entries: entries} = record} ->
+        Map.put(owners, owner, %{record | entries: MapSet.put(entries, entry)})
+
+      _ ->
+        ref = Process.monitor(owner)
+        Map.put(owners, owner, %{ref: ref, entries: MapSet.new([entry])})
+    end
+  end
+
+  defp remove_owner_entry(owners, entry) do
+    found =
+      Enum.find(owners, fn {_pid, %{entries: entries}} -> MapSet.member?(entries, entry) end)
+
+    case found do
+      nil ->
+        owners
+
+      {pid, %{ref: ref, entries: entries} = record} ->
+        entries = MapSet.delete(entries, entry)
+
+        if MapSet.size(entries) == 0 do
+          Process.demonitor(ref, [:flush])
+          Map.delete(owners, pid)
+        else
+          Map.put(owners, pid, %{record | entries: entries})
+        end
+    end
+  end
+
+  defp remove_request(routers, router_id, request_id) do
+    {_, router_map} = routers |> Map.get(router_id, %{}) |> Map.pop(request_id)
+
+    if map_size(router_map) == 0 do
+      Map.delete(routers, router_id)
+    else
+      Map.put(routers, router_id, router_map)
+    end
   end
 end

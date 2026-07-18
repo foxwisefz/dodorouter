@@ -30,34 +30,76 @@ defmodule DodoRouter.Proxy do
       first_step = List.first(steps)
       broadcast_request_started(router, request_id, first_step, streaming)
 
-      result =
-        FallbackChain.execute(
-          request,
-          steps,
-          router.id,
-          opts
-          |> Keyword.put(:client_headers, client_headers)
-          |> Keyword.put(:request_id, request_id)
-          |> Keyword.put(:fail_on_context_overflow, router.fail_on_context_overflow)
-        )
+      try do
+        result =
+          FallbackChain.execute(
+            request,
+            steps,
+            router.id,
+            opts
+            |> Keyword.put(:client_headers, client_headers)
+            |> Keyword.put(:request_id, request_id)
+            |> Keyword.put(:fail_on_context_overflow, router.fail_on_context_overflow)
+          )
 
-      log = log_request(router, request, result, request_id, start_time, opts)
+        log = log_request(router, request, result, request_id, start_time, opts)
 
-      record_key_health(result.attempted_steps)
+        record_key_health(result.attempted_steps)
 
-      broadcast_event(router, result, request_id)
+        broadcast_event(router, result, request_id)
 
-      # Calculate provider time (sum of all attempt latencies)
-      provider_ms = result.attempted_steps |> Enum.map(& &1[:latency_ms]) |> Enum.sum()
+        # Calculate provider time (sum of all attempt latencies)
+        provider_ms = result.attempted_steps |> Enum.map(& &1[:latency_ms]) |> Enum.sum()
 
-      case result.status do
-        status when status in [:success, :fallback] ->
-          {:ok, result.final_response, %{provider_ms: provider_ms, log: log}}
+        case result.status do
+          status when status in [:success, :fallback] ->
+            {:ok, result.final_response, %{provider_ms: provider_ms, log: log}}
 
-        :error ->
-          {:error, :all_providers_failed, result.attempted_steps}
+          :error ->
+            {:error, :all_providers_failed, result.attempted_steps}
+        end
+      catch
+        # A crash mid-chain must still leave an error log row and resolve the
+        # pending UI entry before propagating — otherwise the request vanishes
+        # from the dashboard entirely.
+        kind, reason ->
+          stacktrace = __STACKTRACE__
+          result = crash_result(kind, reason, stacktrace, first_step)
+          log_request(router, request, result, request_id, start_time, opts)
+          broadcast_event(router, result, request_id)
+          :erlang.raise(kind, reason, stacktrace)
+      after
+        # Runs on normal return, raise, and throw alike, so the activity count
+        # cannot leak when a request dies mid-chain. (Brutal kills skip `after`;
+        # Activity's owner monitor covers those.)
+        DodoRouter.Activity.request_completed(router.id, request_id)
       end
     end
+  end
+
+  # Synthesizes a FallbackChain-shaped result for a request that crashed
+  # mid-chain, so log_request/broadcast_event can treat it like a failed attempt.
+  defp crash_result(kind, reason, stacktrace, first_step) do
+    message =
+      case kind do
+        :error -> Exception.message(Exception.normalize(:error, reason, stacktrace))
+        _ -> inspect(reason)
+      end
+
+    %{
+      status: :error,
+      final_response: nil,
+      response_headers: nil,
+      attempted_steps: [
+        %{
+          provider: first_step.provider,
+          model: first_step.model,
+          error: "exception",
+          error_body: message,
+          latency_ms: nil
+        }
+      ]
+    }
   end
 
   @doc """
@@ -352,8 +394,6 @@ defmodule DodoRouter.Proxy do
   end
 
   defp broadcast_event(router, result, request_id) do
-    DodoRouter.Activity.request_completed(router.id, request_id)
-
     last_step = List.last(result.attempted_steps)
 
     event = %{

@@ -25,7 +25,9 @@ defmodule DodoRouter.Proxy.Adapters.TestProvider do
   alias DodoRouter.Routers.RoutingStep
 
   @impl Adapter
-  def call(_request, %RoutingStep{} = step, _api_key, _client_headers) do
+  def call(request, %RoutingStep{} = step, _api_key, _client_headers) do
+    maybe_crash(request)
+
     response = %{
       "choices" => [
         %{
@@ -54,7 +56,9 @@ defmodule DodoRouter.Proxy.Adapters.TestProvider do
   end
 
   @impl Adapter
-  def stream(_request, %RoutingStep{} = step, _api_key, send_chunk, _client_headers) do
+  def stream(request, %RoutingStep{} = step, _api_key, send_chunk, _client_headers) do
+    maybe_crash(request)
+
     content = "Hello from #{step.model}"
 
     # Send chunks inline (same process), mirroring how real adapters call
@@ -121,4 +125,9 @@ defmodule DodoRouter.Proxy.Adapters.TestProvider do
 
     {:ok, response, %{headers: [{"content-type", "text/event-stream"}]}}
   end
+
+  # Lets tests exercise an adapter that raises mid-chain (e.g. a malformed
+  # request crashing request conversion, as in the pre-0.1.x system-content-blocks bug).
+  defp maybe_crash(%{"__crash__" => true}), do: raise(ArgumentError, "test adapter crash")
+  defp maybe_crash(_request), do: :ok
 end
