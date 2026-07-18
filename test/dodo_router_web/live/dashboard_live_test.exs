@@ -29,10 +29,15 @@ defmodule DodoRouterWeb.DashboardLiveTest do
       {router, _api_key} = RoutersFixtures.router_fixture(user)
       LogsFixtures.log_fixture(router)
 
-      {:ok, _live, html} = live(conn, ~p"/dashboard")
+      {:ok, live, html} = live(conn, ~p"/dashboard")
 
-      assert html =~ "Total Requests"
+      assert html =~ "Total Spend"
       assert html =~ "Success Rate"
+      assert has_element?(live, "#kpi-requests")
+      assert has_element?(live, "#spend-chart")
+      assert has_element?(live, "#requests-chart")
+      assert has_element?(live, "#latency-chart")
+      assert has_element?(live, "#provider-share")
     end
 
     test "can select different router", %{conn: conn, user: user} do
@@ -47,7 +52,34 @@ defmodule DodoRouterWeb.DashboardLiveTest do
       |> element("button[phx-value-router_id='#{router2.id}']")
       |> render_click()
 
-      assert_patch(live, ~p"/dashboard?router_id=#{router2.id}")
+      assert_patch(live, ~p"/dashboard?router_id=#{router2.id}&range=24h")
+    end
+
+    test "can change the time range", %{conn: conn, user: user} do
+      {router, _api_key} = RoutersFixtures.router_fixture(user)
+      LogsFixtures.log_fixture(router)
+
+      {:ok, live, _html} = live(conn, ~p"/dashboard")
+
+      live
+      |> element("#range-picker button[phx-value-range='7d']")
+      |> render_click()
+
+      assert_patch(live, ~p"/dashboard?range=7d&router_id=#{router.id}")
+      assert render(live) =~ "Last 7 days"
+    end
+
+    test "can toggle spend chart to table view", %{conn: conn, user: user} do
+      {router, _api_key} = RoutersFixtures.router_fixture(user)
+      LogsFixtures.log_fixture(router)
+
+      {:ok, live, _html} = live(conn, ~p"/dashboard")
+
+      live
+      |> element("button[phx-click='spend_view'][phx-value-view='table']")
+      |> render_click()
+
+      refute has_element?(live, "#spend-chart")
     end
   end
 end

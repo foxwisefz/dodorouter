@@ -27,6 +27,7 @@ import {RequestFlowAnimation} from "./request_flow_animation"
 import {LogEntryAnimations} from "./log_entry_animations"
 import {CopyButton} from "./copy_button"
 import {ScrollRail} from "./scroll_rail"
+import {VizTooltip} from "./viz_tooltip"
 
 const ScrollIntoView = {
   mounted() {
@@ -39,7 +40,7 @@ const csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute
 const liveSocket = new LiveSocket("/live", Socket, {
   longPollFallbackMs: 2500,
   params: {_csrf_token: csrfToken},
-  hooks: {...colocatedHooks, RequestFlowAnimation, LogEntryAnimations, CopyButton, ScrollIntoView, ScrollRail},
+  hooks: {...colocatedHooks, RequestFlowAnimation, LogEntryAnimations, CopyButton, ScrollIntoView, ScrollRail, VizTooltip},
 })
 
 // Show progress bar on live navigation and form submits

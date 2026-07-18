@@ -114,6 +114,97 @@
 
 /* This file is for your main application CSS */
 
+/* Data-viz series palette (CVD-validated, fixed slot order — never cycle past 8).
+   Light values validated against #ffffff, dark against the dark base-100. */
+:root,
+[data-theme="light"] {
+  --viz-1: #2a78d6;
+  --viz-2: #1baf7a;
+  --viz-3: #eda100;
+  --viz-4: #008300;
+  --viz-5: #4a3aa7;
+  --viz-6: #e34948;
+  --viz-7: #e87ba4;
+  --viz-8: #eb6834;
+  --viz-other: #a3a3a3;
+  --viz-grid: rgba(0, 0, 0, 0.06);
+  --viz-axis: rgba(0, 0, 0, 0.15);
+  /* Ordinal blue pair (percentiles: p50 light, p95 dark — same hue, ordered) */
+  --viz-ord-lo: #86b6ef;
+  --viz-ord-hi: #1c5cab;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --viz-1: #3987e5;
+    --viz-2: #199e70;
+    --viz-3: #c98500;
+    --viz-4: #008300;
+    --viz-5: #9085e9;
+    --viz-6: #e66767;
+    --viz-7: #d55181;
+    --viz-8: #d95926;
+    --viz-other: #6b6b6b;
+    --viz-grid: rgba(255, 255, 255, 0.07);
+    --viz-axis: rgba(255, 255, 255, 0.18);
+    --viz-ord-lo: #6da7ec;
+    --viz-ord-hi: #3987e5;
+  }
+}
+
+[data-theme="dark"] {
+  --viz-1: #3987e5;
+  --viz-2: #199e70;
+  --viz-3: #c98500;
+  --viz-4: #008300;
+  --viz-5: #9085e9;
+  --viz-6: #e66767;
+  --viz-7: #d55181;
+  --viz-8: #d95926;
+  --viz-other: #6b6b6b;
+  --viz-grid: rgba(255, 255, 255, 0.07);
+  --viz-axis: rgba(255, 255, 255, 0.18);
+  --viz-ord-lo: #6da7ec;
+  --viz-ord-hi: #3987e5;
+}
+
+/* Hovered mark lifts slightly so the chart visibly responds */
+.viz-slot:hover .viz-seg,
+.viz-slot:focus-visible .viz-seg,
+.viz-row:hover .viz-seg,
+.viz-row:focus-visible .viz-seg {
+  filter: brightness(1.08) saturate(1.05);
+}
+
+.viz-slot:focus-visible,
+.viz-row:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: -2px;
+  border-radius: 4px;
+}
+
+/* Floating tooltip (managed by the VizTooltip hook, appended to <body>) */
+.viz-tooltip {
+  position: fixed;
+  z-index: 50;
+  pointer-events: none;
+  max-width: 18rem;
+  border-radius: 0.5rem;
+  border: 1px solid var(--color-base-300);
+  background: var(--color-base-100);
+  box-shadow: 0 8px 24px -8px rgba(0, 0, 0, 0.25);
+  padding: 0.5rem 0.625rem;
+  font-size: 0.75rem;
+  line-height: 1rem;
+  color: var(--color-base-content);
+  opacity: 0;
+  transition: opacity 80ms ease;
+}
+
+.viz-tooltip[data-show] {
+  opacity: 1;
+}
+
 /* Markdown renderer disclosure arrow */
 .md-arrow {
   transform-origin: center;
