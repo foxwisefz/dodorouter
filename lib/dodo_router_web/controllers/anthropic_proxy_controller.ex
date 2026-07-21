@@ -144,29 +144,35 @@ defmodule DodoRouterWeb.AnthropicProxyController do
     :ok = send_chunk.(anthropic_message_start_event(model, request_id))
     :ok = send_chunk.(anthropic_content_block_start_event())
 
+    # Block lifecycle state for the SSE converter; kept in the process
+    # dictionary because send_chunk closures can't rebind it.
+    Process.put(:anthropic_sse_state, AnthropicFormat.new_sse_state())
+
     anthropic_send_chunk = fn openai_sse_data ->
-      case AnthropicFormat.convert_sse_chunk(openai_sse_data) do
-        {:ok, anthropic_events} ->
-          Enum.each(anthropic_events, &send_chunk.(&1))
-
-        :skip ->
-          :ok
-      end
-
+      state = Process.get(:anthropic_sse_state) || AnthropicFormat.new_sse_state()
+      {anthropic_events, state} = AnthropicFormat.convert_sse_chunk(openai_sse_data, state)
+      Process.put(:anthropic_sse_state, state)
+      Enum.each(anthropic_events, &send_chunk.(&1))
       :ok
     end
 
-    case Proxy.dispatch_streaming(router, openai_params, anthropic_send_chunk,
-           session: session,
-           recording_id: recording_id,
-           client_headers: client_headers
-         ) do
+    result =
+      Proxy.dispatch_streaming(router, openai_params, anthropic_send_chunk,
+        session: session,
+        recording_id: recording_id,
+        client_headers: client_headers
+      )
+
+    sse_state = Process.get(:anthropic_sse_state) || AnthropicFormat.new_sse_state()
+    Process.delete(:anthropic_sse_state)
+
+    case result do
       {:ok, openai_response, _timing} ->
         choice = get_in(openai_response, ["choices", Access.at(0)]) || %{}
         stop_reason = convert_stop_reason(choice["finish_reason"])
         usage = openai_response["usage"] || %{}
 
-        :ok = send_chunk.(anthropic_content_block_stop_event())
+        :ok = send_chunk.(anthropic_content_block_stop_event(sse_state.open_block))
         :ok = send_chunk.(anthropic_message_delta_event(stop_reason, usage))
         :ok = send_chunk.(anthropic_message_stop_event())
         conn
@@ -245,10 +251,10 @@ defmodule DodoRouterWeb.AnthropicProxyController do
     "event: content_block_start\ndata: #{Jason.encode!(event_data)}\n\n"
   end
 
-  defp anthropic_content_block_stop_event do
+  defp anthropic_content_block_stop_event(index) do
     event_data = %{
       "type" => "content_block_stop",
-      "index" => 0
+      "index" => index
     }
 
     "event: content_block_stop\ndata: #{Jason.encode!(event_data)}\n\n"

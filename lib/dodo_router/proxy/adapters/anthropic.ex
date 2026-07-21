@@ -119,16 +119,7 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
         resp =
           if resp.private[:stream_acc] == nil do
             ttfb = System.monotonic_time(:millisecond) - start_time
-
-            initial_acc = %{
-              content: "",
-              tool_calls: [],
-              usage: nil,
-              stop_reason: nil,
-              first_chunk_time: ttfb,
-              sse_buffer: ""
-            }
-
+            initial_acc = %{initial_stream_acc() | first_chunk_time: ttfb}
             Req.Response.put_private(resp, :stream_acc, initial_acc)
           else
             resp
@@ -167,9 +158,7 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
 
     case result do
       {:ok, %Req.Response{status: 200} = resp} ->
-        acc =
-          resp.private[:stream_acc] ||
-            %{content: "", tool_calls: [], usage: nil, stop_reason: nil, first_chunk_time: nil}
+        acc = resp.private[:stream_acc] || initial_stream_acc()
 
         upload_ms = calculate_upload_ms(start_time)
 
@@ -500,9 +489,51 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
     end
   end
 
-  defp process_anthropic_events(acc, events) do
+  @doc false
+  def initial_stream_acc do
+    %{
+      content: "",
+      tool_calls: [],
+      block_tools: %{},
+      usage: nil,
+      stop_reason: nil,
+      first_chunk_time: nil,
+      sse_buffer: ""
+    }
+  end
+
+  @doc false
+  def process_anthropic_events(acc, events) do
     Enum.reduce(events, {acc, []}, fn event, {acc, chunks} ->
       case event["type"] do
+        "content_block_start" ->
+          case event["content_block"] do
+            %{"type" => "tool_use"} = block ->
+              tool_idx = length(acc.tool_calls)
+
+              tool_call = %{
+                "id" => block["id"],
+                "type" => "function",
+                "function" => %{"name" => block["name"], "arguments" => ""}
+              }
+
+              new_acc = %{
+                acc
+                | tool_calls: acc.tool_calls ++ [tool_call],
+                  block_tools: Map.put(acc.block_tools, event["index"], tool_idx)
+              }
+
+              chunk =
+                build_openai_stream_chunk(%{
+                  "tool_calls" => [Map.put(tool_call, "index", tool_idx)]
+                })
+
+              {new_acc, chunks ++ [chunk]}
+
+            _ ->
+              {acc, chunks}
+          end
+
         "content_block_delta" ->
           delta = event["delta"]
 
@@ -511,6 +542,29 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
               new_acc = %{acc | content: acc.content <> (delta["text"] || "")}
               chunk = build_openai_stream_chunk(%{"content" => delta["text"]})
               {new_acc, chunks ++ [chunk]}
+
+            "input_json_delta" ->
+              case Map.fetch(acc.block_tools, event["index"]) do
+                {:ok, tool_idx} ->
+                  partial = delta["partial_json"] || ""
+
+                  tool_calls =
+                    List.update_at(acc.tool_calls, tool_idx, fn tc ->
+                      update_in(tc, ["function", "arguments"], &(&1 <> partial))
+                    end)
+
+                  chunk =
+                    build_openai_stream_chunk(%{
+                      "tool_calls" => [
+                        %{"index" => tool_idx, "function" => %{"arguments" => partial}}
+                      ]
+                    })
+
+                  {%{acc | tool_calls: tool_calls}, chunks ++ [chunk]}
+
+                :error ->
+                  {acc, chunks}
+              end
 
             _ ->
               {acc, chunks}
@@ -581,8 +635,14 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
     "data: #{Jason.encode!(chunk)}\n\n"
   end
 
-  defp build_final_openai_response(acc, timing_meta) do
+  @doc false
+  def build_final_openai_response(acc, timing_meta) do
     message = %{"role" => "assistant", "content" => acc.content}
+
+    message =
+      if acc.tool_calls != [],
+        do: Map.put(message, "tool_calls", acc.tool_calls),
+        else: message
 
     finish_reason =
       case acc.stop_reason do

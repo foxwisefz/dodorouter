@@ -102,39 +102,117 @@ defmodule DodoRouterWeb.AnthropicFormat do
   end
 
   def convert_sse_chunk(openai_sse_data) when is_binary(openai_sse_data) do
+    case convert_sse_chunk(openai_sse_data, new_sse_state()) do
+      {[], _state} -> :skip
+      {events, _state} -> {:ok, events}
+    end
+  end
+
+  @doc """
+  Stateful SSE conversion. `state` (from `new_sse_state/0`) tracks which
+  Anthropic content block is open so tool_use blocks get proper
+  content_block_start/stop lifecycle events. Block 0 is the text block the
+  streaming controller opens up front; each tool call opens the next index.
+  """
+  def convert_sse_chunk(openai_sse_data, state) when is_binary(openai_sse_data) do
     openai_sse_data
     |> String.split("\n")
     |> Enum.filter(&String.starts_with?(&1, "data: "))
     |> Enum.map(&String.replace_prefix(&1, "data: ", ""))
     |> Enum.reject(&(&1 == "[DONE]"))
-    |> Enum.flat_map(fn json_str ->
+    |> Enum.reduce({[], state}, fn json_str, {events, state} ->
       case Jason.decode(json_str) do
-        {:ok, chunk} -> convert_openai_chunk_to_anthropic_events(chunk)
-        _ -> []
+        {:ok, chunk} ->
+          {new_events, state} = convert_openai_chunk_to_anthropic_events(chunk, state)
+          {events ++ new_events, state}
+
+        _ ->
+          {events, state}
       end
     end)
-    |> case do
-      [] -> :skip
-      events -> {:ok, events}
-    end
   end
 
-  defp convert_openai_chunk_to_anthropic_events(chunk) do
+  def new_sse_state, do: %{open_block: 0, tool_blocks: %{}}
+
+  defp convert_openai_chunk_to_anthropic_events(chunk, state) do
     delta = get_in(chunk, ["choices", Access.at(0), "delta"]) || %{}
     content = delta["content"]
 
-    if is_binary(content) and content != "" do
-      event_data = %{
-        "type" => "content_block_delta",
-        "index" => 0,
-        "delta" => %{"type" => "text_delta", "text" => content}
-      }
+    text_events =
+      if is_binary(content) and content != "" do
+        [
+          sse_event("content_block_delta", %{
+            "type" => "content_block_delta",
+            "index" => 0,
+            "delta" => %{"type" => "text_delta", "text" => content}
+          })
+        ]
+      else
+        []
+      end
 
-      ["event: content_block_delta\ndata: #{Jason.encode!(event_data)}\n\n"]
-    else
-      []
-    end
+    {tool_events, state} = convert_tool_call_deltas(delta["tool_calls"], state)
+    {text_events ++ tool_events, state}
   end
+
+  defp convert_tool_call_deltas(tool_calls, state) when is_list(tool_calls) do
+    Enum.reduce(tool_calls, {[], state}, fn tc, {events, state} ->
+      openai_idx = tc["index"] || map_size(state.tool_blocks)
+
+      {start_events, state} =
+        if Map.has_key?(state.tool_blocks, openai_idx) do
+          {[], state}
+        else
+          block_idx = map_size(state.tool_blocks) + 1
+
+          stop_event =
+            sse_event("content_block_stop", %{
+              "type" => "content_block_stop",
+              "index" => state.open_block
+            })
+
+          start_event =
+            sse_event("content_block_start", %{
+              "type" => "content_block_start",
+              "index" => block_idx,
+              "content_block" => %{
+                "type" => "tool_use",
+                "id" => tc["id"],
+                "name" => get_in(tc, ["function", "name"]),
+                "input" => %{}
+              }
+            })
+
+          {[stop_event, start_event],
+           %{
+             state
+             | open_block: block_idx,
+               tool_blocks: Map.put(state.tool_blocks, openai_idx, block_idx)
+           }}
+        end
+
+      args = get_in(tc, ["function", "arguments"])
+
+      json_events =
+        if is_binary(args) and args != "" do
+          [
+            sse_event("content_block_delta", %{
+              "type" => "content_block_delta",
+              "index" => state.tool_blocks[openai_idx],
+              "delta" => %{"type" => "input_json_delta", "partial_json" => args}
+            })
+          ]
+        else
+          []
+        end
+
+      {events ++ start_events ++ json_events, state}
+    end)
+  end
+
+  defp convert_tool_call_deltas(_, state), do: {[], state}
+
+  defp sse_event(type, data), do: "event: #{type}\ndata: #{Jason.encode!(data)}\n\n"
 
   defp convert_messages_to_openai(messages) do
     Enum.flat_map(messages, &convert_message_to_openai/1)
