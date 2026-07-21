@@ -215,6 +215,174 @@ defmodule DodoRouter.Proxy.Adapters.AnthropicTest do
     end
   end
 
+  describe "streaming tool calls" do
+    @tool_use_events [
+      %{
+        "type" => "content_block_start",
+        "index" => 0,
+        "content_block" => %{"type" => "text", "text" => ""}
+      },
+      %{
+        "type" => "content_block_delta",
+        "index" => 0,
+        "delta" => %{"type" => "text_delta", "text" => "Let me check."}
+      },
+      %{
+        "type" => "content_block_start",
+        "index" => 1,
+        "content_block" => %{
+          "type" => "tool_use",
+          "id" => "toolu_01",
+          "name" => "read_file",
+          "input" => %{}
+        }
+      },
+      %{
+        "type" => "content_block_delta",
+        "index" => 1,
+        "delta" => %{"type" => "input_json_delta", "partial_json" => "{\"path\":"}
+      },
+      %{
+        "type" => "content_block_delta",
+        "index" => 1,
+        "delta" => %{"type" => "input_json_delta", "partial_json" => "\"/tmp\"}"}
+      },
+      %{
+        "type" => "message_delta",
+        "delta" => %{"stop_reason" => "tool_use"},
+        "usage" => %{"input_tokens" => 100, "output_tokens" => 30}
+      }
+    ]
+
+    defp parse_chunks(chunks) do
+      Enum.map(chunks, fn "data: " <> rest ->
+        rest |> String.trim() |> Jason.decode!()
+      end)
+    end
+
+    test "forwards tool_use blocks as OpenAI tool_call delta chunks" do
+      acc = Anthropic.initial_stream_acc()
+      {_acc, chunks} = Anthropic.process_anthropic_events(acc, @tool_use_events)
+
+      deltas = parse_chunks(chunks) |> Enum.map(&get_in(&1, ["choices", Access.at(0), "delta"]))
+
+      start_delta =
+        Enum.find(deltas, fn d ->
+          get_in(d, ["tool_calls", Access.at(0), "id"]) == "toolu_01"
+        end)
+
+      assert start_delta, "expected a tool_calls delta chunk carrying the tool id"
+      assert get_in(start_delta, ["tool_calls", Access.at(0), "function", "name"]) == "read_file"
+      assert get_in(start_delta, ["tool_calls", Access.at(0), "index"]) == 0
+
+      streamed_args =
+        deltas
+        |> Enum.map(&get_in(&1, ["tool_calls", Access.at(0), "function", "arguments"]))
+        |> Enum.reject(&is_nil/1)
+        |> Enum.join()
+
+      assert Jason.decode!(streamed_args) == %{"path" => "/tmp"}
+    end
+
+    test "includes accumulated tool_calls in the final OpenAI response" do
+      acc = Anthropic.initial_stream_acc()
+      {acc, _chunks} = Anthropic.process_anthropic_events(acc, @tool_use_events)
+
+      response =
+        Anthropic.build_final_openai_response(acc, %{
+          payload_size_bytes: 0,
+          upload_ms: nil,
+          provider_processing_ms: nil
+        })
+
+      choice = get_in(response, ["choices", Access.at(0)])
+      assert choice["finish_reason"] == "tool_calls"
+
+      assert [tc] = choice["message"]["tool_calls"]
+      assert tc["id"] == "toolu_01"
+      assert tc["type"] == "function"
+      assert tc["function"]["name"] == "read_file"
+      assert Jason.decode!(tc["function"]["arguments"]) == %{"path" => "/tmp"}
+    end
+
+    test "accumulates multiple parallel tool calls with distinct indexes" do
+      events = [
+        %{
+          "type" => "content_block_start",
+          "index" => 0,
+          "content_block" => %{
+            "type" => "tool_use",
+            "id" => "toolu_a",
+            "name" => "read",
+            "input" => %{}
+          }
+        },
+        %{
+          "type" => "content_block_delta",
+          "index" => 0,
+          "delta" => %{"type" => "input_json_delta", "partial_json" => "{\"a\":1}"}
+        },
+        %{
+          "type" => "content_block_start",
+          "index" => 1,
+          "content_block" => %{
+            "type" => "tool_use",
+            "id" => "toolu_b",
+            "name" => "write",
+            "input" => %{}
+          }
+        },
+        %{
+          "type" => "content_block_delta",
+          "index" => 1,
+          "delta" => %{"type" => "input_json_delta", "partial_json" => "{\"b\":2}"}
+        },
+        %{"type" => "message_delta", "delta" => %{"stop_reason" => "tool_use"}, "usage" => nil}
+      ]
+
+      acc = Anthropic.initial_stream_acc()
+      {acc, _chunks} = Anthropic.process_anthropic_events(acc, events)
+
+      response =
+        Anthropic.build_final_openai_response(acc, %{
+          payload_size_bytes: 0,
+          upload_ms: nil,
+          provider_processing_ms: nil
+        })
+
+      assert [tc_a, tc_b] = get_in(response, ["choices", Access.at(0), "message", "tool_calls"])
+      assert tc_a["id"] == "toolu_a"
+      assert Jason.decode!(tc_a["function"]["arguments"]) == %{"a" => 1}
+      assert tc_b["id"] == "toolu_b"
+      assert Jason.decode!(tc_b["function"]["arguments"]) == %{"b" => 2}
+    end
+
+    test "text-only streams still omit tool_calls from the final response" do
+      events = [
+        %{
+          "type" => "content_block_delta",
+          "index" => 0,
+          "delta" => %{"type" => "text_delta", "text" => "Hi"}
+        },
+        %{"type" => "message_delta", "delta" => %{"stop_reason" => "end_turn"}, "usage" => nil}
+      ]
+
+      acc = Anthropic.initial_stream_acc()
+      {acc, _chunks} = Anthropic.process_anthropic_events(acc, events)
+
+      response =
+        Anthropic.build_final_openai_response(acc, %{
+          payload_size_bytes: 0,
+          upload_ms: nil,
+          provider_processing_ms: nil
+        })
+
+      message = get_in(response, ["choices", Access.at(0), "message"])
+      assert message["content"] == "Hi"
+      refute Map.has_key?(message, "tool_calls")
+    end
+  end
+
   describe "edge cases" do
     test "merges consecutive tool_result messages (same role)" do
       request = %{

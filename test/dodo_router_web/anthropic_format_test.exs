@@ -288,4 +288,153 @@ defmodule DodoRouterWeb.AnthropicFormatTest do
       assert :skip = AnthropicFormat.convert_sse_chunk("data: [DONE]\n\n")
     end
   end
+
+  describe "convert_sse_chunk/2 (stateful, tool calls)" do
+    defp openai_chunk(delta) do
+      "data: " <>
+        Jason.encode!(%{"choices" => [%{"index" => 0, "delta" => delta}]}) <> "\n\n"
+    end
+
+    defp convert_all(chunks) do
+      Enum.reduce(chunks, {[], AnthropicFormat.new_sse_state()}, fn chunk, {events, state} ->
+        {new_events, state} = AnthropicFormat.convert_sse_chunk(chunk, state)
+        {events ++ new_events, state}
+      end)
+    end
+
+    defp parse_events(events) do
+      Enum.map(events, fn event ->
+        [_, data] = Regex.run(~r/data: (.*)\n\n/s, event)
+        Jason.decode!(data)
+      end)
+    end
+
+    test "opens a tool_use content block when a tool_calls delta carries id and name" do
+      chunks = [
+        openai_chunk(%{
+          "tool_calls" => [
+            %{
+              "index" => 0,
+              "id" => "toolu_01",
+              "type" => "function",
+              "function" => %{"name" => "read_file", "arguments" => ""}
+            }
+          ]
+        }),
+        openai_chunk(%{
+          "tool_calls" => [%{"index" => 0, "function" => %{"arguments" => "{\"path\":\"/tmp\"}"}}]
+        })
+      ]
+
+      {events, state} = convert_all(chunks)
+      parsed = parse_events(events)
+
+      # The open text block (index 0) is closed before the tool block starts
+      assert %{"type" => "content_block_stop", "index" => 0} =
+               Enum.find(parsed, &(&1["type"] == "content_block_stop"))
+
+      start_event = Enum.find(parsed, &(&1["type"] == "content_block_start"))
+      assert start_event["index"] == 1
+      assert start_event["content_block"]["type"] == "tool_use"
+      assert start_event["content_block"]["id"] == "toolu_01"
+      assert start_event["content_block"]["name"] == "read_file"
+
+      json_deltas =
+        parsed
+        |> Enum.filter(&(get_in(&1, ["delta", "type"]) == "input_json_delta"))
+
+      assert [%{"index" => 1} = json_delta] = json_deltas
+      assert json_delta["delta"]["partial_json"] == "{\"path\":\"/tmp\"}"
+
+      assert state.open_block == 1
+    end
+
+    test "opens a new block per tool call index" do
+      chunks = [
+        openai_chunk(%{
+          "tool_calls" => [
+            %{
+              "index" => 0,
+              "id" => "toolu_a",
+              "function" => %{"name" => "read", "arguments" => "{}"}
+            }
+          ]
+        }),
+        openai_chunk(%{
+          "tool_calls" => [
+            %{
+              "index" => 1,
+              "id" => "toolu_b",
+              "function" => %{"name" => "write", "arguments" => "{}"}
+            }
+          ]
+        })
+      ]
+
+      {events, state} = convert_all(chunks)
+      parsed = parse_events(events)
+
+      starts = Enum.filter(parsed, &(&1["type"] == "content_block_start"))
+      assert [%{"index" => 1}, %{"index" => 2}] = starts
+
+      stops = Enum.filter(parsed, &(&1["type"] == "content_block_stop"))
+      assert [%{"index" => 0}, %{"index" => 1}] = stops
+
+      assert state.open_block == 2
+    end
+
+    test "text deltas still convert and leave the text block open" do
+      {events, state} = convert_all([openai_chunk(%{"content" => "Hello"})])
+      parsed = parse_events(events)
+
+      assert [%{"type" => "content_block_delta", "index" => 0}] = parsed
+      assert state.open_block == 0
+    end
+
+    test "adapter tool_call chunks round-trip to Anthropic tool_use events (seam)" do
+      anthropic_events = [
+        %{
+          "type" => "content_block_start",
+          "index" => 0,
+          "content_block" => %{
+            "type" => "tool_use",
+            "id" => "toolu_01",
+            "name" => "read_file",
+            "input" => %{}
+          }
+        },
+        %{
+          "type" => "content_block_delta",
+          "index" => 0,
+          "delta" => %{"type" => "input_json_delta", "partial_json" => "{\"path\":"}
+        },
+        %{
+          "type" => "content_block_delta",
+          "index" => 0,
+          "delta" => %{"type" => "input_json_delta", "partial_json" => "\"/tmp\"}"}
+        }
+      ]
+
+      acc = DodoRouter.Proxy.Adapters.Anthropic.initial_stream_acc()
+
+      {_acc, openai_chunks} =
+        DodoRouter.Proxy.Adapters.Anthropic.process_anthropic_events(acc, anthropic_events)
+
+      {events, state} = convert_all(openai_chunks)
+      parsed = parse_events(events)
+
+      start_event = Enum.find(parsed, &(&1["type"] == "content_block_start"))
+      assert start_event["content_block"]["id"] == "toolu_01"
+      assert start_event["content_block"]["name"] == "read_file"
+
+      reassembled_json =
+        parsed
+        |> Enum.filter(&(get_in(&1, ["delta", "type"]) == "input_json_delta"))
+        |> Enum.map(&get_in(&1, ["delta", "partial_json"]))
+        |> Enum.join()
+
+      assert Jason.decode!(reassembled_json) == %{"path" => "/tmp"}
+      assert state.open_block == 1
+    end
+  end
 end
