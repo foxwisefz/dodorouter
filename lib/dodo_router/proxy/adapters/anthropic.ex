@@ -54,11 +54,57 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
     ]
   end
 
+  # Client identity headers forwarded upstream so proxied requests are
+  # indistinguishable from the client talking to Anthropic directly. The beta
+  # list matters doubly: it carries feature opt-ins the client relies on
+  # (extended-cache-ttl 1h, context-1m, interleaved thinking), and
+  # subscription OAuth tokens are rate-limited more aggressively when traffic
+  # doesn't look like Claude Code.
+  @forwarded_identity_headers ~w(user-agent x-app)
+
+  @doc """
+  Builds upstream headers from the step's credentials plus the client's
+  Anthropic identity headers (`anthropic-beta`, `user-agent`, `x-app`).
+  Client credentials are never forwarded. For OAuth setup-tokens the
+  `oauth-2025-04-20` beta is guaranteed present in the merged beta list.
+  """
+  def build_headers(api_key, client_headers) do
+    client = Enum.map(client_headers, fn {k, v} -> {String.downcase(to_string(k)), v} end)
+    client_beta = :proplists.get_value("anthropic-beta", client, nil)
+
+    base = auth_headers(api_key)
+
+    headers =
+      if client_beta do
+        beta = ensure_oauth_beta(client_beta, api_key)
+        List.keystore(base, "anthropic-beta", 0, {"anthropic-beta", beta})
+      else
+        base
+      end
+
+    identity =
+      for {k, v} <- client, k in @forwarded_identity_headers, do: {k, v}
+
+    headers ++ identity
+  end
+
+  defp ensure_oauth_beta(client_beta, "sk-ant-oat" <> _rest) do
+    betas = client_beta |> String.split(",") |> Enum.map(&String.trim/1)
+
+    if "oauth-2025-04-20" in betas do
+      client_beta
+    else
+      client_beta <> ",oauth-2025-04-20"
+    end
+  end
+
+  defp ensure_oauth_beta(client_beta, _api_key), do: client_beta
+
   @impl true
-  def call(request, %RoutingStep{} = step, api_key, _client_headers \\ []) do
+  def call(request, %RoutingStep{} = step, api_key, client_headers \\ []) do
     url = @base_url <> "/messages"
     body = build_anthropic_request(request, step)
-    headers = auth_headers(api_key)
+    headers = build_headers(api_key, client_headers)
 
     payload_size_bytes = body |> Jason.encode!() |> byte_size()
     start_time = FinchTelemetry.mark_request_start()
@@ -102,10 +148,10 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
   end
 
   @impl true
-  def stream(request, %RoutingStep{} = step, api_key, send_chunk, _client_headers \\ []) do
+  def stream(request, %RoutingStep{} = step, api_key, send_chunk, client_headers \\ []) do
     url = @base_url <> "/messages"
     body = build_anthropic_request(request, step) |> Map.put("stream", true)
-    headers = auth_headers(api_key)
+    headers = build_headers(api_key, client_headers)
 
     payload_size_bytes = body |> Jason.encode!() |> byte_size()
     start_time = FinchTelemetry.mark_request_start()
@@ -202,11 +248,12 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
   Forwards a count_tokens request to Anthropic. Returns `{:ok, body}` with the
   upstream response (`%{"input_tokens" => n}`) or `{:error, reason}`.
   """
-  def count_tokens(params, %RoutingStep{} = step, api_key) do
+  def count_tokens(params, %RoutingStep{} = step, api_key, client_headers \\ []) do
     url = @base_url <> "/messages/count_tokens"
     body = build_count_tokens_request(params, step)
+    headers = build_headers(api_key, client_headers)
 
-    case Req.post(url, headers: auth_headers(api_key), json: body, receive_timeout: 30_000) do
+    case Req.post(url, headers: headers, json: body, receive_timeout: 30_000) do
       {:ok, %{status: 200, body: response_body}} ->
         {:ok, response_body}
 

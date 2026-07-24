@@ -53,8 +53,9 @@ defmodule DodoRouterWeb.AnthropicProxyController do
   def count_tokens(conn, params) do
     router = conn.assigns.current_router
     params = Map.drop(params, ["router_slug"])
+    client_headers = extract_forwardable_headers(conn)
 
-    case forward_count_tokens(router, params) do
+    case forward_count_tokens(router, params, client_headers) do
       {:ok, body} ->
         json(conn, body)
 
@@ -63,7 +64,7 @@ defmodule DodoRouterWeb.AnthropicProxyController do
     end
   end
 
-  defp forward_count_tokens(router, params) do
+  defp forward_count_tokens(router, params, client_headers) do
     alias DodoRouter.Proxy.Adapters.Anthropic
     alias DodoRouter.{Providers, Routers}
 
@@ -80,7 +81,7 @@ defmodule DodoRouterWeb.AnthropicProxyController do
 
     with %{} <- step,
          key when is_binary(key) <- api_key,
-         {:ok, body} <- Anthropic.count_tokens(params, step, key) do
+         {:ok, body} <- Anthropic.count_tokens(params, step, key, client_headers) do
       {:ok, body}
     else
       _ -> :estimate
