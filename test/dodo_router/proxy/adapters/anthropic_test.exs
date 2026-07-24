@@ -501,4 +501,39 @@ defmodule DodoRouter.Proxy.Adapters.AnthropicTest do
       assert body["thinking"]["budget_tokens"] == 999
     end
   end
+
+  describe "build_count_tokens_request/2" do
+    test "keeps only count_tokens fields and uses the step's model" do
+      params = %{
+        "model" => "claude-sonnet-5",
+        "messages" => [%{"role" => "user", "content" => "hi"}],
+        "system" => [%{"type" => "text", "text" => "be nice"}],
+        "tools" => [%{"name" => "t", "input_schema" => %{}}],
+        "thinking" => %{"type" => "enabled", "budget_tokens" => 1024},
+        "stream" => true,
+        "max_tokens" => 64_000,
+        "metadata" => %{"user_id" => "u1"},
+        "router_slug" => "fw-claude"
+      }
+
+      step = %RoutingStep{model: "claude-sonnet-4-20250514"}
+      body = Anthropic.build_count_tokens_request(params, step)
+
+      assert body["model"] == "claude-sonnet-4-20250514"
+      assert body["messages"] == params["messages"]
+      assert body["system"] == params["system"]
+      assert body["tools"] == params["tools"]
+      assert body["thinking"] == params["thinking"]
+      refute Map.has_key?(body, "stream")
+      refute Map.has_key?(body, "max_tokens")
+      refute Map.has_key?(body, "metadata")
+      refute Map.has_key?(body, "router_slug")
+    end
+
+    test "falls back to the client model when the step has none" do
+      params = %{"model" => "claude-sonnet-5", "messages" => []}
+      body = Anthropic.build_count_tokens_request(params, %RoutingStep{model: nil})
+      assert body["model"] == "claude-sonnet-5"
+    end
+  end
 end

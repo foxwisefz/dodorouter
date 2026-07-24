@@ -28,6 +28,7 @@ defmodule DodoRouterWeb.Router do
     get "/models", ProxyController, :models
     post "/chat/completions", ProxyController, :create
     post "/messages", AnthropicProxyController, :create
+    post "/messages/count_tokens", AnthropicProxyController, :count_tokens
     post "/responses", ResponsesProxyController, :create
   end
 

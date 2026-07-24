@@ -51,6 +51,9 @@ defmodule DodoRouterWeb.Endpoint do
   plug Plug.Parsers,
     parsers: [:urlencoded, :multipart, :json],
     pass: ["*/*"],
+    # Proxy requests carry base64 images (Claude Code screenshots etc.) and
+    # easily exceed Plug's 8MB default; Anthropic itself accepts up to ~32MB.
+    length: 50_000_000,
     json_decoder: Phoenix.json_library()
 
   plug Plug.MethodOverride

@@ -43,6 +43,61 @@ defmodule DodoRouterWeb.AnthropicProxyController do
     end
   end
 
+  @doc """
+  Anthropic-compatible `/v1/messages/count_tokens`. Claude Code calls this for
+  compaction sizing. When the router has an Anthropic step with a usable key we
+  forward for an exact count; otherwise we return a byte-based estimate —
+  tokenizers differ per provider anyway, so an approximation is fine (see the
+  reactive-handling philosophy in AGENTS.md).
+  """
+  def count_tokens(conn, params) do
+    router = conn.assigns.current_router
+    params = Map.drop(params, ["router_slug"])
+
+    case forward_count_tokens(router, params) do
+      {:ok, body} ->
+        json(conn, body)
+
+      :estimate ->
+        json(conn, %{"input_tokens" => estimate_input_tokens(params)})
+    end
+  end
+
+  defp forward_count_tokens(router, params) do
+    alias DodoRouter.Proxy.Adapters.Anthropic
+    alias DodoRouter.{Providers, Routers}
+
+    step =
+      router
+      |> Routers.list_routing_steps()
+      |> Enum.find(&(&1.provider == "anthropic"))
+
+    api_key =
+      case step do
+        %{provider_key: %{} = provider_key} -> Providers.resolve_api_key(provider_key)
+        _ -> nil
+      end
+
+    with %{} <- step,
+         key when is_binary(key) <- api_key,
+         {:ok, body} <- Anthropic.count_tokens(params, step, key) do
+      {:ok, body}
+    else
+      _ -> :estimate
+    end
+  end
+
+  # ~4 bytes/token is a reasonable ballpark for prompt text; base64 images
+  # skew high, but overestimating is the safe direction for compaction checks.
+  defp estimate_input_tokens(params) do
+    params
+    |> Map.take(["messages", "system", "tools"])
+    |> Jason.encode!()
+    |> byte_size()
+    |> div(4)
+    |> max(1)
+  end
+
   defp sync_anthropic(
          conn,
          router,
