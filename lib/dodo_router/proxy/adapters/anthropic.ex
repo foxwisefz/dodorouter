@@ -185,6 +185,43 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
     end
   end
 
+  @count_tokens_fields ~w(messages system tools tool_choice thinking)
+
+  @doc """
+  Builds the body for Anthropic's `/v1/messages/count_tokens` endpoint from an
+  incoming Anthropic-format request. The step's model wins because that is the
+  model dispatch would actually send the request to.
+  """
+  def build_count_tokens_request(params, %RoutingStep{} = step) do
+    params
+    |> Map.take(@count_tokens_fields)
+    |> Map.put("model", step.model || params["model"])
+  end
+
+  @doc """
+  Forwards a count_tokens request to Anthropic. Returns `{:ok, body}` with the
+  upstream response (`%{"input_tokens" => n}`) or `{:error, reason}`.
+  """
+  def count_tokens(params, %RoutingStep{} = step, api_key) do
+    url = @base_url <> "/messages/count_tokens"
+    body = build_count_tokens_request(params, step)
+
+    case Req.post(url, headers: auth_headers(api_key), json: body, receive_timeout: 30_000) do
+      {:ok, %{status: 200, body: response_body}} ->
+        {:ok, response_body}
+
+      {:ok, %{status: status, body: response_body}} ->
+        Logger.warning(
+          "[Anthropic] count_tokens failed: status=#{status} body=#{inspect(response_body)}"
+        )
+
+        {:error, {:http, status}}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
   def build_anthropic_request(request, step) do
     messages = request["messages"] || []
     {system_msg, system_cache_control, other_messages} = extract_system_message(messages)
