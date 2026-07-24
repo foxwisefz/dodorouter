@@ -437,4 +437,166 @@ defmodule DodoRouterWeb.AnthropicFormatTest do
       assert state.open_block == 1
     end
   end
+
+  describe "image passthrough (to_openai_params/1)" do
+    @png_block %{
+      "type" => "image",
+      "source" => %{"type" => "base64", "media_type" => "image/png", "data" => "iVBORw0KGgo="}
+    }
+
+    test "user message with text and image blocks becomes OpenAI content parts" do
+      anthropic = %{
+        "model" => "claude-sonnet-5",
+        "max_tokens" => 100,
+        "messages" => [
+          %{
+            "role" => "user",
+            "content" => [
+              %{"type" => "text", "text" => "what is in this image?"},
+              @png_block
+            ]
+          }
+        ]
+      }
+
+      [msg] = AnthropicFormat.to_openai_params(anthropic)["messages"]
+
+      assert msg["role"] == "user"
+
+      assert msg["content"] == [
+               %{"type" => "text", "text" => "what is in this image?"},
+               %{
+                 "type" => "image_url",
+                 "image_url" => %{"url" => "data:image/png;base64,iVBORw0KGgo="}
+               }
+             ]
+    end
+
+    test "url-source image blocks pass the URL through" do
+      anthropic = %{
+        "messages" => [
+          %{
+            "role" => "user",
+            "content" => [
+              %{"type" => "image", "source" => %{"type" => "url", "url" => "https://x/y.png"}}
+            ]
+          }
+        ]
+      }
+
+      [msg] = AnthropicFormat.to_openai_params(anthropic)["messages"]
+
+      assert msg["content"] == [
+               %{"type" => "image_url", "image_url" => %{"url" => "https://x/y.png"}}
+             ]
+    end
+
+    test "text-only content stays a joined string (no format change)" do
+      anthropic = %{
+        "messages" => [
+          %{
+            "role" => "user",
+            "content" => [
+              %{"type" => "text", "text" => "one"},
+              %{"type" => "text", "text" => "two"}
+            ]
+          }
+        ]
+      }
+
+      [msg] = AnthropicFormat.to_openai_params(anthropic)["messages"]
+      assert msg["content"] == "one\ntwo"
+    end
+
+    test "images inside tool_result content surface as a user message after the tool message" do
+      anthropic = %{
+        "messages" => [
+          %{
+            "role" => "user",
+            "content" => [
+              %{
+                "type" => "tool_result",
+                "tool_use_id" => "toolu_1",
+                "content" => [%{"type" => "text", "text" => "screenshot taken"}, @png_block]
+              }
+            ]
+          }
+        ]
+      }
+
+      [tool_msg, image_msg] = AnthropicFormat.to_openai_params(anthropic)["messages"]
+
+      assert tool_msg["role"] == "tool"
+      assert tool_msg["tool_call_id"] == "toolu_1"
+      assert tool_msg["content"] == "screenshot taken"
+
+      assert image_msg["role"] == "user"
+
+      assert image_msg["content"] == [
+               %{
+                 "type" => "image_url",
+                 "image_url" => %{"url" => "data:image/png;base64,iVBORw0KGgo="}
+               }
+             ]
+    end
+  end
+
+  describe "seam: image blocks -> to_openai_params -> build_anthropic_request" do
+    test "images survive the full request round-trip, tool_result images in the same user turn" do
+      alias DodoRouter.Proxy.Adapters.Anthropic
+      alias DodoRouter.Routers.RoutingStep
+
+      anthropic_request = %{
+        "model" => "claude-sonnet-5",
+        "max_tokens" => 100,
+        "messages" => [
+          %{"role" => "user", "content" => "take a screenshot"},
+          %{
+            "role" => "assistant",
+            "content" => [
+              %{"type" => "tool_use", "id" => "toolu_1", "name" => "screenshot", "input" => %{}}
+            ]
+          },
+          %{
+            "role" => "user",
+            "content" => [
+              %{
+                "type" => "tool_result",
+                "tool_use_id" => "toolu_1",
+                "content" => [
+                  %{"type" => "text", "text" => "done"},
+                  %{
+                    "type" => "image",
+                    "source" => %{
+                      "type" => "base64",
+                      "media_type" => "image/png",
+                      "data" => "iVBORw0KGgo="
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+
+      body =
+        anthropic_request
+        |> AnthropicFormat.to_openai_params()
+        |> Anthropic.build_anthropic_request(%RoutingStep{model: "claude-sonnet-4-20250514"})
+
+      # the tool_result and the surfaced image must land in the same user turn
+      tool_turn =
+        Enum.find(body["messages"], fn m ->
+          is_list(m["content"]) and Enum.any?(m["content"], &(&1["type"] == "tool_result"))
+        end)
+
+      assert tool_turn["role"] == "user"
+
+      image_block = Enum.find(tool_turn["content"], &(&1["type"] == "image"))
+      assert image_block["source"]["type"] == "base64"
+      assert image_block["source"]["media_type"] == "image/png"
+      assert image_block["source"]["data"] == "iVBORw0KGgo="
+    end
+  end
 end

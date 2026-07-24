@@ -266,10 +266,22 @@ defmodule DodoRouterWeb.AnthropicFormat do
               else: tool_msg
           end)
 
-        text_parts =
-          other_blocks
-          |> Enum.filter(&(&1["type"] == "text"))
-          |> Enum.map(& &1["text"])
+        # OpenAI tool messages can't carry images, so images inside
+        # tool_result content are surfaced as a user message right after —
+        # the Anthropic adapter merges consecutive user messages back into
+        # one turn, so they end up alongside the tool_result again.
+        tool_result_image_parts =
+          tool_results
+          |> Enum.flat_map(fn block -> List.wrap(block["content"]) end)
+          |> Enum.filter(&is_map/1)
+          |> Enum.map(&image_block_to_openai_part/1)
+          |> Enum.reject(&is_nil/1)
+
+        tool_image_messages =
+          case tool_result_image_parts do
+            [] -> []
+            parts -> [%{"role" => "user", "content" => parts}]
+          end
 
         # Preserve cache_control from the last text block that has it
         cache_control =
@@ -279,19 +291,19 @@ defmodule DodoRouterWeb.AnthropicFormat do
           end)
 
         user_messages =
-          case text_parts do
-            [] ->
+          case user_content_from_blocks(other_blocks) do
+            nil ->
               []
 
-            parts ->
-              user_msg = %{"role" => "user", "content" => Enum.join(parts, "\n")}
+            content ->
+              user_msg = %{"role" => "user", "content" => content}
 
               if cache_control,
                 do: [Map.put(user_msg, "cache_control", cache_control)],
                 else: [user_msg]
           end
 
-        tool_messages ++ user_messages
+        tool_messages ++ tool_image_messages ++ user_messages
 
       %{"role" => "user", "content" => content} ->
         msg = %{"role" => "user", "content" => content || ""}
@@ -363,6 +375,47 @@ defmodule DodoRouterWeb.AnthropicFormat do
         []
     end
   end
+
+  # Builds OpenAI user-message content from Anthropic content blocks.
+  # Text-only content stays a joined string (the historical shape); as soon as
+  # an image is involved the content becomes an OpenAI parts array so the
+  # image survives — parts arrays are the intermediate contract adapters
+  # already understand (see Adapters.Google.convert_content_parts/1).
+  defp user_content_from_blocks(blocks) do
+    if Enum.any?(blocks, &(&1["type"] == "image")) do
+      parts =
+        blocks
+        |> Enum.map(fn
+          %{"type" => "text", "text" => text} -> %{"type" => "text", "text" => text}
+          %{"type" => "image"} = block -> image_block_to_openai_part(block)
+          _ -> nil
+        end)
+        |> Enum.reject(&is_nil/1)
+
+      if parts == [], do: nil, else: parts
+    else
+      case blocks |> Enum.filter(&(&1["type"] == "text")) |> Enum.map(& &1["text"]) do
+        [] -> nil
+        texts -> Enum.join(texts, "\n")
+      end
+    end
+  end
+
+  defp image_block_to_openai_part(%{
+         "type" => "image",
+         "source" => %{"type" => "base64", "media_type" => media_type, "data" => data}
+       }) do
+    %{"type" => "image_url", "image_url" => %{"url" => "data:#{media_type};base64,#{data}"}}
+  end
+
+  defp image_block_to_openai_part(%{
+         "type" => "image",
+         "source" => %{"type" => "url", "url" => url}
+       }) do
+    %{"type" => "image_url", "image_url" => %{"url" => url}}
+  end
+
+  defp image_block_to_openai_part(_block), do: nil
 
   defp extract_text_from_content(content) when is_list(content) do
     content

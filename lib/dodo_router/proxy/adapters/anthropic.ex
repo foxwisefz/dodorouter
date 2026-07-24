@@ -380,6 +380,8 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
   end
 
   defp convert_message_to_anthropic(%{"role" => role, "content" => content} = msg) do
+    content = if is_list(content), do: normalize_content_blocks(content), else: content
+
     if msg["cache_control"] do
       content_blocks =
         if is_binary(content) do
@@ -394,6 +396,31 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
       %{"role" => role, "content" => content_blocks}
     else
       %{"role" => role, "content" => content}
+    end
+  end
+
+  # Converts OpenAI-style content parts to native Anthropic blocks. Blocks that
+  # are already Anthropic-shaped (image, tool_result, ...) pass through, so
+  # both the OpenAI endpoint's parts arrays and native lists work.
+  defp normalize_content_blocks(parts) do
+    Enum.map(parts, fn
+      %{"type" => "image_url", "image_url" => %{"url" => url}} -> image_url_to_anthropic(url)
+      part -> part
+    end)
+  end
+
+  @data_uri_regex ~r/^data:([^;,]+);base64,(.+)$/s
+
+  defp image_url_to_anthropic(url) do
+    case Regex.run(@data_uri_regex, url) do
+      [_, media_type, data] ->
+        %{
+          "type" => "image",
+          "source" => %{"type" => "base64", "media_type" => media_type, "data" => data}
+        }
+
+      nil ->
+        %{"type" => "image", "source" => %{"type" => "url", "url" => url}}
     end
   end
 

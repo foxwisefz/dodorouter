@@ -536,4 +536,98 @@ defmodule DodoRouter.Proxy.Adapters.AnthropicTest do
       assert body["model"] == "claude-sonnet-5"
     end
   end
+
+  describe "image content parts" do
+    test "converts OpenAI image_url data URIs to Anthropic base64 image blocks" do
+      request = %{
+        "messages" => [
+          %{
+            "role" => "user",
+            "content" => [
+              %{"type" => "text", "text" => "what is this?"},
+              %{
+                "type" => "image_url",
+                "image_url" => %{"url" => "data:image/jpeg;base64,/9j/4AAQ"}
+              }
+            ]
+          }
+        ]
+      }
+
+      step = %RoutingStep{model: "claude-sonnet-4-20250514"}
+      body = Anthropic.build_anthropic_request(request, step)
+
+      [msg] = body["messages"]
+
+      assert msg["content"] == [
+               %{"type" => "text", "text" => "what is this?"},
+               %{
+                 "type" => "image",
+                 "source" => %{
+                   "type" => "base64",
+                   "media_type" => "image/jpeg",
+                   "data" => "/9j/4AAQ"
+                 }
+               }
+             ]
+    end
+
+    test "converts http(s) image_url parts to Anthropic url-source image blocks" do
+      request = %{
+        "messages" => [
+          %{
+            "role" => "user",
+            "content" => [
+              %{"type" => "image_url", "image_url" => %{"url" => "https://example.com/cat.png"}}
+            ]
+          }
+        ]
+      }
+
+      body = Anthropic.build_anthropic_request(request, %RoutingStep{model: "m"})
+      [msg] = body["messages"]
+
+      assert msg["content"] == [
+               %{
+                 "type" => "image",
+                 "source" => %{"type" => "url", "url" => "https://example.com/cat.png"}
+               }
+             ]
+    end
+
+    test "cache_control still lands on the last block of normalized part lists" do
+      request = %{
+        "messages" => [
+          %{
+            "role" => "user",
+            "cache_control" => %{"type" => "ephemeral"},
+            "content" => [
+              %{"type" => "text", "text" => "hi"},
+              %{"type" => "image_url", "image_url" => %{"url" => "data:image/png;base64,AAAA"}}
+            ]
+          }
+        ]
+      }
+
+      body = Anthropic.build_anthropic_request(request, %RoutingStep{model: "m"})
+      [msg] = body["messages"]
+      last = List.last(msg["content"])
+
+      assert last["type"] == "image"
+      assert last["cache_control"] == %{"type" => "ephemeral"}
+    end
+
+    test "already-native Anthropic blocks pass through unchanged" do
+      native = %{
+        "type" => "image",
+        "source" => %{"type" => "base64", "media_type" => "image/png", "data" => "AAAA"}
+      }
+
+      request = %{"messages" => [%{"role" => "user", "content" => [native]}]}
+      body = Anthropic.build_anthropic_request(request, %RoutingStep{model: "m"})
+      [msg] = body["messages"]
+
+      assert msg["content"] == [native]
+    end
+  end
 end
