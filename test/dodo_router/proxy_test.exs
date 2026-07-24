@@ -363,6 +363,61 @@ defmodule DodoRouter.ProxyTest do
       assert flags == []
       assert truncated["messages"] |> hd() |> Map.get("content") == "Hello world"
     end
+
+    test "truncates base64 data URIs inside image_url content parts" do
+      data_uri = "data:image/png;base64," <> String.duplicate("QUJD", 1_000)
+
+      request = %{
+        "messages" => [
+          %{
+            "role" => "user",
+            "content" => [
+              %{"type" => "text", "text" => "look at this"},
+              %{"type" => "image_url", "image_url" => %{"url" => data_uri}}
+            ]
+          }
+        ]
+      }
+
+      {truncated, flags} = Proxy.truncate_body(request)
+
+      assert "request_base64_truncated" in flags
+
+      [text_part, image_part] = truncated["messages"] |> hd() |> Map.get("content")
+      assert text_part["text"] == "look at this"
+      assert image_part["image_url"]["url"] =~ "truncated"
+      refute image_part["image_url"]["url"] =~ "QUJD"
+    end
+
+    test "truncates large text parts inside content lists" do
+      big_text = String.duplicate("hello world ", 20_000)
+
+      request = %{
+        "messages" => [
+          %{"role" => "user", "content" => [%{"type" => "text", "text" => big_text}]}
+        ]
+      }
+
+      {truncated, flags} = Proxy.truncate_body(request)
+
+      assert "request_text_truncated" in flags
+      [part] = truncated["messages"] |> hd() |> Map.get("content")
+      assert String.length(part["text"]) < 210_000
+    end
+
+    test "leaves small content parts and http image URLs unchanged" do
+      content = [
+        %{"type" => "text", "text" => "hi"},
+        %{"type" => "image_url", "image_url" => %{"url" => "https://example.com/x.png"}}
+      ]
+
+      request = %{"messages" => [%{"role" => "user", "content" => content}]}
+
+      {truncated, flags} = Proxy.truncate_body(request)
+
+      assert flags == []
+      assert truncated["messages"] |> hd() |> Map.get("content") == content
+    end
   end
 
   describe "attempted_steps JSON serialization" do

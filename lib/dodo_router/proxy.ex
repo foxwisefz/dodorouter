@@ -246,6 +246,14 @@ defmodule DodoRouter.Proxy do
 
                 {[new_msg | acc_msgs], new_flags}
 
+              content when is_list(content) ->
+                {truncated_parts, part_flags} = truncate_content_parts(content)
+
+                new_msg =
+                  if part_flags == [], do: msg, else: Map.put(msg, "content", truncated_parts)
+
+                {[new_msg | acc_msgs], part_flags ++ acc_flags}
+
               _ ->
                 {[msg | acc_msgs], acc_flags}
             end
@@ -257,6 +265,40 @@ defmodule DodoRouter.Proxy do
       _ ->
         {body, []}
     end
+  end
+
+  # Content parts arrays (multimodal messages) carry base64 images that would
+  # otherwise be stored verbatim in request_logs — megabytes per row.
+  defp truncate_content_parts(parts) do
+    {truncated, flags} =
+      Enum.reduce(parts, {[], []}, fn part, {acc_parts, acc_flags} ->
+        case part do
+          %{"type" => "image_url", "image_url" => %{"url" => "data:" <> _ = url}}
+          when byte_size(url) > 1000 ->
+            placeholder = "[base64 data: #{byte_size(url)} bytes truncated]"
+            new_part = put_in(part, ["image_url", "url"], placeholder)
+            {[new_part | acc_parts], ["request_base64_truncated" | acc_flags]}
+
+          %{"type" => "image", "source" => %{"data" => data}} when byte_size(data) > 1000 ->
+            placeholder = "[base64 data: #{byte_size(data)} bytes truncated]"
+            new_part = put_in(part, ["source", "data"], placeholder)
+            {[new_part | acc_parts], ["request_base64_truncated" | acc_flags]}
+
+          %{"type" => "text", "text" => text} when is_binary(text) ->
+            {truncated_text, was_truncated, flag} = smart_truncate(text)
+
+            if was_truncated do
+              {[Map.put(part, "text", truncated_text) | acc_parts], [flag | acc_flags]}
+            else
+              {[part | acc_parts], acc_flags}
+            end
+
+          _ ->
+            {[part | acc_parts], acc_flags}
+        end
+      end)
+
+    {Enum.reverse(truncated), Enum.reverse(flags)}
   end
 
   defp smart_truncate(content) when is_binary(content) do
