@@ -224,7 +224,7 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
 
   def build_anthropic_request(request, step) do
     messages = request["messages"] || []
-    {system_msg, system_cache_control, other_messages} = extract_system_message(messages)
+    {system_blocks, other_messages} = extract_system_blocks(messages)
 
     anthropic_messages =
       other_messages
@@ -238,19 +238,10 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
     }
 
     body =
-      if system_msg do
-        system_block = %{"type" => "text", "text" => system_msg}
-
-        system_block =
-          if system_cache_control do
-            Map.put(system_block, "cache_control", system_cache_control)
-          else
-            system_block
-          end
-
-        Map.put(body, "system", [system_block])
-      else
+      if system_blocks == [] do
         body
+      else
+        Map.put(body, "system", system_blocks)
       end
 
     # Optional params
@@ -284,43 +275,35 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
     end
   end
 
-  defp extract_system_message(messages) do
-    case Enum.split_with(messages, &(&1["role"] == "system")) do
-      {[], other} ->
-        {nil, nil, other}
+  # Hoists system messages into Anthropic's top-level system array, preserving
+  # block boundaries and per-block cache_control — joining blocks would slide
+  # client cache breakpoints to the end of the joined text and bust prompt
+  # caching whenever content after the breakpoint changes.
+  defp extract_system_blocks(messages) do
+    {system_msgs, other} = Enum.split_with(messages, &(&1["role"] == "system"))
 
-      {system_msgs, other} ->
-        {system_content, cache_control} =
-          Enum.reduce(system_msgs, {"", nil}, fn msg, {acc_text, acc_cc} ->
-            {text, block_cc} = extract_system_content(msg["content"])
-            new_text = if acc_text == "", do: text, else: acc_text <> "\n\n" <> text
-            cc = msg["cache_control"] || block_cc || acc_cc
-            {new_text, cc}
-          end)
+    blocks =
+      Enum.flat_map(system_msgs, fn msg ->
+        case msg["content"] do
+          content when is_binary(content) ->
+            block = %{"type" => "text", "text" => content}
 
-        {system_content, cache_control, other}
-    end
-  end
+            if msg["cache_control"],
+              do: [Map.put(block, "cache_control", msg["cache_control"])],
+              else: [block]
 
-  defp extract_system_content(content) when is_binary(content), do: {content, nil}
+          content when is_list(content) ->
+            content
+            |> Enum.filter(&(&1["type"] == "text"))
+            |> Enum.map(&Map.take(&1, ["type", "text", "cache_control"]))
 
-  defp extract_system_content(content) when is_list(content) do
-    text =
-      content
-      |> Enum.filter(&(&1["type"] == "text"))
-      |> Enum.map(& &1["text"])
-      |> Enum.join("\n")
-
-    cache_control =
-      Enum.find_value(Enum.reverse(content), fn
-        %{"cache_control" => cc} when cc != nil -> cc
-        _ -> nil
+          _ ->
+            []
+        end
       end)
 
-    {text, cache_control}
+    {blocks, other}
   end
-
-  defp extract_system_content(_), do: {"", nil}
 
   defp convert_message_to_anthropic(%{"role" => "assistant", "tool_calls" => tool_calls} = msg)
        when is_list(tool_calls) do
@@ -404,8 +387,15 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
   # both the OpenAI endpoint's parts arrays and native lists work.
   defp normalize_content_blocks(parts) do
     Enum.map(parts, fn
-      %{"type" => "image_url", "image_url" => %{"url" => url}} -> image_url_to_anthropic(url)
-      part -> part
+      %{"type" => "image_url", "image_url" => %{"url" => url}} = part ->
+        block = image_url_to_anthropic(url)
+
+        if part["cache_control"],
+          do: Map.put(block, "cache_control", part["cache_control"]),
+          else: block
+
+      part ->
+        part
     end)
   end
 

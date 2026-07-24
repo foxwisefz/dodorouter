@@ -545,6 +545,17 @@ When integrating a new provider:
 3. **Normalize in the adapter** — if the adapter converts usage (e.g. `convert_usage/1`), ensure the output satisfies `Adapter.extract_cache_read_tokens/1`. This function checks (in order): `cache_read_input_tokens`, `prompt_tokens_details.cached_tokens`, `prompt_cache_hit_tokens`, `cache_read_tokens`.
 4. **Test the seam** — write a test that pipes `convert_usage/1` output through `Adapter.extract_usage/1` and asserts `cache_read_tokens` is non-nil when cache data is present. Unit-testing each function in isolation is insufficient.
 
+## Prompt Cache Fidelity Through Format Conversion
+
+Anthropic prompt caching only hits when the request is a byte-stable prefix extension of a previous request, up to a `cache_control` breakpoint that sits at the same position. The Anthropic-endpoint conversion (`AnthropicFormat.to_openai_params` → `Adapters.Anthropic.build_anthropic_request`) must therefore obey two invariants:
+
+1. **Breakpoints stay on their blocks.** Never join multi-block content into one string when a block carries `cache_control`: the breakpoint slides to the end of the joined text, pulling any volatile tail (env info, the advisor question, mid-message reminders) inside the cached segment — every request then rewrites the whole tail (`cache_read` pins at the last stable breakpoint, `cache_creation` grows monotonically; this cost ~330k extra cache-write tokens per Claude Code session before it was fixed). Multi-block user/system content is carried as a parts array with per-part `cache_control`; the Anthropic adapter rebuilds blocks 1:1.
+2. **Representation depends only on content, never on cache_control.** Clients move breakpoints between turns; if cc presence changed a message's rendering (string vs parts), an unchanged message's bytes would change and bust the cache at that point. Single text block → string; anything else → parts. This rule must survive refactors.
+
+OpenAI-family providers cache by prefix automatically and need no `cache_control`; `Adapter.sanitize_messages` flattens parts arrays (user/tool/system) to plain strings for them, dropping the embedded cc keys.
+
+When touching the conversion, keep the "cache breakpoints survive the full request round-trip" seam tests green (`anthropic_format_test.exs`).
+
 ## LLM Provider Reasoning Effort Handling
 
 Reasoning/thinking controls are **not standardized** across LLM providers. The proxy stores a canonical `reasoning_effort` level on each `RoutingStep` and translates it into the provider-native field when building the upstream request.

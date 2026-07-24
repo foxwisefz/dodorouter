@@ -330,9 +330,11 @@ defmodule DodoRouter.Proxy.Adapter do
 
   # Normalize content from array format to string.
   # OpenAI-style: [{"type": "text", "text": "..."}] -> "..."
-  # Only normalize for tool messages and when content is a list.
+  # System parts arrays come from the Anthropic endpoint's block-preserving
+  # conversion; OpenAI-family providers cache by prefix automatically, so
+  # flattening (and dropping the embedded cache_control keys) is safe here.
   defp normalize_message_content(%{"content" => content, "role" => role} = msg)
-       when is_list(content) and role in ["tool", "user"] do
+       when is_list(content) and role in ["tool", "user", "system"] do
     normalized =
       content
       |> Enum.map(fn
