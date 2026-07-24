@@ -418,4 +418,29 @@ defmodule DodoRouter.Proxy.AdapterTest do
                %{"effort" => "none"}
     end
   end
+
+  describe "sanitize_request/1 with content parts" do
+    test "flattens system parts arrays to a string for OpenAI-family providers" do
+      request = %{
+        "model" => "m",
+        "messages" => [
+          %{
+            "role" => "system",
+            "content" => [
+              %{"type" => "text", "text" => "IDENTITY"},
+              %{
+                "type" => "text",
+                "text" => "BIG PROMPT",
+                "cache_control" => %{"type" => "ephemeral"}
+              }
+            ]
+          },
+          %{"role" => "user", "content" => "hi"}
+        ]
+      }
+
+      [sys_msg | _] = Adapter.sanitize_request(request)["messages"]
+      assert sys_msg["content"] == "IDENTITY\nBIG PROMPT"
+    end
+  end
 end

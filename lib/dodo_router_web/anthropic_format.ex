@@ -17,30 +17,29 @@ defmodule DodoRouterWeb.AnthropicFormat do
           [%{"role" => "system", "content" => system} | messages]
 
         system when is_list(system) ->
-          {text, cache_control} =
-            Enum.reduce(system, {"", nil}, fn block, {acc_text, acc_cc} ->
-              new_text =
-                if block["type"] == "text" do
-                  if acc_text == "", do: block["text"], else: acc_text <> "\n" <> block["text"]
-                else
-                  acc_text
-                end
+          # Block boundaries and per-block cache_control must survive:
+          # joining blocks slides the client's cache breakpoint to the end of
+          # the joined text, so any volatile block after the breakpoint busts
+          # the whole cached prefix on every request.
+          case Enum.filter(system, &(&1["type"] == "text")) do
+            [] ->
+              messages
 
-              new_cc = block["cache_control"] || acc_cc
-              {new_text, new_cc}
-            end)
+            [only] ->
+              sys_msg = %{"role" => "system", "content" => only["text"]}
 
-          if text != "" do
-            sys_msg = %{"role" => "system", "content" => text}
+              sys_msg =
+                if only["cache_control"],
+                  do: Map.put(sys_msg, "cache_control", only["cache_control"]),
+                  else: sys_msg
 
-            sys_msg =
-              if cache_control,
-                do: Map.put(sys_msg, "cache_control", cache_control),
-                else: sys_msg
+              [sys_msg | messages]
 
-            [sys_msg | messages]
-          else
-            messages
+            blocks ->
+              parts =
+                Enum.map(blocks, &Map.take(&1, ["type", "text", "cache_control"]))
+
+              [%{"role" => "system", "content" => parts} | messages]
           end
       end
 
@@ -53,6 +52,7 @@ defmodule DodoRouterWeb.AnthropicFormat do
     |> maybe_put("temperature", anthropic_params["temperature"])
     |> maybe_put("top_p", anthropic_params["top_p"])
     |> maybe_put("stop", anthropic_params["stop_sequences"])
+    |> maybe_put("thinking", anthropic_params["thinking"])
     |> maybe_put_tools(anthropic_params["tools"])
   end
 
@@ -283,24 +283,20 @@ defmodule DodoRouterWeb.AnthropicFormat do
             parts -> [%{"role" => "user", "content" => parts}]
           end
 
-        # Preserve cache_control from the last text block that has it
-        cache_control =
-          Enum.find_value(Enum.reverse(other_blocks), fn
-            %{"type" => "text", "cache_control" => cc} when cc != nil -> cc
-            _ -> nil
-          end)
-
         user_messages =
           case user_content_from_blocks(other_blocks) do
             nil ->
               []
 
-            content ->
-              user_msg = %{"role" => "user", "content" => content}
+            {:string, text, cache_control} ->
+              user_msg = %{"role" => "user", "content" => text}
 
               if cache_control,
                 do: [Map.put(user_msg, "cache_control", cache_control)],
                 else: [user_msg]
+
+            {:parts, parts} ->
+              [%{"role" => "user", "content" => parts}]
           end
 
         tool_messages ++ tool_image_messages ++ user_messages
@@ -377,42 +373,56 @@ defmodule DodoRouterWeb.AnthropicFormat do
   end
 
   # Builds OpenAI user-message content from Anthropic content blocks.
-  # Text-only content stays a joined string (the historical shape); as soon as
-  # an image is involved the content becomes an OpenAI parts array so the
-  # image survives — parts arrays are the intermediate contract adapters
-  # already understand (see Adapters.Google.convert_content_parts/1).
+  # A single text block stays a string (the historical shape); anything else
+  # becomes an OpenAI parts array preserving per-block cache_control — parts
+  # arrays are the intermediate contract adapters already understand (see
+  # Adapters.Google.convert_content_parts/1).
+  #
+  # The string-vs-parts choice must depend only on the content, never on
+  # cache_control: clients move breakpoints between turns, and a
+  # representation change would alter the rendered bytes of an unchanged
+  # message and bust the prompt cache at that point.
   defp user_content_from_blocks(blocks) do
-    if Enum.any?(blocks, &(&1["type"] == "image")) do
-      parts =
-        blocks
-        |> Enum.map(fn
-          %{"type" => "text", "text" => text} -> %{"type" => "text", "text" => text}
-          %{"type" => "image"} = block -> image_block_to_openai_part(block)
-          _ -> nil
-        end)
-        |> Enum.reject(&is_nil/1)
+    kept = Enum.filter(blocks, &(&1["type"] in ["text", "image"]))
 
-      if parts == [], do: nil, else: parts
-    else
-      case blocks |> Enum.filter(&(&1["type"] == "text")) |> Enum.map(& &1["text"]) do
-        [] -> nil
-        texts -> Enum.join(texts, "\n")
-      end
+    case kept do
+      [] ->
+        nil
+
+      [%{"type" => "text"} = only] ->
+        {:string, only["text"], only["cache_control"]}
+
+      blocks ->
+        parts =
+          blocks
+          |> Enum.map(fn
+            %{"type" => "text"} = block -> Map.take(block, ["type", "text", "cache_control"])
+            %{"type" => "image"} = block -> image_block_to_openai_part(block)
+          end)
+          |> Enum.reject(&is_nil/1)
+
+        if parts == [], do: nil, else: {:parts, parts}
     end
   end
 
-  defp image_block_to_openai_part(%{
-         "type" => "image",
-         "source" => %{"type" => "base64", "media_type" => media_type, "data" => data}
-       }) do
+  defp image_block_to_openai_part(
+         %{
+           "type" => "image",
+           "source" => %{"type" => "base64", "media_type" => media_type, "data" => data}
+         } = block
+       ) do
     %{"type" => "image_url", "image_url" => %{"url" => "data:#{media_type};base64,#{data}"}}
+    |> maybe_put("cache_control", block["cache_control"])
   end
 
-  defp image_block_to_openai_part(%{
-         "type" => "image",
-         "source" => %{"type" => "url", "url" => url}
-       }) do
+  defp image_block_to_openai_part(
+         %{
+           "type" => "image",
+           "source" => %{"type" => "url", "url" => url}
+         } = block
+       ) do
     %{"type" => "image_url", "image_url" => %{"url" => url}}
+    |> maybe_put("cache_control", block["cache_control"])
   end
 
   defp image_block_to_openai_part(_block), do: nil

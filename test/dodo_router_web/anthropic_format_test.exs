@@ -438,6 +438,190 @@ defmodule DodoRouterWeb.AnthropicFormatTest do
     end
   end
 
+  describe "cache_control position preservation (to_openai_params/1)" do
+    test "multi-block user content keeps per-block cache_control as parts" do
+      anthropic = %{
+        "messages" => [
+          %{
+            "role" => "user",
+            "content" => [
+              %{
+                "type" => "text",
+                "text" => "STABLE TRANSCRIPT",
+                "cache_control" => %{"type" => "ephemeral"}
+              },
+              %{"type" => "text", "text" => "VOLATILE QUESTION"}
+            ]
+          }
+        ]
+      }
+
+      [msg] = AnthropicFormat.to_openai_params(anthropic)["messages"]
+
+      assert msg["content"] == [
+               %{
+                 "type" => "text",
+                 "text" => "STABLE TRANSCRIPT",
+                 "cache_control" => %{"type" => "ephemeral"}
+               },
+               %{"type" => "text", "text" => "VOLATILE QUESTION"}
+             ]
+
+      refute Map.has_key?(msg, "cache_control")
+    end
+
+    test "single text block stays a string with message-level cache_control" do
+      anthropic = %{
+        "messages" => [
+          %{
+            "role" => "user",
+            "content" => [
+              %{"type" => "text", "text" => "hello", "cache_control" => %{"type" => "ephemeral"}}
+            ]
+          }
+        ]
+      }
+
+      [msg] = AnthropicFormat.to_openai_params(anthropic)["messages"]
+      assert msg["content"] == "hello"
+      assert msg["cache_control"] == %{"type" => "ephemeral"}
+    end
+
+    test "multi-block system keeps per-block cache_control and block boundaries" do
+      anthropic = %{
+        "system" => [
+          %{"type" => "text", "text" => "IDENTITY"},
+          %{
+            "type" => "text",
+            "text" => "BIG STABLE PROMPT",
+            "cache_control" => %{"type" => "ephemeral", "ttl" => "1h"}
+          },
+          %{"type" => "text", "text" => "VOLATILE ENV INFO"}
+        ],
+        "messages" => [%{"role" => "user", "content" => "hi"}]
+      }
+
+      [sys_msg | _] = AnthropicFormat.to_openai_params(anthropic)["messages"]
+
+      assert sys_msg["role"] == "system"
+
+      assert sys_msg["content"] == [
+               %{"type" => "text", "text" => "IDENTITY"},
+               %{
+                 "type" => "text",
+                 "text" => "BIG STABLE PROMPT",
+                 "cache_control" => %{"type" => "ephemeral", "ttl" => "1h"}
+               },
+               %{"type" => "text", "text" => "VOLATILE ENV INFO"}
+             ]
+    end
+
+    test "single-block system stays a string" do
+      anthropic = %{
+        "system" => [%{"type" => "text", "text" => "just one block"}],
+        "messages" => [%{"role" => "user", "content" => "hi"}]
+      }
+
+      [sys_msg | _] = AnthropicFormat.to_openai_params(anthropic)["messages"]
+      assert sys_msg["content"] == "just one block"
+    end
+
+    test "forwards the thinking config" do
+      anthropic = %{
+        "messages" => [%{"role" => "user", "content" => "hi"}],
+        "thinking" => %{"type" => "enabled", "budget_tokens" => 8000}
+      }
+
+      result = AnthropicFormat.to_openai_params(anthropic)
+      assert result["thinking"] == %{"type" => "enabled", "budget_tokens" => 8000}
+    end
+  end
+
+  describe "seam: cache breakpoints survive the full request round-trip" do
+    alias DodoRouter.Proxy.Adapters.Anthropic, as: AnthropicAdapter
+    alias DodoRouter.Routers.RoutingStep, as: Step
+
+    test "a breakpoint on a non-final block stays on that block" do
+      anthropic_request = %{
+        "model" => "claude-sonnet-5",
+        "max_tokens" => 100,
+        "system" => [
+          %{"type" => "text", "text" => "IDENTITY"},
+          %{
+            "type" => "text",
+            "text" => "BIG STABLE PROMPT",
+            "cache_control" => %{"type" => "ephemeral", "ttl" => "1h"}
+          },
+          %{"type" => "text", "text" => "VOLATILE ENV INFO"}
+        ],
+        "messages" => [
+          %{
+            "role" => "user",
+            "content" => [
+              %{
+                "type" => "text",
+                "text" => "STABLE TRANSCRIPT",
+                "cache_control" => %{"type" => "ephemeral"}
+              },
+              %{"type" => "text", "text" => "VOLATILE QUESTION"}
+            ]
+          }
+        ],
+        "thinking" => %{"type" => "enabled", "budget_tokens" => 8000}
+      }
+
+      body =
+        anthropic_request
+        |> AnthropicFormat.to_openai_params()
+        |> AnthropicAdapter.build_anthropic_request(%Step{model: "claude-sonnet-5"})
+
+      # system: three blocks, breakpoint still on the middle one
+      assert [id_block, stable_block, env_block] = body["system"]
+      assert id_block["text"] == "IDENTITY"
+      refute Map.has_key?(id_block, "cache_control")
+      assert stable_block["text"] == "BIG STABLE PROMPT"
+      assert stable_block["cache_control"] == %{"type" => "ephemeral", "ttl" => "1h"}
+      assert env_block["text"] == "VOLATILE ENV INFO"
+      refute Map.has_key?(env_block, "cache_control")
+
+      # user message: breakpoint on the transcript block, not the question
+      [msg] = body["messages"]
+      assert [transcript_block, question_block] = msg["content"]
+      assert transcript_block["text"] == "STABLE TRANSCRIPT"
+      assert transcript_block["cache_control"] == %{"type" => "ephemeral"}
+      assert question_block["text"] == "VOLATILE QUESTION"
+      refute Map.has_key?(question_block, "cache_control")
+
+      # client thinking config survives
+      assert body["thinking"] == %{"type" => "enabled", "budget_tokens" => 8000}
+    end
+
+    test "representation does not depend on cache_control placement" do
+      # Claude Code moves breakpoints between turns; the rendered content
+      # bytes must not change when only cache_control moves, or the cache
+      # busts at this message.
+      blocks_with_cc = [
+        %{"type" => "text", "text" => "part one", "cache_control" => %{"type" => "ephemeral"}},
+        %{"type" => "text", "text" => "part two"}
+      ]
+
+      blocks_without_cc = [
+        %{"type" => "text", "text" => "part one"},
+        %{"type" => "text", "text" => "part two"}
+      ]
+
+      convert = fn blocks ->
+        %{"messages" => [%{"role" => "user", "content" => blocks}]}
+        |> AnthropicFormat.to_openai_params()
+        |> AnthropicAdapter.build_anthropic_request(%Step{model: "m"})
+        |> get_in(["messages", Access.at(0), "content"])
+        |> Enum.map(&Map.delete(&1, "cache_control"))
+      end
+
+      assert convert.(blocks_with_cc) == convert.(blocks_without_cc)
+    end
+  end
+
   describe "image passthrough (to_openai_params/1)" do
     @png_block %{
       "type" => "image",
@@ -491,7 +675,7 @@ defmodule DodoRouterWeb.AnthropicFormatTest do
              ]
     end
 
-    test "text-only content stays a joined string (no format change)" do
+    test "multiple text blocks stay separate parts (block boundaries preserved)" do
       anthropic = %{
         "messages" => [
           %{
@@ -505,7 +689,11 @@ defmodule DodoRouterWeb.AnthropicFormatTest do
       }
 
       [msg] = AnthropicFormat.to_openai_params(anthropic)["messages"]
-      assert msg["content"] == "one\ntwo"
+
+      assert msg["content"] == [
+               %{"type" => "text", "text" => "one"},
+               %{"type" => "text", "text" => "two"}
+             ]
     end
 
     test "images inside tool_result content surface as a user message after the tool message" do
