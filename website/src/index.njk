@@ -1,7 +1,7 @@
 ---
 layout: base.njk
-title: DodoRouter — The LLM proxy with automatic fallback
-description: Drop-in OpenAI- and Anthropic-compatible proxy. Chain providers, fall back automatically on rate limits, outages, and context overflows, and see every request. Free to start.
+title: DodoRouter — See real traffic while you build your AI harness
+description: The observability layer for AI operators. Point Claude Code or any OpenAI- and Anthropic-compatible tool at DodoRouter and watch every prompt, token, and dollar live — while you build your harness. Free to start.
 ---
 
 <section class="hero-canvas relative overflow-hidden bg-background">
@@ -12,22 +12,22 @@ description: Drop-in OpenAI- and Anthropic-compatible proxy. Chain providers, fa
           <span class="absolute inline-flex h-full w-full animate-ping rounded-full bg-go opacity-75"></span>
           <span class="relative inline-flex h-2 w-2 rounded-full bg-go"></span>
         </span>
-        Open source · OpenAI &amp; Anthropic compatible
+        Open source · Works with Claude Code &amp; any AI tool
       </div>
 
       <h1 class="animate-fade-up mt-6 font-display text-5xl md:text-6xl lg:text-[4.75rem] leading-[0.95] tracking-tight text-foreground" style="--fade-y: 16px; --fade-duration: 0.6s; --fade-delay: 0.1s;">
-        Every model. One dashboard.<br />
-        <em>Zero babysitting.</em>
+        See <em>real traffic</em> while you build your harness.
       </h1>
 
       <p class="animate-fade-up mt-5 text-base md:text-lg text-muted-foreground leading-relaxed font-body max-w-2xl mx-auto" style="--fade-y: 16px; --fade-duration: 0.6s; --fade-delay: 0.2s;">
-        Point your agent at DodoRouter once. Then rewire providers, watch every request,
-        and survive every outage — live, from the dashboard, without touching code again.
+        DodoRouter sits between your AI tools and the model providers. Every prompt the
+        model actually received, every token, every dollar — live in a dashboard, so you
+        tune your master prompt with evidence instead of guesswork.
       </p>
 
       <div class="animate-fade-up mt-7 flex items-center justify-center gap-3" style="--fade-y: 16px; --fade-duration: 0.6s; --fade-delay: 0.3s;">
         <a href="https://api.dodorouter.com/users/register" class="rounded-full bg-primary px-7 py-3 text-sm font-medium font-body text-primary-foreground transition-all hover:opacity-90">
-          Get started free →
+          Start watching free →
         </a>
         <a href="https://github.com/foxwise-ai/dodorouter" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-2 rounded-full border border-border bg-background px-5 py-3 text-sm font-medium font-body text-foreground transition-colors hover:bg-secondary">
           <svg class="h-4 w-4 fill-foreground" viewBox="0 0 24 24"><path d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"/></svg>
@@ -138,7 +138,7 @@ description: Drop-in OpenAI- and Anthropic-compatible proxy. Chain providers, fa
         </div>
       </div>
       <p class="mt-3 text-center text-xs text-muted-foreground font-body">
-        This is the product: a router that heals itself while you watch — or don't.
+        This is the product: your AI's real traffic, live — one setting change away.
       </p>
     </div>
   </div>
@@ -151,31 +151,31 @@ description: Drop-in OpenAI- and Anthropic-compatible proxy. Chain providers, fa
   <div class="mx-auto max-w-6xl px-6 md:px-12 lg:px-20">
     <div class="grid items-center gap-12 lg:grid-cols-2 lg:gap-20">
       <div>
-        <p class="text-sm font-semibold tracking-wide text-accent font-body">Drop-in compatible</p>
+        <p class="text-sm font-semibold tracking-wide text-accent font-body">Two-minute setup</p>
         <h2 class="mt-3 font-display text-3xl md:text-4xl lg:text-5xl leading-[1.05] tracking-tight text-foreground">
-          Stop building reliability into every agent.<br/>Build it once.
+          One setting change.<br/>Total visibility.
         </h2>
         <p class="mt-5 text-base md:text-lg text-muted-foreground leading-relaxed font-body max-w-lg">
-          Change one line of code and every agent you build — today or next year — gets automatic fallback, full observability, and provider switching. No SDK changes. No deployment. Your agent code stays exactly the same.
+          Point Claude Code, your agent, or any AI tool at DodoRouter instead of the model provider directly. The tool works exactly as before — but now every call flows through a dashboard you watch while you build.
         </p>
         <ul class="mt-6 space-y-3">
           <li class="flex items-start gap-3">
             <span class="mt-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-go/10">
               <svg class="h-3 w-3 text-go" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
             </span>
-            <span class="text-sm text-foreground font-body">One line change — update <code class="rounded bg-secondary px-1.5 py-0.5 text-xs font-mono text-accent">base_url</code> and you're protected</span>
+            <span class="text-sm text-foreground font-body">Change the <code class="rounded bg-secondary px-1.5 py-0.5 text-xs font-mono text-accent">base_url</code> in your tool's settings — no code required</span>
           </li>
           <li class="flex items-start gap-3">
             <span class="mt-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-go/10">
               <svg class="h-3 w-3 text-go" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
             </span>
-            <span class="text-sm text-foreground font-body">Streaming, tool calls, and context window overflow handled automatically</span>
+            <span class="text-sm text-foreground font-body">Works with Claude Code, OpenCode, and anything OpenAI- or Anthropic-compatible</span>
           </li>
           <li class="flex items-start gap-3">
             <span class="mt-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-go/10">
               <svg class="h-3 w-3 text-go" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
             </span>
-            <span class="text-sm text-foreground font-body">Full request logs, headers, and error bodies for every failure — no more guessing</span>
+            <span class="text-sm text-foreground font-body">See exactly what your master prompt becomes by the time it reaches the model</span>
           </li>
         </ul>
       </div>
@@ -238,12 +238,12 @@ description: Drop-in OpenAI- and Anthropic-compatible proxy. Chain providers, fa
       <div class="lg:col-span-2 reveal-rise">
         <p class="text-sm font-semibold tracking-wide text-accent font-body">Automatic fallback</p>
         <h2 class="mt-3 font-display text-3xl md:text-4xl lg:text-5xl leading-[1.05] tracking-tight text-foreground">
-          When a provider fails,<br /><em>nobody notices.</em>
+          When a provider fails,<br /><em>your harness doesn't.</em>
         </h2>
         <p class="mt-5 text-base text-muted-foreground leading-relaxed font-body">
-          Rate limits, outages, overloaded models, context overflows — your chain absorbs
-          them all. The request silently reroutes to the next step and your user gets an
-          answer, not an error page.
+          Rate limits, outages, overloaded models, context overflows — the chain absorbs
+          them all. The request silently reroutes to the next provider and your playbook
+          keeps running: no failed client demo, no broken automation, no error page.
         </p>
         <div class="mt-6 flex flex-wrap gap-2 font-body">
           <span class="inline-flex items-center gap-1.5 rounded-full border border-border bg-background px-3 py-1 text-xs font-medium text-foreground">
@@ -337,39 +337,41 @@ description: Drop-in OpenAI- and Anthropic-compatible proxy. Chain providers, fa
     <div data-reveal class="mt-24">
       <div class="text-center max-w-2xl mx-auto reveal-rise">
         <h3 class="font-display text-3xl md:text-4xl leading-[1.05] tracking-tight text-foreground">
-          Reliability is just the <em>beginning</em>
+          Seeing is just the <em>beginning</em>
         </h3>
         <p class="mt-4 text-base text-muted-foreground leading-relaxed font-body">
-          Everything between your code and the model — handled, visible, and adjustable while it runs.
+          Everything between your tools and the model — visible, adjustable, and resilient while it runs.
         </p>
       </div>
     </div>
 
-    {# 1 — mid-stream recovery #}
+    {# 1 — flight recorder #}
     <div data-reveal class="mt-16 grid items-center gap-10 lg:grid-cols-2 lg:gap-16 font-body">
       <div class="reveal-rise">
-        <p class="text-sm font-semibold tracking-wide text-accent">Mid-stream failure recovery</p>
-        <h3 class="mt-2 font-display text-2xl md:text-3xl tracking-tight text-foreground">The stream dies. The sentence doesn't.</h3>
+        <p class="text-sm font-semibold tracking-wide text-accent">The flight recorder</p>
+        <h3 class="mt-2 font-display text-2xl md:text-3xl tracking-tight text-foreground">You wrote the master prompt. Now see what the model actually got.</h3>
         <p class="mt-4 text-muted-foreground leading-relaxed">
-          The cruelest failure mode: a provider drops the connection halfway through a streamed
-          answer, with tool calls in flight. DodoRouter catches the dropped stream, re-issues the
-          request on the next step in your chain, and keeps streaming to your client.
+          Every request opens into the full picture: the conversation, the raw request and
+          response, the headers, and exactly how much context the model received. When an
+          output surprises you — too generic, off-brand, suddenly worse — the reason is on
+          screen, not in your imagination.
         </p>
         <ul class="mt-4 space-y-2 text-sm text-foreground">
-          <li class="flex gap-2"><span class="text-go">✓</span> No broken half-messages in your UI</li>
-          <li class="flex gap-2"><span class="text-go">✓</span> Tool-call state carried across providers</li>
-          <li class="flex gap-2"><span class="text-go">✓</span> Logged as a fallback, so you can see it happened</li>
+          <li class="flex gap-2"><span class="text-go">✓</span> Verify your 30-page master prompt arrived intact — every run</li>
+          <li class="flex gap-2"><span class="text-go">✓</span> Cost and cache-hit analytics per model and provider</li>
+          <li class="flex gap-2"><span class="text-go">✓</span> Live — new requests appear as they happen</li>
         </ul>
       </div>
       <div class="reveal-rise rounded-2xl border border-border bg-white p-6 shadow-[0_8px_40px_rgba(0,0,0,0.04)]" style="--reveal-delay: 0.1s" aria-hidden="true">
-        <div class="flex items-center gap-2 text-xs text-muted-foreground mb-3">
-          <span class="rounded bg-accent/10 px-2 py-0.5 font-bold text-accent">streaming</span>
-          <span class="ms-drop-chip scene-anim rounded bg-error/10 px-2 py-0.5 font-bold text-error">openai dropped mid-stream</span>
+        <div class="flex items-center justify-between mb-3 text-xs">
+          <span class="rounded bg-accent/10 px-2 py-0.5 font-bold text-accent">session: hiring-playbook</span>
+          <span class="flex items-center gap-1.5 font-bold text-error"><span class="rec-dot scene-anim h-2 w-2 rounded-full bg-error"></span>REC</span>
         </div>
-        <div class="rounded-xl bg-secondary/30 border border-border p-4 text-sm leading-relaxed text-foreground font-mono">
-          <div class="ms-line-1 scene-anim">The three key findings from the</div>
-          <div class="flex"><div class="ms-line-2 scene-anim">Q3 report are: first, revenue…</div><span class="ms-caret scene-anim text-accent">▌</span></div>
-          <div class="mt-3 text-xs text-muted-foreground">↳ continued by <span class="font-semibold text-go">anthropic</span> — same message, no reset, client never disconnected</div>
+        <div class="space-y-1.5 text-xs font-mono">
+          <div class="ss-row scene-anim flex justify-between rounded-lg bg-secondary/40 border border-border px-3 py-2"><span class="text-foreground">draft_job_post → 200</span><span class="text-muted-foreground">241ms</span></div>
+          <div class="ss-row scene-anim flex justify-between rounded-lg bg-secondary/40 border border-border px-3 py-2" style="animation-delay: 0.7s"><span class="text-foreground">screen_candidates → 200</span><span class="text-muted-foreground">189ms · 82% cached</span></div>
+          <div class="ss-row scene-anim flex justify-between rounded-lg bg-secondary/40 border border-border px-3 py-2" style="animation-delay: 1.4s"><span class="text-warn">interview_questions → fallback</span><span class="text-muted-foreground">1.2s · trace ↗</span></div>
+          <div class="ss-row scene-anim flex justify-between rounded-lg bg-secondary/40 border border-border px-3 py-2" style="animation-delay: 2.1s"><span class="text-foreground">write_offer_email → 200</span><span class="text-muted-foreground">203ms</span></div>
         </div>
       </div>
     </div>
@@ -397,12 +399,12 @@ description: Drop-in OpenAI- and Anthropic-compatible proxy. Chain providers, fa
       </div>
       <div class="reveal-rise order-1 lg:order-2">
         <p class="text-sm font-semibold tracking-wide text-accent">Context-overflow rerouting</p>
-        <h3 class="mt-2 font-display text-2xl md:text-3xl tracking-tight text-foreground">Too many tokens? Hop to a bigger window.</h3>
+        <h3 class="mt-2 font-display text-2xl md:text-3xl tracking-tight text-foreground">Master prompts are getting huge. Never hit the wall.</h3>
         <p class="mt-4 text-muted-foreground leading-relaxed">
-          Every provider reports overflow differently — OpenAI throws a code, Anthropic says
-          "prompt is too long", z.ai returns a 200 with a special finish_reason, Kimi 400s with
-          the count. DodoRouter knows every dialect, and instead of guessing token limits
-          preflight, it reacts to the real signal and reroutes to a model with room.
+          A 30-page business brain plus a long conversation will outgrow some model's window —
+          and every provider reports it differently. DodoRouter knows each dialect, reacts to
+          the real signal, and reroutes to a model with room. Your harness grows without
+          artificial ceilings.
         </p>
         <ul class="mt-4 space-y-2 text-sm text-foreground">
           <li class="flex gap-2"><span class="text-go">✓</span> Per-provider overflow detection, maintained for you</li>
@@ -416,12 +418,11 @@ description: Drop-in OpenAI- and Anthropic-compatible proxy. Chain providers, fa
     <div data-reveal class="mt-20 grid items-center gap-10 lg:grid-cols-2 lg:gap-16 font-body">
       <div class="reveal-rise">
         <p class="text-sm font-semibold tracking-wide text-accent">Replay &amp; compare</p>
-        <h3 class="mt-2 font-display text-2xl md:text-3xl tracking-tight text-foreground">Audition models on your real traffic.</h3>
+        <h3 class="mt-2 font-display text-2xl md:text-3xl tracking-tight text-foreground">Tune your harness with evidence, not vibes.</h3>
         <p class="mt-4 text-muted-foreground leading-relaxed">
-          Wondering if a cheaper model could handle your workload? Take any logged request and
+          Could a cheaper model run your playbook just as well? Take any real request and
           re-run it against a different provider or model — the answers render side by side,
-          diffed, with tokens and latency compared. No synthetic benchmarks; your production
-          prompts are the benchmark.
+          diffed, with tokens and cost compared. Your actual prompts are the benchmark.
         </p>
         <ul class="mt-4 space-y-2 text-sm text-foreground">
           <li class="flex gap-2"><span class="text-go">✓</span> Replay against any provider key you hold</li>
@@ -481,12 +482,11 @@ description: Drop-in OpenAI- and Anthropic-compatible proxy. Chain providers, fa
       </div>
       <div class="reveal-rise order-1 lg:order-2">
         <p class="text-sm font-semibold tracking-wide text-accent">Rewire in production</p>
-        <h3 class="mt-2 font-display text-2xl md:text-3xl tracking-tight text-foreground">Change everything. Deploy nothing.</h3>
+        <h3 class="mt-2 font-display text-2xl md:text-3xl tracking-tight text-foreground">Change everything. Redeploy nothing.</h3>
         <p class="mt-4 text-muted-foreground leading-relaxed">
-          Reorder steps, swap models, rotate keys, tune reasoning effort and temperature —
-          from the dashboard, effective on the very next request. Your agent keeps its one
-          base URL; the routing behind it is yours to remix at any hour, mid-incident,
-          without a code change or restart.
+          Swap models, reorder providers, tune reasoning effort — from the dashboard,
+          effective on the very next request. Your tools keep one URL; the routing behind
+          it is yours to remix at any hour, without touching a config or waiting on a deploy.
         </p>
         <ul class="mt-4 space-y-2 text-sm text-foreground">
           <li class="flex gap-2"><span class="text-go">✓</span> Per-step model, key, reasoning effort, temperature</li>
@@ -500,12 +500,12 @@ description: Drop-in OpenAI- and Anthropic-compatible proxy. Chain providers, fa
     <div data-reveal class="mt-20 grid items-center gap-10 lg:grid-cols-2 lg:gap-16 font-body">
       <div class="reveal-rise">
         <p class="text-sm font-semibold tracking-wide text-accent">Subscriptions as keys</p>
-        <h3 class="mt-2 font-display text-2xl md:text-3xl tracking-tight text-foreground">Route through plans you already pay for.</h3>
+        <h3 class="mt-2 font-display text-2xl md:text-3xl tracking-tight text-foreground">Run your playbooks on plans you already pay for.</h3>
         <p class="mt-4 text-muted-foreground leading-relaxed">
           Claude Max, ChatGPT Pro, Kimi Code, z.ai Coding — those subscriptions carry serious
-          model quota. DodoRouter treats them as first-class provider keys (OAuth device flow
-          built in, no token copy-pasting) so your chain can burn subscription quota first and
-          fall back to pay-as-you-go API keys only when it runs dry.
+          model quota. DodoRouter treats them as first-class provider keys (sign in with a
+          device code, no token copy-pasting) so your harness burns subscription quota first
+          and falls back to pay-as-you-go API keys only when it runs dry.
         </p>
         <ul class="mt-4 space-y-2 text-sm text-foreground">
           <li class="flex gap-2"><span class="text-go">✓</span> Connect with a device-code login, not a pasted token</li>
@@ -529,33 +529,31 @@ description: Drop-in OpenAI- and Anthropic-compatible proxy. Chain providers, fa
       </div>
     </div>
 
-    {# 6 — flight recorder #}
+    {# 6 — mid-stream recovery #}
     <div data-reveal class="mt-20 grid items-center gap-10 lg:grid-cols-2 lg:gap-16 font-body">
       <div class="reveal-rise order-2 lg:order-1 rounded-2xl border border-border bg-white p-6 shadow-[0_8px_40px_rgba(0,0,0,0.04)]" style="--reveal-delay: 0.1s" aria-hidden="true">
-        <div class="flex items-center justify-between mb-3 text-xs">
-          <span class="rounded bg-accent/10 px-2 py-0.5 font-bold text-accent">session: checkout-agent</span>
-          <span class="flex items-center gap-1.5 font-bold text-error"><span class="rec-dot scene-anim h-2 w-2 rounded-full bg-error"></span>REC</span>
+        <div class="flex items-center gap-2 text-xs text-muted-foreground mb-3">
+          <span class="rounded bg-accent/10 px-2 py-0.5 font-bold text-accent">streaming</span>
+          <span class="ms-drop-chip scene-anim rounded bg-error/10 px-2 py-0.5 font-bold text-error">openai dropped mid-stream</span>
         </div>
-        <div class="space-y-1.5 text-xs font-mono">
-          <div class="ss-row scene-anim flex justify-between rounded-lg bg-secondary/40 border border-border px-3 py-2"><span class="text-foreground">get_cart → 200</span><span class="text-muted-foreground">241ms</span></div>
-          <div class="ss-row scene-anim flex justify-between rounded-lg bg-secondary/40 border border-border px-3 py-2" style="animation-delay: 0.7s"><span class="text-foreground">apply_discount → 200</span><span class="text-muted-foreground">189ms · 82% cached</span></div>
-          <div class="ss-row scene-anim flex justify-between rounded-lg bg-secondary/40 border border-border px-3 py-2" style="animation-delay: 1.4s"><span class="text-warn">charge_card → fallback</span><span class="text-muted-foreground">1.2s · trace ↗</span></div>
-          <div class="ss-row scene-anim flex justify-between rounded-lg bg-secondary/40 border border-border px-3 py-2" style="animation-delay: 2.1s"><span class="text-foreground">send_receipt → 200</span><span class="text-muted-foreground">203ms</span></div>
+        <div class="rounded-xl bg-secondary/30 border border-border p-4 text-sm leading-relaxed text-foreground font-mono">
+          <div class="ms-line-1 scene-anim">The three key findings from the</div>
+          <div class="flex"><div class="ms-line-2 scene-anim">Q3 report are: first, revenue…</div><span class="ms-caret scene-anim text-accent">▌</span></div>
+          <div class="mt-3 text-xs text-muted-foreground">↳ continued by <span class="font-semibold text-go">anthropic</span> — same message, no reset, client never disconnected</div>
         </div>
       </div>
       <div class="reveal-rise order-1 lg:order-2">
-        <p class="text-sm font-semibold tracking-wide text-accent">The flight recorder</p>
-        <h3 class="mt-2 font-display text-2xl md:text-3xl tracking-tight text-foreground">Every request your agent ever made, inspectable.</h3>
+        <p class="text-sm font-semibold tracking-wide text-accent">Mid-stream failure recovery</p>
+        <h3 class="mt-2 font-display text-2xl md:text-3xl tracking-tight text-foreground">The stream dies. The sentence doesn't.</h3>
         <p class="mt-4 text-muted-foreground leading-relaxed">
-          One header groups requests into sessions; recordings capture whole conversations.
-          Each request opens into a full picture — the conversation, the raw request and
-          response, headers, and a per-step fallback trace with each provider's real error
-          body. When something goes wrong, the cause is on screen, not in your imagination.
+          The cruelest failure mode: a provider drops the connection halfway through a streamed
+          answer, with tool calls in flight. DodoRouter catches the dropped stream, re-issues the
+          request on the next step in your chain, and keeps streaming to your tool.
         </p>
         <ul class="mt-4 space-y-2 text-sm text-foreground">
-          <li class="flex gap-2"><span class="text-go">✓</span> Failures lead with what the client saw and why</li>
-          <li class="flex gap-2"><span class="text-go">✓</span> Cache-hit and cost analytics per model and provider</li>
-          <li class="flex gap-2"><span class="text-go">✓</span> Live — new requests appear as they happen</li>
+          <li class="flex gap-2"><span class="text-go">✓</span> No broken half-answers in your playbook output</li>
+          <li class="flex gap-2"><span class="text-go">✓</span> Tool-call state carried across providers</li>
+          <li class="flex gap-2"><span class="text-go">✓</span> Logged as a fallback, so you can see it happened</li>
         </ul>
       </div>
     </div>
@@ -615,7 +613,7 @@ description: Drop-in OpenAI- and Anthropic-compatible proxy. Chain providers, fa
           Any model.<br/>One endpoint.
         </h2>
         <p class="mt-5 text-base md:text-lg text-muted-foreground leading-relaxed font-body max-w-lg">
-          Route across OpenAI, Anthropic, Google, DeepSeek, Moonshot, and more through a single unified API. Mix providers in your fallback chains to optimize for cost, speed, and context window size.
+          Route across OpenAI, Anthropic, Google, DeepSeek, Moonshot, and more through a single URL. Test your harness against new models the day they launch — without changing your tools.
         </p>
         <div class="mt-6 flex flex-wrap items-center gap-2">
           <span class="inline-flex items-center gap-1.5 rounded-full bg-go/10 px-3 py-1 text-xs font-medium text-go font-body">
@@ -648,10 +646,10 @@ description: Drop-in OpenAI- and Anthropic-compatible proxy. Chain providers, fa
     <div class="text-center max-w-2xl mx-auto">
       <p class="text-sm font-semibold tracking-wide text-accent font-body">Observability</p>
       <h2 class="mt-3 font-display text-3xl md:text-4xl lg:text-5xl leading-[1.05] tracking-tight text-foreground">
-        Debug agent failures in minutes, not hours.
+        Know what every playbook costs to run.
       </h2>
       <p class="mt-4 text-base text-muted-foreground leading-relaxed font-body">
-        Full request logs with headers, response bodies, error details, and latency breakdowns for every step in your routing chain. Know exactly why a provider failed and what your agent saw.
+        Per-request cost, token usage, cache savings, and latency — for every run of every playbook. Prove the ROI of your AI operations with numbers, not anecdotes.
       </p>
     </div>
 
@@ -820,20 +818,20 @@ description: Drop-in OpenAI- and Anthropic-compatible proxy. Chain providers, fa
     <div class="space-y-4">
       {# FAQ 1 #}
       <div class="rounded-xl border border-border bg-background p-6">
-        <h3 class="text-base font-semibold text-foreground font-body">Can't I just build this myself?</h3>
-        <p class="mt-2 text-sm text-muted-foreground leading-relaxed font-body">You can — a retry loop gets you 80% of the way. The last 20% is the hard part: streaming failures mid-response, tool-call state, every provider reporting context overflow differently, and the observability to debug any of it. DodoRouter is that last 20%, already built and battle-tested.</p>
+        <h3 class="text-base font-semibold text-foreground font-body">I'm an operator, not a developer. Is this for me?</h3>
+        <p class="mt-2 text-sm text-muted-foreground leading-relaxed font-body">Yes. If you can paste a URL into a settings field, you can use DodoRouter. Claude Code, OpenCode, and most AI tools let you set a custom base URL — point it at DodoRouter and everything you do becomes visible in the dashboard. No code required.</p>
       </div>
 
       {# FAQ 2 #}
       <div class="rounded-xl border border-border bg-background p-6">
-        <h3 class="text-base font-semibold text-foreground font-body">What happens when a provider fails mid-stream?</h3>
-        <p class="mt-2 text-sm text-muted-foreground leading-relaxed font-body">DodoRouter catches the dropped stream, re-issues the request to the next provider in your chain, and keeps streaming to your client — including handling content that was already sent. The request is logged as a fallback so you can see exactly what happened.</p>
+        <h3 class="text-base font-semibold text-foreground font-body">How does this help me build a better master prompt or harness?</h3>
+        <p class="mt-2 text-sm text-muted-foreground leading-relaxed font-body">You stop guessing. Every run shows you the exact context the model received, what it returned, what it cost, and how much was cached. When output quality drifts, you see why — and when you tweak your prompt, you see the effect on the very next run.</p>
       </div>
 
       {# FAQ 3 #}
       <div class="rounded-xl border border-border bg-background p-6">
-        <h3 class="text-base font-semibold text-foreground font-body">Do I need to change my agent code?</h3>
-        <p class="mt-2 text-sm text-muted-foreground leading-relaxed font-body">Nope. Change your base URL from <code class="rounded bg-secondary px-1.5 py-0.5 text-xs font-mono text-accent">api.openai.com</code> to <code class="rounded bg-secondary px-1.5 py-0.5 text-xs font-mono text-accent">api.dodorouter.com</code> and swap your API key. That's it. Same SDK, same types, same everything.</p>
+        <h3 class="text-base font-semibold text-foreground font-body">Will my tools still work the same?</h3>
+        <p class="mt-2 text-sm text-muted-foreground leading-relaxed font-body">Yes. DodoRouter is a transparent proxy — same APIs, same streaming, same tool calls. Change the base URL from <code class="rounded bg-secondary px-1.5 py-0.5 text-xs font-mono text-accent">api.openai.com</code> to <code class="rounded bg-secondary px-1.5 py-0.5 text-xs font-mono text-accent">api.dodorouter.com</code> and your tool behaves exactly as before, just observed.</p>
       </div>
 
       {# FAQ 4 #}
@@ -862,14 +860,14 @@ description: Drop-in OpenAI- and Anthropic-compatible proxy. Chain providers, fa
       <div class="absolute -bottom-16 -left-16 h-48 w-48 rounded-full bg-white/5"></div>
 
       <h2 class="relative font-display text-3xl md:text-4xl lg:text-5xl leading-[1.05] tracking-tight text-white">
-        Point your agent at<br/>something <em>sturdier.</em>
+        Stop building blind.<br/><em>Start seeing.</em>
       </h2>
       <p class="relative mt-5 text-base md:text-lg text-white/80 max-w-xl mx-auto leading-relaxed font-body">
-        Create a router, add your keys, and make your first request in under two minutes. Free while in beta — no credit card required.
+        Create a router, point your tools at it, and watch your first real request two minutes from now. Free while in beta — no credit card required.
       </p>
       <div class="relative mt-8 flex flex-col sm:flex-row items-center justify-center gap-3">
         <a href="https://api.dodorouter.com/users/register" class="rounded-full bg-white px-8 py-3.5 text-sm font-semibold text-accent transition-all hover:bg-white/90 font-body">
-          Get started free →
+          Start watching free →
         </a>
         <a href="https://github.com/foxwise-ai/dodorouter" target="_blank" rel="noopener noreferrer" class="flex items-center gap-2 rounded-full border border-white/25 px-6 py-3.5 text-sm font-medium text-white transition-all hover:bg-white/10 font-body">
           <svg class="h-4 w-4 fill-white" viewBox="0 0 24 24"><path d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"/></svg>
