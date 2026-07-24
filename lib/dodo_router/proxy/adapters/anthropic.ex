@@ -193,9 +193,17 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
   model dispatch would actually send the request to.
   """
   def build_count_tokens_request(params, %RoutingStep{} = step) do
-    params
-    |> Map.take(@count_tokens_fields)
-    |> Map.put("model", step.model || params["model"])
+    body =
+      params
+      |> Map.take(@count_tokens_fields)
+      |> Map.put("model", step.model || params["model"])
+
+    # Same translation as build_anthropic_request/2: Claude 5 models reject an
+    # explicit thinking disable; omission is the portable spelling.
+    case body["thinking"] do
+      %{"type" => "disabled"} -> Map.delete(body, "thinking")
+      _ -> body
+    end
   end
 
   @doc """
@@ -258,13 +266,23 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
         else: body
 
     # Forward a client-supplied thinking block (if any) so it takes precedence
-    # over the step-level default below.
+    # over the step-level default. An explicit disable is translated to
+    # omission: Claude 5 models reject thinking.type=disabled outright, and on
+    # older models omission means the same thing. It still counts as a client
+    # choice, so the step-level effort default is not injected over it.
     body =
-      if request["thinking"],
-        do: Map.put(body, "thinking", request["thinking"]),
-        else: body
+      case request["thinking"] do
+        %{"type" => "disabled"} ->
+          body
 
-    body = Adapter.inject_reasoning_effort(body, step.reasoning_effort, :anthropic)
+        nil ->
+          Adapter.inject_reasoning_effort(body, step.reasoning_effort, :anthropic)
+
+        thinking ->
+          body
+          |> Map.put("thinking", thinking)
+          |> Adapter.inject_reasoning_effort(step.reasoning_effort, :anthropic)
+      end
 
     # Tools
     if request["tools"] do

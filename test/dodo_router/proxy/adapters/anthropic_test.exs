@@ -500,6 +500,35 @@ defmodule DodoRouter.Proxy.Adapters.AnthropicTest do
 
       assert body["thinking"]["budget_tokens"] == 999
     end
+
+    test "omits a client thinking.type=disabled block instead of forwarding it" do
+      # Claude 5 models reject an explicit disable ("thinking.type.disabled is
+      # not supported for this model"); omission is the portable spelling —
+      # no thinking on older models, adaptive default on newer ones. This bit
+      # fallbacks: kimi/zai (on_off format) accept disabled, so the request
+      # only blew up when the chain fell back to an Anthropic step.
+      request = %{
+        "messages" => [%{"role" => "user", "content" => "hi"}],
+        "thinking" => %{"type" => "disabled"}
+      }
+
+      step = %RoutingStep{model: "claude-sonnet-5"}
+      body = Anthropic.build_anthropic_request(request, step)
+
+      refute Map.has_key?(body, "thinking")
+    end
+
+    test "client thinking.type=disabled also suppresses step-level effort injection" do
+      request = %{
+        "messages" => [%{"role" => "user", "content" => "hi"}],
+        "thinking" => %{"type" => "disabled"}
+      }
+
+      step = %RoutingStep{model: "claude-sonnet-5", reasoning_effort: "high"}
+      body = Anthropic.build_anthropic_request(request, step)
+
+      refute Map.has_key?(body, "thinking")
+    end
   end
 
   describe "build_count_tokens_request/2" do
@@ -534,6 +563,17 @@ defmodule DodoRouter.Proxy.Adapters.AnthropicTest do
       params = %{"model" => "claude-sonnet-5", "messages" => []}
       body = Anthropic.build_count_tokens_request(params, %RoutingStep{model: nil})
       assert body["model"] == "claude-sonnet-5"
+    end
+
+    test "drops a client thinking.type=disabled block (rejected by Claude 5 models)" do
+      params = %{
+        "model" => "claude-sonnet-5",
+        "messages" => [],
+        "thinking" => %{"type" => "disabled"}
+      }
+
+      body = Anthropic.build_count_tokens_request(params, %RoutingStep{model: "claude-sonnet-5"})
+      refute Map.has_key?(body, "thinking")
     end
   end
 
