@@ -57,6 +57,29 @@ defmodule DodoRouterWeb.SessionLiveTest do
       assert html =~ "3 requests"
     end
 
+    test "shows spend per session", %{conn: conn, router: router} do
+      LogsFixtures.log_with_session(router, "paid-session", %{
+        estimated_cost_usd: Decimal.new("2.50"),
+        list_cost_usd: Decimal.new("2.50")
+      })
+
+      {:ok, _live, html} = live(conn, ~p"/routers/#{router.id}/sessions")
+
+      assert html =~ "$2.50"
+    end
+
+    test "shows would-be cost for plan-covered sessions", %{conn: conn, router: router} do
+      LogsFixtures.log_with_session(router, "plan-session", %{
+        estimated_cost_usd: Decimal.new("0"),
+        list_cost_usd: Decimal.new("12.00")
+      })
+
+      {:ok, _live, html} = live(conn, ~p"/routers/#{router.id}/sessions")
+
+      assert html =~ "~$12.00"
+      assert html =~ "at API rates"
+    end
+
     test "raises when router doesn't belong to user", %{conn: conn} do
       {other_router, _} = RoutersFixtures.router_fixture()
 
@@ -84,6 +107,43 @@ defmodule DodoRouterWeb.SessionLiveTest do
       {:ok, _live, html} = live(conn, ~p"/routers/#{router.id}/sessions/#{session_id}")
 
       assert html =~ session_name
+    end
+
+    test "shows total spend and per-request cost", %{conn: conn, router: router} do
+      session_id = "cost-session"
+
+      LogsFixtures.log_with_session(router, session_id, %{
+        estimated_cost_usd: Decimal.new("1.00"),
+        list_cost_usd: Decimal.new("1.00")
+      })
+
+      LogsFixtures.log_with_session(router, session_id, %{
+        estimated_cost_usd: Decimal.new("1.50"),
+        list_cost_usd: Decimal.new("1.50")
+      })
+
+      {:ok, live, html} = live(conn, ~p"/routers/#{router.id}/sessions/#{session_id}")
+
+      assert html =~ "Cost"
+      # Session total
+      assert has_element?(live, "#session-cost", "$2.50")
+      # Per-request cost on the timeline
+      assert html =~ "$1.50"
+    end
+
+    test "shows would-be cost when traffic is plan-covered", %{conn: conn, router: router} do
+      session_id = "plan-cost-session"
+
+      LogsFixtures.log_with_session(router, session_id, %{
+        estimated_cost_usd: Decimal.new("0"),
+        list_cost_usd: Decimal.new("12.00")
+      })
+
+      {:ok, live, html} = live(conn, ~p"/routers/#{router.id}/sessions/#{session_id}")
+
+      assert has_element?(live, "#session-cost", "$0")
+      assert html =~ "~$12.00"
+      assert html =~ "at API rates"
     end
 
     test "allows editing session name", %{conn: conn, router: router} do
