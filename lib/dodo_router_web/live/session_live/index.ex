@@ -79,6 +79,7 @@ defmodule DodoRouterWeb.SessionLive.Index do
               </div>
               <div class="text-right text-sm text-base-content/60">
                 <div>{pluralize(session.request_count, "request")}</div>
+                <.session_cost session={session} />
                 <div>{Calendar.strftime(session.last_activity, "%b %d, %H:%M")}</div>
               </div>
             </div>
@@ -108,6 +109,39 @@ defmodule DodoRouterWeb.SessionLive.Index do
     </div>
     """
   end
+
+  # Actual spend, plus the pay-as-you-go figure whenever it is higher — that
+  # gap is the part of the session served by plan/subscription keys, which
+  # bill nothing marginal and would otherwise just show "$0".
+  attr :session, :map, required: true
+
+  defp session_cost(assigns) do
+    actual = decimal_float(assigns.session.total_cost_usd)
+    list = decimal_float(assigns.session.total_list_cost_usd)
+
+    assigns =
+      assign(assigns,
+        actual: if(actual > 0, do: format_usd(actual)),
+        would_be: if(list > actual, do: format_usd(list))
+      )
+
+    ~H"""
+    <div :if={@actual || @would_be} class="font-mono text-base-content/80">
+      {@actual}
+      <span
+        :if={@would_be}
+        class="text-base-content/40"
+        title="Traffic served through subscription/coding-plan keys has no marginal per-token cost. This is what the same tokens would cost at pay-as-you-go API list prices."
+      >
+        {if @actual, do: "· "}~{@would_be} at API rates
+      </span>
+    </div>
+    """
+  end
+
+  defp decimal_float(nil), do: 0.0
+  defp decimal_float(%Decimal{} = d), do: Decimal.to_float(d)
+  defp decimal_float(n) when is_number(n), do: n / 1
 
   defp apply_action(socket, params) do
     page = String.to_integer(params["page"] || "1")

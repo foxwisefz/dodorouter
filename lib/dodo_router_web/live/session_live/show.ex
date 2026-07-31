@@ -97,10 +97,23 @@ defmodule DodoRouterWeb.SessionLive.Show do
       </div>
       
     <!-- Stats -->
-      <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+      <div class="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
         <div class="stat bg-base-100 border border-base-300 rounded-lg p-3">
           <div class="stat-title text-xs">Requests</div>
           <div class="stat-value text-lg">{@stats.request_count}</div>
+        </div>
+        <div class="stat bg-base-100 border border-base-300 rounded-lg p-3">
+          <div class="stat-title text-xs">Cost</div>
+          <div id="session-cost" class="stat-value text-lg">
+            {format_usd(@stats.total_cost_usd)}
+          </div>
+          <div
+            :if={would_be_cost(@stats)}
+            class="text-xs text-base-content/50 mt-0.5"
+            title="Traffic served through subscription/coding-plan keys has no marginal per-token cost. This is what the same tokens would cost at pay-as-you-go API list prices."
+          >
+            ~{format_usd(would_be_cost(@stats))} at API rates
+          </div>
         </div>
         <div class="stat bg-base-100 border border-base-300 rounded-lg p-3">
           <div class="stat-title text-xs">Total Tokens</div>
@@ -168,6 +181,7 @@ defmodule DodoRouterWeb.SessionLive.Show do
                 </span>
               </div>
               <div class="flex items-center gap-4 text-base-content/50 text-sm shrink-0">
+                <.log_cost log={log} />
                 <span :if={Map.get(log, :latency_ms)} class="font-mono">{log.latency_ms}ms</span>
                 <span class="font-mono text-xs">{format_time(log.inserted_at)}</span>
               </div>
@@ -184,6 +198,44 @@ defmodule DodoRouterWeb.SessionLive.Show do
     </div>
     """
   end
+
+  # Per-request spend. Plan/subscription traffic bills nothing marginal, so
+  # "$0" alone reads like missing data — show the would-have-cost instead.
+  attr :log, :map, required: true
+
+  defp log_cost(assigns) do
+    actual = decimal_float(Map.get(assigns.log, :estimated_cost_usd))
+    list = decimal_float(Map.get(assigns.log, :list_cost_usd))
+
+    assigns =
+      cond do
+        actual > 0 -> assign(assigns, label: format_usd(actual), plan?: false)
+        list > 0 -> assign(assigns, label: "~" <> format_usd(list), plan?: true)
+        true -> assign(assigns, label: nil, plan?: false)
+      end
+
+    ~H"""
+    <span
+      :if={@label}
+      class={["font-mono", @plan? && "text-base-content/35"]}
+      title={@plan? && "Included in plan — cost at pay-as-you-go API rates"}
+    >
+      {@label}
+    </span>
+    """
+  end
+
+  # The pay-as-you-go figure, shown only when it exceeds what was actually
+  # billed (i.e. some of the session ran on a plan/subscription key).
+  defp would_be_cost(stats) do
+    list = decimal_float(Map.get(stats, :total_list_cost_usd))
+
+    if list > decimal_float(Map.get(stats, :total_cost_usd)), do: list
+  end
+
+  defp decimal_float(nil), do: 0.0
+  defp decimal_float(%Decimal{} = d), do: Decimal.to_float(d)
+  defp decimal_float(n) when is_number(n), do: n / 1
 
   defp load_data(socket) do
     router = socket.assigns.router

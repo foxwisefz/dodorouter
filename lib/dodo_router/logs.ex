@@ -663,6 +663,8 @@ defmodule DodoRouter.Logs do
         prompt_tokens: sum(l.prompt_tokens),
         completion_tokens: sum(l.completion_tokens),
         avg_latency_ms: avg(l.latency_ms),
+        total_cost_usd: sum(l.estimated_cost_usd),
+        total_list_cost_usd: sum(l.list_cost_usd),
         successful_requests:
           count(fragment("CASE WHEN ? IN ('success', 'fallback') THEN 1 END", l.status)),
         error_requests: count(fragment("CASE WHEN ? = 'error' THEN 1 END", l.status)),
