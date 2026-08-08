@@ -44,6 +44,25 @@ defmodule DodoRouter.CacheCostTest do
       assert Decimal.compare(cost, Decimal.new("0.0010875")) == :eq
     end
 
+    test "bills new input when the provider excludes cache from prompt_tokens" do
+      model = %Model{
+        input_price_per_million: Decimal.new("3.0"),
+        output_price_per_million: Decimal.new("15.0"),
+        cache_read_price_per_million: Decimal.new("0.30"),
+        cache_write_price_per_million: Decimal.new("3.75")
+      }
+
+      # Anthropic: input_tokens (260) counts ONLY the new input — the 38_356
+      # cache reads are on top of it, not inside it. Subtracting them clamped
+      # regular input to 0 and billed the real new tokens at nothing.
+      cost =
+        Models.calculate_cost(model, 260, 0, cache_read_tokens: 38_356, cache_write_tokens: 0)
+
+      # Regular input: 260 at $3/1M = $0.00078
+      # Cache read: 38_356 at $0.30/1M = $0.0115068
+      assert Decimal.compare(cost, Decimal.new("0.0122868")) == :eq
+    end
+
     test "handles nil cache pricing (falls back to regular input pricing)" do
       model = %Model{
         input_price_per_million: Decimal.new("3.0"),

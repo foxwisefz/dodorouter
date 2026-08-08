@@ -545,6 +545,17 @@ When integrating a new provider:
 3. **Normalize in the adapter** — if the adapter converts usage (e.g. `convert_usage/1`), ensure the output satisfies `Adapter.extract_cache_read_tokens/1`. This function checks (in order): `cache_read_input_tokens`, `prompt_tokens_details.cached_tokens`, `prompt_cache_hit_tokens`, `cache_read_tokens`.
 4. **Test the seam** — write a test that pipes `convert_usage/1` output through `Adapter.extract_usage/1` and asserts `cache_read_tokens` is non-nil when cache data is present. Unit-testing each function in isolation is insufficient.
 
+### `prompt_tokens` Means Different Things Per Provider
+
+Normalizing the field *names* does not normalize the *semantics*. Providers disagree on whether `prompt_tokens` already contains the cache figures:
+
+* **OpenAI-family** — `prompt_tokens` is the total input; `prompt_tokens_details.cached_tokens` is a subset of it.
+* **Anthropic** — `prompt_tokens` maps to `input_tokens`, which counts only the input that was neither read from nor written to cache. `cache_read_input_tokens` and `cache_creation_input_tokens` sit *on top* of it.
+
+Nothing on `request_logs` records which convention a row used, so `DodoRouter.Usage` infers it from the numbers: when `cache_read + cache_write > prompt_tokens`, the provider must be reporting them separately.
+
+**Never divide by `prompt_tokens` directly, and never subtract cache tokens from it directly.** Use `Usage.cache_hit_pct/4`, `Usage.new_input_tokens/3`, or `Usage.total_input_tokens/3`. Dividing directly is what rendered a 38,356-token cache hit over a 260-token billed prompt as "14752%"; subtracting directly clamped `regular_input` to zero in `Models.calculate_cost/4` and billed Anthropic's real new input at $0.
+
 ## Prompt Cache Fidelity Through Format Conversion
 
 Anthropic prompt caching only hits when the request is a byte-stable prefix extension of a previous request, up to a `cache_control` breakpoint that sits at the same position. The Anthropic-endpoint conversion (`AnthropicFormat.to_openai_params` → `Adapters.Anthropic.build_anthropic_request`) must therefore obey two invariants:

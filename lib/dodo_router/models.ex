@@ -6,6 +6,7 @@ defmodule DodoRouter.Models do
   import Ecto.Query
   alias DodoRouter.Repo
   alias DodoRouter.Models.Model
+  alias DodoRouter.Usage
 
   def list_models do
     Repo.all(from m in Model, order_by: [asc: m.provider_slug, asc: m.model_id])
@@ -147,9 +148,10 @@ defmodule DodoRouter.Models do
     cache_read_tokens = Keyword.get(opts, :cache_read_tokens, 0) || 0
     cache_write_tokens = Keyword.get(opts, :cache_write_tokens, 0) || 0
 
-    # Non-cached input tokens = total input - cache_read - cache_write
-    # cache_write tokens are billed at write price, not regular input
-    regular_input = max(0, input_tokens - cache_read_tokens - cache_write_tokens)
+    # Cache reads/writes are billed at their own rates, so only what's left
+    # pays the regular input price. Whether `input_tokens` already contains
+    # the cache figures depends on the provider — `Usage` decides.
+    regular_input = Usage.new_input_tokens(input_tokens, cache_read_tokens, cache_write_tokens)
 
     input_cost = decimal_cost(model.input_price_per_million, regular_input)
     output_cost = decimal_cost(model.output_price_per_million, output_tokens)

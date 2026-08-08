@@ -370,6 +370,25 @@ defmodule DodoRouter.LogsTest do
     end
   end
 
+  describe "cache_stats/2" do
+    test "keeps the hit rate under 100% for Anthropic-style usage" do
+      {router, _api_key} = RoutersFixtures.router_fixture()
+
+      # Anthropic reports prompt_tokens as newly-billed input only, so a large
+      # cache hit over a tiny billed prompt used to render as e.g. 14752%.
+      LogsFixtures.log_fixture(router, %{
+        prompt_tokens: 260,
+        cache_read_tokens: 38_356,
+        cache_write_tokens: 0
+      })
+
+      stats = Logs.cache_stats(router)
+
+      assert stats.hit_rate == 99.3
+      assert stats.cached_requests == 1
+    end
+  end
+
   describe "stats_by_provider/2" do
     test "sums total_cost_usd and cache_read_tokens per provider" do
       {router, _api_key} = RoutersFixtures.router_fixture()

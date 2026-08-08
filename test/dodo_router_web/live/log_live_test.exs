@@ -531,12 +531,35 @@ defmodule DodoRouterWeb.LogLiveTest do
 
       assert html =~ "cached"
       assert html =~ "response"
-      # 400 cached of (400 cached + 500 billed) = 44%, never >100%
-      assert html =~ "(44%)"
+      # OpenAI-family usage: prompt_tokens (500) already includes the 400
+      # cache reads, so the hit rate is 400/500 and new input is 100.
+      assert html =~ "(80%)"
       # new (uncached) input and output are separated so the cached figure
       # can't dwarf an ambiguous "Tokens" total
       assert html =~ "Input (new)"
       assert html =~ "Output"
+    end
+
+    test "Anthropic-style cache tokens don't blow past 100%", %{conn: conn, user: user} do
+      {router, _api_key} = RoutersFixtures.router_fixture(user)
+
+      # Anthropic reports input_tokens as newly-billed input only, so
+      # 38_356 cache reads over 260 billed tokens rendered as "14752%".
+      log =
+        LogsFixtures.log_fixture(router, %{
+          final_provider: "anthropic",
+          final_model: "claude-opus-4-7",
+          prompt_tokens: 260,
+          completion_tokens: 1175,
+          total_tokens: 1435,
+          cache_read_tokens: 38_356,
+          cache_write_tokens: 0
+        })
+
+      {:ok, _live, html} = live(conn, ~p"/logs/#{log.request_id}")
+
+      assert html =~ "(99%)"
+      refute html =~ "14752%"
     end
 
     test "renders per-step response body in fallback trace", %{conn: conn, user: user} do

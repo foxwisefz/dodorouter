@@ -6,6 +6,7 @@ defmodule DodoRouterWeb.LogLive.Show do
   alias DodoRouter.Logs.MessageNormalizer
   alias DodoRouter.Logs.Provenance
   alias DodoRouter.Proxy.Adapter.Registry
+  alias DodoRouter.Usage
   alias DodoRouterWeb.MarkdownRenderer
 
   import DodoRouterWeb.PromptComponents
@@ -370,7 +371,7 @@ defmodule DodoRouterWeb.LogLive.Show do
                   >
                     Input (new)
                   </span>
-                  <span class="font-mono">{@log.prompt_tokens || "—"}</span>
+                  <span class="font-mono">{new_input(@log)}</span>
                 </div>
               <% else %>
                 <div class="flex justify-between">
@@ -1305,16 +1306,15 @@ defmodule DodoRouterWeb.LogLive.Show do
   defp format_bytes(bytes) when bytes < 1024 * 1024, do: "#{Float.round(bytes / 1024, 1)} KB"
   defp format_bytes(bytes), do: "#{Float.round(bytes / 1024 / 1024, 2)} MB"
 
-  defp cache_pct(%{cache_read_tokens: nil}), do: ""
-
-  # Anthropic-style usage reports prompt_tokens EXCLUDING cache reads, so the
-  # denominator must be cached + billed input or a 54k-token cache hit over a
-  # 6-token billed prompt renders as "902567%".
-  defp cache_pct(%{cache_read_tokens: cached, prompt_tokens: prompt})
-       when is_integer(cached) and is_integer(prompt) and cached + prompt > 0 do
-    pct = Float.round(cached / (cached + prompt) * 100, 0)
-    "#{trunc(pct)}%"
+  defp cache_pct(log) do
+    case Usage.cache_hit_pct(log.prompt_tokens, log.cache_read_tokens, log.cache_write_tokens, 0) do
+      nil -> ""
+      pct -> "#{trunc(pct)}%"
+    end
   end
 
-  defp cache_pct(_), do: ""
+  defp new_input(%{prompt_tokens: nil}), do: "—"
+
+  defp new_input(log),
+    do: Usage.new_input_tokens(log.prompt_tokens, log.cache_read_tokens, log.cache_write_tokens)
 end
