@@ -787,4 +787,64 @@ defmodule DodoRouterWeb.AnthropicFormatTest do
       assert image_block["source"]["data"] == "iVBORw0KGgo="
     end
   end
+
+  describe "unknown_fields/1" do
+    @known %{
+      "model" => "claude-sonnet-5",
+      "messages" => [%{"role" => "user", "content" => "hi"}],
+      "max_tokens" => 1024
+    }
+
+    test "returns [] when every field is consumed by the conversion" do
+      params =
+        Map.merge(@known, %{
+          "system" => [%{"type" => "text", "text" => "be nice"}],
+          "stream" => true,
+          "temperature" => 1,
+          "top_p" => 0.9,
+          "stop_sequences" => ["</done>"],
+          "thinking" => %{"type" => "enabled", "budget_tokens" => 1024},
+          "tools" => []
+        })
+
+      assert AnthropicFormat.unknown_fields(params) == []
+    end
+
+    test "flags a field the converter silently drops (output_config)" do
+      # Anthropic structured outputs: the client constrains decoding with a
+      # schema, we drop it, the model answers in prose, the client's parse
+      # fails. This detector is how we learn about such fields on day one.
+      params = Map.put(@known, "output_config", %{"format" => %{"type" => "json_schema"}})
+
+      assert AnthropicFormat.unknown_fields(params) == ["output_config"]
+    end
+
+    test "ignores router_slug, which Phoenix injects from the path" do
+      params = Map.put(@known, "router_slug", "fw-claude")
+
+      assert AnthropicFormat.unknown_fields(params) == []
+    end
+
+    test "reports every unconsumed field, sorted" do
+      params =
+        Map.merge(@known, %{
+          "router_slug" => "fw-claude",
+          "top_k" => 40,
+          "metadata" => %{"user_id" => "u1"},
+          "context_management" => %{"edits" => []}
+        })
+
+      assert AnthropicFormat.unknown_fields(params) == [
+               "context_management",
+               "metadata",
+               "top_k"
+             ]
+    end
+
+    test "flags tool_choice, which the converter does not currently carry" do
+      params = Map.put(@known, "tool_choice", %{"type" => "any"})
+
+      assert AnthropicFormat.unknown_fields(params) == ["tool_choice"]
+    end
+  end
 end

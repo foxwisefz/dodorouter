@@ -20,6 +20,8 @@ defmodule DodoRouterWeb.ResponsesProxyController do
         "model=#{params["model"]}"
     )
 
+    warn_dropped_fields(params, request_id, router)
+
     if params["stream"] == true do
       stream_responses(
         conn,
@@ -282,6 +284,22 @@ defmodule DodoRouterWeb.ResponsesProxyController do
     case Recordings.get_active_recording(router) do
       nil -> nil
       recording -> recording.id
+    end
+  end
+
+  # See AnthropicProxyController: the conversion is a whitelist, so anything it
+  # doesn't carry is dropped in silence. Logging it turns that into a work
+  # queue rather than a bug report from a confused client.
+  defp warn_dropped_fields(params, request_id, router) do
+    case ResponsesFormat.unknown_fields(params) do
+      [] ->
+        :ok
+
+      fields ->
+        Logger.warning(
+          "[ResponsesProxy] dropped_fields=#{Enum.join(fields, ",")} " <>
+            "request_id=#{request_id} router=#{router.slug} model=#{params["model"]}"
+        )
     end
   end
 end

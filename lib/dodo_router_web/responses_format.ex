@@ -3,6 +3,32 @@ defmodule DodoRouterWeb.ResponsesFormat do
   Converts between OpenAI Responses API format and OpenAI Chat Completions format.
   """
 
+  # Top-level Responses request fields this module carries into the
+  # OpenAI-shaped intermediate representation.
+  @consumed_fields ~w(
+    model input instructions stream temperature top_p
+    max_output_tokens truncation tools tool_choice parallel_tool_calls
+    metadata reasoning
+  )
+
+  # Injected by the router from the URL path — never part of the client body.
+  @ignored_fields ~w(router_slug)
+
+  @doc """
+  Top-level fields present in an incoming Responses request that the conversion
+  to Chat Completions format does **not** carry.
+
+  See `DodoRouterWeb.AnthropicFormat.unknown_fields/1` — same contract, same
+  reason: the conversion is a whitelist, so unrecognised fields vanish
+  silently and the client gets a 200 that ignored what it asked for.
+  """
+  def unknown_fields(responses_params) when is_map(responses_params) do
+    responses_params
+    |> Map.keys()
+    |> Enum.reject(&(&1 in @consumed_fields or &1 in @ignored_fields))
+    |> Enum.sort()
+  end
+
   def to_openai_params(responses_params) do
     messages = convert_input_to_messages(responses_params["input"])
 

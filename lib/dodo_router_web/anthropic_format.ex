@@ -3,6 +3,36 @@ defmodule DodoRouterWeb.AnthropicFormat do
   Converts between Anthropic Messages API format and OpenAI Chat Completions format.
   """
 
+  # Top-level Anthropic request fields this module actually carries into the
+  # OpenAI-shaped intermediate representation.
+  @consumed_fields ~w(
+    model messages system max_tokens
+    stream temperature top_p stop_sequences thinking tools
+  )
+
+  # Injected by the router from the URL path — never part of the client body.
+  @ignored_fields ~w(router_slug)
+
+  @doc """
+  Top-level fields present in an incoming Anthropic request that the conversion
+  to OpenAI format does **not** carry.
+
+  The IR is a whitelist, so anything Anthropic adds that we haven't taught it
+  about is dropped in silence — that is how `output_config` (structured
+  outputs) went unnoticed until a client's JSON parsing started failing. This
+  turns that silent loss into a signal: callers log it, and each reported field
+  is either a translation to write or a deliberate, documented drop.
+
+  Fields are reported whether or not we recognise them, precisely so genuinely
+  new ones surface without anyone predicting them.
+  """
+  def unknown_fields(anthropic_params) when is_map(anthropic_params) do
+    anthropic_params
+    |> Map.keys()
+    |> Enum.reject(&(&1 in @consumed_fields or &1 in @ignored_fields))
+    |> Enum.sort()
+  end
+
   def to_openai_params(anthropic_params) do
     raw_messages = anthropic_params["messages"] || []
     converted = convert_messages_to_openai(raw_messages)

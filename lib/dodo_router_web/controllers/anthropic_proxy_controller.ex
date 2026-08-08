@@ -20,6 +20,8 @@ defmodule DodoRouterWeb.AnthropicProxyController do
         "model=#{params["model"]} msg_count=#{length(params["messages"] || [])}"
     )
 
+    warn_dropped_fields(params, request_id, router)
+
     if params["stream"] == true do
       stream_anthropic(
         conn,
@@ -40,6 +42,25 @@ defmodule DodoRouterWeb.AnthropicProxyController do
         recording_id,
         client_headers
       )
+    end
+  end
+
+  # The Anthropic->OpenAI conversion is a whitelist, so any field we haven't
+  # taught it about is dropped in silence — the client sees a 200 and a
+  # response that quietly ignored what it asked for (this is how structured
+  # outputs via `output_config` went unnoticed). Surfacing it here turns an
+  # unknown-unknown into a work queue: each field is either a translation to
+  # write or a deliberate drop to document.
+  defp warn_dropped_fields(params, request_id, router) do
+    case AnthropicFormat.unknown_fields(params) do
+      [] ->
+        :ok
+
+      fields ->
+        Logger.warning(
+          "[AnthropicProxy] dropped_fields=#{Enum.join(fields, ",")} " <>
+            "request_id=#{request_id} router=#{router.slug} model=#{params["model"]}"
+        )
     end
   end
 
