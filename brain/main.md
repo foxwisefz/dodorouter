@@ -86,6 +86,26 @@ Stated so it stays stated:
 - **Not machine/VM/service monitoring.** The Castellan aggregates it; we feed it the inference slice, we don't reimplement it.
 - **Not an agent runtime.** We are the boundary, not the runner.
 
+# Policy: request fidelity
+
+**Decided 2026-08-08.** Client headers are forwarded to the provider by default, *including on fallback*. We strip only for a stated reason, and the reasons are exactly three:
+
+1. **We must replace it.** `authorization`, `x-api-key`, `content-type` — we authenticate with our own key.
+2. **The provider will break.** `content-length` and `transfer-encoding` (we rewrite the body, so they're lies), `accept-encoding` (corrupts streamed responses), and account-scoped routing headers that name the *client's* account on a provider we authenticate to with *our* key: `openai-organization`, `openai-project`, `chatgpt-account-id`, `x-goog-user-project`. Those 401 or route to the wrong account.
+3. **It isn't the client's to send.** `cookie` (a browser-originated request carries the user's DodoRouter session — forwarding it hands a third party our own auth credential) and the edge's own additions, `x-forwarded-*` / `x-real-ip` / `via` (disclose the end user's real IP and our internal hostnames). *Pending confirmation — Gezim may prefer these flow too.*
+
+Session headers **are forwarded**. They're often used downstream, and stripping them would be us second-guessing the client again.
+
+Everything else flows, `anthropic-beta` to Moonshot on a fallback included. Moonshot ignores it; that's harmless and honest.
+
+**Why this is the rule.** Every bug in the parked stack below is the same bug: the proxy silently deciding the client didn't need something. A dropped `anthropic-beta` cost the 1h cache TTL. A whitelist dropped `output_config` and returned 200. A response echoed the requested model while another provider served it. Fidelity *is* the product. A strip list is a list of decisions we made on the user's behalf that we might have wrong and that they cannot see — so it should be as short as it can defensibly be.
+
+**The corollary, which is the load-bearing half.** "The provider will break" is not knowable in advance for every provider × header pair; we will discover breakage in production. So: **anything the proxy removes or rewrites is recorded on the request log** — headers stripped, body fields dropped, response fields not passed back. That gives a real answer to "what did the proxy change about my request," an attribution path when a provider starts 400ing, and a strip list whose every entry has a traceable reason instead of decaying into folklore.
+
+That corollary unifies the three loss channels (request headers, request body fields, response fields) into one observable surface, rather than three unrelated fixes.
+
+**Open question, not blocking.** Whether request fidelity — "we pass your request through unmodified, and show you anything we couldn't" — is a feature we advertise to harness builders. If yes, it stops being a bug-fix and becomes pillar work, probably outranking the Token Tap.
+
 # Before the pillars: the parked fidelity stack
 
 Four-plus commits of proxy-fidelity work sit unlanded as separate jj heads, none in `@`'s ancestry (epic `dodo_router-dor`). This is mostly written and tested already, and one item is not a roadmap item at all — it's an active bug:
