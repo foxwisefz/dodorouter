@@ -6,6 +6,7 @@ defmodule DodoRouterWeb.LogLive.Index do
   alias DodoRouter.{Logs, Routers}
   alias DodoRouter.Logs.MessageNormalizer
   alias DodoRouter.Proxy.Adapter.Registry
+  alias DodoRouter.Usage
 
   @impl true
   def mount(_params, _session, socket) do
@@ -473,14 +474,9 @@ defmodule DodoRouterWeb.LogLive.Index do
   end
 
   defp cache_pct(log) do
-    cached = log.cache_read_tokens || 0
-    prompt = log.prompt_tokens || 0
-
-    if prompt > 0 do
-      pct = Float.round(cached / prompt * 100, 0)
-      "#{trunc(pct)}%"
-    else
-      ""
+    case Usage.cache_hit_pct(log.prompt_tokens, log.cache_read_tokens, log.cache_write_tokens, 0) do
+      nil -> ""
+      pct -> "#{trunc(pct)}%"
     end
   end
 

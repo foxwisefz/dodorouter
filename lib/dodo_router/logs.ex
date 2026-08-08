@@ -8,6 +8,7 @@ defmodule DodoRouter.Logs do
   alias DodoRouter.Logs.RequestLog
   alias DodoRouter.Routers.Router
   alias DodoRouter.Accounts.User
+  alias DodoRouter.Usage
 
   # Logging
 
@@ -760,18 +761,14 @@ defmodule DodoRouter.Logs do
       stats ->
         prompt_tokens = stats.total_prompt_tokens || 0
         cache_read = stats.cache_read_tokens || 0
+        cache_write = stats.cache_write_tokens || 0
 
-        hit_rate =
-          if prompt_tokens > 0 do
-            Float.round(cache_read / prompt_tokens * 100, 1)
-          else
-            0.0
-          end
+        hit_rate = Usage.cache_hit_pct(prompt_tokens, cache_read, cache_write) || 0.0
 
         %{
           hit_rate: hit_rate,
           cache_read_tokens: cache_read,
-          cache_write_tokens: stats.cache_write_tokens || 0,
+          cache_write_tokens: cache_write,
           cached_requests: stats.cached_requests || 0,
           total_requests: stats.total_requests || 0
         }
