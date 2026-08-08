@@ -11,7 +11,7 @@ defmodule DodoRouterWeb.AnthropicProxyController do
     request_id = Ecto.UUID.generate()
     session = extract_session(conn)
     recording_id = extract_active_recording_id(router)
-    client_headers = extract_forwardable_headers(conn)
+    client_headers = conn.req_headers
 
     openai_params = AnthropicFormat.to_openai_params(params)
 
@@ -54,7 +54,7 @@ defmodule DodoRouterWeb.AnthropicProxyController do
     router = conn.assigns.current_router
     params = Map.drop(params, ["router_slug"])
 
-    case forward_count_tokens(router, params) do
+    case forward_count_tokens(router, params, conn.req_headers) do
       {:ok, body} ->
         json(conn, body)
 
@@ -63,7 +63,7 @@ defmodule DodoRouterWeb.AnthropicProxyController do
     end
   end
 
-  defp forward_count_tokens(router, params) do
+  defp forward_count_tokens(router, params, client_headers) do
     alias DodoRouter.Proxy.Adapters.Anthropic
     alias DodoRouter.{Providers, Routers}
 
@@ -80,7 +80,7 @@ defmodule DodoRouterWeb.AnthropicProxyController do
 
     with %{} <- step,
          key when is_binary(key) <- api_key,
-         {:ok, body} <- Anthropic.count_tokens(params, step, key) do
+         {:ok, body} <- Anthropic.count_tokens(params, step, key, client_headers) do
       {:ok, body}
     else
       _ -> :estimate
@@ -360,13 +360,5 @@ defmodule DodoRouterWeb.AnthropicProxyController do
       nil -> nil
       recording -> recording.id
     end
-  end
-
-  @hop_by_hop_headers ~w(host connection content-length transfer-encoding upgrade proxy-authorization proxy-authenticate te trailer)
-                      |> Enum.map(&String.downcase/1)
-
-  defp extract_forwardable_headers(conn) do
-    conn.req_headers
-    |> Enum.reject(fn {key, _} -> String.downcase(key) in @hop_by_hop_headers end)
   end
 end

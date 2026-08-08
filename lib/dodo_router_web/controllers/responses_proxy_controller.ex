@@ -11,7 +11,7 @@ defmodule DodoRouterWeb.ResponsesProxyController do
     request_id = Ecto.UUID.generate()
     session = extract_session(conn)
     recording_id = extract_active_recording_id(router)
-    client_headers = extract_forwardable_headers(conn)
+    client_headers = conn.req_headers
 
     openai_params = ResponsesFormat.to_openai_params(params)
 
@@ -283,13 +283,5 @@ defmodule DodoRouterWeb.ResponsesProxyController do
       nil -> nil
       recording -> recording.id
     end
-  end
-
-  @hop_by_hop_headers ~w(host connection content-length transfer-encoding upgrade proxy-authorization proxy-authenticate te trailer)
-                      |> Enum.map(&String.downcase/1)
-
-  defp extract_forwardable_headers(conn) do
-    conn.req_headers
-    |> Enum.reject(fn {key, _} -> String.downcase(key) in @hop_by_hop_headers end)
   end
 end

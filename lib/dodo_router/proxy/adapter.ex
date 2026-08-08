@@ -445,13 +445,67 @@ defmodule DodoRouter.Proxy.Adapter do
     "call_" <> (:crypto.strong_rand_bytes(12) |> Base.encode16(case: :lower))
   end
 
+  # Request-fidelity policy (brain/main.md): client headers reach the provider
+  # by default, INCLUDING on fallback to a different provider. A header is
+  # stripped only for one of three stated reasons, below. This function is the
+  # single place that policy lives, and it is provider agnostic — so step 1 and
+  # step 5 of a fallback chain behave identically, with no notion of "is this a
+  # fallback?" to get wrong.
+
+  # 1. We must replace it: the proxy authenticates with its own credentials.
   @proxy_overrides ~w(authorization content-type x-api-key)
-                   |> Enum.map(&String.downcase/1)
+
+  # 2a. The provider will break. content-length/transfer-encoding describe a
+  # body we rewrite, so they are lies by the time we forward. accept-encoding
+  # corrupts streamed responses. The rest cannot survive a hop by definition.
+  @transport_headers ~w(
+    host connection content-length transfer-encoding upgrade
+    proxy-authorization proxy-authenticate te trailer keep-alive
+    accept-encoding
+  )
+
+  # 2b. The provider will break: these name the CLIENT's account or project on
+  # a provider we authenticate to with OUR key, so forwarding them either 401s
+  # or bills the wrong account. Note openai-beta is deliberately absent — it is
+  # a feature opt-in like anthropic-beta, not account scope, so it forwards.
+  @provider_scoped_headers ~w(
+    openai-organization openai-project
+    chatgpt-account-id
+    x-goog-api-key x-goog-user-project
+  )
+
+  # 3. Not the client's to send. `cookie` on a browser-originated request
+  # carries the user's own DodoRouter session — forwarding it would hand a
+  # third party our auth credential. The rest are added by our edge (Caddy),
+  # not by the caller, and disclose the end user's real IP and our internal
+  # hostnames.
+  @non_client_headers ~w(
+    cookie
+    forwarded via x-real-ip x-original-forwarded-for x-original-url
+  )
+
+  # Matched by prefix rather than enumerated: Caddy's config lives on the
+  # server, not in this repo, so the edge can start emitting a new
+  # `x-forwarded-*` with no change here and an enumerated list would go stale
+  # silently. `cf-` costs nothing and covers the day something fronts Caddy.
+  @non_client_prefixes ~w(x-forwarded- cf-)
+
+  @dropped_client_headers (@proxy_overrides ++
+                             @transport_headers ++
+                             @provider_scoped_headers ++
+                             @non_client_headers)
+                          |> Enum.map(&String.downcase/1)
 
   def build_forwarded_headers(client_headers, proxy_headers) when is_list(client_headers) do
+    proxy_keys = MapSet.new(proxy_headers, fn {key, _} -> String.downcase(key) end)
+
     filtered =
       Enum.reject(client_headers, fn {key, _} ->
-        String.downcase(key) in @proxy_overrides
+        key = String.downcase(key)
+
+        key in @dropped_client_headers or
+          String.starts_with?(key, @non_client_prefixes) or
+          MapSet.member?(proxy_keys, key)
       end)
 
     filtered ++ proxy_headers

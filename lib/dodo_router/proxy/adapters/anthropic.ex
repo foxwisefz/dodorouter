@@ -32,6 +32,7 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
   @base_url "https://api.anthropic.com/v1"
   @timeout_ms 120_000
   @api_version "2023-06-01"
+  @oauth_beta "oauth-2025-04-20"
 
   @doc """
   OAuth tokens from `claude setup-token` (prefix `sk-ant-oat`) authenticate
@@ -40,7 +41,7 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
   def auth_headers("sk-ant-oat" <> _rest = token) do
     [
       {"authorization", "Bearer " <> token},
-      {"anthropic-beta", "oauth-2025-04-20"},
+      {"anthropic-beta", @oauth_beta},
       {"anthropic-version", @api_version},
       {"Content-Type", "application/json"}
     ]
@@ -54,11 +55,54 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
     ]
   end
 
+  @doc """
+  Upstream headers: the proxy's credentials plus the client's forwardable
+  headers, per the request-fidelity policy in `Adapter.build_forwarded_headers/2`.
+
+  `anthropic-beta` is the one header that policy cannot resolve on its own.
+  Both sides send it, so the generic proxy-wins collision rule would discard
+  the client's opt-ins in favour of our bare `oauth-2025-04-20` — including
+  `extended-cache-ttl`, whose loss silently demotes an agent session from a 1h
+  prompt cache to 5 minutes. It is therefore merged into the proxy's own
+  headers *before* the policy runs, so exactly one merged header goes upstream.
+  """
+  def request_headers(api_key, client_headers) do
+    proxy_headers =
+      case merged_beta(api_key, client_headers) do
+        nil ->
+          auth_headers(api_key)
+
+        beta ->
+          List.keystore(auth_headers(api_key), "anthropic-beta", 0, {"anthropic-beta", beta})
+      end
+
+    Adapter.build_forwarded_headers(client_headers, proxy_headers)
+  end
+
+  defp merged_beta(api_key, client_headers) do
+    client_beta =
+      Enum.find_value(client_headers || [], fn {k, v} ->
+        if String.downcase(to_string(k)) == "anthropic-beta", do: v
+      end)
+
+    case {client_beta, api_key} do
+      {nil, _} -> nil
+      {beta, "sk-ant-oat" <> _rest} -> ensure_oauth_beta(beta)
+      {beta, _} -> beta
+    end
+  end
+
+  defp ensure_oauth_beta(client_beta) do
+    betas = client_beta |> String.split(",") |> Enum.map(&String.trim/1)
+
+    if @oauth_beta in betas, do: client_beta, else: client_beta <> "," <> @oauth_beta
+  end
+
   @impl true
-  def call(request, %RoutingStep{} = step, api_key, _client_headers \\ []) do
+  def call(request, %RoutingStep{} = step, api_key, client_headers \\ []) do
     url = @base_url <> "/messages"
     body = build_anthropic_request(request, step)
-    headers = auth_headers(api_key)
+    headers = request_headers(api_key, client_headers)
 
     payload_size_bytes = body |> Jason.encode!() |> byte_size()
     start_time = FinchTelemetry.mark_request_start()
@@ -102,10 +146,10 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
   end
 
   @impl true
-  def stream(request, %RoutingStep{} = step, api_key, send_chunk, _client_headers \\ []) do
+  def stream(request, %RoutingStep{} = step, api_key, send_chunk, client_headers \\ []) do
     url = @base_url <> "/messages"
     body = build_anthropic_request(request, step) |> Map.put("stream", true)
-    headers = auth_headers(api_key)
+    headers = request_headers(api_key, client_headers)
 
     payload_size_bytes = body |> Jason.encode!() |> byte_size()
     start_time = FinchTelemetry.mark_request_start()
@@ -210,11 +254,12 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
   Forwards a count_tokens request to Anthropic. Returns `{:ok, body}` with the
   upstream response (`%{"input_tokens" => n}`) or `{:error, reason}`.
   """
-  def count_tokens(params, %RoutingStep{} = step, api_key) do
+  def count_tokens(params, %RoutingStep{} = step, api_key, client_headers \\ []) do
     url = @base_url <> "/messages/count_tokens"
     body = build_count_tokens_request(params, step)
+    headers = request_headers(api_key, client_headers)
 
-    case Req.post(url, headers: auth_headers(api_key), json: body, receive_timeout: 30_000) do
+    case Req.post(url, headers: headers, json: body, receive_timeout: 30_000) do
       {:ok, %{status: 200, body: response_body}} ->
         {:ok, response_body}
 
