@@ -329,6 +329,9 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
           |> Adapter.inject_reasoning_effort(step.reasoning_effort, :anthropic)
       end
 
+    body = put_tool_choice(body, request["tool_choice"], request["parallel_tool_calls"])
+    body = put_output_config(body, request)
+
     # Tools
     if request["tools"] do
       anthropic_tools = Enum.map(request["tools"], &convert_tool_to_anthropic/1)
@@ -337,6 +340,70 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
       body
     end
   end
+
+  # OpenAI tool_choice -> Anthropic. Inverse of AnthropicFormat.put_tool_choice/2;
+  # OpenAI's sibling `parallel_tool_calls` folds into the choice object here.
+  defp put_tool_choice(body, nil, _parallel), do: body
+
+  defp put_tool_choice(body, tool_choice, parallel) do
+    choice =
+      case tool_choice do
+        "auto" ->
+          %{"type" => "auto"}
+
+        "required" ->
+          %{"type" => "any"}
+
+        "none" ->
+          %{"type" => "none"}
+
+        %{"type" => "function", "function" => %{"name" => name}} ->
+          %{"type" => "tool", "name" => name}
+
+        _ ->
+          nil
+      end
+
+    cond do
+      is_nil(choice) ->
+        body
+
+      parallel == false ->
+        Map.put(body, "tool_choice", Map.put(choice, "disable_parallel_tool_use", true))
+
+      true ->
+        Map.put(body, "tool_choice", choice)
+    end
+  end
+
+  # Anthropic expresses structured outputs and reasoning depth in one
+  # `output_config` object; rebuild it from the OpenAI-shaped fields.
+  defp put_output_config(body, request) do
+    output_config =
+      %{}
+      |> maybe_put_format(request["response_format"])
+      |> maybe_put_effort(request["reasoning_effort"])
+
+    if map_size(output_config) == 0 do
+      body
+    else
+      Map.put(body, "output_config", output_config)
+    end
+  end
+
+  defp maybe_put_format(config, %{"type" => "json_schema", "json_schema" => json_schema}) do
+    case json_schema["schema"] do
+      nil -> config
+      schema -> Map.put(config, "format", %{"type" => "json_schema", "schema" => schema})
+    end
+  end
+
+  defp maybe_put_format(config, _), do: config
+
+  defp maybe_put_effort(config, effort) when is_binary(effort) and effort != "",
+    do: Map.put(config, "effort", effort)
+
+  defp maybe_put_effort(config, _), do: config
 
   # Hoists system messages into Anthropic's top-level system array, preserving
   # block boundaries and per-block cache_control — joining blocks would slide
