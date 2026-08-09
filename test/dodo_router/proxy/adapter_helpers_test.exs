@@ -161,14 +161,32 @@ defmodule DodoRouter.Proxy.AdapterHelpersTest do
         "model" => "gpt-4o",
         "messages" => [],
         "router_slug" => "my-router",
-        "parallel_tool_calls" => true
+        "dodo_internal_thing" => true
       }
 
       result = Adapter.sanitize_request(request)
       assert Map.has_key?(result, "model")
       assert Map.has_key?(result, "messages")
       refute Map.has_key?(result, "router_slug")
-      refute Map.has_key?(result, "parallel_tool_calls")
+      refute Map.has_key?(result, "dodo_internal_thing")
+    end
+
+    test "parallel_tool_calls survives — it is a standard Chat Completions param" do
+      # A client that disables parallel tool calls must keep that behaviour on
+      # every OpenAI-family step, INCLUDING fallback. The Anthropic path has
+      # honoured it since tool_choice translation landed; stripping it here
+      # meant the same request behaved differently depending on which provider
+      # answered it.
+      result = Adapter.sanitize_request(%{"messages" => [], "parallel_tool_calls" => false})
+
+      assert result["parallel_tool_calls"] == false
+    end
+
+    test "parallel_tool_calls is only sent when the client asked for it" do
+      # Map.take is what keeps this true: a request that never mentioned the
+      # field must not grow one, or we would be sending a preference the client
+      # never expressed to providers that may not accept it.
+      refute Map.has_key?(Adapter.sanitize_request(%{"messages" => []}), "parallel_tool_calls")
     end
 
     test "normalizes max_completion_tokens to max_tokens" do

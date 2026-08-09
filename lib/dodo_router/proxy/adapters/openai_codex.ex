@@ -28,22 +28,34 @@ defmodule DodoRouter.Proxy.Adapters.OpenAICodex do
   @endpoint "https://chatgpt.com/backend-api/codex/responses"
 
   @impl true
-  def call(request, %RoutingStep{} = step, api_key, _client_headers \\ []) do
+  def call(request, %RoutingStep{} = step, api_key, client_headers \\ []) do
     {token, extra_headers} = prepare_auth(api_key)
 
     ResponsesAPI.call(request, step, token, @endpoint,
       provider: "openai-codex",
-      extra_headers: extra_headers
+      extra_headers: extra_headers,
+      client_headers: client_headers
     )
   end
 
   @impl true
-  def stream(request, %RoutingStep{} = step, api_key, send_chunk, _client_headers \\ []) do
+  def stream(request, %RoutingStep{} = step, api_key, send_chunk, client_headers \\ []) do
     {token, extra_headers} = prepare_auth(api_key)
 
     ResponsesAPI.stream(request, step, token, send_chunk, @endpoint,
       provider: "openai-codex",
-      extra_headers: extra_headers
+      extra_headers: extra_headers,
+      client_headers: client_headers
+    )
+  end
+
+  @doc false
+  def request_headers(api_key, client_headers) do
+    {token, extra_headers} = prepare_auth(api_key)
+
+    ResponsesAPI.build_headers(token,
+      extra_headers: extra_headers,
+      client_headers: client_headers
     )
   end
 

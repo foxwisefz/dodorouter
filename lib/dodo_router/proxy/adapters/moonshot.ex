@@ -46,6 +46,13 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
     ]
   end
 
+  @doc """
+  Upstream headers: our credentials plus the client's forwardable headers, per
+  `Adapter.build_forwarded_headers/2`.
+  """
+  def request_headers(api_key, client_headers),
+    do: Adapter.build_forwarded_headers(client_headers, proxy_headers(nil, api_key))
+
   # Debug helper - returns key hint or indicates nil/empty
   defp key_hint(nil), do: "nil"
   defp key_hint(""), do: "empty"

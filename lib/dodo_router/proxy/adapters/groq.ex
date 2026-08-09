@@ -44,7 +44,7 @@ defmodule DodoRouter.Proxy.Adapters.Groq do
     request = transform_request(request)
 
     if needs_fake_stream?(request) do
-      fake_stream(request, step, api_key, send_chunk)
+      fake_stream(request, step, api_key, send_chunk, client_headers)
     else
       OpenAICompatible.stream(request, step, api_key, send_chunk, @base_url,
         provider: "groq",
@@ -53,6 +53,10 @@ defmodule DodoRouter.Proxy.Adapters.Groq do
       )
     end
   end
+
+  @doc false
+  def request_headers(api_key, client_headers),
+    do: OpenAICompatible.build_headers(api_key, client_headers: client_headers)
 
   @doc false
   def transform_request(request) do
@@ -80,8 +84,11 @@ defmodule DodoRouter.Proxy.Adapters.Groq do
   end
 
   # Fake streaming: make non-streaming call, send response as SSE chunk
-  defp fake_stream(request, step, api_key, send_chunk) do
-    case OpenAICompatible.call(request, step, api_key, @base_url, provider: "groq") do
+  defp fake_stream(request, step, api_key, send_chunk, client_headers) do
+    case OpenAICompatible.call(request, step, api_key, @base_url,
+           provider: "groq",
+           client_headers: client_headers
+         ) do
       {:ok, response, meta} ->
         send_chunk.("data: #{Jason.encode!(response)}\n\n")
         send_chunk.("data: [DONE]\n\n")

@@ -193,14 +193,25 @@ defmodule DodoRouter.Proxy.Adapters.OpenAICompatible do
     |> Adapter.inject_reasoning_effort(step.reasoning_effort, format)
   end
 
-  defp build_headers(api_key, opts) do
+  @doc """
+  Upstream headers: the proxy's credentials plus the client's forwardable
+  headers, per the request-fidelity policy in `Adapter.build_forwarded_headers/2`.
+
+  Delegating adapters (Groq, Mistral, xAI, DeepSeek, …) pass the client's
+  headers through as the `:client_headers` opt. Reading that key here is what
+  makes the policy reach them — for a while they all passed it and this
+  function ignored it, so every OpenAI-family step silently forwarded nothing.
+  """
+  def build_headers(api_key, opts) do
     base = [
       {"Authorization", "Bearer #{api_key}"},
       {"Content-Type", "application/json"}
     ]
 
     extra = Keyword.get(opts, :extra_headers, [])
-    base ++ extra
+    client_headers = Keyword.get(opts, :client_headers, [])
+
+    Adapter.build_forwarded_headers(client_headers, base ++ extra)
   end
 
   defp latency(start_time), do: System.monotonic_time(:millisecond) - start_time

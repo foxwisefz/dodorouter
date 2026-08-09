@@ -71,6 +71,7 @@ defmodule DodoRouterWeb.LogLive.Show do
       |> assign(:show_resp_headers, false)
       |> assign(:expanded_messages, MapSet.new())
       |> assign(:truncation_flags, log.truncation_flags || [])
+      |> assign(:fidelity_changes, log.fidelity_changes || [])
       |> assign(:finish_reason, extract_finish_reason(log.response_body))
       |> assign(:evaluations, Evaluations.list_for_log(socket.assigns.current_user, log.id))
       |> assign(:replay_count, Logs.replay_counts([log.id]) |> Map.get(log.id, 0))
@@ -615,6 +616,61 @@ defmodule DodoRouterWeb.LogLive.Show do
                     Full fallback trace with headers and bodies →
                   </button>
                 </div>
+                <%= if length(@fidelity_changes) > 0 do %>
+                  <div class="mb-4 rounded-lg border border-base-300 bg-base-100 overflow-hidden">
+                    <button
+                      type="button"
+                      phx-click={JS.toggle(to: "#fidelity-changes")}
+                      class="w-full flex items-center gap-2 px-4 py-2.5 text-left hover:bg-base-200/60 transition-colors"
+                    >
+                      <.icon name="hero-scissors" class="w-4 h-4 text-base-content/50 shrink-0" />
+                      <span class="text-sm font-semibold">What the proxy changed</span>
+                      <span class="badge badge-sm badge-ghost">{length(@fidelity_changes)}</span>
+                      <span class="ml-auto text-xs text-base-content/40">show</span>
+                    </button>
+                    <div id="fidelity-changes" class="hidden border-t border-base-300">
+                      <table class="table table-xs">
+                        <thead>
+                          <tr>
+                            <th>Where</th>
+                            <th>What</th>
+                            <th>Action</th>
+                            <th>Why</th>
+                            <th>Step</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          <tr :for={change <- @fidelity_changes}>
+                            <td class="text-base-content/60 whitespace-nowrap">
+                              {fidelity_channel_label(change["channel"])}
+                            </td>
+                            <td class="font-mono break-all">{change["name"]}</td>
+                            <td>
+                              <span class={[
+                                "badge badge-xs",
+                                if(change["action"] == "rewritten",
+                                  do: "badge-info",
+                                  else: "badge-ghost"
+                                )
+                              ]}>
+                                {change["action"]}
+                              </span>
+                            </td>
+                            <td class="text-base-content/60">
+                              {DodoRouter.Proxy.Fidelity.explain(change["reason"])}
+                              <span :if={change["detail"]} class="block text-base-content/40">
+                                {change["detail"]}
+                              </span>
+                            </td>
+                            <td class="text-base-content/50 whitespace-nowrap">
+                              {fidelity_step_label(change)}
+                            </td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                <% end %>
                 <%= if length(@truncation_flags) > 0 do %>
                   <div class="alert alert-warning mb-4">
                     <svg
@@ -1198,6 +1254,20 @@ defmodule DodoRouterWeb.LogLive.Show do
       _ -> nil
     end
   end
+
+  defp fidelity_channel_label("request_header"), do: "Request header"
+  defp fidelity_channel_label("request_body"), do: "Request field"
+  defp fidelity_channel_label("response_body"), do: "Response field"
+  defp fidelity_channel_label(other), do: other
+
+  # Ingress-conversion changes happen before any step exists, so they carry no
+  # provider — saying so beats printing a blank cell next to the per-step rows.
+  defp fidelity_step_label(%{"provider" => provider, "step" => step})
+       when is_binary(provider) and is_integer(step) do
+    "#{step + 1} · #{provider}"
+  end
+
+  defp fidelity_step_label(_change), do: "before routing"
 
   defp attempt_error_message(attempt) do
     case attempt["error_body"] do

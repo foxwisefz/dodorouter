@@ -3,6 +3,7 @@ defmodule DodoRouter.Proxy.Adapter do
   Behaviour for LLM provider adapters.
   """
 
+  alias DodoRouter.Proxy.Fidelity
   alias DodoRouter.Routers.RoutingStep
 
   @type request :: map()
@@ -231,30 +232,54 @@ defmodule DodoRouter.Proxy.Adapter do
   end
 
   # Standard OpenAI-compatible fields that upstream providers accept.
-  # Everything else (router_slug, parallel_tool_calls, etc.) is stripped.
+  # Everything else (`router_slug`, client-invented extras, …) is stripped.
+  #
+  # `parallel_tool_calls` belongs here: it is a documented Chat Completions
+  # parameter, both ingress converters produce it (AnthropicFormat derives it
+  # from `tool_choice.disable_parallel_tool_use`, ResponsesFormat passes it
+  # through), and the Anthropic adapter honours it on egress. Leaving it out
+  # meant an identical request kept the client's "do not parallelise" intent on
+  # an Anthropic step and silently lost it on every OpenAI-family fallback.
+  # `Map.take/2` means it only travels when the client actually sent it.
   @allowed_request_fields ~w(
     model messages temperature top_p max_tokens max_completion_tokens
     stream stream_options stop frequency_penalty presence_penalty
-    tools tool_choice response_format seed n logprobs top_logprobs
-    user reasoning_effort thinking
+    tools tool_choice parallel_tool_calls response_format seed n
+    logprobs top_logprobs user reasoning_effort thinking
   )
 
   @doc """
   Strips non-standard fields from the incoming request body before
   forwarding to an upstream provider.
 
-  Clients may send extra fields (e.g. `router_slug`, `parallel_tool_calls`)
-  that are not part of the provider's API. This whitelist ensures only
-  recognized fields are forwarded, preventing 400 Bad Request errors.
+  Clients may send extra fields (e.g. `router_slug`) that are not part of the
+  provider's API. This whitelist ensures only recognized fields are forwarded,
+  preventing 400 Bad Request errors.
   """
   def sanitize_request(request) when is_map(request) do
     request
+    |> record_dropped_fields()
     |> Map.take(@allowed_request_fields)
     |> normalize_max_completion_tokens()
     |> sanitize_messages()
   end
 
   def sanitize_request(request), do: request
+
+  # Injected by the router from the URL path or by the proxy itself — the
+  # client never sent them, so removing them is not a fidelity loss and
+  # reporting them would put noise on every single request log.
+  @proxy_owned_request_fields ~w(router_slug)
+
+  defp record_dropped_fields(request) do
+    request
+    |> Map.keys()
+    |> Enum.reject(&(&1 in @allowed_request_fields or &1 in @proxy_owned_request_fields))
+    |> Enum.sort()
+    |> Fidelity.record_dropped_body_fields(:not_in_provider_allowlist)
+
+    request
+  end
 
   @doc """
   Accumulates raw response data while streaming a non-200 response.
@@ -490,29 +515,46 @@ defmodule DodoRouter.Proxy.Adapter do
   # silently. `cf-` costs nothing and covers the day something fronts Caddy.
   @non_client_prefixes ~w(x-forwarded- cf-)
 
-  @dropped_client_headers (@proxy_overrides ++
-                             @transport_headers ++
-                             @provider_scoped_headers ++
-                             @non_client_headers)
-                          |> Enum.map(&String.downcase/1)
-
   def build_forwarded_headers(client_headers, proxy_headers) when is_list(client_headers) do
     proxy_keys = MapSet.new(proxy_headers, fn {key, _} -> String.downcase(key) end)
 
-    filtered =
-      Enum.reject(client_headers, fn {key, _} ->
-        key = String.downcase(key)
-
-        key in @dropped_client_headers or
-          String.starts_with?(key, @non_client_prefixes) or
-          MapSet.member?(proxy_keys, key)
+    {dropped, filtered} =
+      Enum.split_with(client_headers, fn {key, _} ->
+        strip_reason(String.downcase(to_string(key)), proxy_keys) != nil
       end)
 
-    filtered ++ proxy_headers
+    outbound = filtered ++ proxy_headers
+
+    Fidelity.record_headers(
+      Enum.map(dropped, fn {key, _} ->
+        key = String.downcase(to_string(key))
+        {key, strip_reason(key, proxy_keys)}
+      end),
+      outbound
+    )
+
+    outbound
   end
 
   def build_forwarded_headers(client_headers, proxy_headers) when is_nil(client_headers) do
+    Fidelity.record_headers([], proxy_headers)
     proxy_headers
+  end
+
+  # The reason a client header does not reach the provider, or nil when it
+  # does. Recording the reason alongside the drop is what keeps the strip list
+  # from decaying into folklore: every entry in a log can be traced back to one
+  # of the three stated rationales rather than to someone's memory of an outage.
+  defp strip_reason(key, proxy_keys) do
+    cond do
+      key in @proxy_overrides -> :replaced_by_proxy
+      key in @transport_headers -> :transport
+      key in @provider_scoped_headers -> :account_scoped
+      key in @non_client_headers -> :not_client_sent
+      String.starts_with?(key, @non_client_prefixes) -> :not_client_sent
+      MapSet.member?(proxy_keys, key) -> :proxy_value_wins
+      true -> nil
+    end
   end
 
   # SSE parsing utilities
