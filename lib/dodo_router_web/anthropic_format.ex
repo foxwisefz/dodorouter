@@ -3,6 +3,37 @@ defmodule DodoRouterWeb.AnthropicFormat do
   Converts between Anthropic Messages API format and OpenAI Chat Completions format.
   """
 
+  # Top-level Anthropic request fields this module actually carries into the
+  # OpenAI-shaped intermediate representation.
+  @consumed_fields ~w(
+    model messages system max_tokens
+    stream temperature top_p stop_sequences thinking tools
+    tool_choice output_config
+  )
+
+  # Injected by the router from the URL path — never part of the client body.
+  @ignored_fields ~w(router_slug)
+
+  @doc """
+  Top-level fields present in an incoming Anthropic request that the conversion
+  to OpenAI format does **not** carry.
+
+  The IR is a whitelist, so anything Anthropic adds that we haven't taught it
+  about is dropped in silence — that is how `output_config` (structured
+  outputs) went unnoticed until a client's JSON parsing started failing. This
+  turns that silent loss into a signal: callers log it, and each reported field
+  is either a translation to write or a deliberate, documented drop.
+
+  Fields are reported whether or not we recognise them, precisely so genuinely
+  new ones surface without anyone predicting them.
+  """
+  def unknown_fields(anthropic_params) when is_map(anthropic_params) do
+    anthropic_params
+    |> Map.keys()
+    |> Enum.reject(&(&1 in @consumed_fields or &1 in @ignored_fields))
+    |> Enum.sort()
+  end
+
   def to_openai_params(anthropic_params) do
     raw_messages = anthropic_params["messages"] || []
     converted = convert_messages_to_openai(raw_messages)
@@ -54,7 +85,62 @@ defmodule DodoRouterWeb.AnthropicFormat do
     |> maybe_put("stop", anthropic_params["stop_sequences"])
     |> maybe_put("thinking", anthropic_params["thinking"])
     |> maybe_put_tools(anthropic_params["tools"])
+    |> put_tool_choice(anthropic_params["tool_choice"])
+    |> put_output_config(anthropic_params["output_config"])
   end
+
+  # Anthropic tool_choice -> OpenAI. The two express the same intents with
+  # different spellings; `disable_parallel_tool_use` lives on the choice object
+  # in Anthropic and as a sibling field in OpenAI.
+  defp put_tool_choice(map, nil), do: map
+
+  defp put_tool_choice(map, %{"type" => type} = tool_choice) do
+    choice =
+      case type do
+        "auto" -> "auto"
+        "any" -> "required"
+        "none" -> "none"
+        "tool" -> %{"type" => "function", "function" => %{"name" => tool_choice["name"]}}
+        _ -> nil
+      end
+
+    map = if choice, do: Map.put(map, "tool_choice", choice), else: map
+
+    case tool_choice["disable_parallel_tool_use"] do
+      true -> Map.put(map, "parallel_tool_calls", false)
+      _ -> map
+    end
+  end
+
+  defp put_tool_choice(map, _), do: map
+
+  # Anthropic carries structured outputs and reasoning depth together in
+  # `output_config`; the OpenAI shape splits them into `response_format` and
+  # `reasoning_effort`. Routing `effort` through `reasoning_effort` also means
+  # `Adapter.inject_reasoning_effort/3` sees it as a client-supplied value and
+  # leaves it alone, which is the precedence the adapter contract expects.
+  defp put_output_config(map, nil), do: map
+
+  defp put_output_config(map, output_config) when is_map(output_config) do
+    map
+    |> maybe_put("reasoning_effort", output_config["effort"])
+    |> put_response_format(output_config["format"])
+  end
+
+  defp put_output_config(map, _), do: map
+
+  defp put_response_format(map, %{"type" => "json_schema"} = format) do
+    # OpenAI requires a name on the schema object; Anthropic has no equivalent,
+    # so we supply a stable placeholder rather than inventing one per request
+    # (a varying name would change the request bytes and bust prompt caching).
+    json_schema =
+      %{"name" => "response", "schema" => format["schema"]}
+      |> Map.reject(fn {_k, v} -> is_nil(v) end)
+
+    Map.put(map, "response_format", %{"type" => "json_schema", "json_schema" => json_schema})
+  end
+
+  defp put_response_format(map, _), do: map
 
   def from_openai_response(openai_response) do
     choice = get_in(openai_response, ["choices", Access.at(0)]) || %{}

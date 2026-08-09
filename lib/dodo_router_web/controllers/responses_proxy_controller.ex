@@ -11,7 +11,7 @@ defmodule DodoRouterWeb.ResponsesProxyController do
     request_id = Ecto.UUID.generate()
     session = extract_session(conn)
     recording_id = extract_active_recording_id(router)
-    client_headers = extract_forwardable_headers(conn)
+    client_headers = conn.req_headers
 
     openai_params = ResponsesFormat.to_openai_params(params)
 
@@ -19,6 +19,8 @@ defmodule DodoRouterWeb.ResponsesProxyController do
       "[ResponsesProxy] request_id=#{request_id} router=#{router.slug} stream=#{params["stream"]} " <>
         "model=#{params["model"]}"
     )
+
+    warn_dropped_fields(params, request_id, router)
 
     if params["stream"] == true do
       stream_responses(
@@ -285,11 +287,19 @@ defmodule DodoRouterWeb.ResponsesProxyController do
     end
   end
 
-  @hop_by_hop_headers ~w(host connection content-length transfer-encoding upgrade proxy-authorization proxy-authenticate te trailer)
-                      |> Enum.map(&String.downcase/1)
+  # See AnthropicProxyController: the conversion is a whitelist, so anything it
+  # doesn't carry is dropped in silence. Logging it turns that into a work
+  # queue rather than a bug report from a confused client.
+  defp warn_dropped_fields(params, request_id, router) do
+    case ResponsesFormat.unknown_fields(params) do
+      [] ->
+        :ok
 
-  defp extract_forwardable_headers(conn) do
-    conn.req_headers
-    |> Enum.reject(fn {key, _} -> String.downcase(key) in @hop_by_hop_headers end)
+      fields ->
+        Logger.warning(
+          "[ResponsesProxy] dropped_fields=#{Enum.join(fields, ",")} " <>
+            "request_id=#{request_id} router=#{router.slug} model=#{params["model"]}"
+        )
+    end
   end
 end

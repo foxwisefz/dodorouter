@@ -11,7 +11,7 @@ defmodule DodoRouterWeb.AnthropicProxyController do
     request_id = Ecto.UUID.generate()
     session = extract_session(conn)
     recording_id = extract_active_recording_id(router)
-    client_headers = extract_forwardable_headers(conn)
+    client_headers = conn.req_headers
 
     openai_params = AnthropicFormat.to_openai_params(params)
 
@@ -19,6 +19,8 @@ defmodule DodoRouterWeb.AnthropicProxyController do
       "[AnthropicProxy] request_id=#{request_id} router=#{router.slug} stream=#{params["stream"]} " <>
         "model=#{params["model"]} msg_count=#{length(params["messages"] || [])}"
     )
+
+    warn_dropped_fields(params, request_id, router)
 
     if params["stream"] == true do
       stream_anthropic(
@@ -43,6 +45,25 @@ defmodule DodoRouterWeb.AnthropicProxyController do
     end
   end
 
+  # The Anthropic->OpenAI conversion is a whitelist, so any field we haven't
+  # taught it about is dropped in silence — the client sees a 200 and a
+  # response that quietly ignored what it asked for (this is how structured
+  # outputs via `output_config` went unnoticed). Surfacing it here turns an
+  # unknown-unknown into a work queue: each field is either a translation to
+  # write or a deliberate drop to document.
+  defp warn_dropped_fields(params, request_id, router) do
+    case AnthropicFormat.unknown_fields(params) do
+      [] ->
+        :ok
+
+      fields ->
+        Logger.warning(
+          "[AnthropicProxy] dropped_fields=#{Enum.join(fields, ",")} " <>
+            "request_id=#{request_id} router=#{router.slug} model=#{params["model"]}"
+        )
+    end
+  end
+
   @doc """
   Anthropic-compatible `/v1/messages/count_tokens`. Claude Code calls this for
   compaction sizing. When the router has an Anthropic step with a usable key we
@@ -54,7 +75,7 @@ defmodule DodoRouterWeb.AnthropicProxyController do
     router = conn.assigns.current_router
     params = Map.drop(params, ["router_slug"])
 
-    case forward_count_tokens(router, params) do
+    case forward_count_tokens(router, params, conn.req_headers) do
       {:ok, body} ->
         json(conn, body)
 
@@ -63,7 +84,7 @@ defmodule DodoRouterWeb.AnthropicProxyController do
     end
   end
 
-  defp forward_count_tokens(router, params) do
+  defp forward_count_tokens(router, params, client_headers) do
     alias DodoRouter.Proxy.Adapters.Anthropic
     alias DodoRouter.{Providers, Routers}
 
@@ -80,7 +101,7 @@ defmodule DodoRouterWeb.AnthropicProxyController do
 
     with %{} <- step,
          key when is_binary(key) <- api_key,
-         {:ok, body} <- Anthropic.count_tokens(params, step, key) do
+         {:ok, body} <- Anthropic.count_tokens(params, step, key, client_headers) do
       {:ok, body}
     else
       _ -> :estimate
@@ -360,13 +381,5 @@ defmodule DodoRouterWeb.AnthropicProxyController do
       nil -> nil
       recording -> recording.id
     end
-  end
-
-  @hop_by_hop_headers ~w(host connection content-length transfer-encoding upgrade proxy-authorization proxy-authenticate te trailer)
-                      |> Enum.map(&String.downcase/1)
-
-  defp extract_forwardable_headers(conn) do
-    conn.req_headers
-    |> Enum.reject(fn {key, _} -> String.downcase(key) in @hop_by_hop_headers end)
   end
 end

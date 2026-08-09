@@ -302,5 +302,50 @@ defmodule DodoRouterWeb.ResponsesFormatTest do
     end
   end
 
+  describe "unknown_fields/1" do
+    @known %{"model" => "gpt-5.5", "input" => "hi"}
+
+    test "returns [] when every field is consumed by the conversion" do
+      params =
+        Map.merge(@known, %{
+          "instructions" => "be nice",
+          "stream" => true,
+          "temperature" => 1,
+          "top_p" => 0.9,
+          "max_output_tokens" => 1024,
+          "truncation" => "auto",
+          "tools" => [],
+          "tool_choice" => "auto",
+          "parallel_tool_calls" => false,
+          "metadata" => %{"user_id" => "u1"},
+          "reasoning" => %{"effort" => "high"}
+        })
+
+      assert ResponsesFormat.unknown_fields(params) == []
+    end
+
+    test "flags the Responses structured-output field the converter drops" do
+      # `text.format` is the Responses API spelling of structured outputs —
+      # the same class of silent loss as Anthropic's output_config.
+      params = Map.put(@known, "text", %{"format" => %{"type" => "json_schema"}})
+
+      assert ResponsesFormat.unknown_fields(params) == ["text"]
+    end
+
+    test "flags stateful-conversation fields, which change semantics when dropped" do
+      params =
+        Map.merge(@known, %{
+          "previous_response_id" => "resp_123",
+          "store" => true
+        })
+
+      assert ResponsesFormat.unknown_fields(params) == ["previous_response_id", "store"]
+    end
+
+    test "ignores router_slug, which Phoenix injects from the path" do
+      assert ResponsesFormat.unknown_fields(Map.put(@known, "router_slug", "codex")) == []
+    end
+  end
+
   defp unique, do: System.unique_integer([:positive])
 end

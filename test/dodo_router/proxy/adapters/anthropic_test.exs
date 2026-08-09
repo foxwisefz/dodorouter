@@ -531,6 +531,99 @@ defmodule DodoRouter.Proxy.Adapters.AnthropicTest do
     end
   end
 
+  describe "tool_choice translation (build_anthropic_request/2)" do
+    defp anthropic_tool_choice(request_extras) do
+      %{"messages" => [%{"role" => "user", "content" => "hi"}]}
+      |> Map.merge(request_extras)
+      |> Anthropic.build_anthropic_request(%RoutingStep{model: "claude-sonnet-5"})
+    end
+
+    test "\"auto\" maps to the Anthropic auto form" do
+      assert anthropic_tool_choice(%{"tool_choice" => "auto"})["tool_choice"] ==
+               %{"type" => "auto"}
+    end
+
+    test "\"required\" maps to any" do
+      assert anthropic_tool_choice(%{"tool_choice" => "required"})["tool_choice"] ==
+               %{"type" => "any"}
+    end
+
+    test "\"none\" maps to none" do
+      assert anthropic_tool_choice(%{"tool_choice" => "none"})["tool_choice"] ==
+               %{"type" => "none"}
+    end
+
+    test "the OpenAI function form maps to a named tool" do
+      choice = %{"type" => "function", "function" => %{"name" => "read_file"}}
+
+      assert anthropic_tool_choice(%{"tool_choice" => choice})["tool_choice"] ==
+               %{"type" => "tool", "name" => "read_file"}
+    end
+
+    test "parallel_tool_calls false becomes disable_parallel_tool_use" do
+      body =
+        anthropic_tool_choice(%{"tool_choice" => "auto", "parallel_tool_calls" => false})
+
+      assert body["tool_choice"] == %{"type" => "auto", "disable_parallel_tool_use" => true}
+    end
+
+    test "absent tool_choice stays absent" do
+      refute Map.has_key?(anthropic_tool_choice(%{}), "tool_choice")
+    end
+  end
+
+  describe "structured outputs (build_anthropic_request/2)" do
+    test "OpenAI response_format maps to Anthropic output_config.format" do
+      schema = %{"type" => "object", "properties" => %{"severity" => %{"type" => "string"}}}
+
+      request = %{
+        "messages" => [%{"role" => "user", "content" => "hi"}],
+        "response_format" => %{
+          "type" => "json_schema",
+          "json_schema" => %{"name" => "response", "schema" => schema}
+        }
+      }
+
+      body = Anthropic.build_anthropic_request(request, %RoutingStep{model: "claude-sonnet-5"})
+
+      assert body["output_config"]["format"] == %{"type" => "json_schema", "schema" => schema}
+    end
+
+    test "a client reasoning_effort becomes output_config.effort" do
+      request = %{
+        "messages" => [%{"role" => "user", "content" => "hi"}],
+        "reasoning_effort" => "xhigh"
+      }
+
+      body = Anthropic.build_anthropic_request(request, %RoutingStep{model: "claude-sonnet-5"})
+
+      assert body["output_config"]["effort"] == "xhigh"
+    end
+
+    test "format and effort share one output_config" do
+      request = %{
+        "messages" => [%{"role" => "user", "content" => "hi"}],
+        "reasoning_effort" => "low",
+        "response_format" => %{
+          "type" => "json_schema",
+          "json_schema" => %{"name" => "r", "schema" => %{"type" => "object"}}
+        }
+      }
+
+      body = Anthropic.build_anthropic_request(request, %RoutingStep{model: "claude-sonnet-5"})
+
+      assert body["output_config"]["effort"] == "low"
+      assert body["output_config"]["format"]["type"] == "json_schema"
+    end
+
+    test "no output_config when the client asked for neither" do
+      request = %{"messages" => [%{"role" => "user", "content" => "hi"}]}
+      body = Anthropic.build_anthropic_request(request, %RoutingStep{model: "claude-sonnet-5"})
+
+      refute Map.has_key?(body, "output_config")
+    end
+  end
+
   describe "build_count_tokens_request/2" do
     test "keeps only count_tokens fields and uses the step's model" do
       params = %{

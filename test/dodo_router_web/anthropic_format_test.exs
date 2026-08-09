@@ -787,4 +787,221 @@ defmodule DodoRouterWeb.AnthropicFormatTest do
       assert image_block["source"]["data"] == "iVBORw0KGgo="
     end
   end
+
+  describe "tool_choice translation (to_openai_params/1)" do
+    defp openai_tool_choice(anthropic_tool_choice) do
+      %{
+        "model" => "claude-sonnet-5",
+        "messages" => [%{"role" => "user", "content" => "hi"}],
+        "max_tokens" => 1024,
+        "tool_choice" => anthropic_tool_choice
+      }
+      |> AnthropicFormat.to_openai_params()
+    end
+
+    test "auto maps to \"auto\"" do
+      assert openai_tool_choice(%{"type" => "auto"})["tool_choice"] == "auto"
+    end
+
+    test "any maps to \"required\"" do
+      assert openai_tool_choice(%{"type" => "any"})["tool_choice"] == "required"
+    end
+
+    test "none maps to \"none\"" do
+      assert openai_tool_choice(%{"type" => "none"})["tool_choice"] == "none"
+    end
+
+    test "a named tool maps to the OpenAI function form" do
+      result = openai_tool_choice(%{"type" => "tool", "name" => "read_file"})
+
+      assert result["tool_choice"] == %{
+               "type" => "function",
+               "function" => %{"name" => "read_file"}
+             }
+    end
+
+    test "disable_parallel_tool_use maps to parallel_tool_calls" do
+      result = openai_tool_choice(%{"type" => "any", "disable_parallel_tool_use" => true})
+
+      assert result["tool_choice"] == "required"
+      assert result["parallel_tool_calls"] == false
+    end
+
+    test "absent tool_choice stays absent" do
+      params = %{"model" => "m", "messages" => [], "max_tokens" => 1}
+      refute Map.has_key?(AnthropicFormat.to_openai_params(params), "tool_choice")
+    end
+  end
+
+  describe "output_config translation (to_openai_params/1)" do
+    test "structured output format maps to OpenAI response_format" do
+      schema = %{
+        "type" => "object",
+        "properties" => %{"severity" => %{"type" => "string"}},
+        "required" => ["severity"]
+      }
+
+      params = %{
+        "model" => "claude-sonnet-5",
+        "messages" => [%{"role" => "user", "content" => "hi"}],
+        "max_tokens" => 1024,
+        "output_config" => %{"format" => %{"type" => "json_schema", "schema" => schema}}
+      }
+
+      result = AnthropicFormat.to_openai_params(params)
+
+      assert %{"type" => "json_schema", "json_schema" => json_schema} = result["response_format"]
+      assert json_schema["schema"] == schema
+      # OpenAI requires a name on the schema object; Anthropic has no equivalent
+      assert is_binary(json_schema["name"])
+    end
+
+    test "effort maps to reasoning_effort so the client's choice takes precedence" do
+      params = %{
+        "model" => "claude-sonnet-5",
+        "messages" => [%{"role" => "user", "content" => "hi"}],
+        "max_tokens" => 1024,
+        "output_config" => %{"effort" => "xhigh"}
+      }
+
+      assert AnthropicFormat.to_openai_params(params)["reasoning_effort"] == "xhigh"
+    end
+
+    test "format and effort travel together" do
+      params = %{
+        "model" => "claude-sonnet-5",
+        "messages" => [%{"role" => "user", "content" => "hi"}],
+        "max_tokens" => 1024,
+        "output_config" => %{
+          "effort" => "low",
+          "format" => %{"type" => "json_schema", "schema" => %{"type" => "object"}}
+        }
+      }
+
+      result = AnthropicFormat.to_openai_params(params)
+      assert result["reasoning_effort"] == "low"
+      assert result["response_format"]["type"] == "json_schema"
+    end
+  end
+
+  describe "unknown_fields/1" do
+    @known %{
+      "model" => "claude-sonnet-5",
+      "messages" => [%{"role" => "user", "content" => "hi"}],
+      "max_tokens" => 1024
+    }
+
+    test "returns [] when every field is consumed by the conversion" do
+      params =
+        Map.merge(@known, %{
+          "system" => [%{"type" => "text", "text" => "be nice"}],
+          "stream" => true,
+          "temperature" => 1,
+          "top_p" => 0.9,
+          "stop_sequences" => ["</done>"],
+          "thinking" => %{"type" => "enabled", "budget_tokens" => 1024},
+          "tools" => []
+        })
+
+      assert AnthropicFormat.unknown_fields(params) == []
+    end
+
+    test "flags a field the converter silently drops (context_management)" do
+      # The failure mode this guards against: the client asks for something,
+      # we drop it, the model ignores it, and the client only finds out when
+      # its own parsing or expectations break. `output_config` reached
+      # production that way before this detector existed.
+      params = Map.put(@known, "context_management", %{"edits" => []})
+
+      assert AnthropicFormat.unknown_fields(params) == ["context_management"]
+    end
+
+    test "ignores router_slug, which Phoenix injects from the path" do
+      params = Map.put(@known, "router_slug", "fw-claude")
+
+      assert AnthropicFormat.unknown_fields(params) == []
+    end
+
+    test "reports every unconsumed field, sorted" do
+      params =
+        Map.merge(@known, %{
+          "router_slug" => "fw-claude",
+          "top_k" => 40,
+          "metadata" => %{"user_id" => "u1"},
+          "context_management" => %{"edits" => []}
+        })
+
+      assert AnthropicFormat.unknown_fields(params) == [
+               "context_management",
+               "metadata",
+               "top_k"
+             ]
+    end
+
+    test "no longer flags fields the converter now translates" do
+      params =
+        Map.merge(@known, %{
+          "tool_choice" => %{"type" => "any"},
+          "output_config" => %{"format" => %{"type" => "json_schema", "schema" => %{}}}
+        })
+
+      assert AnthropicFormat.unknown_fields(params) == []
+    end
+  end
+
+  describe "seam: tool_choice and output_config survive the full request round-trip" do
+    alias DodoRouter.Proxy.Adapters.Anthropic
+    alias DodoRouter.Routers.RoutingStep
+
+    test "a forced tool with parallel use disabled arrives intact at Anthropic" do
+      client_request = %{
+        "model" => "claude-sonnet-5",
+        "max_tokens" => 1024,
+        "messages" => [%{"role" => "user", "content" => "read it"}],
+        "tools" => [%{"name" => "read_file", "input_schema" => %{"type" => "object"}}],
+        "tool_choice" => %{
+          "type" => "tool",
+          "name" => "read_file",
+          "disable_parallel_tool_use" => true
+        }
+      }
+
+      body =
+        client_request
+        |> AnthropicFormat.to_openai_params()
+        |> Anthropic.build_anthropic_request(%RoutingStep{model: "claude-sonnet-5"})
+
+      assert body["tool_choice"] == %{
+               "type" => "tool",
+               "name" => "read_file",
+               "disable_parallel_tool_use" => true
+             }
+    end
+
+    test "a structured-output schema arrives intact at Anthropic" do
+      schema = %{
+        "type" => "object",
+        "properties" => %{"score" => %{"type" => "integer"}},
+        "required" => ["score"]
+      }
+
+      client_request = %{
+        "model" => "claude-sonnet-5",
+        "max_tokens" => 1024,
+        "messages" => [%{"role" => "user", "content" => "score it"}],
+        "output_config" => %{
+          "effort" => "high",
+          "format" => %{"type" => "json_schema", "schema" => schema}
+        }
+      }
+
+      body =
+        client_request
+        |> AnthropicFormat.to_openai_params()
+        |> Anthropic.build_anthropic_request(%RoutingStep{model: "claude-sonnet-5"})
+
+      assert body["output_config"]["format"] == %{"type" => "json_schema", "schema" => schema}
+      assert body["output_config"]["effort"] == "high"
+    end
+  end
 end
