@@ -503,7 +503,41 @@ defmodule DodoRouterWeb.ProxyIntegrationTest do
       assert get_in(message_start, ["message", "content"]) == []
     end
 
-    test "returns HTTP 200 SSE error when no routing configured", %{metadata: metadata} do
+    test "message_start names the model that actually answered", %{metadata: metadata} do
+      # A silent fallback used to be invisible: message_start echoed the model
+      # the client asked for, so an agent session could run entirely on another
+      # provider with nothing in the stream to say so.
+      %{router: router, api_key: api_key} = create_router_with_test_provider(metadata)
+
+      {:ok, response} =
+        make_request(
+          "/r/#{router.slug}/v1/messages",
+          %{
+            "model" => "a-model-the-router-does-not-use",
+            "messages" => [%{"role" => "user", "content" => "Hello"}],
+            "max_tokens" => 1024
+          },
+          api_key,
+          metadata,
+          stream: true
+        )
+
+      assert response.status == 200
+
+      message_start =
+        response.body
+        |> parse_anthropic_sse_events()
+        |> Enum.find(&(is_map(&1) and &1["type"] == "message_start"))
+
+      assert get_in(message_start, ["message", "model"]) == "test-model"
+    end
+
+    test "returns a real HTTP error when the request fails before any content",
+         %{metadata: metadata} do
+      # The 200 is deferred until the first chunk. A request that never
+      # produces one still has a revisable status, so the client's SDK sees an
+      # error instead of an empty successful stream — the OpenAI-shaped
+      # endpoint has always behaved this way.
       {router, api_key} = RoutersFixtures.router_fixture()
 
       {:ok, response} =
@@ -519,17 +553,10 @@ defmodule DodoRouterWeb.ProxyIntegrationTest do
           stream: true
         )
 
-      assert response.status == 200
-      assert response.headers["content-type"] == ["text/event-stream; charset=utf-8"]
+      assert response.status == 400
 
-      events = parse_anthropic_sse_events(response.body)
-
-      error_event =
-        Enum.find(events, fn e ->
-          is_map(e) && e["type"] == "error"
-        end)
-
-      assert error_event["error"]["message"] == "No routing configured"
+      assert response.body["type"] == "error"
+      assert response.body["error"]["message"] == "No routing configured"
     end
   end
 

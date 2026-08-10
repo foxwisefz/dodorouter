@@ -35,16 +35,23 @@ defmodule DodoRouter.Proxy.Adapters.Zai do
   @coding_base_url "https://api.z.ai/api/coding/paas/v4"
   @timeout_ms 120_000
 
+  @doc """
+  Upstream headers: our credentials plus the client's forwardable headers, per
+  `Adapter.build_forwarded_headers/2`.
+  """
+  def request_headers(api_key, client_headers) do
+    Adapter.build_forwarded_headers(client_headers, [
+      {"Authorization", "Bearer #{api_key}"},
+      {"Content-Type", "application/json"}
+    ])
+  end
+
   @impl true
   def call(request, %RoutingStep{} = step, api_key, client_headers \\ []) do
     url = base_url(step) <> "/chat/completions"
     body = build_request_body(request, step)
 
-    headers =
-      Adapter.build_forwarded_headers(client_headers, [
-        {"Authorization", "Bearer #{api_key}"},
-        {"Content-Type", "application/json"}
-      ])
+    headers = request_headers(api_key, client_headers)
 
     payload_size_bytes = body |> Jason.encode!() |> byte_size()
     start_time = FinchTelemetry.mark_request_start()
@@ -97,11 +104,7 @@ defmodule DodoRouter.Proxy.Adapters.Zai do
     url = base_url(step) <> "/chat/completions"
     body = build_request_body(request, step) |> Map.put("stream", true)
 
-    headers =
-      Adapter.build_forwarded_headers(client_headers, [
-        {"Authorization", "Bearer #{api_key}"},
-        {"Content-Type", "application/json"}
-      ])
+    headers = request_headers(api_key, client_headers)
 
     payload_size_bytes = body |> Jason.encode!() |> byte_size()
 

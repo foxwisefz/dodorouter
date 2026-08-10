@@ -39,6 +39,7 @@ Every adapter must satisfy several **cross-cutting contracts** documented in thi
 1. **Check every cross-cutting section** in this AGENTS.md that applies to adapters. Currently:
    - [Context Limit Handling](#llm-provider-context-limit-handling) — error detection patterns per provider
    - [Usage & Cache Token Normalization](#llm-provider-usage--cache-token-normalization) — usage field mapping for cache extraction
+   - [Request & Response Fidelity](#request--response-fidelity) — header forwarding, dropped-field recording, naming the serving model
 2. **Test the seams** — unit-testing adapter functions in isolation is insufficient. You **must** write at least one test that pipes adapter output through the downstream contract (e.g. `convert_usage/1` → `Adapter.extract_usage/1`) to verify they compose correctly.
 3. **When adding a new cross-cutting concern** (anything all adapters must satisfy), document it as a new section in this file with the same structure: known provider patterns, the contract, and how to test it.
 4. **Slug naming**: for a NEW adapter, prefer the provider's models.dev key as the slug (check https://models.dev/api.json) and add the mapping to `Models.Sync`'s `@provider_slug_map` — the sync silently drops providers whose mapped key doesn't exist upstream (it now logs a warning when that happens). **Never rename existing slugs** to chase upstream naming: they're baked into `routing_steps.provider`, `request_logs.final_provider`, `models.provider_slug`, and `provider_keys.provider_slug`; translation happens only in the sync map. Coding-plan catalogs (e.g. models.dev `kimi-for-coding`) map to the provider-KEY slug (`moonshot_coding`), not the adapter slug.
@@ -555,6 +556,56 @@ Normalizing the field *names* does not normalize the *semantics*. Providers disa
 Nothing on `request_logs` records which convention a row used, so `DodoRouter.Usage` infers it from the numbers: when `cache_read + cache_write > prompt_tokens`, the provider must be reporting them separately.
 
 **Never divide by `prompt_tokens` directly, and never subtract cache tokens from it directly.** Use `Usage.cache_hit_pct/4`, `Usage.new_input_tokens/3`, or `Usage.total_input_tokens/3`. Dividing directly is what rendered a 38,356-token cache hit over a 260-token billed prompt as "14752%"; subtracting directly clamped `regular_input` to zero in `Models.calculate_cost/4` and billed Anthropic's real new input at $0.
+
+## Request & Response Fidelity
+
+Fidelity is the product. A client asks for something and gets a 200 that quietly ignored it — that is the failure mode this whole section exists to prevent. There are three loss channels between the client and the provider, and every adapter has to satisfy all three.
+
+### 1. Client headers forward by default
+
+Policy decided 2026-08-08: client headers reach the provider by default, **including on fallback**. A header is stripped for exactly three reasons, all enumerated in `Adapter.build_forwarded_headers/2`:
+
+1. **We must replace it** — the proxy authenticates with its own credentials (`authorization`, `x-api-key`, `content-type`).
+2. **The provider will break** — hop-by-hop and body-describing headers after we rewrite the body (`content-length`, `transfer-encoding`, `accept-encoding`, …), plus account-scoped headers that name the *client's* account on a provider we authenticate to with *our* key (`openai-organization`, `chatgpt-account-id`, `x-goog-api-key`, …). Note `openai-beta` and `anthropic-beta` are deliberately absent: they are feature opt-ins, not account scope.
+3. **Not the client's to send** — `cookie` (carries the user's own DodoRouter session), and anything our edge added (`x-forwarded-*`, `cf-*`, `via`, `x-real-ip`).
+
+**The contract:** every adapter that makes an upstream request exposes `request_headers(api_key, client_headers)` and builds its outbound headers through `Adapter.build_forwarded_headers/2`. Nothing else may assemble headers — a policy only applies where it is called, and for a while it was called by three adapters out of twelve while four more accepted `client_headers` and dropped them on the floor.
+
+`Adapters.OpenAICompatible.build_headers/2` and `Adapters.ResponsesAPI.build_headers/2` read `:client_headers` from opts, so every delegating adapter (Groq, Mistral, xAI, DeepSeek, Codex) is covered by passing it down.
+
+**Merging beats colliding.** The generic rule is "the proxy's value wins on a collision", which is wrong for headers both sides legitimately set. `anthropic-beta` is merged *before* the policy runs (`Adapters.Anthropic.request_headers/2`) — dropping the client's list silently demotes an agent session from a 1h prompt cache to 5 minutes.
+
+**How to test it:** `test/dodo_router/proxy/adapter_header_coverage_test.exs` walks `Registry.registered_modules()`, so a new adapter fails the suite until it either forwards headers or states in `@cannot_forward` why it cannot.
+
+### 2. Request-body fields are only dropped deliberately
+
+Two whitelists drop fields:
+
+* **Ingress** — `AnthropicFormat.to_openai_params/1` and `ResponsesFormat.to_openai_params/1`. Anything they don't carry is lost. `unknown_fields/1` on each reports what that was; controllers log it *and* pass it to `Proxy.dispatch/3` as `:dropped_request_fields`.
+* **Egress** — `Adapter.@allowed_request_fields`, applied by `sanitize_request/1` on every OpenAI-family step.
+
+**The contract:** a field that is a real parameter of the upstream API belongs in `@allowed_request_fields`. `Map.take/2` means an allowed field only travels when the client actually sent it, so allowing one costs nothing for clients that don't use it. Getting this wrong is asymmetric and invisible: `parallel_tool_calls` was honoured on an Anthropic step and silently dropped on every OpenAI-family fallback of the same request.
+
+### 3. The response names the provider that answered
+
+`FallbackChain` stamps `"model"` onto the final response (`put_new`, so a provider reporting its own resolved snapshot wins). Streaming egress that must announce the model before the first chunk — Anthropic's `message_start` — takes it from the `:on_step_start` callback on `Proxy.dispatch_streaming/4`.
+
+**Why it matters:** streaming used to echo the *requested* model, so a silent fallback was invisible from outside. An entire Claude Code session once ran on Kimi unnoticed after Anthropic 429'd, and per-agent rollups inherit whatever the response claims.
+
+Related rules for streaming egress:
+
+* **Defer `send_chunked/2` until the first chunk.** While nothing has been sent the HTTP status is still revisable, so a request that fails before producing content returns a real 400/502 instead of `200 OK` with an error buried in the SSE body (which SDKs report as a successful empty response).
+* **Don't invent values the provider didn't give you.** `stop_sequence` was hardcoded `nil`, which is a lie whenever a client's stop sequence actually matched.
+
+### Everything removed or rewritten gets recorded
+
+"The provider will break" is not knowable in advance for every provider × header pair, so the strip list grows by accretion after outages. Without a record, each entry becomes folklore nobody can trace back to a reason.
+
+`DodoRouter.Proxy.Fidelity` records all three channels into `request_logs.fidelity_changes`, and the log page renders them as "What the proxy changed". Recording happens inside the two policy functions (`build_forwarded_headers/2`, `sanitize_request/1`) rather than in each adapter, so coverage is automatic — the alternative is what left `outbound_headers` populated by two adapters out of twelve.
+
+Adapters run inline in the caller's process, so `FallbackChain` resets the buffer before each step and harvests it after. **Anything that moves an adapter call into its own task must move the harvest with it.**
+
+Use `Fidelity.record_header_rewrite/2` when a header is transformed rather than dropped, and `Fidelity.record_dropped_response_fields/2` for native response fields the egress conversion does not carry.
 
 ## Prompt Cache Fidelity Through Format Conversion
 

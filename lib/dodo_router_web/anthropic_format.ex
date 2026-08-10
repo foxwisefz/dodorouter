@@ -182,7 +182,10 @@ defmodule DodoRouterWeb.AnthropicFormat do
       "content" => content_blocks,
       "model" => openai_response["model"] || "",
       "stop_reason" => stop_reason,
-      "stop_sequence" => nil,
+      # Carried from the provider when it reported one (Anthropic upstream);
+      # nil is the correct answer everywhere else, since no OpenAI-family
+      # provider tells us which stop string matched.
+      "stop_sequence" => openai_response["stop_sequence"],
       "usage" => anthropic_usage
     }
   end

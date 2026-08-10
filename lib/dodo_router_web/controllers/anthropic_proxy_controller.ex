@@ -20,7 +20,7 @@ defmodule DodoRouterWeb.AnthropicProxyController do
         "model=#{params["model"]} msg_count=#{length(params["messages"] || [])}"
     )
 
-    warn_dropped_fields(params, request_id, router)
+    dropped_fields = warn_dropped_fields(params, request_id, router)
 
     if params["stream"] == true do
       stream_anthropic(
@@ -30,7 +30,8 @@ defmodule DodoRouterWeb.AnthropicProxyController do
         request_id,
         session,
         client_headers,
-        recording_id
+        recording_id,
+        dropped_fields
       )
     else
       sync_anthropic(
@@ -40,9 +41,55 @@ defmodule DodoRouterWeb.AnthropicProxyController do
         request_id,
         session,
         recording_id,
-        client_headers
+        client_headers,
+        dropped_fields
       )
     end
+  end
+
+  # Claude Code paces itself off `anthropic-ratelimit-unified-*`; swallowing
+  # those headers means the client flies blind and keeps hammering into a 429
+  # it could have waited out. They describe whichever provider actually served
+  # the request — which is the honest answer, and the only one we have.
+  @forwarded_response_prefixes ~w(anthropic-ratelimit-)
+
+  defp forward_ratelimit_headers(conn, nil), do: conn
+
+  defp forward_ratelimit_headers(conn, headers) do
+    headers
+    |> normalize_response_headers()
+    |> Enum.filter(fn {key, _} -> String.starts_with?(key, @forwarded_response_prefixes) end)
+    |> Enum.reduce(conn, fn {key, value}, acc -> put_resp_header(acc, key, value) end)
+  end
+
+  # Req hands back a map of name => [values]; Finch a list of tuples.
+  defp normalize_response_headers(headers) when is_map(headers) do
+    Enum.flat_map(headers, fn
+      {key, [value | _]} -> [{String.downcase(key), to_string(value)}]
+      {key, value} when is_binary(value) -> [{String.downcase(key), value}]
+      _ -> []
+    end)
+  end
+
+  defp normalize_response_headers(headers) when is_list(headers) do
+    Enum.flat_map(headers, fn
+      {key, value} when is_binary(value) -> [{String.downcase(to_string(key)), value}]
+      _ -> []
+    end)
+  end
+
+  defp normalize_response_headers(_), do: []
+
+  # Ingress conversion drops travel to the request log so an operator can see
+  # them next to the header and egress-allowlist drops, rather than having to
+  # correlate a Logger line by request_id.
+  defp fidelity_opts([]), do: []
+
+  defp fidelity_opts(fields) do
+    [
+      dropped_request_fields: fields,
+      dropped_request_fields_detail: "anthropic -> openai request conversion"
+    ]
   end
 
   # The Anthropic->OpenAI conversion is a whitelist, so any field we haven't
@@ -54,13 +101,15 @@ defmodule DodoRouterWeb.AnthropicProxyController do
   defp warn_dropped_fields(params, request_id, router) do
     case AnthropicFormat.unknown_fields(params) do
       [] ->
-        :ok
+        []
 
       fields ->
         Logger.warning(
           "[AnthropicProxy] dropped_fields=#{Enum.join(fields, ",")} " <>
             "request_id=#{request_id} router=#{router.slug} model=#{params["model"]}"
         )
+
+        fields
     end
   end
 
@@ -126,16 +175,20 @@ defmodule DodoRouterWeb.AnthropicProxyController do
          request_id,
          session,
          recording_id,
-         client_headers
+         client_headers,
+         dropped_fields
        ) do
     start_time = System.monotonic_time(:millisecond)
 
-    case Proxy.dispatch(router, openai_params,
-           request_id: request_id,
-           session: session,
-           client_headers: client_headers,
-           recording_id: recording_id
-         ) do
+    dispatch_opts =
+      [
+        request_id: request_id,
+        session: session,
+        client_headers: client_headers,
+        recording_id: recording_id
+      ] ++ fidelity_opts(dropped_fields)
+
+    case Proxy.dispatch(router, openai_params, dispatch_opts) do
       {:ok, openai_response, timing} ->
         total_ms = System.monotonic_time(:millisecond) - start_time
         provider_ms = timing[:provider_ms] || 0
@@ -145,6 +198,7 @@ defmodule DodoRouterWeb.AnthropicProxyController do
         |> put_resp_header("x-request-id", request_id)
         |> put_resp_header("x-timing-total-ms", to_string(total_ms))
         |> put_resp_header("x-timing-provider-ms", to_string(provider_ms))
+        |> forward_ratelimit_headers(timing[:response_headers])
         |> json(anthropic_response)
 
       {:error, :no_routing_configured} ->
@@ -199,97 +253,173 @@ defmodule DodoRouterWeb.AnthropicProxyController do
          request_id,
          session,
          client_headers,
-         recording_id
+         recording_id,
+         dropped_fields
        ) do
-    model = openai_params["model"] || "unknown"
-
+    # The 200 is deferred until the first byte of content actually arrives.
+    # Sending it up front (as this did) meant a request that failed before any
+    # provider produced output — context overflow, every key rate-limited —
+    # reached the client as `200 OK` with an SSE error buried inside it, which
+    # SDKs report as a successful empty response. The OpenAI-shaped endpoint
+    # already defers for exactly this reason; this brings the Anthropic one in
+    # line. `Process` rather than a rebound variable because `send_chunk` is a
+    # closure and cannot rebind `conn`.
     conn =
       conn
       |> put_resp_content_type("text/event-stream")
       |> put_resp_header("cache-control", "no-cache")
       |> put_resp_header("x-request-id", request_id)
-      |> send_chunked(200)
 
-    send_chunk = fn data ->
-      chunk(conn, data)
-      :ok
-    end
-
-    # Anthropic streaming lifecycle requires message_start and
-    # content_block_start to precede any content_block_delta events.
-    :ok = send_chunk.(anthropic_message_start_event(model, request_id))
-    :ok = send_chunk.(anthropic_content_block_start_event())
-
-    # Block lifecycle state for the SSE converter; kept in the process
-    # dictionary because send_chunk closures can't rebind it.
+    Process.put(:__stream_conn__, conn)
     Process.put(:anthropic_sse_state, AnthropicFormat.new_sse_state())
+    Process.put(:__anthropic_serving_model__, openai_params["model"] || "unknown")
+    # Keep-alive means the next request may land in this same process.
+    Process.delete(:__stream_opened__)
+
+    send_chunk = &raw_send_chunk/1
 
     anthropic_send_chunk = fn openai_sse_data ->
       state = Process.get(:anthropic_sse_state) || AnthropicFormat.new_sse_state()
       {anthropic_events, state} = AnthropicFormat.convert_sse_chunk(openai_sse_data, state)
       Process.put(:anthropic_sse_state, state)
-      Enum.each(anthropic_events, &send_chunk.(&1))
+
+      if anthropic_events != [] do
+        open_stream(request_id)
+        Enum.each(anthropic_events, send_chunk)
+      end
+
       :ok
     end
 
     result =
-      Proxy.dispatch_streaming(router, openai_params, anthropic_send_chunk,
-        session: session,
-        recording_id: recording_id,
-        client_headers: client_headers
+      Proxy.dispatch_streaming(
+        router,
+        openai_params,
+        anthropic_send_chunk,
+        [
+          session: session,
+          recording_id: recording_id,
+          client_headers: client_headers,
+          # `message_start` carries the model and can never be revised, so the
+          # client must be told which provider is answering *before* the first
+          # chunk. Without this a silent fallback echoes back the requested
+          # model and an agent session can run entirely on another provider
+          # with nothing in the response to say so.
+          on_step_start: fn %{model: model} ->
+            Process.put(:__anthropic_serving_model__, model)
+            :ok
+          end
+        ] ++ fidelity_opts(dropped_fields)
       )
 
     sse_state = Process.get(:anthropic_sse_state) || AnthropicFormat.new_sse_state()
     Process.delete(:anthropic_sse_state)
+    Process.delete(:__anthropic_serving_model__)
 
-    case result do
-      {:ok, openai_response, _timing} ->
-        choice = get_in(openai_response, ["choices", Access.at(0)]) || %{}
-        stop_reason = convert_stop_reason(choice["finish_reason"])
-        usage = openai_response["usage"] || %{}
+    conn = finish_stream(result, sse_state, request_id, send_chunk)
+    Process.delete(:__stream_conn__)
+    Process.delete(:__stream_opened__)
+    conn
+  end
 
-        :ok = send_chunk.(anthropic_content_block_stop_event(sse_state.open_block))
-        :ok = send_chunk.(anthropic_message_delta_event(stop_reason, usage))
-        :ok = send_chunk.(anthropic_message_stop_event())
-        conn
+  # Anthropic's stream lifecycle requires message_start and content_block_start
+  # before any delta, so both are emitted lazily at the moment the first delta
+  # is ready — which is also the moment the HTTP status stops being revisable.
+  defp open_stream(request_id) do
+    if Process.get(:__stream_opened__) != true do
+      Process.put(:__stream_opened__, true)
+      model = Process.get(:__anthropic_serving_model__) || "unknown"
+      raw_send_chunk(anthropic_message_start_event(model, request_id))
+      raw_send_chunk(anthropic_content_block_start_event())
+    end
 
-      {:error, :no_routing_configured} ->
-        error_event =
-          "event: error\ndata: " <>
-            Jason.encode!(%{
-              type: "error",
-              error: %{type: "configuration_error", message: "No routing configured"}
-            }) <> "\n\n"
+    :ok
+  end
 
-        :ok = send_chunk.(error_event)
-        :ok = send_chunk.(anthropic_message_stop_event())
-        conn
+  defp stream_open?, do: Process.get(:__stream_opened__) == true
 
-      {:error, :all_providers_failed, attempts} ->
-        last_attempt = List.last(attempts)
+  defp raw_send_chunk(data) do
+    conn = Process.get(:__stream_conn__)
+    conn = if conn.state == :unset, do: send_chunked(conn, 200), else: conn
 
-        error_payload =
-          if last_attempt && last_attempt[:error] == "context_overflow" do
-            %{
-              type: "error",
-              error: %{
-                type: "invalid_request_error",
-                message: "Input exceeds context window of this model"
-              }
-            }
-          else
-            %{
-              type: "error",
-              error: %{type: "provider_error", message: "All providers failed"}
-            }
-          end
+    case chunk(conn, data) do
+      {:ok, chunked} -> Process.put(:__stream_conn__, chunked)
+      _error -> Process.put(:__stream_conn__, conn)
+    end
 
-        error_event =
-          "event: error\ndata: " <> Jason.encode!(error_payload) <> "\n\n"
+    :ok
+  end
 
-        :ok = send_chunk.(error_event)
-        :ok = send_chunk.(anthropic_message_stop_event())
-        conn
+  defp finish_stream({:ok, openai_response, _timing}, sse_state, request_id, send_chunk) do
+    choice = get_in(openai_response, ["choices", Access.at(0)]) || %{}
+    stop_reason = convert_stop_reason(choice["finish_reason"])
+    usage = openai_response["usage"] || %{}
+
+    # A successful request that produced no content still owes the client a
+    # well-formed, empty message rather than a bare 200 with no body.
+    open_stream(request_id)
+
+    :ok = send_chunk.(anthropic_content_block_stop_event(sse_state.open_block))
+    :ok = send_chunk.(anthropic_message_delta_event(stop_reason, usage))
+    :ok = send_chunk.(anthropic_message_stop_event())
+    Process.get(:__stream_conn__)
+  end
+
+  defp finish_stream({:error, :no_routing_configured}, _sse_state, _request_id, send_chunk) do
+    stream_or_status(
+      400,
+      %{
+        "type" => "error",
+        "error" => %{"type" => "configuration_error", "message" => "No routing configured"}
+      },
+      send_chunk
+    )
+  end
+
+  defp finish_stream(
+         {:error, :all_providers_failed, attempts},
+         _sse_state,
+         _request_id,
+         send_chunk
+       ) do
+    last_attempt = List.last(attempts)
+
+    {status, payload} =
+      if last_attempt && last_attempt[:error] == "context_overflow" do
+        {400,
+         %{
+           "type" => "error",
+           "error" => %{
+             "type" => "invalid_request_error",
+             "message" => "Input exceeds context window of this model"
+           }
+         }}
+      else
+        {502,
+         %{
+           "type" => "error",
+           "error" => %{"type" => "provider_error", "message" => "All providers failed"}
+         }}
+      end
+
+    stream_or_status(status, payload, send_chunk)
+  end
+
+  # Nothing has been sent yet -> a real HTTP status the client's SDK can act
+  # on. Content is already on the wire -> the status is spent, so the error can
+  # only be an SSE event.
+  defp stream_or_status(status, payload, send_chunk) do
+    conn = Process.get(:__stream_conn__)
+
+    if stream_open?() do
+      :ok = send_chunk.("event: error\ndata: " <> Jason.encode!(payload) <> "\n\n")
+      :ok = send_chunk.(anthropic_message_stop_event())
+      Process.get(:__stream_conn__)
+    else
+      conn
+      |> delete_resp_header("content-type")
+      |> put_status(status)
+      |> json(payload)
     end
   end
 

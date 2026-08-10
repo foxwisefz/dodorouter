@@ -52,6 +52,10 @@ defmodule DodoRouter.Proxy.Adapters.XAI do
     |> transform_response()
   end
 
+  @doc false
+  def request_headers(api_key, client_headers),
+    do: OpenAICompatible.build_headers(api_key, client_headers: client_headers)
+
   def transform_request(request, model) do
     request
     |> Adapter.strip_name_from_messages(:all)

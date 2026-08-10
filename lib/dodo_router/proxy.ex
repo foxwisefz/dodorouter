@@ -53,7 +53,12 @@ defmodule DodoRouter.Proxy do
 
         case result.status do
           status when status in [:success, :fallback] ->
-            {:ok, result.final_response, %{provider_ms: provider_ms, log: log}}
+            {:ok, result.final_response,
+             %{
+               provider_ms: provider_ms,
+               log: log,
+               response_headers: result.response_headers
+             }}
 
           :error ->
             {:error, :all_providers_failed, result.attempted_steps}
@@ -170,6 +175,7 @@ defmodule DodoRouter.Proxy do
       session_name: session[:session_name],
       recording_id: recording_id,
       truncation_flags: truncation_flags,
+      fidelity_changes: collect_fidelity_changes(result.attempted_steps, opts),
       estimated_cost_usd: estimated_cost,
       list_cost_usd: list_cost,
       request_headers: encode_redacted_headers(client_headers),
@@ -191,6 +197,39 @@ defmodule DodoRouter.Proxy do
         _ = Logs.create_log_async(log_attrs)
         nil
     end
+  end
+
+  # The load-bearing half of the request-fidelity policy: whatever the proxy
+  # removed or rewrote is recorded, or the strip list decays into folklore.
+  #
+  # Two sources feed one column. Per-step changes come from the adapters via
+  # `DodoRouter.Proxy.Fidelity` (header policy and the egress field allowlist,
+  # both of which re-run per fallback step). Request-level changes come from
+  # the ingress format converters, which run once before any step exists —
+  # controllers pass them in as `:dropped_request_fields`.
+  defp collect_fidelity_changes(attempted_steps, opts) do
+    ingress =
+      case Keyword.get(opts, :dropped_request_fields, []) do
+        [] ->
+          []
+
+        fields ->
+          detail = Keyword.get(opts, :dropped_request_fields_detail)
+
+          Enum.map(fields, fn field ->
+            %{
+              "channel" => "request_body",
+              "name" => to_string(field),
+              "action" => "dropped",
+              "reason" => "unsupported_by_format_conversion"
+            }
+            |> then(&if detail, do: Map.put(&1, "detail", detail), else: &1)
+          end)
+      end
+
+    per_step = Enum.flat_map(attempted_steps, &(&1[:fidelity_changes] || []))
+
+    ingress ++ per_step
   end
 
   @doc false
@@ -472,6 +511,10 @@ defmodule DodoRouter.Proxy do
 
   defp truncate_step_response(step) do
     step
+    # Already aggregated onto the log's own fidelity_changes column, where the
+    # provider/step tags let a reader slice it back per attempt. Keeping a
+    # second copy inside each step would just be the same rows twice.
+    |> Map.delete(:fidelity_changes)
     |> maybe_truncate_step_field(:response_body)
     |> maybe_truncate_step_field(:request_body)
     |> maybe_truncate_step_field(:outbound_body)

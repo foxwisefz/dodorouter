@@ -55,6 +55,12 @@ defmodule DodoRouter.Logs.RequestLog do
     # Truncation metadata
     field :truncation_flags, {:array, :string}, default: []
 
+    # Everything the proxy removed or rewrote between the client and the
+    # provider: stripped headers with the policy reason, request-body fields
+    # dropped by a whitelist conversion, and native response fields not passed
+    # back. See DodoRouter.Proxy.Fidelity for the entry shape.
+    field :fidelity_changes, {:array, :map}, default: []
+
     # Favorited for later review/benchmarking
     field :favorite, :boolean, default: false
 
@@ -114,6 +120,7 @@ defmodule DodoRouter.Logs.RequestLog do
       :session_name,
       :recording_id,
       :truncation_flags,
+      :fidelity_changes,
       :favorite,
       :replayed_from_id,
       :replay_from_index

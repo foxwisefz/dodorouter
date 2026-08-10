@@ -25,14 +25,27 @@ defmodule DodoRouter.Proxy.Adapters.Google do
 
   @timeout_ms 120_000
 
+  @doc """
+  Upstream headers: the client's forwardable headers plus `Content-Type`.
+
+  Gemini takes our credential as a `?key=` query parameter rather than a
+  header, so there is nothing to authenticate with here — `api_key` is accepted
+  only so every adapter exposes the same seam. The client's own
+  `x-goog-api-key`/`x-goog-user-project` are on the strip list: they name the
+  caller's Google project, not ours.
+  """
+  def request_headers(_api_key, client_headers) do
+    Adapter.build_forwarded_headers(client_headers, [{"Content-Type", "application/json"}])
+  end
+
   @impl true
-  def call(request, %RoutingStep{} = step, api_key, _client_headers \\ []) do
+  def call(request, %RoutingStep{} = step, api_key, client_headers \\ []) do
     url =
       "https://generativelanguage.googleapis.com/v1beta/models/#{step.model}:generateContent?key=#{api_key}"
 
     body = build_gemini_request(request, step)
 
-    headers = [{"Content-Type", "application/json"}]
+    headers = request_headers(api_key, client_headers)
     payload_size_bytes = body |> Jason.encode!() |> byte_size()
     start_time = FinchTelemetry.mark_request_start()
 
@@ -72,13 +85,13 @@ defmodule DodoRouter.Proxy.Adapters.Google do
   end
 
   @impl true
-  def stream(request, %RoutingStep{} = step, api_key, send_chunk, _client_headers \\ []) do
+  def stream(request, %RoutingStep{} = step, api_key, send_chunk, client_headers \\ []) do
     url =
       "https://generativelanguage.googleapis.com/v1beta/models/#{step.model}:streamGenerateContent?key=#{api_key}&alt=sse"
 
     body = build_gemini_request(request, step)
 
-    headers = [{"Content-Type", "application/json"}]
+    headers = request_headers(api_key, client_headers)
     payload_size_bytes = body |> Jason.encode!() |> byte_size()
     start_time = FinchTelemetry.mark_request_start()
     Process.delete(:__google_stream_acc__)

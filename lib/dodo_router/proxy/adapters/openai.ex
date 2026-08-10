@@ -26,15 +26,25 @@ defmodule DodoRouter.Proxy.Adapters.OpenAI do
   @base_url "https://api.openai.com/v1"
   @timeout_ms 120_000
 
+  @doc """
+  Upstream headers: our credentials plus the client's forwardable headers, per
+  `Adapter.build_forwarded_headers/2`. `openai-organization`/`openai-project`
+  are on the strip list — they name the *client's* account while we
+  authenticate with our own key.
+  """
+  def request_headers(api_key, client_headers) do
+    Adapter.build_forwarded_headers(client_headers, [
+      {"Authorization", "Bearer #{api_key}"},
+      {"Content-Type", "application/json"}
+    ])
+  end
+
   @impl true
-  def call(request, %RoutingStep{} = step, api_key, _client_headers \\ []) do
+  def call(request, %RoutingStep{} = step, api_key, client_headers \\ []) do
     url = @base_url <> "/chat/completions"
     body = build_request_body(request, step)
 
-    headers = [
-      {"Authorization", "Bearer #{api_key}"},
-      {"Content-Type", "application/json"}
-    ]
+    headers = request_headers(api_key, client_headers)
 
     payload_size_bytes = body |> Jason.encode!() |> byte_size()
     start_time = FinchTelemetry.mark_request_start()
@@ -75,7 +85,7 @@ defmodule DodoRouter.Proxy.Adapters.OpenAI do
   end
 
   @impl true
-  def stream(request, %RoutingStep{} = step, api_key, send_chunk, _client_headers \\ []) do
+  def stream(request, %RoutingStep{} = step, api_key, send_chunk, client_headers \\ []) do
     url = @base_url <> "/chat/completions"
 
     body =
@@ -83,10 +93,7 @@ defmodule DodoRouter.Proxy.Adapters.OpenAI do
       |> Map.put("stream", true)
       |> Map.put("stream_options", %{"include_usage" => true})
 
-    headers = [
-      {"Authorization", "Bearer #{api_key}"},
-      {"Content-Type", "application/json"}
-    ]
+    headers = request_headers(api_key, client_headers)
 
     payload_size_bytes = body |> Jason.encode!() |> byte_size()
     start_time = FinchTelemetry.mark_request_start()

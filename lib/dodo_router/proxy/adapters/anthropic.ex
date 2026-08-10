@@ -26,6 +26,7 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
   require Logger
 
   alias DodoRouter.Proxy.Adapter
+  alias DodoRouter.Proxy.Fidelity
   alias DodoRouter.Proxy.FinchTelemetry
   alias DodoRouter.Routers.RoutingStep
 
@@ -67,8 +68,10 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
   headers *before* the policy runs, so exactly one merged header goes upstream.
   """
   def request_headers(api_key, client_headers) do
+    merged = merged_beta(api_key, client_headers)
+
     proxy_headers =
-      case merged_beta(api_key, client_headers) do
+      case merged do
         nil ->
           auth_headers(api_key)
 
@@ -76,14 +79,29 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
           List.keystore(auth_headers(api_key), "anthropic-beta", 0, {"anthropic-beta", beta})
       end
 
-    Adapter.build_forwarded_headers(client_headers, proxy_headers)
+    headers = Adapter.build_forwarded_headers(client_headers, proxy_headers)
+
+    # The policy above sees the client's anthropic-beta colliding with the
+    # already-merged proxy header and records it as a drop. On the OAuth path
+    # it wasn't dropped — it was merged, and logging it as lost would send the
+    # next person debugging a cache miss looking for a header that is right
+    # there. (On the api-key path `merged` is the client's list verbatim, so
+    # the header is forwarded unchanged and there is nothing to report.)
+    if merged && merged != client_beta(client_headers) do
+      Fidelity.record_header_rewrite("anthropic-beta", "merged with #{@oauth_beta}")
+    end
+
+    headers
+  end
+
+  defp client_beta(client_headers) do
+    Enum.find_value(client_headers || [], fn {k, v} ->
+      if String.downcase(to_string(k)) == "anthropic-beta", do: v
+    end)
   end
 
   defp merged_beta(api_key, client_headers) do
-    client_beta =
-      Enum.find_value(client_headers || [], fn {k, v} ->
-        if String.downcase(to_string(k)) == "anthropic-beta", do: v
-      end)
+    client_beta = client_beta(client_headers)
 
     case {client_beta, api_key} do
       {nil, _} -> nil
@@ -636,12 +654,33 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
           else: base
       end
 
-    response = %{
-      "choices" => [%{"index" => 0, "message" => message, "finish_reason" => finish_reason}]
-    }
+    response =
+      %{"choices" => [%{"index" => 0, "message" => message, "finish_reason" => finish_reason}]}
+      |> put_if(usage, "usage", usage)
+      # The model Anthropic actually served — an alias like
+      # `claude-sonnet-4-5` resolves to a dated snapshot upstream, and the
+      # client should see the snapshot.
+      |> put_if(anthropic_response["model"], "model", anthropic_response["model"])
+      # Which stop string ended the turn. OpenAI's shape has no equivalent, so
+      # it rides the IR as-is rather than being reinvented downstream — the
+      # Anthropic egress used to hardcode `stop_sequence: nil`, which is a lie
+      # whenever the client supplied stop_sequences and one of them matched.
+      |> put_if(
+        anthropic_response["stop_sequence"],
+        "stop_sequence",
+        anthropic_response["stop_sequence"]
+      )
 
-    if usage, do: Map.put(response, "usage", usage), else: response
+    # `id` is deliberately not carried: it names a message in Anthropic's
+    # store, and on a fallback to any other provider there is nothing to carry.
+    # The egress synthesises a stable one instead.
+    Fidelity.record_dropped_response_fields(["id"], "anthropic message id is provider-scoped")
+
+    response
   end
+
+  defp put_if(map, nil, _key, _value), do: map
+  defp put_if(map, _present, key, value), do: Map.put(map, key, value)
 
   defp parse_anthropic_sse(data, buffer) do
     combined = buffer <> data

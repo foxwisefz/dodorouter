@@ -51,6 +51,10 @@ defmodule DodoRouter.Proxy.Adapters.DeepSeek do
   end
 
   @doc false
+  def request_headers(api_key, client_headers),
+    do: OpenAICompatible.build_headers(api_key, client_headers: client_headers)
+
+  @doc false
   def transform_request(request) do
     request
     |> Adapter.flatten_content_to_string()

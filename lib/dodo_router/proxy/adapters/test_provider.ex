@@ -5,6 +5,11 @@ defmodule DodoRouter.Proxy.Adapters.TestProvider do
   Simulates an OpenAI-compatible provider for end-to-end testing.
   Calls send_chunk from a spawned process to mirror real adapter behavior
   (which invokes send_chunk from Finch's response callback process).
+
+  It runs the same header and request-body policy as a real adapter and throws
+  the result away. That is deliberate: it makes this a faithful stand-in for
+  end-to-end tests of what the proxy strips and records, instead of a provider
+  that is silently exempt from the rules everything else follows.
   """
 
   use DodoRouter.Proxy.Adapter.Registry,
@@ -24,10 +29,36 @@ defmodule DodoRouter.Proxy.Adapters.TestProvider do
   alias DodoRouter.Proxy.Adapter
   alias DodoRouter.Routers.RoutingStep
 
-  @impl Adapter
-  def call(request, %RoutingStep{} = step, _api_key, _client_headers) do
-    maybe_crash(request)
+  @doc false
+  def request_headers(api_key, client_headers) do
+    Adapter.build_forwarded_headers(client_headers, [
+      {"Authorization", "Bearer #{api_key}"},
+      {"Content-Type", "application/json"}
+    ])
+  end
 
+  # Lets a test build a chain whose first step fails *after* the upstream
+  # request was constructed — the only way to exercise the error path of
+  # anything recorded while building it.
+  @failing_model "fail-model"
+
+  @impl Adapter
+  def call(request, %RoutingStep{} = step, api_key, client_headers) do
+    maybe_crash(request)
+    _ = simulate_upstream_request(request, api_key, client_headers)
+
+    if step.model == @failing_model do
+      simulated_failure()
+    else
+      ok_response(step)
+    end
+  end
+
+  defp simulated_failure do
+    {:error, :server_error, %{status: 500, body: "simulated failure", latency_ms: 1}}
+  end
+
+  defp ok_response(step) do
     response = %{
       "choices" => [
         %{
@@ -56,9 +87,18 @@ defmodule DodoRouter.Proxy.Adapters.TestProvider do
   end
 
   @impl Adapter
-  def stream(request, %RoutingStep{} = step, _api_key, send_chunk, _client_headers) do
+  def stream(request, %RoutingStep{} = step, api_key, send_chunk, client_headers) do
     maybe_crash(request)
+    _ = simulate_upstream_request(request, api_key, client_headers)
 
+    if step.model == @failing_model do
+      simulated_failure()
+    else
+      do_stream(step, send_chunk)
+    end
+  end
+
+  defp do_stream(%RoutingStep{} = step, send_chunk) do
     content = "Hello from #{step.model}"
 
     # Send chunks inline (same process), mirroring how real adapters call
@@ -130,4 +170,10 @@ defmodule DodoRouter.Proxy.Adapters.TestProvider do
   # request crashing request conversion, as in the pre-0.1.x system-content-blocks bug).
   defp maybe_crash(%{"__crash__" => true}), do: raise(ArgumentError, "test adapter crash")
   defp maybe_crash(_request), do: :ok
+
+  # Nothing is sent anywhere; the point is to exercise the two policy functions
+  # so the fidelity record a real provider would produce also shows up here.
+  defp simulate_upstream_request(request, api_key, client_headers) do
+    {request_headers(api_key, client_headers), Adapter.sanitize_request(request)}
+  end
 end

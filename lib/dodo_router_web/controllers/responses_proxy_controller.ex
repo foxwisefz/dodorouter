@@ -20,7 +20,7 @@ defmodule DodoRouterWeb.ResponsesProxyController do
         "model=#{params["model"]}"
     )
 
-    warn_dropped_fields(params, request_id, router)
+    dropped_fields = warn_dropped_fields(params, request_id, router)
 
     if params["stream"] == true do
       stream_responses(
@@ -30,7 +30,8 @@ defmodule DodoRouterWeb.ResponsesProxyController do
         request_id,
         session,
         client_headers,
-        recording_id
+        recording_id,
+        dropped_fields
       )
     else
       sync_responses(
@@ -40,9 +41,21 @@ defmodule DodoRouterWeb.ResponsesProxyController do
         request_id,
         session,
         recording_id,
-        client_headers
+        client_headers,
+        dropped_fields
       )
     end
+  end
+
+  # See AnthropicProxyController: ingress conversion drops travel to the
+  # request log alongside the header and egress-allowlist drops.
+  defp fidelity_opts([]), do: []
+
+  defp fidelity_opts(fields) do
+    [
+      dropped_request_fields: fields,
+      dropped_request_fields_detail: "responses -> openai request conversion"
+    ]
   end
 
   defp sync_responses(
@@ -52,16 +65,20 @@ defmodule DodoRouterWeb.ResponsesProxyController do
          request_id,
          session,
          recording_id,
-         client_headers
+         client_headers,
+         dropped_fields
        ) do
     start_time = System.monotonic_time(:millisecond)
 
-    case Proxy.dispatch(router, openai_params,
-           request_id: request_id,
-           session: session,
-           client_headers: client_headers,
-           recording_id: recording_id
-         ) do
+    dispatch_opts =
+      [
+        request_id: request_id,
+        session: session,
+        client_headers: client_headers,
+        recording_id: recording_id
+      ] ++ fidelity_opts(dropped_fields)
+
+    case Proxy.dispatch(router, openai_params, dispatch_opts) do
       {:ok, openai_response, timing} ->
         total_ms = System.monotonic_time(:millisecond) - start_time
         provider_ms = timing[:provider_ms] || 0
@@ -123,7 +140,8 @@ defmodule DodoRouterWeb.ResponsesProxyController do
          request_id,
          session,
          client_headers,
-         recording_id
+         recording_id,
+         dropped_fields
        ) do
     # Check routing BEFORE starting chunked response so we can return proper HTTP status
     conn =
@@ -204,11 +222,14 @@ defmodule DodoRouterWeb.ResponsesProxyController do
         :ok
       end
 
-      case Proxy.dispatch_streaming(router, openai_params, responses_send_chunk,
-             session: session,
-             recording_id: recording_id,
-             client_headers: client_headers
-           ) do
+      dispatch_opts =
+        [
+          session: session,
+          recording_id: recording_id,
+          client_headers: client_headers
+        ] ++ fidelity_opts(dropped_fields)
+
+      case Proxy.dispatch_streaming(router, openai_params, responses_send_chunk, dispatch_opts) do
         {:ok, openai_response, _timing} ->
           Logger.info("[ResponsesProxy] request_id=#{request_id} streaming succeeded")
 
@@ -293,13 +314,15 @@ defmodule DodoRouterWeb.ResponsesProxyController do
   defp warn_dropped_fields(params, request_id, router) do
     case ResponsesFormat.unknown_fields(params) do
       [] ->
-        :ok
+        []
 
       fields ->
         Logger.warning(
           "[ResponsesProxy] dropped_fields=#{Enum.join(fields, ",")} " <>
             "request_id=#{request_id} router=#{router.slug} model=#{params["model"]}"
         )
+
+        fields
     end
   end
 end

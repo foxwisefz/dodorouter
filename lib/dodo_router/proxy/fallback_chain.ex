@@ -8,6 +8,7 @@ defmodule DodoRouter.Proxy.FallbackChain do
 
   alias DodoRouter.Proxy.Adapter
   alias DodoRouter.Proxy.Adapter.Registry
+  alias DodoRouter.Proxy.Fidelity
   alias DodoRouter.Providers
   alias DodoRouter.Routers.RoutingStep
   alias DodoRouter.Secrets
@@ -19,6 +20,7 @@ defmodule DodoRouter.Proxy.FallbackChain do
     :request_id,
     :stream,
     :send_chunk,
+    :on_step_start,
     :client_headers,
     :fail_on_context_overflow,
     attempted_steps: [],
@@ -31,6 +33,7 @@ defmodule DodoRouter.Proxy.FallbackChain do
   def execute(request, steps, router_id, opts \\ []) do
     stream = Keyword.get(opts, :stream, false)
     send_chunk = Keyword.get(opts, :send_chunk, fn _ -> :ok end)
+    on_step_start = Keyword.get(opts, :on_step_start, fn _ -> :ok end)
     client_headers = Keyword.get(opts, :client_headers, [])
     request_id = Keyword.get(opts, :request_id)
     fail_on_context_overflow = Keyword.get(opts, :fail_on_context_overflow, false)
@@ -42,6 +45,7 @@ defmodule DodoRouter.Proxy.FallbackChain do
       request_id: request_id,
       stream: stream,
       send_chunk: send_chunk,
+      on_step_start: on_step_start,
       client_headers: client_headers,
       fail_on_context_overflow: fail_on_context_overflow
     }
@@ -66,7 +70,10 @@ defmodule DodoRouter.Proxy.FallbackChain do
       "[FallbackChain] Step #{step_index + 1}: #{step.provider}/#{step.model} -> #{endpoint}"
     )
 
-    case execute_step(step, state) do
+    result = execute_step(step, state)
+    fidelity = Fidelity.take()
+
+    case result do
       {:ok, response, meta} ->
         step_usage = Adapter.extract_usage(response)
 
@@ -88,8 +95,8 @@ defmodule DodoRouter.Proxy.FallbackChain do
           latency_ms: latency(start_time),
           cache_read_tokens: step_usage.cache_read_tokens,
           cache_write_tokens: step_usage.cache_write_tokens,
-          forwarded_headers: build_forwarded_headers(step),
-          outbound_headers: meta[:outbound_headers],
+          fidelity_changes: attribute(fidelity, step),
+          outbound_headers: meta[:outbound_headers] || fidelity.outbound_headers,
           outbound_body: meta[:outbound_body],
           request_body: state.request,
           response_body: response,
@@ -99,7 +106,10 @@ defmodule DodoRouter.Proxy.FallbackChain do
         status = if length(state.attempted_steps) > 0, do: :fallback, else: :success
 
         # Prepend any partial content from previous failed attempts
-        response = prepend_partial_content(response, state.partial_content)
+        response =
+          response
+          |> stamp_serving_model(step)
+          |> prepend_partial_content(state.partial_content)
 
         final_state = %{
           state
@@ -141,8 +151,8 @@ defmodule DodoRouter.Proxy.FallbackChain do
           streamed_to_client: streamed_to_client,
           partial_content_length:
             if(is_binary(partial_content), do: String.length(partial_content), else: nil),
-          forwarded_headers: build_forwarded_headers(step),
-          outbound_headers: details[:outbound_headers],
+          fidelity_changes: attribute(fidelity, step),
+          outbound_headers: details[:outbound_headers] || fidelity.outbound_headers,
           outbound_body: details[:outbound_body],
           request_body: state.request,
           response_headers: details[:headers]
@@ -215,6 +225,15 @@ defmodule DodoRouter.Proxy.FallbackChain do
   defp execute_step(%RoutingStep{} = step, state) do
     adapter = adapter_for(step.provider)
     api_key = get_api_key(step, state.router_id)
+
+    # Adapters record what they strip or rewrite into a per-process buffer as
+    # they build the upstream request (see DodoRouter.Proxy.Fidelity). Clearing
+    # it here is what keeps step N's record from carrying step N-1's drops.
+    Fidelity.reset()
+
+    # Streaming egress needs the serving model *before* the first chunk — an
+    # Anthropic `message_start` carries it, and there is no revising it later.
+    state.on_step_start.(%{provider: step.provider, model: step.model, position: step.position})
 
     if is_nil(api_key) do
       {:error, :auth_error, %{status: nil, body: "Missing API key for #{step.provider}"}}
@@ -315,6 +334,20 @@ defmodule DodoRouter.Proxy.FallbackChain do
     %{state | request: Map.put(request, "messages", updated_messages)}
   end
 
+  # The client must be told which model actually answered, not which one it
+  # asked for. Adapters that build a response themselves (every streaming path,
+  # and the Anthropic/Google/Cohere format conversions) don't carry `model`, so
+  # a silent fallback used to be invisible from the outside — a whole agent
+  # session once ran on a different provider unnoticed after a 429. Stamping it
+  # here rather than in each adapter means one place to be right, and it is
+  # `put_new` so a provider that reports its own resolved model (an alias
+  # expanding to a dated snapshot, say) still wins.
+  defp stamp_serving_model(response, step) when is_map(response) do
+    Map.put_new(response, "model", step.model)
+  end
+
+  defp stamp_serving_model(response, _step), do: response
+
   # Prepend partial content from previous attempts to the final response
   defp prepend_partial_content(response, ""), do: response
 
@@ -351,5 +384,11 @@ defmodule DodoRouter.Proxy.FallbackChain do
   defp key_slug_for(%{provider_key: %{provider_slug: slug}}), do: slug
   defp key_slug_for(_step), do: nil
 
-  defp build_forwarded_headers(_step), do: %{}
+  # Header and body policy re-run per step, so a fallback can lose different
+  # things than the step it replaced — which is exactly the comparison an
+  # operator wants when a retry behaves differently from the original attempt.
+  defp attribute(%{changes: []}, _step), do: []
+
+  defp attribute(%{changes: changes}, step),
+    do: Fidelity.attribute(changes, step.provider, step.position)
 end

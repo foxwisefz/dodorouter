@@ -462,14 +462,24 @@ defmodule DodoRouter.Proxy.Adapters.ResponsesAPI do
 
   # ── Headers ────────────────────────────────────────────────────────────────
 
-  defp build_headers(api_key, opts) do
+  @doc """
+  Upstream headers: the proxy's credentials plus the client's forwardable
+  headers, per the request-fidelity policy in `Adapter.build_forwarded_headers/2`.
+
+  `chatgpt-account-id` is on the strip list, so a Codex client's own account id
+  never reaches ChatGPT — but ours, added via `:extra_headers`, does: it is a
+  proxy header and the policy only filters the *client's* side.
+  """
+  def build_headers(api_key, opts) do
     base = [
       {"Authorization", "Bearer #{api_key}"},
       {"Content-Type", "application/json"}
     ]
 
     extra = Keyword.get(opts, :extra_headers, [])
-    base ++ extra
+    client_headers = Keyword.get(opts, :client_headers, [])
+
+    Adapter.build_forwarded_headers(client_headers, base ++ extra)
   end
 
   defp latency(start_time), do: System.monotonic_time(:millisecond) - start_time
