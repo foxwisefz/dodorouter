@@ -201,6 +201,25 @@ defmodule DodoRouter.Proxy.HeaderForwardingTest do
       assert Enum.count(betas, &(&1 == "oauth-2025-04-20")) == 1
     end
 
+    test "the client's anthropic-version wins; ours is only a default" do
+      # We hold the API key, not the API contract. A version the caller picked
+      # is a statement about the response shape they can parse, and the policy
+      # is that we pass their request through — `anthropic-version` is not a
+      # credential, a hop header, or their account name, so none of the three
+      # strip reasons apply to it.
+      headers =
+        Anthropic.request_headers("sk-ant-api03-xyz", [{"anthropic-version", "2099-01-01"}])
+
+      assert value(headers, "anthropic-version") == "2099-01-01"
+      assert Enum.count(keys(headers), &(&1 == "anthropic-version")) == 1
+    end
+
+    test "a request with no version still gets one, since Anthropic requires it" do
+      headers = Anthropic.request_headers("sk-ant-api03-xyz", [{"user-agent", "claude-cli/1.0"}])
+
+      assert value(headers, "anthropic-version") == "2023-06-01"
+    end
+
     test "a client sending no beta list gets exactly the old headers" do
       headers = Anthropic.request_headers("sk-ant-oat01-abc", [{"user-agent", "claude-cli/1.0"}])
 

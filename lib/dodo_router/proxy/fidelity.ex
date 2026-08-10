@@ -53,14 +53,19 @@ defmodule DodoRouter.Proxy.Fidelity do
     unsupported_by_format_conversion: "the format conversion has no translation for it yet"
   }
 
-  # Two reasons describe the transport rather than the request. `host`,
-  # `content-length` and `accept-encoding` are stripped from every request ever
-  # made, and `x-forwarded-*`/`via` were never the caller's headers at all —
-  # our edge put them there. Listing a dozen such rows on every log buries the
-  # two or three drops that are genuinely about what this client asked for,
-  # which is the only question the panel exists to answer. They are still
-  # dropped from the upstream request; they are just not news.
-  @silent_reasons ~w(transport edge_added)
+  # Three reasons say nothing about the request they are attached to, because
+  # they are true of every request ever made: `host`/`content-length`/
+  # `accept-encoding` always come off, `x-forwarded-*`/`via` were never the
+  # caller's headers at all (our edge put them there), and `authorization` is
+  # replaced with our own credential — which is the definition of being a
+  # proxy, not news about this call. A dozen such rows buried the two or three
+  # drops that were genuinely about what this client asked for, which is the
+  # only question the panel exists to answer.
+  #
+  # The bar: would an operator debugging *this* request learn anything? A
+  # collision on `anthropic-version` stays reported — the client picked a value
+  # and we sent a different one. Nobody is surprised we hold the API key.
+  @silent_reasons ~w(transport edge_added replaced_by_proxy)
 
   @doc """
   Clears the buffer. Call before dispatching a routing step so one step's

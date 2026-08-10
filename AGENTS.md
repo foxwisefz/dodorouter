@@ -573,7 +573,12 @@ Policy decided 2026-08-08: client headers reach the provider by default, **inclu
 
 `Adapters.OpenAICompatible.build_headers/2` and `Adapters.ResponsesAPI.build_headers/2` read `:client_headers` from opts, so every delegating adapter (Groq, Mistral, xAI, DeepSeek, Codex) is covered by passing it down.
 
-**Merging beats colliding.** The generic rule is "the proxy's value wins on a collision", which is wrong for headers both sides legitimately set. `anthropic-beta` is merged *before* the policy runs (`Adapters.Anthropic.request_headers/2`) — dropping the client's list silently demotes an agent session from a 1h prompt cache to 5 minutes.
+**Merging and defaulting beat colliding.** The generic rule is "the proxy's value wins on a collision", which is wrong for every header both sides legitimately set. Two live cases, both resolved *before* the policy runs, in `Adapters.Anthropic.request_headers/2`:
+
+* `anthropic-beta` is **merged** — dropping the client's list silently demotes an agent session from a 1h prompt cache to 5 minutes.
+* `anthropic-version` **defers** to the client; ours is supplied only when they sent none (the header is required, and OpenAI-format traffic falling back here has no version to forward). We hold the API key, not the API contract — the version states which response shape the caller can parse, and none of the three strip reasons apply to it.
+
+The test for a new one: is this header ours to state, or theirs? Credentials and our own account id are ours. Feature opt-ins, API versions and anything else describing what the *caller* wants are not.
 
 **How to test it:** `test/dodo_router/proxy/adapter_header_coverage_test.exs` walks `Registry.registered_modules()`, so a new adapter fails the suite until it either forwards headers or states in `@cannot_forward` why it cannot.
 
@@ -607,7 +612,7 @@ Adapters run inline in the caller's process, so `FallbackChain` resets the buffe
 
 Use `Fidelity.record_header_rewrite/2` when a header is transformed rather than dropped, and `Fidelity.record_dropped_response_fields/2` for native response fields the egress conversion does not carry.
 
-**Two reasons are recorded nowhere: `:transport` and `:edge_added`** (`Fidelity`'s `@silent_reasons`). `host`/`content-length`/`accept-encoding` come off every request ever made, and `x-forwarded-*`/`via`/`x-real-ip`/`cf-*` were never the caller's headers — our own edge added them on the way in. A dozen identical rows per log buried the two or three drops that were actually about what that client asked for. They are still stripped from the upstream request; they are just not news. `Fidelity.hidden?/1` applies the same rule at read time, because rows written before `:edge_added` existed recorded edge headers as `not_client_sent`.
+**Three reasons are recorded nowhere: `:transport`, `:edge_added` and `:replaced_by_proxy`** (`Fidelity`'s `@silent_reasons`). `host`/`content-length`/`accept-encoding` come off every request ever made; `x-forwarded-*`/`via`/`x-real-ip`/`cf-*` were never the caller's headers, our own edge added them on the way in; and swapping `authorization`/`x-api-key` for our own credential is the definition of being a proxy. A dozen identical rows per log buried the two or three drops that were actually about what that client asked for. They are still stripped from the upstream request; they are just not news. The bar for a new reason: would an operator debugging *this* request learn anything? `:proxy_value_wins` stays reported, because the client picked an `anthropic-version` and we sent a different one. `Fidelity.hidden?/1` applies the same rule at read time, because rows written before `:edge_added` existed recorded edge headers as `not_client_sent`.
 
 **To learn what the edge actually adds, probe it — don't read the Caddyfile.** Caddy's `reverse_proxy` sets `X-Forwarded-For`/`-Proto`/`-Host` with no directive present in the config, so the config alone under-reports. `scripts/edge_header_probe.sh` sends one identical request through the edge and one straight at the app's listener on the box, then diffs the header names each run recorded in `request_logs.request_headers`. Whatever appears only in the edge run belongs in `Adapter`'s `@edge_headers`/`@edge_prefixes`. Re-run it after any Caddyfile change; the prefix match means a new `x-forwarded-*` is still dropped in the meantime, just reported.
 

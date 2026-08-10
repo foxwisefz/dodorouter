@@ -94,7 +94,6 @@ defmodule DodoRouter.Proxy.FidelityTest do
 
       assert find(log, "request_header", "cookie")["reason"] == "not_client_sent"
       assert find(log, "request_header", "openai-organization")["reason"] == "account_scoped"
-      assert find(log, "request_header", "authorization")["reason"] == "replaced_by_proxy"
 
       # Forwarded headers are not changes — recording them would bury the
       # handful of drops under everything a coding agent sends.
@@ -160,6 +159,24 @@ defmodule DodoRouter.Proxy.FidelityTest do
         )
 
       assert log.fidelity_changes == []
+    end
+
+    test "swapping the client's credential for ours is what a proxy is", %{router: router} do
+      # Reporting it says nothing about this request: it is true of every
+      # request the proxy has ever served.
+      log =
+        dispatch(router, request(),
+          client_headers: [
+            {"authorization", "Bearer client-token"},
+            {"x-api-key", "client-key"},
+            {"content-type", "application/json"}
+          ]
+        )
+
+      assert log.fidelity_changes == []
+
+      [attempt] = log.attempted_steps
+      refute Enum.any?(attempt["outbound_headers"], fn [_, value] -> value == "client-key" end)
     end
 
     test "a row written before the rule existed is filtered on read" do
