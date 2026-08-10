@@ -431,6 +431,47 @@ defmodule DodoRouterWeb.LogLiveTest do
       assert dupes == [], "duplicate element ids: #{inspect(dupes)}"
     end
 
+    test "a clean request says so instead of rendering nothing", %{conn: conn, user: user} do
+      # "We changed nothing" is the claim the whole fidelity stack exists to
+      # make. Silence is the wrong way to say it — an empty panel reads as a
+      # missing feature, not as a guarantee kept.
+      {router, _api_key} = RoutersFixtures.router_fixture(user)
+
+      log =
+        LogsFixtures.log_fixture(router, %{
+          fidelity_changes: [],
+          final_provider: "anthropic"
+        })
+
+      {:ok, _live, html} = live(conn, ~p"/logs/#{log.request_id}")
+
+      assert html =~ "Passed through unchanged"
+      assert html =~ "anthropic"
+      refute html =~ "What the proxy changed"
+    end
+
+    test "a request that lost something names it instead", %{conn: conn, user: user} do
+      {router, _api_key} = RoutersFixtures.router_fixture(user)
+
+      log =
+        LogsFixtures.log_fixture(router, %{
+          fidelity_changes: [
+            %{
+              "channel" => "request_body",
+              "name" => "context_management",
+              "action" => "dropped",
+              "reason" => "unsupported_by_format_conversion"
+            }
+          ]
+        })
+
+      {:ok, _live, html} = live(conn, ~p"/logs/#{log.request_id}")
+
+      assert html =~ "What the proxy changed"
+      assert html =~ "context_management"
+      refute html =~ "Passed through unchanged"
+    end
+
     test "raw request and response tabs offer a copy button", %{conn: conn, user: user} do
       {router, _api_key} = RoutersFixtures.router_fixture(user)
 
@@ -445,7 +486,7 @@ defmodule DodoRouterWeb.LogLiveTest do
 
       {:ok, live, _html} = live(conn, ~p"/logs/#{log.request_id}")
 
-      live |> element("button", "Original Request") |> render_click()
+      live |> element("button", "Sent to Provider") |> render_click()
       assert has_element?(live, "#copy-request-json[phx-hook=CopyButton][data-copy]")
 
       live |> element("button", "Final Response") |> render_click()

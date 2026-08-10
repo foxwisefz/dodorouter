@@ -531,7 +531,7 @@ defmodule DodoRouterWeb.LogLive.Show do
                     "text-base-content/60 hover:text-base-content hover:bg-base-200/50"
                 ]}
               >
-                Original Request
+                Sent to Provider
               </button>
               <button
                 type="button"
@@ -615,17 +615,40 @@ defmodule DodoRouterWeb.LogLive.Show do
                     Full fallback trace with headers and bodies →
                   </button>
                 </div>
+                <%!-- "We changed nothing" is the product's central claim, so silence is the
+     wrong way to say it. A clean request states it outright instead of
+     rendering blank space where the panel would be. --%>
+                <%= if @fidelity_changes == [] do %>
+                  <div class="mb-4 flex items-center gap-2 rounded-lg border border-success/30 bg-success/5 px-4 py-2.5">
+                    <.icon name="hero-check-circle" class="w-4 h-4 text-success shrink-0" />
+                    <span class="text-sm">
+                      <span class="font-semibold">Passed through unchanged</span>
+                      <span class="text-base-content/60">
+                        — {passthrough_summary(@log)}
+                      </span>
+                    </span>
+                  </div>
+                <% end %>
                 <%= if length(@fidelity_changes) > 0 do %>
                   <div class="mb-4 rounded-lg border border-base-300 bg-base-100 overflow-hidden">
                     <button
                       type="button"
-                      phx-click={JS.toggle(to: "#fidelity-changes")}
+                      phx-click={
+                        JS.toggle(to: "#fidelity-changes")
+                        |> JS.toggle(to: "#fidelity-show")
+                        |> JS.toggle(to: "#fidelity-hide")
+                      }
                       class="w-full flex items-center gap-2 px-4 py-2.5 text-left hover:bg-base-200/60 transition-colors"
                     >
                       <.icon name="hero-scissors" class="w-4 h-4 text-base-content/50 shrink-0" />
                       <span class="text-sm font-semibold">What the proxy changed</span>
                       <span class="badge badge-sm badge-ghost">{length(@fidelity_changes)}</span>
-                      <span class="ml-auto text-xs text-base-content/40">show</span>
+                      <span id="fidelity-show" class="ml-auto text-xs text-base-content/40">
+                        show
+                      </span>
+                      <span id="fidelity-hide" class="ml-auto hidden text-xs text-base-content/40">
+                        hide
+                      </span>
                     </button>
                     <div id="fidelity-changes" class="hidden border-t border-base-300">
                       <table class="table table-xs">
@@ -877,11 +900,17 @@ defmodule DodoRouterWeb.LogLive.Show do
             <%= if @active_tab == "fallback_trace" do %>
               <div class="p-4 space-y-3">
                 <div class="text-sm text-base-content/60 mb-2">
-                  {if @log.status == "error",
-                    do:
-                      "All #{length(@log.attempted_steps)} providers failed — each attempt below with its actual response.",
-                    else:
-                      "Request was retried across #{length(@log.attempted_steps)} providers before succeeding."}
+                  <%!-- A single successful attempt was never "retried". --%>
+                  {cond do
+                    @log.status == "error" ->
+                      "All #{length(@log.attempted_steps)} providers failed — each attempt below with its actual response."
+
+                    length(@log.attempted_steps) <= 1 ->
+                      "Served on the first attempt — exactly what went upstream and came back."
+
+                    true ->
+                      "Fell back through #{length(@log.attempted_steps)} providers before one answered."
+                  end}
                 </div>
                 <%= for {attempt, idx} <- Enum.with_index(@log.attempted_steps) do %>
                   <div class={[
@@ -998,7 +1027,9 @@ defmodule DodoRouterWeb.LogLive.Show do
                             phx-click={JS.toggle(to: "#step-request-#{idx}")}
                             class="text-[10px] uppercase tracking-wider text-primary hover:underline font-semibold mb-1"
                           >
-                            {if idx == 0, do: "Original Request", else: "Request Sent (transformed)"}
+                            {if idx == 0,
+                              do: "Request body sent",
+                              else: "Request body sent (re-converted)"}
                           </button>
                           <div id={"step-request-#{idx}"} class="hidden">
                             <div class="mockup-code text-xs max-h-64 overflow-auto">
@@ -1251,6 +1282,16 @@ defmodule DodoRouterWeb.LogLive.Show do
       err["message"] || err["type"]
     else
       _ -> nil
+    end
+  end
+
+  # Names the provider that answered, because "unchanged" is a claim about a
+  # specific hop: the same request can pass through untouched on an Anthropic
+  # step and lose fields on an OpenAI-family fallback.
+  defp passthrough_summary(log) do
+    case log.final_provider do
+      nil -> "every header and field you sent reached the provider"
+      provider -> "every header and field you sent reached #{provider}"
     end
   end
 
