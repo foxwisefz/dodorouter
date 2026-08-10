@@ -60,12 +60,22 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
   Upstream headers: the proxy's credentials plus the client's forwardable
   headers, per the request-fidelity policy in `Adapter.build_forwarded_headers/2`.
 
-  `anthropic-beta` is the one header that policy cannot resolve on its own.
-  Both sides send it, so the generic proxy-wins collision rule would discard
-  the client's opt-ins in favour of our bare `oauth-2025-04-20` — including
+  Two headers here are ours only by default, because the generic proxy-wins
+  collision rule is wrong for anything both sides legitimately set.
+
+  `anthropic-beta` is *merged* before the policy runs, so exactly one header
+  goes upstream carrying both lists. Letting ours win would discard the
+  client's opt-ins in favour of a bare `oauth-2025-04-20` — including
   `extended-cache-ttl`, whose loss silently demotes an agent session from a 1h
-  prompt cache to 5 minutes. It is therefore merged into the proxy's own
-  headers *before* the policy runs, so exactly one merged header goes upstream.
+  prompt cache to 5 minutes.
+
+  `anthropic-version` *defers* to the client entirely, and we supply
+  `#{@api_version}` only when they sent none (Anthropic requires the header,
+  and OpenAI-format traffic falling back to this adapter has no version to
+  forward). We hold the API key, not the API contract: the version a caller
+  picked states which response shape they can parse, and none of the three
+  strip reasons — replace it, it breaks the hop, it isn't theirs to send —
+  apply to it.
   """
   def request_headers(api_key, client_headers) do
     merged = merged_beta(api_key, client_headers)
@@ -77,6 +87,13 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
 
         beta ->
           List.keystore(auth_headers(api_key), "anthropic-beta", 0, {"anthropic-beta", beta})
+      end
+
+    proxy_headers =
+      if client_header(client_headers, "anthropic-version") do
+        List.keydelete(proxy_headers, "anthropic-version", 0)
+      else
+        proxy_headers
       end
 
     headers = Adapter.build_forwarded_headers(client_headers, proxy_headers)
@@ -94,9 +111,11 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
     headers
   end
 
-  defp client_beta(client_headers) do
+  defp client_beta(client_headers), do: client_header(client_headers, "anthropic-beta")
+
+  defp client_header(client_headers, name) do
     Enum.find_value(client_headers || [], fn {k, v} ->
-      if String.downcase(to_string(k)) == "anthropic-beta", do: v
+      if String.downcase(to_string(k)) == name, do: v
     end)
   end
 

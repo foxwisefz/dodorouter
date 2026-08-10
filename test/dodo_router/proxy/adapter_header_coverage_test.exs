@@ -98,6 +98,12 @@ defmodule DodoRouter.Proxy.AdapterHeaderCoverageTest do
             assert is_binary(reason) and reason != ""
 
           :error ->
+            # function_exported?/3 answers "loaded AND exported", and in the
+            # test env modules load lazily — without this the sweep failed or
+            # passed depending on whether an earlier test happened to touch the
+            # adapter, which is the one thing a guard test must not do.
+            Code.ensure_loaded!(module)
+
             assert function_exported?(module, :request_headers, 2),
                    "#{inspect(module)} makes upstream requests but exposes no request_headers/2 " <>
                      "— it cannot honour the request-fidelity policy"
