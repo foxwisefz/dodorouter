@@ -148,6 +148,63 @@ defmodule DodoRouter.Proxy.HeaderForwardingTest do
     end
   end
 
+  describe "untranslated fields survive an Anthropic -> Anthropic round trip" do
+    alias DodoRouter.Proxy.Adapter
+    alias DodoRouter.Routers.RoutingStep
+
+    defp anthropic_body(request) do
+      Anthropic.build_anthropic_request(request, %RoutingStep{
+        provider: "anthropic",
+        model: "claude-opus-4-6",
+        position: 0
+      })
+    end
+
+    test "a field the IR cannot carry goes back on the wire as the client sent it" do
+      # Claude Code asks for context editing; the OpenAI-shaped IR has no such
+      # field, so before this the request reached Anthropic with the feature
+      # silently missing and a 200 that had ignored it.
+      edits = %{"edits" => [%{"type" => "clear_tool_uses_20250919"}]}
+
+      body =
+        anthropic_body(%{
+          "messages" => [%{"role" => "user", "content" => "hi"}],
+          Adapter.passthrough_key() => %{
+            "context_management" => edits,
+            "metadata" => %{"user_id" => "u_123"}
+          }
+        })
+
+      assert body["context_management"] == edits
+      assert body["metadata"] == %{"user_id" => "u_123"}
+    end
+
+    test "the passthrough can never override a value routing owns" do
+      # The passthrough is built from keys the converter did not consume, so a
+      # stale model cannot appear in it — but the merge order is what enforces
+      # that rather than assumes it.
+      body =
+        anthropic_body(%{
+          "messages" => [%{"role" => "user", "content" => "hi"}],
+          "max_tokens" => 512,
+          Adapter.passthrough_key() => %{"model" => "sneaky", "max_tokens" => 999_999}
+        })
+
+      assert body["model"] == "claude-opus-4-6"
+      assert body["max_tokens"] == 512
+    end
+
+    test "the envelope itself never reaches the provider" do
+      body =
+        anthropic_body(%{
+          "messages" => [%{"role" => "user", "content" => "hi"}],
+          Adapter.passthrough_key() => %{"metadata" => %{"user_id" => "u_1"}}
+        })
+
+      refute Map.has_key?(body, Adapter.passthrough_key())
+    end
+  end
+
   describe "collisions" do
     test "the proxy's value wins when a client header collides with ours" do
       result =

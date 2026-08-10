@@ -57,7 +57,12 @@ defmodule DodoRouter.Proxy do
              %{
                provider_ms: provider_ms,
                log: log,
-               response_headers: result.response_headers
+               response_headers: result.response_headers,
+               # Native provider response fields the IR cannot represent,
+               # present only when the serving provider spoke the client's own
+               # format. The egress converter restores them; on any other
+               # provider they were recorded as lost instead.
+               response_passthrough: result.response_passthrough
              }}
 
           :error ->

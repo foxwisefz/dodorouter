@@ -470,6 +470,39 @@ defmodule DodoRouter.Proxy.Adapter do
     "call_" <> (:crypto.strong_rand_bytes(12) |> Base.encode16(case: :lower))
   end
 
+  # Where `FallbackChain` stashes the client's untranslated request fields for a
+  # step that speaks the client's own format. Namespaced because it rides inside
+  # the request map: it must never be mistaken for a real parameter, and the
+  # adapters that read it build their body from scratch, so it cannot leak
+  # upstream.
+  @passthrough_key "__client_passthrough__"
+
+  # The response-direction twin: what the provider sent back that the IR has no
+  # place for. Split off by `FallbackChain` before anything logs or reads the
+  # response, so it never reaches a client, a log row, or the UI as a field.
+  @response_passthrough_key "__provider_passthrough__"
+
+  @doc false
+  def passthrough_key, do: @passthrough_key
+
+  @doc false
+  def response_passthrough_key, do: @response_passthrough_key
+
+  @doc """
+  The client's untranslated fields, for an adapter whose format matches theirs.
+
+  Empty for every other adapter — `FallbackChain` only attaches them on a
+  format match, and records the loss against the step when it doesn't.
+  """
+  def client_passthrough(request) when is_map(request) do
+    case Map.get(request, @passthrough_key) do
+      fields when is_map(fields) -> fields
+      _ -> %{}
+    end
+  end
+
+  def client_passthrough(_request), do: %{}
+
   # Request-fidelity policy (brain/main.md): client headers reach the provider
   # by default, INCLUDING on fallback to a different provider. A header is
   # stripped only for one of three stated reasons, below. This function is the
@@ -532,7 +565,8 @@ defmodule DodoRouter.Proxy.Adapter do
   @edge_prefixes ~w(x-forwarded- cf-)
 
   def build_forwarded_headers(client_headers, proxy_headers) when is_list(client_headers) do
-    proxy_keys = MapSet.new(proxy_headers, fn {key, _} -> String.downcase(key) end)
+    proxy_values = Map.new(proxy_headers, fn {key, value} -> {String.downcase(key), value} end)
+    proxy_keys = MapSet.new(Map.keys(proxy_values))
 
     {dropped, filtered} =
       Enum.split_with(client_headers, fn {key, _} ->
@@ -542,7 +576,16 @@ defmodule DodoRouter.Proxy.Adapter do
     outbound = filtered ++ proxy_headers
 
     Fidelity.record_headers(
-      Enum.map(dropped, fn {key, _} ->
+      dropped
+      # A collision the proxy resolves to the client's own value is not a
+      # change — `anthropic-beta` on the api-key path is merged to exactly what
+      # they sent, and reporting it as dropped points the next person debugging
+      # a cache miss at a header that went upstream untouched. The duplicate
+      # still has to go; only the claim that something happened is wrong.
+      |> Enum.reject(fn {key, value} ->
+        Map.get(proxy_values, String.downcase(to_string(key))) == value
+      end)
+      |> Enum.map(fn {key, _} ->
         key = String.downcase(to_string(key))
         {key, strip_reason(key, proxy_keys)}
       end),

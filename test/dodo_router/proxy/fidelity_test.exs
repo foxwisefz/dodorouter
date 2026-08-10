@@ -15,6 +15,7 @@ defmodule DodoRouter.Proxy.FidelityTest do
   alias DodoRouter.AccountsFixtures
   alias DodoRouter.Providers.ProviderKey
   alias DodoRouter.Proxy
+  alias DodoRouter.Proxy.Adapter
   alias DodoRouter.Proxy.Fidelity
   alias DodoRouter.Routers
   alias DodoRouter.RoutersFixtures
@@ -179,6 +180,26 @@ defmodule DodoRouter.Proxy.FidelityTest do
       refute Enum.any?(attempt["outbound_headers"], fn [_, value] -> value == "client-key" end)
     end
 
+    test "a collision resolved to the client's own value is not a change" do
+      # anthropic-beta on the api-key path is merged to exactly what the client
+      # sent, so the header upstream *is* theirs. Reporting it as dropped sent
+      # the next person debugging a cache miss looking for a header that was
+      # right there.
+      Fidelity.reset()
+      Adapter.build_forwarded_headers([{"x-collides", "same"}], [{"x-collides", "same"}])
+
+      assert Fidelity.take().changes == []
+    end
+
+    test "a collision that actually changes the value is still reported" do
+      Fidelity.reset()
+      Adapter.build_forwarded_headers([{"x-collides", "client"}], [{"x-collides", "proxy"}])
+
+      assert [change] = Fidelity.take().changes
+      assert change["name"] == "x-collides"
+      assert change["reason"] == "proxy_value_wins"
+    end
+
     test "a row written before the rule existed is filtered on read" do
       # Logs from before `:edge_added` recorded x-forwarded-for as
       # not_client_sent, which is indistinguishable from a cookie by reason
@@ -192,6 +213,43 @@ defmodule DodoRouter.Proxy.FidelityTest do
 
       assert Fidelity.hidden?(legacy)
       refute Fidelity.hidden?(%{legacy | "name" => "cookie"})
+    end
+  end
+
+  describe "channel 2: fields the IR cannot carry" do
+    test "a step in the client's own format receives them and reports nothing", %{
+      router: router
+    } do
+      # An Anthropic request served by Anthropic never needed translating. The
+      # loss is a property of crossing formats, not of the provider — so on
+      # this step there is nothing to report.
+      log =
+        dispatch(router, request(),
+          client_headers: [],
+          client_format: :openai,
+          passthrough_request_fields: %{"context_management" => %{"edits" => []}}
+        )
+
+      refute find(log, "request_body", "context_management")
+    end
+
+    test "a step in another format reports the loss against that step", %{router: router} do
+      log =
+        dispatch(router, request(),
+          client_headers: [],
+          client_format: :anthropic,
+          passthrough_request_fields: %{"context_management" => %{"edits" => []}},
+          passthrough_detail: "no equivalent in the OpenAI Chat Completions format"
+        )
+
+      change = find(log, "request_body", "context_management")
+      assert change["reason"] == "unsupported_by_format_conversion"
+      assert change["detail"] == "no equivalent in the OpenAI Chat Completions format"
+
+      # Attributed to the step that actually lost it, not to "before routing" —
+      # whether anything was lost depends on which provider answered.
+      assert change["provider"] == "test_provider"
+      assert change["step"] == 0
     end
   end
 
