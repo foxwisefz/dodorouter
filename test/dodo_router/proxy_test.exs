@@ -75,6 +75,17 @@ defmodule DodoRouter.ProxyTest do
       assert Logs.list_replays(original) |> Enum.map(& &1.id) == [log.id]
     end
 
+    test "key health is recorded before dispatch returns", ctx do
+      assert {:ok, _response, _meta} = Proxy.dispatch(ctx.router, ctx.request, steps: [ctx.step])
+
+      # Health tracking is fire-and-forget in production, but a task that
+      # outlives its caller loses the sandbox connection it borrowed — so
+      # in test it has to be finished by the time dispatch returns.
+      key = Repo.get!(DodoRouter.Providers.ProviderKey, ctx.step.provider_key_id)
+      assert key.status == "valid"
+      assert key.last_ok_at
+    end
+
     test "sync logging persists an error log retrievable by request_id when the step fails",
          ctx do
       keyless_step = %{ctx.step | provider_key: nil, provider_key_id: nil}

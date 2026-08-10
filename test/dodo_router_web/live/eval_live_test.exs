@@ -56,7 +56,15 @@ defmodule DodoRouterWeb.EvalLiveTest do
 
     evaluation_id = path |> String.trim_leading("/evals/") |> URI.parse() |> Map.fetch!(:path)
     evaluation = Evaluations.get_evaluation!(user, evaluation_id)
-    assert evaluation.benchmark_status == "running"
+
+    # The enqueued benchmark runs against the batch the save created, and
+    # it is done by the time the save action returns — a benchmark still
+    # writing after the test ends would be racing the sandbox owner it
+    # borrowed its connection from.
+    assert evaluation.last_batch_id
+    refute evaluation.benchmark_status in ["draft", "running"]
+    assert length(evaluation.runs) == 3
+    assert Enum.all?(evaluation.runs, &(&1.batch_id == evaluation.last_batch_id))
 
     assert {:ok, show_live, _html} = live(conn, URI.parse(path).path)
     assert has_element?(show_live, "#eval-summary")
