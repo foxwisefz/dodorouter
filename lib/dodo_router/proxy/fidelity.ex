@@ -35,6 +35,8 @@ defmodule DodoRouter.Proxy.Fidelity do
   the harvest with it.
   """
 
+  alias DodoRouter.Proxy.Adapter
+
   @key :__dodo_fidelity__
 
   @empty %{changes: [], outbound_headers: nil}
@@ -44,11 +46,21 @@ defmodule DodoRouter.Proxy.Fidelity do
     transport:
       "describes a hop or a body we rewrite; forwarding it breaks the request or the stream",
     account_scoped: "names the client's account on a provider we authenticate to with our key",
-    not_client_sent: "added by our edge, or not the client's to send",
+    not_client_sent: "not the client's to hand to a third party",
+    edge_added: "our own edge added it; the client never sent it",
     proxy_value_wins: "collides with a header the proxy must set itself",
     not_in_provider_allowlist: "not a field the upstream Chat Completions API accepts",
     unsupported_by_format_conversion: "the format conversion has no translation for it yet"
   }
+
+  # Two reasons describe the transport rather than the request. `host`,
+  # `content-length` and `accept-encoding` are stripped from every request ever
+  # made, and `x-forwarded-*`/`via` were never the caller's headers at all —
+  # our edge put them there. Listing a dozen such rows on every log buries the
+  # two or three drops that are genuinely about what this client asked for,
+  # which is the only question the panel exists to answer. They are still
+  # dropped from the upstream request; they are just not news.
+  @silent_reasons ~w(transport edge_added)
 
   @doc """
   Clears the buffer. Call before dispatching a routing step so one step's
@@ -79,7 +91,10 @@ defmodule DodoRouter.Proxy.Fidelity do
   header list being sent.
   """
   def record_headers(dropped, outbound) do
-    changes = Enum.map(dropped, &change("request_header", elem(&1, 0), "dropped", elem(&1, 1)))
+    changes =
+      dropped
+      |> Enum.reject(fn {_name, reason} -> to_string(reason) in @silent_reasons end)
+      |> Enum.map(&change("request_header", elem(&1, 0), "dropped", elem(&1, 1)))
 
     update(fn record ->
       %{record | changes: record.changes ++ changes, outbound_headers: outbound}
@@ -142,6 +157,25 @@ defmodule DodoRouter.Proxy.Fidelity do
       |> Map.put("step", position)
     end)
   end
+
+  @doc """
+  Whether a persisted change should stay out of the log page's list.
+
+  Read-time filtering as well as record-time is what makes the rule
+  retroactive. Rows written before `:edge_added` existed carry
+  `not_client_sent` for `x-forwarded-for`, so the stored reason cannot tell an
+  edge header apart from a cookie — re-classifying the header name under
+  today's policy can.
+  """
+  def hidden?(%{} = change) do
+    name = change["name"]
+
+    to_string(change["reason"]) in @silent_reasons or
+      (change["channel"] == "request_header" and is_binary(name) and
+         to_string(Adapter.strip_reason(name)) in @silent_reasons)
+  end
+
+  def hidden?(_change), do: false
 
   @doc """
   The human-readable justification behind a recorded reason, for the log UI.

@@ -6,6 +6,7 @@ defmodule DodoRouterWeb.LogLive.Show do
   alias DodoRouter.Logs.MessageNormalizer
   alias DodoRouter.Logs.Provenance
   alias DodoRouter.Proxy.Adapter.Registry
+  alias DodoRouter.Proxy.Fidelity
   alias DodoRouter.Usage
   alias DodoRouterWeb.MarkdownRenderer
 
@@ -53,8 +54,6 @@ defmodule DodoRouterWeb.LogLive.Show do
     resp_headers = parse_headers(log.response_headers)
     available_tools = MessageNormalizer.extract_tools(req_params)
 
-    req_headers = req_headers
-
     socket =
       socket
       |> assign(:page_title, "Request #{String.slice(log.request_id, 0, 8)}...")
@@ -71,7 +70,7 @@ defmodule DodoRouterWeb.LogLive.Show do
       |> assign(:show_resp_headers, false)
       |> assign(:expanded_messages, MapSet.new())
       |> assign(:truncation_flags, log.truncation_flags || [])
-      |> assign(:fidelity_changes, log.fidelity_changes || [])
+      |> assign(:fidelity_changes, Enum.reject(log.fidelity_changes || [], &Fidelity.hidden?/1))
       |> assign(:finish_reason, extract_finish_reason(log.response_body))
       |> assign(:evaluations, Evaluations.list_for_log(socket.assigns.current_user, log.id))
       |> assign(:replay_count, Logs.replay_counts([log.id]) |> Map.get(log.id, 0))

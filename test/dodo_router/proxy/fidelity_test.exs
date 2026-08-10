@@ -93,7 +93,6 @@ defmodule DodoRouter.Proxy.FidelityTest do
         )
 
       assert find(log, "request_header", "cookie")["reason"] == "not_client_sent"
-      assert find(log, "request_header", "accept-encoding")["reason"] == "transport"
       assert find(log, "request_header", "openai-organization")["reason"] == "account_scoped"
       assert find(log, "request_header", "authorization")["reason"] == "replaced_by_proxy"
 
@@ -126,6 +125,56 @@ defmodule DodoRouter.Proxy.FidelityTest do
 
       [attempt] = log.attempted_steps
       assert ["x-client-trace", "abc"] in attempt["outbound_headers"]
+    end
+  end
+
+  describe "drops that are identical on every request are not recorded" do
+    test "headers our own edge added are dropped but never reported", %{router: router} do
+      # The caller did not send these — Caddy did, on the way in. Listing them
+      # under "what the proxy changed" makes a claim about the client's request
+      # that is not true, and a dozen such rows bury the drops that are.
+      edge = [
+        {"x-forwarded-for", "203.0.113.9"},
+        {"x-forwarded-proto", "https"},
+        {"x-forwarded-host", "api.dodorouter.com"},
+        {"via", "1.1 caddy"},
+        {"x-real-ip", "203.0.113.9"},
+        {"cf-ray", "abc"}
+      ]
+
+      log = dispatch(router, request(), client_headers: edge)
+
+      assert log.fidelity_changes == []
+
+      # Silent is not the same as forwarded: they still must not reach the
+      # provider, since they disclose the end user's IP and our hostnames.
+      [attempt] = log.attempted_steps
+      sent = Enum.map(attempt["outbound_headers"], fn [key, _] -> String.downcase(key) end)
+      Enum.each(edge, fn {name, _} -> refute name in sent end)
+    end
+
+    test "transport drops are silent for the same reason", %{router: router} do
+      log =
+        dispatch(router, request(),
+          client_headers: [{"host", "x"}, {"content-length", "12"}, {"accept-encoding", "gzip"}]
+        )
+
+      assert log.fidelity_changes == []
+    end
+
+    test "a row written before the rule existed is filtered on read" do
+      # Logs from before `:edge_added` recorded x-forwarded-for as
+      # not_client_sent, which is indistinguishable from a cookie by reason
+      # alone — so the read path re-classifies the header name.
+      legacy = %{
+        "channel" => "request_header",
+        "name" => "x-forwarded-for",
+        "action" => "dropped",
+        "reason" => "not_client_sent"
+      }
+
+      assert Fidelity.hidden?(legacy)
+      refute Fidelity.hidden?(%{legacy | "name" => "cookie"})
     end
   end
 

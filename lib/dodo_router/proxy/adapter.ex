@@ -501,19 +501,24 @@ defmodule DodoRouter.Proxy.Adapter do
 
   # 3. Not the client's to send. `cookie` on a browser-originated request
   # carries the user's own DodoRouter session — forwarding it would hand a
-  # third party our auth credential. The rest are added by our edge (Caddy),
-  # not by the caller, and disclose the end user's real IP and our internal
-  # hostnames.
-  @non_client_headers ~w(
-    cookie
-    forwarded via x-real-ip x-original-forwarded-for x-original-url
-  )
+  # third party our auth credential.
+  @non_client_headers ~w(cookie)
+
+  # 3b. The client did not send it at all: our own edge (Caddy) added it on the
+  # way in, and it discloses the end user's real IP and our internal hostnames.
+  # Kept separate from 3 because the caller cannot be shown a change to a header
+  # they never sent — `Fidelity` drops this reason from the log page.
+  #
+  # Confirmed against the running edge with `scripts/edge_header_probe.sh`
+  # (2026-08-11): Caddy's `reverse_proxy` sets `x-forwarded-for`, `-proto` and
+  # `-host` unconditionally, and nothing here is ever sent by an SDK.
+  @edge_headers ~w(forwarded via x-real-ip x-original-forwarded-for x-original-url)
 
   # Matched by prefix rather than enumerated: Caddy's config lives on the
   # server, not in this repo, so the edge can start emitting a new
   # `x-forwarded-*` with no change here and an enumerated list would go stale
   # silently. `cf-` costs nothing and covers the day something fronts Caddy.
-  @non_client_prefixes ~w(x-forwarded- cf-)
+  @edge_prefixes ~w(x-forwarded- cf-)
 
   def build_forwarded_headers(client_headers, proxy_headers) when is_list(client_headers) do
     proxy_keys = MapSet.new(proxy_headers, fn {key, _} -> String.downcase(key) end)
@@ -541,6 +546,19 @@ defmodule DodoRouter.Proxy.Adapter do
     proxy_headers
   end
 
+  @doc """
+  The policy reason a header name does not reach the provider, or `nil`.
+
+  Name-only: collisions with the proxy's own headers depend on the request, so
+  this answers the question the log page asks of an already-persisted row —
+  "would today's policy call this an edge header?" — without one.
+  """
+  def strip_reason(key) when is_binary(key) do
+    strip_reason(String.downcase(key), MapSet.new())
+  end
+
+  def strip_reason(_key), do: nil
+
   # The reason a client header does not reach the provider, or nil when it
   # does. Recording the reason alongside the drop is what keeps the strip list
   # from decaying into folklore: every entry in a log can be traced back to one
@@ -551,7 +569,8 @@ defmodule DodoRouter.Proxy.Adapter do
       key in @transport_headers -> :transport
       key in @provider_scoped_headers -> :account_scoped
       key in @non_client_headers -> :not_client_sent
-      String.starts_with?(key, @non_client_prefixes) -> :not_client_sent
+      key in @edge_headers -> :edge_added
+      String.starts_with?(key, @edge_prefixes) -> :edge_added
       MapSet.member?(proxy_keys, key) -> :proxy_value_wins
       true -> nil
     end
