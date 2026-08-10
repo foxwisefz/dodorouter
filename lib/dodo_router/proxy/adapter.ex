@@ -482,7 +482,9 @@ defmodule DodoRouter.Proxy.Adapter do
 
   # 2a. The provider will break. content-length/transfer-encoding describe a
   # body we rewrite, so they are lies by the time we forward. accept-encoding
-  # corrupts streamed responses. The rest cannot survive a hop by definition.
+  # corrupts streamed responses — and per the 2026-08-11 edge probe it usually
+  # is not the client's header at all: Caddy adds `gzip` when the caller sent
+  # none. The rest cannot survive a hop by definition.
   @transport_headers ~w(
     host connection content-length transfer-encoding upgrade
     proxy-authorization proxy-authenticate te trailer keep-alive
@@ -509,9 +511,18 @@ defmodule DodoRouter.Proxy.Adapter do
   # Kept separate from 3 because the caller cannot be shown a change to a header
   # they never sent — `Fidelity` drops this reason from the log page.
   #
-  # Confirmed against the running edge with `scripts/edge_header_probe.sh`
-  # (2026-08-11): Caddy's `reverse_proxy` sets `x-forwarded-for`, `-proto` and
-  # `-host` unconditionally, and nothing here is ever sent by an SDK.
+  # Measured against the running edge with `scripts/edge_header_probe.sh`
+  # (2026-08-11). The same curl through api.dodorouter.com and straight at the
+  # app's listener differed by exactly:
+  #
+  #   via: 2.0 Caddy
+  #   x-forwarded-for / x-forwarded-host / x-forwarded-proto
+  #   accept-encoding: gzip   (see @transport_headers — also not the client's)
+  #
+  # `forwarded`, `x-real-ip` and `x-original-*` were NOT observed. They stay
+  # because they cost nothing and each one leaks the end user's IP or our
+  # hostnames the day a config change starts emitting them; the probe is what
+  # keeps that a hedge rather than a guess.
   @edge_headers ~w(forwarded via x-real-ip x-original-forwarded-for x-original-url)
 
   # Matched by prefix rather than enumerated: Caddy's config lives on the
