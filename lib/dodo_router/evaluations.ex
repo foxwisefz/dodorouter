@@ -166,7 +166,7 @@ defmodule DodoRouter.Evaluations do
       |> Ecto.Changeset.change(benchmark_status: "running", last_batch_id: batch_id)
       |> Repo.update!()
 
-      Task.Supervisor.start_child(available_task_supervisor(), fn ->
+      DodoRouter.BackgroundTask.start(available_task_supervisor(), fn ->
         case register_benchmark(evaluation.id) do
           :ok ->
             result = run(user, evaluation, batch_id: batch_id)

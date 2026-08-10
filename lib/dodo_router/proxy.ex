@@ -219,7 +219,7 @@ defmodule DodoRouter.Proxy do
   @doc false
   # Fire-and-forget key health tracking — must never block or fail dispatch.
   defp record_key_health(attempted_steps) do
-    Task.Supervisor.start_child(DodoRouter.KeyHealthTaskSupervisor, fn ->
+    DodoRouter.BackgroundTask.start(DodoRouter.KeyHealthTaskSupervisor, fn ->
       DodoRouter.Providers.record_attempts(attempted_steps)
     end)
 
