@@ -607,6 +607,10 @@ Adapters run inline in the caller's process, so `FallbackChain` resets the buffe
 
 Use `Fidelity.record_header_rewrite/2` when a header is transformed rather than dropped, and `Fidelity.record_dropped_response_fields/2` for native response fields the egress conversion does not carry.
 
+**Two reasons are recorded nowhere: `:transport` and `:edge_added`** (`Fidelity`'s `@silent_reasons`). `host`/`content-length`/`accept-encoding` come off every request ever made, and `x-forwarded-*`/`via`/`x-real-ip`/`cf-*` were never the caller's headers — our own edge added them on the way in. A dozen identical rows per log buried the two or three drops that were actually about what that client asked for. They are still stripped from the upstream request; they are just not news. `Fidelity.hidden?/1` applies the same rule at read time, because rows written before `:edge_added` existed recorded edge headers as `not_client_sent`.
+
+**To learn what the edge actually adds, probe it — don't read the Caddyfile.** Caddy's `reverse_proxy` sets `X-Forwarded-For`/`-Proto`/`-Host` with no directive present in the config, so the config alone under-reports. `scripts/edge_header_probe.sh` sends one identical request through the edge and one straight at the app's listener on the box, then diffs the header names each run recorded in `request_logs.request_headers`. Whatever appears only in the edge run belongs in `Adapter`'s `@edge_headers`/`@edge_prefixes`. Re-run it after any Caddyfile change; the prefix match means a new `x-forwarded-*` is still dropped in the meantime, just reported.
+
 ## Prompt Cache Fidelity Through Format Conversion
 
 Anthropic prompt caching only hits when the request is a byte-stable prefix extension of a previous request, up to a `cache_control` breakpoint that sits at the same position. The Anthropic-endpoint conversion (`AnthropicFormat.to_openai_params` → `Adapters.Anthropic.build_anthropic_request`) must therefore obey two invariants:
