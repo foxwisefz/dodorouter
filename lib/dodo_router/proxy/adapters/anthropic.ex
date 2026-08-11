@@ -218,9 +218,13 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
           {{:events, events}, buffer} ->
             # Convert and forward as OpenAI format
             {acc, openai_chunks} = process_anthropic_events(acc, events)
-            Enum.each(openai_chunks, &send_chunk.(&1))
             acc = %{acc | sse_buffer: buffer}
+            # Park before forwarding, not after: the egress reads the real
+            # message id from here while handling the very first chunk, and a
+            # frame carrying `message_start` and a delta together would
+            # otherwise hand it a stale accumulator.
             Process.put(:__anthropic_stream_acc__, acc)
+            Enum.each(openai_chunks, &send_chunk.(&1))
             {:cont, {req, Req.Response.put_private(resp, :stream_acc, acc)}}
 
           {:done, _buffer} ->
@@ -813,20 +817,46 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
       stop_reason: nil,
       first_chunk_time: nil,
       sse_buffer: "",
+      # Anthropic's own `msg_…` id, off `message_start`. It arrives before any
+      # delta, so the egress still has it in hand when it emits its own
+      # `message_start` — see `process_anthropic_events/2`.
+      message_id: nil,
       # Native fields off `message_delta` that the OpenAI chunk shape has no
       # place for — `context_management` applied edits, `stop_details` behind a
       # refusal, the `stop_sequence` that actually matched. Collected here
       # because the tail event is emitted after the client's `message_delta`
-      # can still carry them; `message_start` fields (the real `msg_…` id,
-      # `container`) are already on the wire by then and cannot be back-filled.
+      # can still carry them. Other `message_start` fields (`container`) are
+      # already on the wire by then and cannot be back-filled.
       passthrough: %{}
     }
+  end
+
+  @doc """
+  Anthropic's real message id for the stream in flight, or `nil`.
+
+  Read by the Anthropic egress at the moment it opens its own stream. The
+  adapter runs inline in the caller's process — the same property `Fidelity`
+  relies on — and parks the accumulator there as it goes.
+  """
+  def stream_message_id do
+    case Process.get(:__anthropic_stream_acc__) do
+      %{message_id: id} -> id
+      _ -> nil
+    end
   end
 
   @doc false
   def process_anthropic_events(acc, events) do
     Enum.reduce(events, {acc, []}, fn event, {acc, chunks} ->
       case event["type"] do
+        # Anthropic sends this before any delta, so the real `msg_…` id is in
+        # hand before the egress has to emit its own `message_start` — early
+        # enough to use it rather than synthesise one. It names a message in
+        # Anthropic's store, which is what `previous_message_id` cache
+        # diagnostics refer to; a synthesised id cannot be used for that.
+        "message_start" ->
+          {%{acc | message_id: get_in(event, ["message", "id"])}, chunks}
+
         "content_block_start" ->
           case event["content_block"] do
             %{"type" => "tool_use"} = block ->

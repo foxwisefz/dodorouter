@@ -5,6 +5,7 @@ defmodule DodoRouterWeb.AnthropicProxyController do
 
   alias DodoRouter.Proxy
   alias DodoRouter.Proxy.Adapter
+  alias DodoRouter.Proxy.Adapters.Anthropic, as: AnthropicAdapter
   alias DodoRouterWeb.AnthropicFormat
 
   def create(conn, params) do
@@ -356,7 +357,11 @@ defmodule DodoRouterWeb.AnthropicProxyController do
       )
 
       model = Process.get(:__anthropic_serving_model__) || "unknown"
-      raw_send_chunk(anthropic_message_start_event(model, request_id))
+      # Anthropic's own id when Anthropic is serving: it names a message in
+      # their store, which is what `previous_message_id` cache diagnostics
+      # refer to. Any other provider has none, so we synthesise one.
+      message_id = AnthropicAdapter.stream_message_id() || "msg_#{request_id}"
+      raw_send_chunk(anthropic_message_start_event(model, message_id))
       raw_send_chunk(anthropic_content_block_start_event())
     end
 
@@ -455,11 +460,11 @@ defmodule DodoRouterWeb.AnthropicProxyController do
     end
   end
 
-  defp anthropic_message_start_event(model, request_id) do
+  defp anthropic_message_start_event(model, message_id) do
     event_data = %{
       "type" => "message_start",
       "message" => %{
-        "id" => "msg_#{request_id}",
+        "id" => message_id,
         "type" => "message",
         "role" => "assistant",
         "content" => [],

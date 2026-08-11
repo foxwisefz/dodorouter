@@ -233,4 +233,36 @@ defmodule DodoRouter.Proxy.ChannelThreeTest do
       refute Map.has_key?(acc.passthrough, "stop_reason")
     end
   end
+
+  describe "the streaming message id" do
+    test "Anthropic's real id is captured from message_start, before any delta" do
+      # It arrives at the head of the stream, not the tail — early enough for
+      # the egress to use instead of synthesising one, which is what makes
+      # previous_message_id cache diagnostics usable through the proxy.
+      {acc, _chunks} =
+        Anthropic.process_anthropic_events(Anthropic.initial_stream_acc(), [
+          %{"type" => "message_start", "message" => %{"id" => "msg_01realstream"}},
+          %{
+            "type" => "content_block_delta",
+            "index" => 0,
+            "delta" => %{"type" => "text_delta", "text" => "hi"}
+          }
+        ])
+
+      assert acc.message_id == "msg_01realstream"
+    end
+
+    test "no id when the provider never sent one" do
+      {acc, _chunks} =
+        Anthropic.process_anthropic_events(Anthropic.initial_stream_acc(), [
+          %{
+            "type" => "content_block_delta",
+            "index" => 0,
+            "delta" => %{"type" => "text_delta", "text" => "hi"}
+          }
+        ])
+
+      assert acc.message_id == nil
+    end
+  end
 end
