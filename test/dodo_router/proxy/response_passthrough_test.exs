@@ -142,6 +142,79 @@ defmodule DodoRouter.Proxy.ChannelThreeTest do
     end
   end
 
+  describe "the Responses round trip" do
+    alias DodoRouter.Proxy.Adapters.ResponsesAPI
+    alias DodoRouterWeb.ResponsesFormat
+
+    defp completed_acc do
+      {acc, _chunks} =
+        ResponsesAPI.process_events(
+          %{
+            model: "gpt-5.5",
+            content: "hi",
+            tool_calls: %{},
+            usage: nil,
+            finish_reason: nil,
+            first_chunk_time: 1,
+            sse_buffer: ""
+          },
+          [
+            %{
+              "type" => "response.completed",
+              "response" => %{
+                "id" => "resp_realid",
+                "model" => "gpt-5.5",
+                "output" => [],
+                "usage" => %{"input_tokens" => 1, "output_tokens" => 1, "total_tokens" => 2},
+                "text" => %{"format" => %{"type" => "json_schema"}},
+                "instructions" => "be nice"
+              }
+            }
+          ]
+        )
+
+      acc
+    end
+
+    test "native response fields the IR cannot hold reach a Responses client" do
+      ir = ResponsesAPI.build_final_response(completed_acc(), %{})
+      {passthrough, ir} = Map.pop(ir, Adapter.response_passthrough_key())
+
+      client = ResponsesFormat.from_openai_response(ir, "req-1", passthrough)
+
+      assert client["text"] == %{"format" => %{"type" => "json_schema"}}
+      assert client["instructions"] == "be nice"
+    end
+
+    test "the provider's real response id comes back, which is what chains the next turn" do
+      # `previous_response_id` refers to it; a synthesised id cannot be chained.
+      ir = ResponsesAPI.build_final_response(completed_acc(), %{})
+      {passthrough, ir} = Map.pop(ir, Adapter.response_passthrough_key())
+
+      assert ResponsesFormat.from_openai_response(ir, "req-1", passthrough)["id"] == "resp_realid"
+    end
+
+    test "a client with no passthrough still gets a well-formed response" do
+      ir = ResponsesAPI.build_final_response(completed_acc(), %{})
+      {_passthrough, ir} = Map.pop(ir, Adapter.response_passthrough_key())
+
+      client = ResponsesFormat.from_openai_response(ir, "req-1")
+
+      assert client["id"] == "resp_req-1"
+      assert client["object"] == "response"
+    end
+
+    test "translated fields are not duplicated into the passthrough" do
+      ir = ResponsesAPI.build_final_response(completed_acc(), %{})
+      passthrough = Map.fetch!(ir, Adapter.response_passthrough_key())
+
+      for translated <- ~w(model output usage) do
+        refute Map.has_key?(passthrough, translated),
+               "#{translated} is translated and must not also ride the passthrough"
+      end
+    end
+  end
+
   describe "the streaming tail" do
     test "message_delta extras reach the accumulator" do
       {acc, _chunks} =
