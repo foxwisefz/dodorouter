@@ -34,6 +34,24 @@ defmodule DodoRouterWeb.AnthropicFormat do
     |> Enum.sort()
   end
 
+  @doc """
+  The untranslated fields *with their values*, for a step that speaks Anthropic
+  back to us.
+
+  The IR is where these are lost, not the provider: a request that arrives in
+  Anthropic format and is served by an Anthropic-format adapter never needed
+  translating, so nothing should go missing on the way. `FallbackChain` hands
+  this map to a step whose adapter declares `request_format: :anthropic` and
+  reports it as dropped against any step that doesn't.
+
+  Safe to merge by construction — these are exactly the keys `@consumed_fields`
+  does *not* contain, so it can never carry a stale `model`, `max_tokens`, or
+  `thinking` back over a routing decision.
+  """
+  def passthrough_fields(anthropic_params) when is_map(anthropic_params) do
+    Map.take(anthropic_params, unknown_fields(anthropic_params))
+  end
+
   def to_openai_params(anthropic_params) do
     raw_messages = anthropic_params["messages"] || []
     converted = convert_messages_to_openai(raw_messages)
@@ -142,7 +160,7 @@ defmodule DodoRouterWeb.AnthropicFormat do
 
   defp put_response_format(map, _), do: map
 
-  def from_openai_response(openai_response) do
+  def from_openai_response(openai_response, provider_passthrough \\ %{}) do
     choice = get_in(openai_response, ["choices", Access.at(0)]) || %{}
     message = choice["message"] || %{}
     content_blocks = build_content_blocks(message)
@@ -174,7 +192,7 @@ defmodule DodoRouterWeb.AnthropicFormat do
           ),
         else: anthropic_usage
 
-    %{
+    built = %{
       "id" =>
         "msg_#{:crypto.strong_rand_bytes(16) |> Base.encode16(case: :lower) |> String.slice(0, 24)}",
       "type" => "message",
@@ -188,6 +206,15 @@ defmodule DodoRouterWeb.AnthropicFormat do
       "stop_sequence" => openai_response["stop_sequence"],
       "usage" => anthropic_usage
     }
+
+    # When Anthropic itself served the request, the response never needed
+    # translating either — `context_management` applied edits, `stop_details`
+    # behind a refusal, `container`, and the real `msg_…` id go back to the
+    # client as Anthropic sent them. The passthrough wins on collision by
+    # design: it only ever holds fields the adapter did *not* translate, so the
+    # one overlap is the id we synthesise here, and the provider's real one is
+    # strictly better (cache diagnostics reference it).
+    Map.merge(built, provider_passthrough)
   end
 
   def convert_sse_chunk(openai_sse_data) when is_binary(openai_sse_data) do

@@ -39,7 +39,7 @@ Every adapter must satisfy several **cross-cutting contracts** documented in thi
 1. **Check every cross-cutting section** in this AGENTS.md that applies to adapters. Currently:
    - [Context Limit Handling](#llm-provider-context-limit-handling) — error detection patterns per provider
    - [Usage & Cache Token Normalization](#llm-provider-usage--cache-token-normalization) — usage field mapping for cache extraction
-   - [Request & Response Fidelity](#request--response-fidelity) — header forwarding, dropped-field recording, naming the serving model
+   - [Request & Response Fidelity](#request--response-fidelity) — header forwarding, dropped-field recording, `request_format` declaration, naming the serving model
 2. **Test the seams** — unit-testing adapter functions in isolation is insufficient. You **must** write at least one test that pipes adapter output through the downstream contract (e.g. `convert_usage/1` → `Adapter.extract_usage/1`) to verify they compose correctly.
 3. **When adding a new cross-cutting concern** (anything all adapters must satisfy), document it as a new section in this file with the same structure: known provider patterns, the contract, and how to test it.
 4. **Slug naming**: for a NEW adapter, prefer the provider's models.dev key as the slug (check https://models.dev/api.json) and add the mapping to `Models.Sync`'s `@provider_slug_map` — the sync silently drops providers whose mapped key doesn't exist upstream (it now logs a warning when that happens). **Never rename existing slugs** to chase upstream naming: they're baked into `routing_steps.provider`, `request_logs.final_provider`, `models.provider_slug`, and `provider_keys.provider_slug`; translation happens only in the sync map. Coding-plan catalogs (e.g. models.dev `kimi-for-coding`) map to the provider-KEY slug (`moonshot_coding`), not the adapter slug.
@@ -586,8 +586,16 @@ The test for a new one: is this header ours to state, or theirs? Credentials and
 
 Two whitelists drop fields:
 
-* **Ingress** — `AnthropicFormat.to_openai_params/1` and `ResponsesFormat.to_openai_params/1`. Anything they don't carry is lost. `unknown_fields/1` on each reports what that was; controllers log it *and* pass it to `Proxy.dispatch/3` as `:dropped_request_fields`.
+* **Ingress** — `AnthropicFormat.to_openai_params/1` and `ResponsesFormat.to_openai_params/1`. Anything they don't carry is lost. `unknown_fields/1` on each reports what that was; controllers log it.
 * **Egress** — `Adapter.@allowed_request_fields`, applied by `sanitize_request/1` on every OpenAI-family step.
+
+**Untranslated fields survive a same-format round trip.** The ingress whitelist is where fields are lost — *not* the provider. A request that arrives in Anthropic format and is served by an Anthropic-format adapter never needed translating, so `metadata`, `context_management`, and whatever Anthropic ships next reach the wire as the client sent them. Every adapter declares `request_format:` (`:openai` default, plus `:anthropic` / `:responses` / `:gemini`) in its `use Registry` config; `FallbackChain.apply_passthrough/2` attaches `AnthropicFormat.passthrough_fields/1` to a step whose format matches the client's, and records the loss against any step that doesn't.
+
+The rule is **format match, not a provider-capability matrix** — a per-provider "does Kimi support `context_management`?" table is exactly the folklore this section exists to prevent, and it would go stale silently. It also makes the log true per attempt: an Anthropic request served by Anthropic reports nothing; the same request falling back to an OpenAI-family provider reports the loss against *that* step, not "before routing".
+
+`request_format` is **declared, not inferred from `endpoint_path`** — the path only happens to correlate, and a provider moving its route must not silently change what we forward. `adapter_header_coverage_test.exs` sweeps the registry so a new adapter can neither skip the declaration nor drift from its own endpoint path. The passthrough is built from the keys the converter did *not* consume, so it can never carry a stale `model`/`max_tokens`/`thinking` back over a routing decision; `build_anthropic_request` merges it under the body it built as a second guard.
+
+Two known limits: a same-format adapter pointed at a merely Claude-*compatible* third party may reject a field we now forward (the 400 is truthful — it's the client's field), and the **response** half doesn't exist yet, so a feature like `context_management` takes effect without the client being able to see its `applied_edits`. `ResponsesFormat` → `Adapters.ResponsesAPI` has the identical round-trip loss and has not been migrated.
 
 **The contract:** a field that is a real parameter of the upstream API belongs in `@allowed_request_fields`. `Map.take/2` means an allowed field only travels when the client actually sent it, so allowing one costs nothing for clients that don't use it. Getting this wrong is asymmetric and invisible: `parallel_tool_calls` was honoured on an Anthropic step and silently dropped on every OpenAI-family fallback of the same request.
 
@@ -596,6 +604,14 @@ Two whitelists drop fields:
 `FallbackChain` stamps `"model"` onto the final response (`put_new`, so a provider reporting its own resolved snapshot wins). Streaming egress that must announce the model before the first chunk — Anthropic's `message_start` — takes it from the `:on_step_start` callback on `Proxy.dispatch_streaming/4`.
 
 **Why it matters:** streaming used to echo the *requested* model, so a silent fallback was invisible from outside. An entire Claude Code session once ran on Kimi unnoticed after Anthropic 429'd, and per-agent rollups inherit whatever the response claims.
+
+**Native response fields survive a same-format round trip too** — channel 3, the mirror of the request rule. `Adapters.Anthropic.convert_to_openai_format/1` translates `content`/`stop_reason`/`usage`/`model`/`stop_sequence` and stashes everything else (`context_management` applied edits, `stop_details` behind a refusal, `container`, the real `msg_…` id) under `Adapter.response_passthrough_key/0`. `FallbackChain.split_response_passthrough/3` pops it off **before anything logs or reads the response**, so it never reaches a log row, the UI, or an OpenAI-family client: on a format match it rides `dispatch`'s meta as `:response_passthrough` and the egress restores it; otherwise the field names are recorded via `record_dropped_response_fields/2`.
+
+The passthrough wins on collision in this direction, because the only overlap is the `id` the egress would otherwise synthesise — and the provider's real one is strictly better (cache diagnostics reference it). It is still never allowed to become the IR's own `id`, which OpenAI-family clients read and expect to be a `chatcmpl-` value.
+
+**Streaming carries the tail only.** The stream accumulator collects untranslated `message_delta` fields and the egress merges them into the `message_delta` it emits (which is also how `stop_sequence` stopped being hardcoded `nil` there). `message_start` fields — the real id, `container` — are already on the wire by the time the tail arrives and **cannot** be back-filled; a streaming client gets the synthesised id.
+
+**Known gap: content blocks.** `convert_to_openai_format/1` reduces `content` over `text` and `tool_use` only, so `thinking`, `redacted_thinking`, and server-tool result blocks are dropped on the sync path — and Anthropic requires thinking blocks be passed back unchanged on the same model in multi-turn. That is a separate fix from this passthrough, which covers top-level fields.
 
 Related rules for streaming egress:
 
@@ -606,11 +622,24 @@ Related rules for streaming egress:
 
 "The provider will break" is not knowable in advance for every provider × header pair, so the strip list grows by accretion after outages. Without a record, each entry becomes folklore nobody can trace back to a reason.
 
-`DodoRouter.Proxy.Fidelity` records all three channels into `request_logs.fidelity_changes`, and the log page renders them as "What the proxy changed". Recording happens inside the two policy functions (`build_forwarded_headers/2`, `sanitize_request/1`) rather than in each adapter, so coverage is automatic — the alternative is what left `outbound_headers` populated by two adapters out of twelve.
+`DodoRouter.Proxy.Fidelity` records all three channels into `request_logs.fidelity_changes`, and the log page's **Trace** renders each one on the edge between the hops that produced it. Recording happens inside the two policy functions (`build_forwarded_headers/2`, `sanitize_request/1`) rather than in each adapter, so coverage is automatic — the alternative is what left `outbound_headers` populated by two adapters out of twelve.
 
 Adapters run inline in the caller's process, so `FallbackChain` resets the buffer before each step and harvests it after. **Anything that moves an adapter call into its own task must move the harvest with it.**
 
 Use `Fidelity.record_header_rewrite/2` when a header is transformed rather than dropped, and `Fidelity.record_dropped_response_fields/2` for native response fields the egress conversion does not carry.
+
+**Body and response rows carry the dropped value, not just its name.** We decided not to store the client's original request body (dodo_router-5ha), which makes the diff the *only* surviving record of what was asked for — and `context_management dropped` with no value cannot answer "what did I ask for that you didn't forward?". `record_dropped_body_fields/3` and `record_dropped_response_fields/2` therefore take a `name => value` map (a bare list of names is still accepted, and records no `"value"` key rather than a fabricated one), JSON-encode each value, run it through `Redact.redact_secrets/1`, and cap it at `Fidelity`'s `@value_limit` with a visible `… [truncated, N more characters]` marker — a dropped field can be one of the megabyte-sized ones a coding agent sends, and silently halving it would be a second loss on top of the one being reported. `Fidelity.dropped_body_changes/3` builds the same rows without the process dictionary, for the ingress converters that run before any step exists.
+
+**Header rows carry no value.** The three reasons that strip a header are credentials, our own account id, and things our edge added — publishing those values into a log row is a liability with no diagnostic payoff, and the silent reasons never reach the record at all.
+
+**What an `attempted_steps` entry actually holds** — the Trace labels each artifact by this, and a label that outruns it is the same bug class as a silently dropped field:
+
+| Field | What it really is |
+|---|---|
+| `request_body` | `state.request`, the OpenAI-shaped IR. **Request-level, not per-attempt** — the same value is copied onto every attempt in the chain. The only exception is a midstream fallback, where `reconstruct_request/1` appends the partial response the previous provider streamed. The Trace therefore renders it once, on the edge into the first attempt, and inside a later node *only* when it differs from the first attempt's copy. |
+| `outbound_body` | The bytes that provider actually received — but **only `Adapters.ResponsesAPI` records it**. Every other adapter leaves it `nil`, and the node says the bytes were not recorded rather than showing the IR in their place. |
+| `response_body` | What the **adapter returned**, already converted: `Adapters.Anthropic.convert_to_openai_format/1` runs before this is ever stored. The provider's own bytes are not kept for a successful attempt. |
+| `error_body` | `details[:body]`, raw off the wire. The one response artifact on an attempt the provider itself wrote. |
 
 **Three reasons are recorded nowhere: `:transport`, `:edge_added` and `:replaced_by_proxy`** (`Fidelity`'s `@silent_reasons`). `host`/`content-length`/`accept-encoding` come off every request ever made; `x-forwarded-*`/`via`/`x-real-ip`/`cf-*` were never the caller's headers, our own edge added them on the way in; and swapping `authorization`/`x-api-key` for our own credential is the definition of being a proxy. A dozen identical rows per log buried the two or three drops that were actually about what that client asked for. They are still stripped from the upstream request; they are just not news. The bar for a new reason: would an operator debugging *this* request learn anything? `:proxy_value_wins` stays reported, because the client picked an `anthropic-version` and we sent a different one. `Fidelity.hidden?/1` applies the same rule at read time, because rows written before `:edge_added` existed recorded edge headers as `not_client_sent`.
 

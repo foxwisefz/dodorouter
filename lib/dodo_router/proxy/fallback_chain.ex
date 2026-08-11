@@ -23,6 +23,10 @@ defmodule DodoRouter.Proxy.FallbackChain do
     :on_step_start,
     :client_headers,
     :fail_on_context_overflow,
+    :client_format,
+    :passthrough_detail,
+    passthrough_fields: %{},
+    response_passthrough: %{},
     attempted_steps: [],
     final_response: nil,
     response_headers: nil,
@@ -47,7 +51,10 @@ defmodule DodoRouter.Proxy.FallbackChain do
       send_chunk: send_chunk,
       on_step_start: on_step_start,
       client_headers: client_headers,
-      fail_on_context_overflow: fail_on_context_overflow
+      fail_on_context_overflow: fail_on_context_overflow,
+      client_format: Keyword.get(opts, :client_format),
+      passthrough_fields: Keyword.get(opts, :passthrough_request_fields, %{}),
+      passthrough_detail: Keyword.get(opts, :passthrough_detail)
     }
 
     run_chain(state)
@@ -114,6 +121,7 @@ defmodule DodoRouter.Proxy.FallbackChain do
         final_state = %{
           state
           | final_response: response,
+            response_passthrough: meta[:response_passthrough] || %{},
             response_headers: meta[:headers],
             attempted_steps: state.attempted_steps ++ [attempt],
             status: status
@@ -238,13 +246,71 @@ defmodule DodoRouter.Proxy.FallbackChain do
     if is_nil(api_key) do
       {:error, :auth_error, %{status: nil, body: "Missing API key for #{step.provider}"}}
     else
+      request = apply_passthrough(state, adapter)
+
       if state.stream do
-        adapter.stream(state.request, step, api_key, state.send_chunk, state.client_headers)
+        adapter.stream(request, step, api_key, state.send_chunk, state.client_headers)
       else
-        adapter.call(state.request, step, api_key, state.client_headers)
+        adapter.call(request, step, api_key, state.client_headers)
       end
+      |> split_response_passthrough(state, adapter)
     end
   end
+
+  # The response half of the same rule. What the provider returned that the IR
+  # cannot represent is split off the response before anything logs or reads
+  # it: handed to the egress when the client speaks the provider's format, and
+  # recorded as lost when it doesn't.
+  #
+  # Runs before `Fidelity.take/0` in `run_chain/1`, so the record lands in this
+  # step's buffer like every other per-step change.
+  defp split_response_passthrough({:ok, response, meta}, state, adapter) when is_map(response) do
+    case Map.pop(response, Adapter.response_passthrough_key()) do
+      {fields, response} when is_map(fields) and map_size(fields) > 0 ->
+        if Registry.request_format(adapter) == state.client_format do
+          {:ok, response, Map.put(meta, :response_passthrough, fields)}
+        else
+          Fidelity.record_dropped_response_fields(
+            fields,
+            "the client's format has no place for it"
+          )
+
+          {:ok, response, meta}
+        end
+
+      {_empty, response} ->
+        {:ok, response, meta}
+    end
+  end
+
+  defp split_response_passthrough(result, _state, _adapter), do: result
+
+  # Fields the ingress converter had no translation for. They are lost at the
+  # IR, not at the provider — so a step whose adapter speaks the format the
+  # client spoke needs no translation and gets them verbatim, and only a step
+  # in a different format loses them.
+  #
+  # Recording that here rather than at the door is what makes the log true per
+  # attempt: an Anthropic request served by Anthropic reports nothing, and the
+  # same request falling back to an OpenAI-family provider reports the loss
+  # against *that* step. Runs after `Fidelity.reset/0` so it lands in this
+  # step's buffer.
+  defp apply_passthrough(%{passthrough_fields: fields} = state, adapter)
+       when map_size(fields) > 0 do
+    if Registry.request_format(adapter) == state.client_format do
+      Map.put(state.request, Adapter.passthrough_key(), fields)
+    else
+      Fidelity.record_dropped_body_fields(
+        fields,
+        :unsupported_by_format_conversion,
+        state.passthrough_detail
+      )
+
+      state.request
+    end
+  end
+
+  defp apply_passthrough(state, _adapter), do: state.request
 
   defp adapter_for(provider) do
     Registry.adapter_for(provider)

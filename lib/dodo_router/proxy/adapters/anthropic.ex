@@ -18,6 +18,7 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
       "anthropic_oauth" => "https://api.anthropic.com/v1"
     },
     endpoint_path: "/messages",
+    request_format: :anthropic,
     models:
       ~w(claude-sonnet-4-20250514 claude-opus-4-20250514 claude-3-5-sonnet-20241022 claude-3-5-haiku-20241022 claude-3-opus-20240229),
     color: "orange",
@@ -29,6 +30,8 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
   alias DodoRouter.Proxy.Fidelity
   alias DodoRouter.Proxy.FinchTelemetry
   alias DodoRouter.Routers.RoutingStep
+
+  @response_passthrough_key Adapter.response_passthrough_key()
 
   @base_url "https://api.anthropic.com/v1"
   @timeout_ms 120_000
@@ -370,11 +373,30 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
     body = put_output_config(body, request)
 
     # Tools
-    if request["tools"] do
-      anthropic_tools = Enum.map(request["tools"], &convert_tool_to_anthropic/1)
-      Map.put(body, "tools", anthropic_tools)
-    else
-      body
+    body =
+      if request["tools"] do
+        anthropic_tools = Enum.map(request["tools"], &convert_tool_to_anthropic/1)
+        Map.put(body, "tools", anthropic_tools)
+      else
+        body
+      end
+
+    restore_client_passthrough(body, request)
+  end
+
+  # An Anthropic-format request served by Anthropic never needed translating, so
+  # the fields the OpenAI-shaped IR could not carry — `metadata`,
+  # `context_management`, and whatever Anthropic ships next — go back on the
+  # wire as the client sent them. `FallbackChain` only attaches them when the
+  # formats match; a fallback to any other provider reports them as lost.
+  #
+  # `body` wins every collision. Belt and braces: the passthrough is built from
+  # the keys the converter did *not* consume, so it cannot contain `model`,
+  # `max_tokens`, `thinking`, or anything else routing owns.
+  defp restore_client_passthrough(body, request) do
+    case Adapter.client_passthrough(request) do
+      fields when map_size(fields) == 0 -> body
+      fields -> Map.merge(fields, body)
     end
   end
 
@@ -690,12 +712,23 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
         anthropic_response["stop_sequence"]
       )
 
-    # `id` is deliberately not carried: it names a message in Anthropic's
-    # store, and on a fallback to any other provider there is nothing to carry.
-    # The egress synthesises a stable one instead.
-    Fidelity.record_dropped_response_fields(["id"], "anthropic message id is provider-scoped")
+    # Everything Anthropic returned that the OpenAI-shaped IR has no place for
+    # rides along for an Anthropic egress to restore — the response half of the
+    # same rule the request side uses. `id` is in here rather than in the IR's
+    # own `id`: it names a message in Anthropic's store (cache diagnostics
+    # reference it), and an OpenAI-family client expects a `chatcmpl-` id, so
+    # it must not become the IR's.
+    Map.put(response, @response_passthrough_key, untranslated_response(anthropic_response))
+  end
 
-    response
+  # Consumed above, or rebuilt by the egress from what was consumed. Anything
+  # else Anthropic sends — `context_management` applied edits, `stop_details`
+  # for a refusal, `container`, `service_tier`, and whatever ships next — is
+  # invisible to the client unless carried.
+  @translated_response_fields ~w(content stop_reason usage model stop_sequence)
+
+  defp untranslated_response(anthropic_response) do
+    Map.drop(anthropic_response, @translated_response_fields)
   end
 
   defp put_if(map, nil, _key, _value), do: map
@@ -740,7 +773,14 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
       usage: nil,
       stop_reason: nil,
       first_chunk_time: nil,
-      sse_buffer: ""
+      sse_buffer: "",
+      # Native fields off `message_delta` that the OpenAI chunk shape has no
+      # place for — `context_management` applied edits, `stop_details` behind a
+      # refusal, the `stop_sequence` that actually matched. Collected here
+      # because the tail event is emitted after the client's `message_delta`
+      # can still carry them; `message_start` fields (the real `msg_…` id,
+      # `container`) are already on the wire by then and cannot be back-filled.
+      passthrough: %{}
     }
   end
 
@@ -813,7 +853,12 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
           end
 
         "message_delta" ->
-          new_acc = %{acc | stop_reason: event["delta"]["stop_reason"]}
+          new_acc = %{
+            acc
+            | stop_reason: event["delta"]["stop_reason"],
+              passthrough: Map.merge(acc.passthrough, message_delta_passthrough(event))
+          }
+
           usage = event["usage"]
 
           new_acc =
@@ -869,6 +914,18 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
     end)
   end
 
+  # `type`, `delta.stop_reason` and `usage` are translated into the OpenAI
+  # chunk shape; everything else on the tail event is not. `delta` is unwrapped
+  # so the egress can put its contents straight back into the `delta` it emits
+  # — that is where `stop_sequence` lives, which the egress otherwise hardcodes
+  # to nil and thereby lies about whenever a client's stop sequence matched.
+  defp message_delta_passthrough(event) do
+    delta = Map.drop(event["delta"] || %{}, ["stop_reason"])
+    top = Map.drop(event, ["type", "delta", "usage"])
+
+    Map.merge(top, delta)
+  end
+
   defp build_openai_stream_chunk(delta) do
     chunk = %{
       "choices" => [%{"index" => 0, "delta" => delta}]
@@ -906,7 +963,13 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
       "_meta" => meta
     }
 
-    if acc.usage, do: Map.put(response, "usage", acc.usage), else: response
+    response = if acc.usage, do: Map.put(response, "usage", acc.usage), else: response
+
+    if map_size(acc.passthrough) == 0 do
+      response
+    else
+      Map.put(response, @response_passthrough_key, acc.passthrough)
+    end
   end
 
   defp latency(start_time), do: System.monotonic_time(:millisecond) - start_time

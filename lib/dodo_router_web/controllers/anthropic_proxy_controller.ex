@@ -20,7 +20,7 @@ defmodule DodoRouterWeb.AnthropicProxyController do
         "model=#{params["model"]} msg_count=#{length(params["messages"] || [])}"
     )
 
-    dropped_fields = warn_dropped_fields(params, request_id, router)
+    untranslated = warn_untranslated(params, request_id, router)
 
     if params["stream"] == true do
       stream_anthropic(
@@ -31,7 +31,7 @@ defmodule DodoRouterWeb.AnthropicProxyController do
         session,
         client_headers,
         recording_id,
-        dropped_fields
+        untranslated
       )
     else
       sync_anthropic(
@@ -42,7 +42,7 @@ defmodule DodoRouterWeb.AnthropicProxyController do
         session,
         recording_id,
         client_headers,
-        dropped_fields
+        untranslated
       )
     end
   end
@@ -80,36 +80,40 @@ defmodule DodoRouterWeb.AnthropicProxyController do
 
   defp normalize_response_headers(_), do: []
 
-  # Ingress conversion drops travel to the request log so an operator can see
-  # them next to the header and egress-allowlist drops, rather than having to
-  # correlate a Logger line by request_id.
-  defp fidelity_opts([]), do: []
+  # Fields the IR cannot carry travel *with* the request rather than being
+  # dropped at the door: a step that speaks Anthropic back to us needs no
+  # translation, so it gets them verbatim, and only a step in another format
+  # reports them as lost (see `FallbackChain.apply_passthrough/3`). That is
+  # also why the record lands per-step instead of "before routing" — whether
+  # anything was actually lost depends on which provider answered.
+  defp fidelity_opts(untranslated) when map_size(untranslated) == 0, do: []
 
-  defp fidelity_opts(fields) do
+  defp fidelity_opts(untranslated) do
     [
-      dropped_request_fields: fields,
-      dropped_request_fields_detail: "anthropic -> openai request conversion"
+      client_format: :anthropic,
+      passthrough_request_fields: untranslated,
+      passthrough_detail: "no equivalent in the OpenAI Chat Completions format"
     ]
   end
 
   # The Anthropic->OpenAI conversion is a whitelist, so any field we haven't
-  # taught it about is dropped in silence — the client sees a 200 and a
-  # response that quietly ignored what it asked for (this is how structured
-  # outputs via `output_config` went unnoticed). Surfacing it here turns an
-  # unknown-unknown into a work queue: each field is either a translation to
-  # write or a deliberate drop to document.
-  defp warn_dropped_fields(params, request_id, router) do
-    case AnthropicFormat.unknown_fields(params) do
-      [] ->
-        []
+  # taught it about is invisible to every OpenAI-shaped provider — the client
+  # sees a 200 and a response that quietly ignored what it asked for (this is
+  # how structured outputs via `output_config` went unnoticed). The warning
+  # stays even though Anthropic steps now receive the field: a translation we
+  # haven't written is still a gap the moment the request falls back.
+  defp warn_untranslated(params, request_id, router) do
+    case AnthropicFormat.passthrough_fields(params) do
+      untranslated when map_size(untranslated) == 0 ->
+        %{}
 
-      fields ->
+      untranslated ->
         Logger.warning(
-          "[AnthropicProxy] dropped_fields=#{Enum.join(fields, ",")} " <>
+          "[AnthropicProxy] untranslated=#{untranslated |> Map.keys() |> Enum.sort() |> Enum.join(",")} " <>
             "request_id=#{request_id} router=#{router.slug} model=#{params["model"]}"
         )
 
-        fields
+        untranslated
     end
   end
 
@@ -176,7 +180,7 @@ defmodule DodoRouterWeb.AnthropicProxyController do
          session,
          recording_id,
          client_headers,
-         dropped_fields
+         untranslated
        ) do
     start_time = System.monotonic_time(:millisecond)
 
@@ -186,13 +190,18 @@ defmodule DodoRouterWeb.AnthropicProxyController do
         session: session,
         client_headers: client_headers,
         recording_id: recording_id
-      ] ++ fidelity_opts(dropped_fields)
+      ] ++ fidelity_opts(untranslated)
 
     case Proxy.dispatch(router, openai_params, dispatch_opts) do
       {:ok, openai_response, timing} ->
         total_ms = System.monotonic_time(:millisecond) - start_time
         provider_ms = timing[:provider_ms] || 0
-        anthropic_response = AnthropicFormat.from_openai_response(openai_response)
+
+        anthropic_response =
+          AnthropicFormat.from_openai_response(
+            openai_response,
+            timing[:response_passthrough] || %{}
+          )
 
         conn
         |> put_resp_header("x-request-id", request_id)
@@ -254,7 +263,7 @@ defmodule DodoRouterWeb.AnthropicProxyController do
          session,
          client_headers,
          recording_id,
-         dropped_fields
+         untranslated
        ) do
     # The 200 is deferred until the first byte of content actually arrives.
     # Sending it up front (as this did) meant a request that failed before any
@@ -309,7 +318,7 @@ defmodule DodoRouterWeb.AnthropicProxyController do
             Process.put(:__anthropic_serving_model__, model)
             :ok
           end
-        ] ++ fidelity_opts(dropped_fields)
+        ] ++ fidelity_opts(untranslated)
       )
 
     sse_state = Process.get(:anthropic_sse_state) || AnthropicFormat.new_sse_state()
@@ -350,7 +359,7 @@ defmodule DodoRouterWeb.AnthropicProxyController do
     :ok
   end
 
-  defp finish_stream({:ok, openai_response, _timing}, sse_state, request_id, send_chunk) do
+  defp finish_stream({:ok, openai_response, timing}, sse_state, request_id, send_chunk) do
     choice = get_in(openai_response, ["choices", Access.at(0)]) || %{}
     stop_reason = convert_stop_reason(choice["finish_reason"])
     usage = openai_response["usage"] || %{}
@@ -360,7 +369,12 @@ defmodule DodoRouterWeb.AnthropicProxyController do
     open_stream(request_id)
 
     :ok = send_chunk.(anthropic_content_block_stop_event(sse_state.open_block))
-    :ok = send_chunk.(anthropic_message_delta_event(stop_reason, usage))
+
+    :ok =
+      send_chunk.(
+        anthropic_message_delta_event(stop_reason, usage, timing[:response_passthrough] || %{})
+      )
+
     :ok = send_chunk.(anthropic_message_stop_event())
     Process.get(:__stream_conn__)
   end
@@ -466,17 +480,30 @@ defmodule DodoRouterWeb.AnthropicProxyController do
     "event: content_block_stop\ndata: #{Jason.encode!(event_data)}\n\n"
   end
 
-  defp anthropic_message_delta_event(stop_reason, usage) do
-    event_data = %{
-      "type" => "message_delta",
-      "delta" => %{
-        "stop_reason" => stop_reason,
-        "stop_sequence" => nil
-      },
-      "usage" => %{
-        "output_tokens" => usage["completion_tokens"] || 0
+  # `passthrough` is what Anthropic put on its own tail event that the OpenAI
+  # chunk shape could not carry — `context_management` applied edits,
+  # `stop_details` behind a refusal, and the `stop_sequence` that actually
+  # matched. It is empty unless Anthropic itself served the request.
+  #
+  # `stop_sequence` is the reason the split is delta-vs-top rather than one
+  # blob: hardcoding it nil here is a lie whenever the client supplied stop
+  # sequences and one of them ended the turn.
+  defp anthropic_message_delta_event(stop_reason, usage, passthrough) do
+    {delta_extras, top_extras} = Map.split(passthrough, ["stop_sequence"])
+
+    event_data =
+      %{
+        "type" => "message_delta",
+        "delta" =>
+          Map.merge(
+            %{"stop_reason" => stop_reason, "stop_sequence" => nil},
+            delta_extras
+          ),
+        "usage" => %{
+          "output_tokens" => usage["completion_tokens"] || 0
+        }
       }
-    }
+      |> Map.merge(top_extras)
 
     "event: message_delta\ndata: #{Jason.encode!(event_data)}\n\n"
   end

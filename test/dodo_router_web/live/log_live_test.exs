@@ -431,25 +431,56 @@ defmodule DodoRouterWeb.LogLiveTest do
       assert dupes == [], "duplicate element ids: #{inspect(dupes)}"
     end
 
-    test "raw request and response tabs offer a copy button", %{conn: conn, user: user} do
+    test "a clean request says so instead of rendering nothing", %{conn: conn, user: user} do
+      # "We changed nothing" is the claim the whole fidelity stack exists to
+      # make. Silence is the wrong way to say it — an empty panel reads as a
+      # missing feature, not as a guarantee kept.
       {router, _api_key} = RoutersFixtures.router_fixture(user)
 
       log =
         LogsFixtures.log_fixture(router, %{
-          request_body: Jason.encode!(%{"messages" => [%{"role" => "user", "content" => "hi"}]}),
-          response_body:
-            Jason.encode!(%{
-              "choices" => [%{"message" => %{"role" => "assistant", "content" => "yo"}}]
-            })
+          fidelity_changes: [],
+          final_provider: "anthropic"
         })
 
-      {:ok, live, _html} = live(conn, ~p"/logs/#{log.request_id}")
+      {:ok, _live, html} = live(conn, ~p"/logs/#{log.request_id}")
 
-      live |> element("button", "Original Request") |> render_click()
-      assert has_element?(live, "#copy-request-json[phx-hook=CopyButton][data-copy]")
+      assert html =~ "Passed through unchanged"
+      assert html =~ "anthropic"
+      refute html =~ "What the proxy changed"
+    end
 
-      live |> element("button", "Final Response") |> render_click()
-      assert has_element?(live, "#copy-response-json[phx-hook=CopyButton][data-copy]")
+    test "a request that lost something says so and points at the hop", %{conn: conn, user: user} do
+      # The conversation view states that something was changed; the change
+      # itself lives on the trace, under the hop that made it, because that is
+      # the only place it can sit next to its own evidence.
+      {router, _api_key} = RoutersFixtures.router_fixture(user)
+
+      log =
+        LogsFixtures.log_fixture(router, %{
+          attempted_steps: [
+            %{"position" => 0, "provider" => "openai", "model" => "gpt-4o", "status" => "success"}
+          ],
+          fidelity_changes: [
+            %{
+              "channel" => "request_body",
+              "name" => "context_management",
+              "action" => "dropped",
+              "reason" => "unsupported_by_format_conversion",
+              "provider" => "openai",
+              "step" => 0
+            }
+          ]
+        })
+
+      {:ok, live, html} = live(conn, ~p"/logs/#{log.request_id}")
+
+      assert html =~ "What the proxy changed"
+      refute html =~ "Passed through unchanged"
+      assert has_element?(live, "#fidelity-summary")
+
+      html = live |> element("#fidelity-summary") |> render_click()
+      assert html =~ "context_management"
     end
 
     test "a truncated response is called out even when the request succeeded", %{
@@ -562,7 +593,7 @@ defmodule DodoRouterWeb.LogLiveTest do
       refute html =~ "14752%"
     end
 
-    test "renders per-step response body in fallback trace", %{conn: conn, user: user} do
+    test "renders per-step response body in the trace", %{conn: conn, user: user} do
       {router, _api_key} = RoutersFixtures.router_fixture(user)
 
       attempted_steps = [
@@ -593,14 +624,15 @@ defmodule DodoRouterWeb.LogLiveTest do
 
       html =
         live
-        |> element("button[phx-value-tab=\"fallback_trace\"]")
+        |> element("[role=tab][phx-value-tab=trace]")
         |> render_click()
 
-      assert html =~ "Response Body"
+      assert has_element?(live, "#trace-response-body-1")
+      assert html =~ "converted"
       assert html =~ "hello"
     end
 
-    test "renders per-step response headers in fallback trace", %{conn: conn, user: user} do
+    test "renders per-step response headers in the trace", %{conn: conn, user: user} do
       {router, _api_key} = RoutersFixtures.router_fixture(user)
 
       attempted_steps = [
@@ -633,10 +665,10 @@ defmodule DodoRouterWeb.LogLiveTest do
 
       html =
         live
-        |> element("button[phx-value-tab=\"fallback_trace\"]")
+        |> element("[role=tab][phx-value-tab=trace]")
         |> render_click()
 
-      assert html =~ "Response Headers"
+      assert has_element?(live, "#trace-response-headers-1")
       assert html =~ "x-request-id"
       assert html =~ "req-123"
     end
@@ -673,12 +705,13 @@ defmodule DodoRouterWeb.LogLiveTest do
 
       html =
         live
-        |> element("button[phx-value-tab=\"fallback_trace\"]")
+        |> element("[role=tab][phx-value-tab=trace]")
         |> render_click()
 
-      assert html =~ "Error Response"
+      assert has_element?(live, "#trace-error-body-0")
+      assert html =~ "Error response"
       assert html =~ "rate limited"
-      assert html =~ "Response Body"
+      assert has_element?(live, "#trace-response-body-1")
       assert html =~ "fallback response"
     end
 
@@ -736,7 +769,7 @@ defmodule DodoRouterWeb.LogLiveTest do
 
       html =
         live
-        |> element("button[phx-value-tab=\"fallback_trace\"]")
+        |> element("[role=tab][phx-value-tab=trace]")
         |> render_click()
 
       assert html =~ "coding"
@@ -765,6 +798,402 @@ defmodule DodoRouterWeb.LogLiveTest do
 
       refute html =~ "standard"
       refute html =~ "coding"
+    end
+  end
+
+  describe "Show — the Trace" do
+    # The four tabs modelled unordered peers, but a proxied request is a
+    # sequence: client -> us -> provider(s) -> back. Two of them were single
+    # hops hoisted out of that sequence and stripped of their position, and a
+    # third re-rendered the same bodies again per step. The timeline puts every
+    # hop in wire order and hangs the proxy's edits on the edges between them,
+    # so a change and the request that produced it are the same object.
+    defp fallback_log(user) do
+      {router, _api_key} = RoutersFixtures.router_fixture(user)
+
+      LogsFixtures.log_fixture(router, %{
+        status: "fallback",
+        final_provider: "moonshot",
+        request_headers: Jason.encode!([["anthropic-version", "2023-06-01"]]),
+        response_body: Jason.encode!(%{"type" => "message", "content" => []}),
+        attempted_steps: [
+          %{
+            "position" => 0,
+            "provider" => "anthropic",
+            "model" => "claude-sonnet-4",
+            "status" => "error",
+            "error" => "rate_limited",
+            "http_status" => 429,
+            "latency_ms" => 320
+          },
+          %{
+            "position" => 1,
+            "provider" => "moonshot",
+            "model" => "kimi-k2.5",
+            "status" => "success",
+            "latency_ms" => 1800,
+            "response_body" => Jason.encode!(%{"choices" => []})
+          }
+        ],
+        fidelity_changes: [
+          %{
+            "channel" => "request_body",
+            "name" => "context_management",
+            "action" => "dropped",
+            "reason" => "unsupported_by_format_conversion",
+            "value" => ~s({"edits":[{"type":"clear_tool_uses_20250919"}]}),
+            "provider" => "moonshot",
+            "step" => 1
+          },
+          %{
+            "channel" => "request_header",
+            "name" => "cookie",
+            "action" => "dropped",
+            "reason" => "not_client_sent",
+            "provider" => "anthropic",
+            "step" => 0
+          }
+        ]
+      })
+    end
+
+    test "every provider attempt is its own hop, in wire order", %{conn: conn, user: user} do
+      log = fallback_log(user)
+
+      {:ok, live, _html} = live(conn, ~p"/logs/#{log.request_id}")
+      live |> element("[role=tab][phx-value-tab=trace]") |> render_click()
+
+      assert has_element?(live, "#trace-node-client-request")
+      assert has_element?(live, "#trace-node-attempt-0")
+      assert has_element?(live, "#trace-node-attempt-1")
+      assert has_element?(live, "#trace-node-client-response")
+    end
+
+    test "each edit sits under the hop that produced it", %{conn: conn, user: user} do
+      # The old panel's "Step" column pointed at a tab three clicks away. Here
+      # the change and its evidence are the same object, so a change recorded
+      # against the fallback must not appear on the first attempt's edge.
+      log = fallback_log(user)
+
+      {:ok, live, _html} = live(conn, ~p"/logs/#{log.request_id}")
+      live |> element("[role=tab][phx-value-tab=trace]") |> render_click()
+
+      assert has_element?(live, "#trace-edge-attempt-0", "cookie")
+      assert has_element?(live, "#trace-edge-attempt-1", "context_management")
+      refute has_element?(live, "#trace-edge-attempt-0", "context_management")
+    end
+
+    test "a dropped field shows the value the client asked for", %{conn: conn, user: user} do
+      # We do not store the client's body, so the diff has to be self-sufficient:
+      # "context_management dropped" alone cannot answer what was asked for.
+      log = fallback_log(user)
+
+      {:ok, live, _html} = live(conn, ~p"/logs/#{log.request_id}")
+      html = live |> element("[role=tab][phx-value-tab=trace]") |> render_click()
+
+      assert html =~ "clear_tool_uses_20250919"
+      assert has_element?(live, "#trace-value-attempt-1-0")
+    end
+
+    test "the top node claims only what we actually stored", %{conn: conn, user: user} do
+      # The client's request body is not stored. Rendering the normalized IR
+      # there as "what you sent" is the mislabeling this redesign exists to fix,
+      # so the node offers the headers — which really are theirs — and says so.
+      log = fallback_log(user)
+
+      {:ok, live, _html} = live(conn, ~p"/logs/#{log.request_id}")
+      html = live |> element("[role=tab][phx-value-tab=trace]") |> render_click()
+
+      assert html =~ "You sent"
+      assert html =~ "anthropic-version"
+      assert has_element?(live, "#trace-node-client-request", "not stored")
+    end
+
+    test "an Anthropic client is not labelled openai", %{conn: conn, user: user} do
+      # The logged response body is the proxy's OpenAI-shaped IR, not the bytes
+      # the egress wrote — reading it alone renamed every Anthropic client's
+      # format, which is exactly the kind of confident mislabeling this view was
+      # rebuilt to stop. The headers the client sent are theirs, and they say.
+      {router, _api_key} = RoutersFixtures.router_fixture(user)
+
+      log =
+        LogsFixtures.log_fixture(router, %{
+          request_headers: Jason.encode!([["anthropic-version", "2023-06-01"]]),
+          response_body: Jason.encode!(%{"choices" => []}),
+          attempted_steps: [
+            %{"position" => 0, "provider" => "anthropic", "model" => "x", "status" => "success"}
+          ]
+        })
+
+      {:ok, live, _html} = live(conn, ~p"/logs/#{log.request_id}")
+      live |> element("[role=tab][phx-value-tab=trace]") |> render_click()
+
+      assert has_element?(live, "#trace-node-client-request", "anthropic format")
+      refute has_element?(live, "#trace-node-client-request", "openai format")
+    end
+
+    test "a failed hop carries its status and a fell-back edge", %{conn: conn, user: user} do
+      log = fallback_log(user)
+
+      {:ok, live, _html} = live(conn, ~p"/logs/#{log.request_id}")
+      html = live |> element("[role=tab][phx-value-tab=trace]") |> render_click()
+
+      assert has_element?(live, "#trace-node-attempt-0", "rate_limited")
+      assert html =~ "fell back"
+    end
+
+    test "a clean request says so on the edge it applies to", %{conn: conn, user: user} do
+      {router, _api_key} = RoutersFixtures.router_fixture(user)
+
+      log =
+        LogsFixtures.log_fixture(router, %{
+          fidelity_changes: [],
+          final_provider: "anthropic",
+          attempted_steps: [
+            %{"position" => 0, "provider" => "anthropic", "model" => "x", "status" => "success"}
+          ]
+        })
+
+      {:ok, live, _html} = live(conn, ~p"/logs/#{log.request_id}")
+      html = live |> element("[role=tab][phx-value-tab=trace]") |> render_click()
+
+      assert html =~ "Passed through unchanged"
+      assert html =~ "every header and field you sent reached anthropic"
+    end
+
+    test "the trace offers copy buttons for each end of the hop", %{conn: conn, user: user} do
+      {router, _api_key} = RoutersFixtures.router_fixture(user)
+
+      log =
+        LogsFixtures.log_fixture(router, %{
+          response_body: Jason.encode!(%{"choices" => [%{"message" => %{"content" => "yo"}}]}),
+          attempted_steps: [
+            %{
+              "position" => 0,
+              "provider" => "openai",
+              "model" => "gpt-4o",
+              "status" => "success",
+              "request_body" =>
+                Jason.encode!(%{"messages" => [%{"role" => "user", "content" => "hi"}]})
+            }
+          ]
+        })
+
+      {:ok, live, _html} = live(conn, ~p"/logs/#{log.request_id}")
+      live |> element("[role=tab][phx-value-tab=trace]") |> render_click()
+
+      assert has_element?(live, "#copy-normalized-request[phx-hook=CopyButton][data-copy]")
+      assert has_element?(live, "#copy-response-json[phx-hook=CopyButton][data-copy]")
+    end
+
+    test "the normalized request is shown once, on the edge that normalizes it", %{
+      conn: conn,
+      user: user
+    } do
+      # `request_body` on an attempt is `state.request` — the same IR for every
+      # attempt in the chain. Rendering it inside each node printed N copies of
+      # one request-level artifact and left two request bodies per node with
+      # nothing saying which one the provider actually got.
+      {router, _api_key} = RoutersFixtures.router_fixture(user)
+      ir = Jason.encode!(%{"messages" => [%{"role" => "user", "content" => "hi"}]})
+
+      log =
+        LogsFixtures.log_fixture(router, %{
+          status: "fallback",
+          attempted_steps: [
+            %{
+              "position" => 0,
+              "provider" => "anthropic",
+              "model" => "claude",
+              "status" => "error",
+              "error" => "rate_limited",
+              "request_body" => ir
+            },
+            %{
+              "position" => 1,
+              "provider" => "openai",
+              "model" => "gpt-4o",
+              "status" => "success",
+              "request_body" => ir
+            }
+          ]
+        })
+
+      {:ok, live, _html} = live(conn, ~p"/logs/#{log.request_id}")
+      live |> element("[role=tab][phx-value-tab=trace]") |> render_click()
+
+      assert has_element?(live, "#trace-edge-attempt-0 #trace-normalized-request")
+      refute has_element?(live, "#trace-request-body-0")
+      refute has_element?(live, "#trace-request-body-1")
+    end
+
+    test "an attempt whose request really did change shows its own body", %{
+      conn: conn,
+      user: user
+    } do
+      # A midstream fallback reconstructs the request with the partial response
+      # already streamed, so that attempt's body genuinely is not the one on the
+      # edge. Hoisting the shared IR must not hide the one case where it moved.
+      {router, _api_key} = RoutersFixtures.router_fixture(user)
+
+      log =
+        LogsFixtures.log_fixture(router, %{
+          status: "fallback",
+          attempted_steps: [
+            %{
+              "position" => 0,
+              "provider" => "anthropic",
+              "model" => "claude",
+              "status" => "error",
+              "error" => "upstream_error",
+              "request_body" => Jason.encode!(%{"messages" => [%{"content" => "hi"}]})
+            },
+            %{
+              "position" => 1,
+              "provider" => "openai",
+              "model" => "gpt-4o",
+              "status" => "success",
+              "request_body" =>
+                Jason.encode!(%{
+                  "messages" => [%{"content" => "hi"}, %{"content" => "partial so far"}]
+                })
+            }
+          ]
+        })
+
+      {:ok, live, _html} = live(conn, ~p"/logs/#{log.request_id}")
+      html = live |> element("[role=tab][phx-value-tab=trace]") |> render_click()
+
+      refute has_element?(live, "#trace-request-body-0")
+      assert has_element?(live, "#trace-request-body-1")
+      assert html =~ "partial so far"
+    end
+
+    test "a payload renders as text and is upgraded to a tree", %{conn: conn, user: user} do
+      # The tree is built client-side from the <pre> the server renders, so the
+      # markup has to keep carrying the text: that is what a payload which is
+      # not JSON falls back to, and what the hook reads instead of a second copy
+      # in a data- attribute.
+      {router, _api_key} = RoutersFixtures.router_fixture(user)
+      ir = Jason.encode!(%{"messages" => [%{"role" => "user", "content" => "hi"}]})
+
+      log =
+        LogsFixtures.log_fixture(router, %{
+          attempted_steps: [
+            %{
+              "position" => 0,
+              "provider" => "openai",
+              "model" => "gpt-4o",
+              "status" => "success",
+              "request_body" => ir
+            }
+          ]
+        })
+
+      {:ok, live, _html} = live(conn, ~p"/logs/#{log.request_id}")
+      html = live |> element("[role=tab][phx-value-tab=trace]") |> render_click()
+
+      assert has_element?(live, "#trace-normalized-json[phx-hook=JsonTree][phx-update=ignore]")
+      assert has_element?(live, "#trace-normalized-json [data-json-fallback]")
+      assert has_element?(live, "#trace-normalized-controls [data-json-action=expand]")
+      assert html =~ "messages"
+    end
+
+    test "a converted response is not passed off as the provider's own bytes", %{
+      conn: conn,
+      user: user
+    } do
+      # `response_body` on an attempt is what the adapter returned, and the
+      # Anthropic adapter runs convert_to_openai_format/1 before we ever see it.
+      # "Response Body" under a provider node reads as that provider's bytes.
+      {router, _api_key} = RoutersFixtures.router_fixture(user)
+
+      log =
+        LogsFixtures.log_fixture(router, %{
+          attempted_steps: [
+            %{
+              "position" => 0,
+              "provider" => "anthropic",
+              "model" => "claude",
+              "status" => "success",
+              "response_body" => Jason.encode!(%{"choices" => []})
+            }
+          ]
+        })
+
+      {:ok, live, _html} = live(conn, ~p"/logs/#{log.request_id}")
+      html = live |> element("[role=tab][phx-value-tab=trace]") |> render_click()
+
+      assert html =~ "converted"
+      assert has_element?(live, "#trace-response-body-0")
+    end
+
+    test "an attempt says when the bytes it sent were never recorded", %{conn: conn, user: user} do
+      # Only ResponsesAPI records `outbound_body`. Showing the shared IR in its
+      # place would assert that those were the bytes on the wire, which is the
+      # claim the trace is not allowed to make.
+      {router, _api_key} = RoutersFixtures.router_fixture(user)
+
+      log =
+        LogsFixtures.log_fixture(router, %{
+          attempted_steps: [
+            %{
+              "position" => 0,
+              "provider" => "anthropic",
+              "model" => "claude",
+              "status" => "success",
+              "request_body" => Jason.encode!(%{"messages" => []})
+            }
+          ]
+        })
+
+      {:ok, live, _html} = live(conn, ~p"/logs/#{log.request_id}")
+      html = live |> element("[role=tab][phx-value-tab=trace]") |> render_click()
+
+      refute has_element?(live, "#trace-outbound-body-0")
+      assert html =~ "not recorded"
+    end
+
+    test "a failed attempt shows the provider's own error bytes as such", %{
+      conn: conn,
+      user: user
+    } do
+      # error_body is `details[:body]` — genuinely raw. It is the one response
+      # artifact on an attempt that the provider itself wrote.
+      {router, _api_key} = RoutersFixtures.router_fixture(user)
+
+      log =
+        LogsFixtures.log_fixture(router, %{
+          status: "error",
+          attempted_steps: [
+            %{
+              "position" => 0,
+              "provider" => "anthropic",
+              "model" => "claude",
+              "status" => "error",
+              "error" => "rate_limited",
+              "error_body" => ~s({"error":"slow down"})
+            }
+          ]
+        })
+
+      {:ok, live, _html} = live(conn, ~p"/logs/#{log.request_id}")
+      html = live |> element("[role=tab][phx-value-tab=trace]") |> render_click()
+
+      assert html =~ "slow down"
+      assert html =~ "the provider&#39;s own bytes"
+    end
+
+    test "the trace replaces the three hop-shaped tabs", %{conn: conn, user: user} do
+      log = fallback_log(user)
+
+      {:ok, live, _html} = live(conn, ~p"/logs/#{log.request_id}")
+
+      assert has_element?(live, "[role=tab][phx-value-tab=conversation]")
+      assert has_element?(live, "[role=tab][phx-value-tab=trace]")
+      refute has_element?(live, "[role=tab][phx-value-tab=raw_request]")
+      refute has_element?(live, "[role=tab][phx-value-tab=raw_response]")
+      refute has_element?(live, "[role=tab][phx-value-tab=fallback_trace]")
     end
   end
 

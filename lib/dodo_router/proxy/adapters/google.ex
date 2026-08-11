@@ -13,6 +13,7 @@ defmodule DodoRouter.Proxy.Adapters.Google do
       "google" => "https://generativelanguage.googleapis.com/v1beta"
     },
     endpoint_path: "/models/{model}",
+    request_format: :gemini,
     models: ~w(gemini-2.0-flash gemini-2.5-pro gemini-2.5-flash gemini-1.5-pro gemini-1.5-flash),
     color: "blue",
     short_description: "Gemini 2.0, 2.5, 1.5 models"

@@ -72,6 +72,14 @@ defmodule DodoRouter.Proxy.Adapter.Registry do
           # Request path appended to the endpoint base URL; used for display
           # in logs ("{model}" is replaced with the step's model).
           endpoint_path: unquote(opts[:endpoint_path] || "/chat/completions"),
+          # The wire format of the request this adapter builds. When it matches
+          # the format the client spoke, the request needs no translation and
+          # fields the OpenAI-shaped IR cannot carry are passed through
+          # untouched (see `FallbackChain` and `AnthropicFormat`). Declared
+          # rather than inferred from `endpoint_path`: the path is a URL detail
+          # that happens to correlate today, and a provider moving its route
+          # must not silently change what we forward.
+          request_format: unquote(opts[:request_format] || :openai),
           models: unquote(opts[:models]),
           color: unquote(opts[:color]),
           short_description: unquote(opts[:short_description]),
@@ -115,6 +123,19 @@ defmodule DodoRouter.Proxy.Adapter.Registry do
       %{module: module} -> module
       nil -> nil
     end
+  end
+
+  @doc """
+  The wire format an adapter module builds its upstream request in.
+
+  `:openai` unless the adapter says otherwise, because that is the shape of the
+  intermediate representation every ingress converts to.
+  """
+  @spec request_format(module() | nil) :: atom()
+  def request_format(nil), do: nil
+
+  def request_format(module) when is_atom(module) do
+    module.adapter_config().request_format
   end
 
   @doc """

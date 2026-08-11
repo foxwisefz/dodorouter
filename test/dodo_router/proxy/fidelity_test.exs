@@ -15,6 +15,7 @@ defmodule DodoRouter.Proxy.FidelityTest do
   alias DodoRouter.AccountsFixtures
   alias DodoRouter.Providers.ProviderKey
   alias DodoRouter.Proxy
+  alias DodoRouter.Proxy.Adapter
   alias DodoRouter.Proxy.Fidelity
   alias DodoRouter.Routers
   alias DodoRouter.RoutersFixtures
@@ -179,6 +180,26 @@ defmodule DodoRouter.Proxy.FidelityTest do
       refute Enum.any?(attempt["outbound_headers"], fn [_, value] -> value == "client-key" end)
     end
 
+    test "a collision resolved to the client's own value is not a change" do
+      # anthropic-beta on the api-key path is merged to exactly what the client
+      # sent, so the header upstream *is* theirs. Reporting it as dropped sent
+      # the next person debugging a cache miss looking for a header that was
+      # right there.
+      Fidelity.reset()
+      Adapter.build_forwarded_headers([{"x-collides", "same"}], [{"x-collides", "same"}])
+
+      assert Fidelity.take().changes == []
+    end
+
+    test "a collision that actually changes the value is still reported" do
+      Fidelity.reset()
+      Adapter.build_forwarded_headers([{"x-collides", "client"}], [{"x-collides", "proxy"}])
+
+      assert [change] = Fidelity.take().changes
+      assert change["name"] == "x-collides"
+      assert change["reason"] == "proxy_value_wins"
+    end
+
     test "a row written before the rule existed is filtered on read" do
       # Logs from before `:edge_added` recorded x-forwarded-for as
       # not_client_sent, which is indistinguishable from a cookie by reason
@@ -192,6 +213,43 @@ defmodule DodoRouter.Proxy.FidelityTest do
 
       assert Fidelity.hidden?(legacy)
       refute Fidelity.hidden?(%{legacy | "name" => "cookie"})
+    end
+  end
+
+  describe "channel 2: fields the IR cannot carry" do
+    test "a step in the client's own format receives them and reports nothing", %{
+      router: router
+    } do
+      # An Anthropic request served by Anthropic never needed translating. The
+      # loss is a property of crossing formats, not of the provider — so on
+      # this step there is nothing to report.
+      log =
+        dispatch(router, request(),
+          client_headers: [],
+          client_format: :openai,
+          passthrough_request_fields: %{"context_management" => %{"edits" => []}}
+        )
+
+      refute find(log, "request_body", "context_management")
+    end
+
+    test "a step in another format reports the loss against that step", %{router: router} do
+      log =
+        dispatch(router, request(),
+          client_headers: [],
+          client_format: :anthropic,
+          passthrough_request_fields: %{"context_management" => %{"edits" => []}},
+          passthrough_detail: "no equivalent in the OpenAI Chat Completions format"
+        )
+
+      change = find(log, "request_body", "context_management")
+      assert change["reason"] == "unsupported_by_format_conversion"
+      assert change["detail"] == "no equivalent in the OpenAI Chat Completions format"
+
+      # Attributed to the step that actually lost it, not to "before routing" —
+      # whether anything was lost depends on which provider answered.
+      assert change["provider"] == "test_provider"
+      assert change["step"] == 0
     end
   end
 
@@ -224,6 +282,87 @@ defmodule DodoRouter.Proxy.FidelityTest do
       change = find(log, "request_body", "context_management")
       assert change["reason"] == "unsupported_by_format_conversion"
       assert change["detail"] == "anthropic -> openai request conversion"
+    end
+  end
+
+  describe "a dropped field carries what the client actually asked for" do
+    test "the egress allowlist records the value it dropped, not just the name", %{
+      router: router
+    } do
+      # We deliberately do not store the client's original body, so the diff is
+      # the only record of what was asked for. "logit_bias dropped" without the
+      # value cannot answer "what did I ask for that you didn't forward?".
+      log =
+        dispatch(router, Map.put(request(), "logit_bias", %{"1" => -100}), client_headers: [])
+
+      change = find(log, "request_body", "logit_bias")
+      assert change["value"] == ~s({"1":-100})
+    end
+
+    test "a field lost crossing formats records its value too", %{router: router} do
+      log =
+        dispatch(router, request(),
+          client_headers: [],
+          client_format: :anthropic,
+          passthrough_request_fields: %{"context_management" => %{"edits" => [%{"type" => "x"}]}}
+        )
+
+      change = find(log, "request_body", "context_management")
+      assert change["value"] == ~s({"edits":[{"type":"x"}]})
+    end
+
+    test "secrets inside a dropped value are redacted like every other payload" do
+      Fidelity.reset()
+
+      Fidelity.record_dropped_body_fields(
+        %{"metadata" => %{"token" => "Bearer abcdefghijklmnopqrstuvwxyz"}},
+        :not_in_provider_allowlist
+      )
+
+      assert [change] = Fidelity.take().changes
+      refute change["value"] =~ "abcdefghijklmnopqrstuvwxyz"
+      assert change["value"] =~ "REDACTED"
+    end
+
+    test "an oversized value is cut with a marker, never silently" do
+      # Claude Code sends bodies in the megabytes; a dropped field can be one of
+      # the big ones. Cutting is fine, cutting invisibly is a second loss on top
+      # of the one we are reporting.
+      Fidelity.reset()
+      Fidelity.record_dropped_body_fields(%{"blob" => String.duplicate("x", 20_000)}, :dropped)
+
+      assert [change] = Fidelity.take().changes
+      assert String.length(change["value"]) < 20_000
+      assert change["value"] =~ "truncated"
+    end
+
+    test "a caller with only field names records no value rather than a fake one" do
+      Fidelity.reset()
+      Fidelity.record_dropped_body_fields(["mystery"], :unsupported_by_format_conversion)
+
+      assert [change] = Fidelity.take().changes
+      assert change["name"] == "mystery"
+      refute Map.has_key?(change, "value")
+    end
+
+    test "the response channel records values on the same terms" do
+      Fidelity.reset()
+
+      Fidelity.record_dropped_response_fields(
+        %{"container" => %{"id" => "cntr_1"}},
+        "the client's format has no place for it"
+      )
+
+      assert [change] = Fidelity.take().changes
+      assert change["channel"] == "response_body"
+      assert change["value"] == ~s({"id":"cntr_1"})
+    end
+
+    test "header drops carry no value — the ones we strip are credentials", %{router: router} do
+      log = dispatch(router, request(), client_headers: [{"cookie", "_dodo_router_key=secret"}])
+
+      change = find(log, "request_header", "cookie")
+      refute Map.has_key?(change, "value")
     end
   end
 

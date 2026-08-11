@@ -91,6 +91,42 @@ defmodule DodoRouter.Proxy.AdapterHeaderCoverageTest do
   end
 
   describe "registry coverage" do
+    test "every registered adapter declares the wire format it builds" do
+      # Passthrough of untranslated client fields turns on when a step's format
+      # matches the client's, so a new adapter must state which format it
+      # speaks rather than inherit one by accident. Declared, not inferred from
+      # endpoint_path: the path is a URL detail that only happens to correlate.
+      known = ~w(openai anthropic responses gemini)a
+
+      for module <- Registry.registered_modules() do
+        format = Registry.request_format(module)
+
+        assert format in known,
+               "#{inspect(module)} declares request_format: #{inspect(format)} — " <>
+                 "expected one of #{inspect(known)}"
+      end
+    end
+
+    test "the format is what the endpoint path implies" do
+      # Not the source of truth — a cross-check that the two never silently
+      # disagree, since a mismatch means either the wrong passthrough behavior
+      # or a stale path.
+      implied = %{
+        "/messages" => :anthropic,
+        "/responses" => :responses,
+        "/chat/completions" => :openai
+      }
+
+      for module <- Registry.registered_modules(),
+          path = module.adapter_config().endpoint_path,
+          expected = implied[path],
+          not is_nil(expected) do
+        assert Registry.request_format(module) == expected,
+               "#{inspect(module)} serves #{path} but declares " <>
+                 "#{inspect(Registry.request_format(module))}"
+      end
+    end
+
     test "every registered adapter either forwards headers or says why not" do
       for module <- Registry.registered_modules() do
         case Map.fetch(@cannot_forward, module) do
