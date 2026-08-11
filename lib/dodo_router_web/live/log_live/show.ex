@@ -919,6 +919,13 @@ defmodule DodoRouterWeb.LogLive.Show do
     # the client -> proxy hop rather than to any provider.
     pre_routing = Enum.filter(request_changes, &is_nil(&1["step"]))
 
+    # `request_body` on an attempt is `state.request` — one request-level
+    # artifact copied onto every attempt in the chain. It belongs on the edge
+    # where the normalization actually happens, next to the fidelity rows that
+    # say what the normalization cost: here is what we turned your request
+    # into, and here is what that cost you.
+    normalized = normalized_request(log, attempts)
+
     attempt_hops =
       attempts
       |> Enum.with_index()
@@ -931,10 +938,15 @@ defmodule DodoRouterWeb.LogLive.Show do
           key: "attempt-#{index}",
           index: index,
           attempt: attempt,
-          request_body: attempt["request_body"] || (index == 0 && log.request_body) || nil,
+          # Only when this attempt's request genuinely is not the one on the
+          # edge: a midstream fallback rebuilds it with the partial response the
+          # previous provider already streamed, and hoisting the shared copy
+          # must not hide the one case where it moved.
+          request_body: divergent_request(attempt, attempts, index),
           edge: %{
             label: if(index == 0, do: nil, else: "fell back"),
             changes: edge_changes,
+            normalized_request: if(index == 0, do: normalized),
             # Stated once, on the first hop, because "unchanged" is a claim
             # about the whole journey — not about one edge that happens to be
             # quiet while another lost a field.
@@ -954,6 +966,7 @@ defmodule DodoRouterWeb.LogLive.Show do
       edge: %{
         label: nil,
         changes: orphaned ++ response_changes,
+        normalized_request: if(attempts == [], do: normalized),
         clean_summary: if(attempts == [] and changes == [], do: passthrough_summary(log))
       }
     }
@@ -968,6 +981,21 @@ defmodule DodoRouterWeb.LogLive.Show do
     }
 
     [client_request] ++ attempt_hops ++ [client_response]
+  end
+
+  defp normalized_request(log, [first | _rest]), do: first["request_body"] || log.request_body
+  defp normalized_request(log, _no_attempts), do: log.request_body
+
+  # Compared against the *first attempt's* copy rather than the log's, so a
+  # difference in how the two were truncated cannot masquerade as a request
+  # that actually changed between hops.
+  defp divergent_request(_attempt, _attempts, 0), do: nil
+
+  defp divergent_request(attempt, attempts, _index) do
+    baseline = List.first(attempts)["request_body"]
+    own = attempt["request_body"]
+
+    if own && baseline && own != baseline, do: own
   end
 
   defp trace_summary(log) do
@@ -1058,6 +1086,30 @@ defmodule DodoRouterWeb.LogLive.Show do
           <pre class="mt-1 max-h-48 overflow-auto rounded bg-base-300/40 p-2 font-mono whitespace-pre-wrap break-all"><code>{change["value"]}</code></pre>
         </details>
       </div>
+      <%!-- The normalization happens on this edge, so its output belongs here
+           next to what it cost — one request-level artifact, stated once,
+           rather than a copy inside every attempt node. --%>
+      <details
+        :if={@hop.edge.normalized_request}
+        id="trace-normalized-request"
+        class="relative text-xs"
+      >
+        <summary class="cursor-pointer text-[10px] uppercase tracking-wider text-primary font-semibold">
+          Normalized request — what we turned yours into
+        </summary>
+        <button
+          id="copy-normalized-request"
+          phx-hook="CopyButton"
+          data-copy={format_json(@hop.edge.normalized_request)}
+          class="absolute right-2 top-6 z-10 px-2 py-1 rounded bg-base-100/10 text-[10px] font-medium text-base-content/60 hover:text-primary transition-colors"
+          title="Copy normalized request JSON"
+        >
+          <.icon name="hero-clipboard-document" class="w-3.5 h-3.5" />
+        </button>
+        <div class="mt-1 mockup-code text-xs max-h-64 overflow-auto">
+          <pre class="whitespace-pre-wrap break-words"><code>{format_json(@hop.edge.normalized_request)}</code></pre>
+        </div>
+      </details>
     </div>
     """
   end
@@ -1197,20 +1249,39 @@ defmodule DodoRouterWeb.LogLive.Show do
             </div>
           </details>
 
+          <%!-- error_body is `details[:body]`, straight off the wire — the one
+               response artifact on an attempt the provider itself wrote. --%>
           <div :if={@attempt["error_body"]}>
             <div class="text-[10px] uppercase tracking-wider text-base-content/40 font-semibold mb-1">
-              Error Response
+              Error response — the provider's own bytes
             </div>
             <div class="mockup-code text-xs max-h-64 overflow-auto">
               <pre><code>{format_json(@attempt["error_body"])}</code></pre>
             </div>
           </div>
 
+          <%!-- Only ResponsesAPI records the bytes it sent. Filling the gap with
+               the normalized request would assert those were the bytes on the
+               wire; they were its input, and each adapter rebuilds from it. --%>
+          <details :if={@attempt["outbound_body"]} id={"trace-outbound-body-#{@hop.index}"}>
+            <summary class="cursor-pointer text-[10px] uppercase tracking-wider text-primary font-semibold">
+              Request body sent to this provider
+            </summary>
+            <div class="mt-1 mockup-code text-xs max-h-64 overflow-auto">
+              <pre class="whitespace-pre-wrap break-words"><code>{format_json(@attempt["outbound_body"])}</code></pre>
+            </div>
+          </details>
+          <p :if={is_nil(@attempt["outbound_body"])} class="text-base-content/40">
+            The exact bytes sent to this provider are not recorded by its adapter — the normalized
+            request above is what it built them from.
+          </p>
+
+          <%!-- Shown only when this attempt's request is not the one on the edge:
+               a midstream fallback rebuilds it with the partial response the
+               previous provider already streamed. --%>
           <details :if={@hop.request_body} id={"trace-request-body-#{@hop.index}"} class="relative">
             <summary class="cursor-pointer text-[10px] uppercase tracking-wider text-primary font-semibold">
-              {if @hop.index == 0,
-                do: "Request body (normalized)",
-                else: "Request body (re-converted for this provider)"}
+              Request rebuilt for this attempt — it differs from the normalized request
             </summary>
             <button
               id={"copy-attempt-request-#{@hop.index}"}
@@ -1226,19 +1297,17 @@ defmodule DodoRouterWeb.LogLive.Show do
             </div>
           </details>
 
-          <details :if={@attempt["outbound_body"]} id={"trace-outbound-body-#{@hop.index}"}>
-            <summary class="cursor-pointer text-[10px] uppercase tracking-wider text-primary font-semibold">
-              Outbound Request (sent to provider)
-            </summary>
-            <div class="mt-1 mockup-code text-xs max-h-64 overflow-auto">
-              <pre class="whitespace-pre-wrap break-words"><code>{format_json(@attempt["outbound_body"])}</code></pre>
-            </div>
-          </details>
-
+          <%!-- `response_body` is what the *adapter* returned: Anthropic runs
+               convert_to_openai_format/1 before this is ever stored. Calling it
+               "Response Body" under a provider node reads as that provider's
+               bytes, which we do not keep for a successful response. --%>
           <details :if={@attempt["response_body"]} id={"trace-response-body-#{@hop.index}"}>
             <summary class="cursor-pointer text-[10px] uppercase tracking-wider text-primary font-semibold">
-              Response Body
+              Response, converted to the proxy's normalized form
             </summary>
+            <p class="mt-1 text-base-content/40">
+              This provider's own response bytes are not stored for a successful attempt.
+            </p>
             <div class="mt-1 mockup-code text-xs max-h-64 overflow-auto">
               <pre class="whitespace-pre-wrap break-words"><code>{format_json(@attempt["response_body"])}</code></pre>
             </div>
