@@ -867,14 +867,14 @@ defmodule DodoRouterWeb.LogLive.Show do
   end
 
   defp call_type_badge(assigns) do
-    {label, class} =
+    class =
       case assigns.type do
-        "tool_call" -> {"Tool Call", "badge-secondary"}
-        "tool_enabled_completion" -> {"Tool Enabled", "badge-primary"}
-        _ -> {"Completion", "badge-ghost"}
+        "tool_call" -> "badge-secondary"
+        "tool_enabled_completion" -> "badge-primary"
+        _ -> "badge-ghost"
       end
 
-    assigns = assign(assigns, label: label, class: class)
+    assigns = assign(assigns, label: call_type_name(assigns.type), class: class)
 
     ~H"""
     <span class={"badge #{@class}"}>{@label}</span>

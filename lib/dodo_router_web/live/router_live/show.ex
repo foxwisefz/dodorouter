@@ -955,7 +955,7 @@ defmodule DodoRouterWeb.RouterLive.Show do
                     :if={log.call_type}
                     class="px-1.5 py-0.5 rounded text-xs font-medium bg-base-300/50 text-base-content/70"
                   >
-                    {call_type_label(log.call_type)}
+                    {call_type_name(log.call_type)}
                   </span>
                   <span class={[
                     "px-1.5 py-0.5 rounded text-xs font-medium",
@@ -1291,11 +1291,6 @@ defmodule DodoRouterWeb.RouterLive.Show do
   defp status_badge_class("error"), do: "bg-error/20 text-error"
   defp status_badge_class("pending"), do: "bg-info/20 text-info"
   defp status_badge_class(_), do: "bg-base-300 text-base-content/60"
-
-  defp call_type_label("completion"), do: "chat"
-  defp call_type_label("tool_call"), do: "tools"
-  defp call_type_label("tool_enabled_completion"), do: "chat+tools"
-  defp call_type_label(other), do: other
 
   defp last_message_preview(log) do
     if is_nil(Map.get(log, :request_body)) do

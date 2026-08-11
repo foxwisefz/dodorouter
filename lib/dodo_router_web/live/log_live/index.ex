@@ -411,14 +411,14 @@ defmodule DodoRouterWeb.LogLive.Index do
   end
 
   defp call_type_badge(assigns) do
-    {label, class} =
+    class =
       case assigns.type do
-        "tool_call" -> {"Tool", "bg-secondary/20 text-secondary"}
-        "tool_enabled_completion" -> {"Tool+", "bg-primary/20 text-primary"}
-        _ -> {"Chat", "bg-base-300 text-base-content/60"}
+        "tool_call" -> "bg-secondary/20 text-secondary"
+        "tool_enabled_completion" -> "bg-primary/20 text-primary"
+        _ -> "bg-base-300 text-base-content/60"
       end
 
-    assigns = assign(assigns, label: label, class: class)
+    assigns = assign(assigns, label: call_type_name(assigns.type), class: class)
 
     ~H"""
     <span class={"px-2 py-0.5 rounded text-xs font-medium #{@class}"}>{@label}</span>

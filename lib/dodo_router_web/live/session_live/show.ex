@@ -183,7 +183,7 @@ defmodule DodoRouterWeb.SessionLive.Show do
                   :if={log.call_type}
                   class="px-1.5 py-0.5 rounded text-xs font-medium bg-base-300/50 text-base-content/70"
                 >
-                  {call_type_label(log.call_type)}
+                  {call_type_name(log.call_type)}
                 </span>
                 <span class={[
                   "px-1.5 py-0.5 rounded text-xs font-medium",
@@ -413,11 +413,6 @@ defmodule DodoRouterWeb.SessionLive.Show do
   defp format_latency(nil), do: "0"
   defp format_latency(%Decimal{} = ms), do: ms |> Decimal.round(0) |> Decimal.to_integer()
   defp format_latency(ms), do: round(ms)
-
-  defp call_type_label("completion"), do: "chat"
-  defp call_type_label("tool_call"), do: "tools"
-  defp call_type_label("tool_enabled_completion"), do: "chat+tools"
-  defp call_type_label(other), do: other
 
   defp status_badge_class("success"), do: "bg-success/20 text-success"
   defp status_badge_class("fallback"), do: "bg-warning/20 text-warning"
