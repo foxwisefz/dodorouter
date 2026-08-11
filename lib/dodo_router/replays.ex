@@ -58,6 +58,7 @@ defmodule DodoRouter.Replays do
         replayed_from_id: root.id,
         replay_from_index: message_index,
         request_id: request_id,
+        client_headers: replayable_headers(root),
         traffic_type: target[:traffic_type] || "proxy"
       ]
 
@@ -67,6 +68,43 @@ defmodule DodoRouter.Replays do
         {:error, :all_providers_failed, _attempts} -> fetch_persisted(request_id)
         {:error, reason} -> {:error, reason}
       end
+    end
+  end
+
+  # A replay stands in for the traffic it replays, so it has to reach the
+  # provider carrying what that traffic carried. Headers are the half everyone
+  # forgets: without the client's `anthropic-beta` the replay runs on a
+  # different cache TTL and potentially different model behaviour, which makes
+  # the score delta a downgrade decision rests on a measurement of a request
+  # nobody ever sent.
+  #
+  # Two things do not travel. Credentials were redacted on the way into the
+  # log, so the stored value is a marker rather than a secret — and the replay
+  # authenticates with the router's own key anyway, so sending the marker
+  # upstream would be garbage, not fidelity. Everything else goes to
+  # `Adapter.build_forwarded_headers/2`, the same policy live traffic passes
+  # through, which strips what a provider must not see.
+  @redaction_marker "[REDACTED]"
+
+  defp replayable_headers(%RequestLog{request_headers: stored}) do
+    case decode_headers(stored) do
+      nil -> []
+      headers -> Enum.reject(headers, fn {_k, v} -> String.contains?(v, @redaction_marker) end)
+    end
+  end
+
+  defp decode_headers(nil), do: nil
+
+  defp decode_headers(stored) when is_binary(stored) do
+    case Jason.decode(stored) do
+      {:ok, headers} when is_list(headers) ->
+        Enum.flat_map(headers, fn
+          [k, v] when is_binary(k) and is_binary(v) -> [{k, v}]
+          _ -> []
+        end)
+
+      _ ->
+        nil
     end
   end
 

@@ -54,6 +54,49 @@ defmodule DodoRouter.ReplaysTest do
       assert Logs.list_replays(ctx.source) |> Enum.map(& &1.id) == [replay.id]
     end
 
+    test "carries the original request's client headers", ctx do
+      # A replay that reaches the provider with proxy-built headers only is not
+      # standing in for the traffic it replays: on the Anthropic path a missing
+      # client anthropic-beta means a different cache TTL, so the score a
+      # downgrade decision rests on was measured against a request nobody sent.
+      source =
+        LogsFixtures.log_fixture(ctx.router, %{
+          request_body: Jason.encode!(%{"messages" => [%{"role" => "user", "content" => "hi"}]}),
+          request_headers:
+            Jason.encode!([
+              ["anthropic-beta", "context-1m-2025-08-07"],
+              ["user-agent", "claude-cli/2.1.0"],
+              ["authorization", "[REDACTED]"]
+            ])
+        })
+
+      assert {:ok, replay} = Replays.replay(ctx.user, source, target(ctx))
+
+      headers = Jason.decode!(replay.request_headers)
+      assert ["anthropic-beta", "context-1m-2025-08-07"] in headers
+      assert ["user-agent", "claude-cli/2.1.0"] in headers
+    end
+
+    test "does not replay a redacted credential as a literal value", ctx do
+      # Stored credentials are "[REDACTED]", and the replay authenticates with
+      # the router's own key anyway — forwarding the marker would send garbage.
+      source =
+        LogsFixtures.log_fixture(ctx.router, %{
+          request_body: Jason.encode!(%{"messages" => [%{"role" => "user", "content" => "hi"}]}),
+          request_headers:
+            Jason.encode!([
+              ["authorization", "[REDACTED]"],
+              ["x-api-key", "[REDACTED]"],
+              ["x-trace", "sk-live-[REDACTED]"]
+            ])
+        })
+
+      assert {:ok, replay} = Replays.replay(ctx.user, source, target(ctx))
+
+      headers = Jason.decode!(replay.request_headers)
+      refute Enum.any?(headers, fn [_k, v] -> String.contains?(v, "[REDACTED]") end)
+    end
+
     test "sanitizes the stored request before dispatch", ctx do
       assert {:ok, replay} = Replays.replay(ctx.user, ctx.source, target(ctx))
 
