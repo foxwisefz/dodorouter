@@ -1048,7 +1048,7 @@ defmodule DodoRouterWeb.LogLive.Show do
       </div>
       <div :if={@hop.edge.clean_summary} class="flex items-start gap-2 text-xs text-success">
         <.icon name="hero-check-circle" class="size-4 shrink-0 mt-px" />
-        <span>
+        <span class="flex flex-wrap items-baseline gap-x-1">
           <span class="font-semibold">Passed through unchanged</span>
           <span class="text-base-content/60">— {@hop.edge.clean_summary}</span>
         </span>
@@ -1079,37 +1079,29 @@ defmodule DodoRouterWeb.LogLive.Show do
         <%!-- The client's original body is not stored, so this value is the only
              surviving record of what they asked for. Collapsed by default: a
              dropped field can be one of the big ones. --%>
-        <details :if={change["value"]} id={"trace-value-#{@hop.key}-#{position}"}>
-          <summary class="cursor-pointer text-primary hover:underline">
-            what you sent
-          </summary>
-          <pre class="mt-1 max-h-48 overflow-auto rounded bg-base-300/40 p-2 font-mono whitespace-pre-wrap break-all"><code>{change["value"]}</code></pre>
-        </details>
+        <.trace_toggle
+          :if={change["value"]}
+          id={"trace-value-#{@hop.key}-#{position}"}
+          label="What you sent"
+          meta={payload_size(change["value"])}
+        >
+          <pre class="max-h-48 overflow-auto rounded bg-base-300/40 p-2 font-mono whitespace-pre-wrap break-all"><code>{change["value"]}</code></pre>
+        </.trace_toggle>
       </div>
       <%!-- The normalization happens on this edge, so its output belongs here
            next to what it cost — one request-level artifact, stated once,
            rather than a copy inside every attempt node. --%>
-      <details
+      <.trace_toggle
         :if={@hop.edge.normalized_request}
         id="trace-normalized-request"
-        class="relative text-xs"
+        label="Normalized request — what we turned yours into"
+        meta={payload_size(@hop.edge.normalized_request)}
       >
-        <summary class="cursor-pointer text-[10px] uppercase tracking-wider text-primary font-semibold">
-          Normalized request — what we turned yours into
-        </summary>
-        <button
-          id="copy-normalized-request"
-          phx-hook="CopyButton"
-          data-copy={format_json(@hop.edge.normalized_request)}
-          class="absolute right-2 top-6 z-10 px-2 py-1 rounded bg-base-100/10 text-[10px] font-medium text-base-content/60 hover:text-primary transition-colors"
-          title="Copy normalized request JSON"
-        >
-          <.icon name="hero-clipboard-document" class="w-3.5 h-3.5" />
-        </button>
-        <div class="mt-1 mockup-code text-xs max-h-64 overflow-auto">
-          <pre class="whitespace-pre-wrap break-words"><code>{format_json(@hop.edge.normalized_request)}</code></pre>
-        </div>
-      </details>
+        <.trace_code
+          content={format_json(@hop.edge.normalized_request)}
+          copy_id="copy-normalized-request"
+        />
+      </.trace_toggle>
     </div>
     """
   end
@@ -1131,26 +1123,22 @@ defmodule DodoRouterWeb.LogLive.Show do
         >
           {@format} format
         </span>
-        <span :if={@req_headers} class="text-xs text-base-content/50">
-          {length(@req_headers)} headers
-        </span>
       </div>
       <%!-- Naming the normalized request "what you sent" is the mislabeling this
            view exists to fix: we never stored the client's body. --%>
       <p class="mt-1 text-xs text-base-content/40">
         Your request body is not stored — what follows is the headers you sent and what we changed.
       </p>
-      <details :if={@req_headers} id="trace-client-headers" class="mt-2">
-        <summary class="cursor-pointer text-[10px] uppercase tracking-wider text-primary font-semibold">
-          Headers you sent
-        </summary>
-        <div class="mt-2 p-2 bg-base-200 rounded text-xs font-mono space-y-1">
-          <div :for={{key, value} <- @req_headers} class="flex gap-2">
-            <span class="text-base-content/60 shrink-0">{key}:</span>
-            <span class="break-all">{value}</span>
-          </div>
-        </div>
-      </details>
+      <div class="mt-1.5">
+        <.trace_toggle
+          :if={@req_headers}
+          id="trace-client-headers"
+          label="Headers you sent"
+          meta={header_count(@req_headers)}
+        >
+          <.trace_headers headers={@req_headers} />
+        </.trace_toggle>
+      </div>
     </div>
     """
   end
@@ -1212,118 +1200,142 @@ defmodule DodoRouterWeb.LogLive.Show do
           </span>
         </div>
 
-        <div class="px-3 py-2 space-y-2 text-xs">
-          <div :if={@attempt["endpoint"]} class="flex items-center gap-2">
-            <span class="text-[10px] uppercase tracking-wider text-base-content/40 font-semibold">
+        <div class="px-3 py-2.5 text-xs">
+          <%!-- Where the request went, as a two-column pair rather than two more
+               rows competing with the artifacts below. --%>
+          <div class="grid grid-cols-[auto_1fr] items-baseline gap-x-3 gap-y-1">
+            <span
+              :if={@attempt["endpoint"]}
+              class="text-[10px] uppercase tracking-wider text-base-content/40 font-semibold"
+            >
               Endpoint
             </span>
-            <span class="font-mono text-base-content/70 break-all">{@attempt["endpoint"]}</span>
-          </div>
-
-          <div
-            :if={@attempt["provider_key_id"] && @attempt["provider_key_slug"]}
-            class="flex items-center gap-2"
-          >
-            <span class="text-[10px] uppercase tracking-wider text-base-content/40 font-semibold">
+            <span :if={@attempt["endpoint"]} class="font-mono text-base-content/70 break-all">
+              {@attempt["endpoint"]}
+            </span>
+            <span
+              :if={@attempt["provider_key_id"] && @attempt["provider_key_slug"]}
+              class="text-[10px] uppercase tracking-wider text-base-content/40 font-semibold"
+            >
               API Key
             </span>
             <.link
+              :if={@attempt["provider_key_id"] && @attempt["provider_key_slug"]}
               navigate={
                 ~p"/providers?highlight=#{@attempt["provider_key_id"]}&provider=#{@attempt["provider_key_slug"]}"
               }
-              class="font-mono text-primary hover:underline"
+              class="font-mono text-primary hover:underline justify-self-start"
             >
               {@attempt["provider_key_label"]}
             </.link>
           </div>
 
-          <details :if={@attempt["outbound_headers"]} id={"trace-outbound-headers-#{@hop.index}"}>
-            <summary class="cursor-pointer text-[10px] uppercase tracking-wider text-primary font-semibold">
-              Outbound Headers
-            </summary>
-            <div class="mt-1 p-2 bg-base-200 rounded font-mono space-y-1">
-              <div :for={[key, value] <- @attempt["outbound_headers"]} class="flex gap-2">
-                <span class="text-base-content/60 shrink-0">{key}:</span>
-                <span class="break-all">{value}</span>
-              </div>
-            </div>
-          </details>
-
-          <%!-- error_body is `details[:body]`, straight off the wire — the one
-               response artifact on an attempt the provider itself wrote. --%>
-          <div :if={@attempt["error_body"]}>
-            <div class="text-[10px] uppercase tracking-wider text-base-content/40 font-semibold mb-1">
-              Error response — the provider's own bytes
-            </div>
-            <div class="mockup-code text-xs max-h-64 overflow-auto">
-              <pre><code>{format_json(@attempt["error_body"])}</code></pre>
-            </div>
-          </div>
-
-          <%!-- Only ResponsesAPI records the bytes it sent. Filling the gap with
-               the normalized request would assert those were the bytes on the
-               wire; they were its input, and each adapter rebuilds from it. --%>
-          <details :if={@attempt["outbound_body"]} id={"trace-outbound-body-#{@hop.index}"}>
-            <summary class="cursor-pointer text-[10px] uppercase tracking-wider text-primary font-semibold">
-              Request body sent to this provider
-            </summary>
-            <div class="mt-1 mockup-code text-xs max-h-64 overflow-auto">
-              <pre class="whitespace-pre-wrap break-words"><code>{format_json(@attempt["outbound_body"])}</code></pre>
-            </div>
-          </details>
-          <p :if={is_nil(@attempt["outbound_body"])} class="text-base-content/40">
-            The exact bytes sent to this provider are not recorded by its adapter — the normalized
-            request above is what it built them from.
-          </p>
-
-          <%!-- Shown only when this attempt's request is not the one on the edge:
-               a midstream fallback rebuilds it with the partial response the
-               previous provider already streamed. --%>
-          <details :if={@hop.request_body} id={"trace-request-body-#{@hop.index}"} class="relative">
-            <summary class="cursor-pointer text-[10px] uppercase tracking-wider text-primary font-semibold">
-              Request rebuilt for this attempt — it differs from the normalized request
-            </summary>
-            <button
-              id={"copy-attempt-request-#{@hop.index}"}
-              phx-hook="CopyButton"
-              data-copy={format_json(@hop.request_body)}
-              class="absolute right-2 top-6 z-10 px-2 py-1 rounded bg-base-100/10 text-[10px] font-medium text-base-content/60 hover:text-primary transition-colors"
-              title="Copy request JSON"
+          <%!-- The artifacts are grouped by which way they travelled. Rendered as
+               one flat list of identical links, a header dump and a response body
+               read as peers, and nothing said which end of the wire each was
+               from — the complaint that prompted this grouping. --%>
+          <.trace_section icon="hero-arrow-up-tray" label={"Sent to #{@attempt["provider"]}"}>
+            <.trace_toggle
+              :if={@attempt["outbound_headers"]}
+              id={"trace-outbound-headers-#{@hop.index}"}
+              label="Headers"
+              meta={header_count(@attempt["outbound_headers"])}
             >
-              <.icon name="hero-clipboard-document" class="w-3.5 h-3.5" />
-            </button>
-            <div class="mt-1 mockup-code text-xs max-h-64 overflow-auto">
-              <pre class="whitespace-pre-wrap break-words"><code>{format_json(@hop.request_body)}</code></pre>
-            </div>
-          </details>
+              <.trace_headers headers={@attempt["outbound_headers"]} />
+            </.trace_toggle>
 
-          <%!-- `response_body` is what the *adapter* returned: Anthropic runs
-               convert_to_openai_format/1 before this is ever stored. Calling it
-               "Response Body" under a provider node reads as that provider's
-               bytes, which we do not keep for a successful response. --%>
-          <details :if={@attempt["response_body"]} id={"trace-response-body-#{@hop.index}"}>
-            <summary class="cursor-pointer text-[10px] uppercase tracking-wider text-primary font-semibold">
-              Response, converted to the proxy's normalized form
-            </summary>
-            <p class="mt-1 text-base-content/40">
-              This provider's own response bytes are not stored for a successful attempt.
+            <%!-- Only ResponsesAPI records the bytes it sent. Filling the gap with
+                 the normalized request would assert those were the bytes on the
+                 wire; they were its input, and each adapter rebuilds from it. --%>
+            <.trace_toggle
+              :if={@attempt["outbound_body"]}
+              id={"trace-outbound-body-#{@hop.index}"}
+              label="Body — the bytes this provider received"
+              meta={payload_size(@attempt["outbound_body"])}
+            >
+              <.trace_code
+                content={format_json(@attempt["outbound_body"])}
+                copy_id={"copy-outbound-body-#{@hop.index}"}
+              />
+            </.trace_toggle>
+
+            <%!-- Shown only when this attempt's request is not the one on the edge:
+                 a midstream fallback rebuilds it with the partial response the
+                 previous provider already streamed. --%>
+            <.trace_toggle
+              :if={@hop.request_body}
+              id={"trace-request-body-#{@hop.index}"}
+              label="Request rebuilt for this attempt"
+              meta={payload_size(@hop.request_body)}
+            >
+              <p class="mb-1 text-base-content/40">
+                It differs from the normalized request on the edge above.
+              </p>
+              <.trace_code
+                content={format_json(@hop.request_body)}
+                copy_id={"copy-attempt-request-#{@hop.index}"}
+              />
+            </.trace_toggle>
+
+            <%!-- Names whichever request this adapter actually built from: on a
+                 midstream fallback the normalized one on the edge is not it. --%>
+            <p
+              :if={is_nil(@attempt["outbound_body"])}
+              class="flex items-start gap-2 py-1.5 text-base-content/40"
+            >
+              <.icon name="hero-information-circle" class="size-3.5 shrink-0 mt-px" />
+              <span>
+                Body not recorded — this adapter does not keep the bytes it sent. {if @hop.request_body,
+                  do: "The request rebuilt above is what it built them from.",
+                  else: "The normalized request above is what it built them from."}
+              </span>
             </p>
-            <div class="mt-1 mockup-code text-xs max-h-64 overflow-auto">
-              <pre class="whitespace-pre-wrap break-words"><code>{format_json(@attempt["response_body"])}</code></pre>
-            </div>
-          </details>
+          </.trace_section>
 
-          <details :if={@attempt["response_headers"]} id={"trace-response-headers-#{@hop.index}"}>
-            <summary class="cursor-pointer text-[10px] uppercase tracking-wider text-primary font-semibold">
-              Response Headers
-            </summary>
-            <div class="mt-1 p-2 bg-base-200 rounded font-mono space-y-1">
-              <div :for={[key, value] <- @attempt["response_headers"]} class="flex gap-2">
-                <span class="text-base-content/60 shrink-0">{key}:</span>
-                <span class="break-all">{value}</span>
-              </div>
-            </div>
-          </details>
+          <.trace_section
+            :if={@attempt["error_body"] || @attempt["response_body"] || @attempt["response_headers"]}
+            icon="hero-arrow-down-tray"
+            label={"Received from #{@attempt["provider"]}"}
+          >
+            <%!-- error_body is `details[:body]`, straight off the wire — the one
+                 response artifact on an attempt the provider itself wrote, and
+                 the reason this attempt is on the page, so it opens itself. --%>
+            <.trace_toggle
+              :if={@attempt["error_body"]}
+              id={"trace-error-body-#{@hop.index}"}
+              open
+              tone={:error}
+              label="Error response — the provider's own bytes"
+              meta={payload_size(@attempt["error_body"])}
+            >
+              <.trace_code content={format_json(@attempt["error_body"])} />
+            </.trace_toggle>
+
+            <%!-- `response_body` is what the *adapter* returned: Anthropic runs
+                 convert_to_openai_format/1 before this is ever stored. Calling it
+                 "Response Body" under a provider node reads as that provider's
+                 bytes, which we do not keep for a successful response. --%>
+            <.trace_toggle
+              :if={@attempt["response_body"]}
+              id={"trace-response-body-#{@hop.index}"}
+              label="Body — converted to the proxy's normalized form"
+              meta={payload_size(@attempt["response_body"])}
+            >
+              <p class="mb-1 text-base-content/40">
+                This provider's own response bytes are not stored for a successful attempt.
+              </p>
+              <.trace_code content={format_json(@attempt["response_body"])} />
+            </.trace_toggle>
+
+            <.trace_toggle
+              :if={@attempt["response_headers"]}
+              id={"trace-response-headers-#{@hop.index}"}
+              label="Headers"
+              meta={header_count(@attempt["response_headers"])}
+            >
+              <.trace_headers headers={@attempt["response_headers"]} />
+            </.trace_toggle>
+          </.trace_section>
         </div>
       </div>
     </div>
@@ -1356,39 +1368,146 @@ defmodule DodoRouterWeb.LogLive.Show do
            OpenAI-format client those are the same thing; for anyone else they
            are not, and saying "returned to you" over a converted body is the
            same lie as calling the outbound request the client's own. --%>
-      <details :if={@log.response_body} id="trace-client-response-body" class="relative mt-2">
-        <summary class="cursor-pointer text-[10px] uppercase tracking-wider text-primary font-semibold">
-          {if @format in [nil, "openai"],
-            do: "Response body returned to you",
-            else: "Response body, recorded before conversion to #{@format}"}
-        </summary>
-        <button
-          id="copy-response-json"
-          phx-hook="CopyButton"
-          data-copy={format_json(@log.response_body)}
-          class="absolute right-2 top-6 z-10 px-2 py-1 rounded bg-base-100/10 text-[10px] font-medium text-base-content/60 hover:text-primary transition-colors"
-          title="Copy response JSON"
+      <div class="mt-1.5">
+        <.trace_toggle
+          :if={@log.response_body}
+          id="trace-client-response-body"
+          label={
+            if @format in [nil, "openai"],
+              do: "Response body returned to you",
+              else: "Response body, recorded before conversion to #{@format}"
+          }
+          meta={payload_size(@log.response_body)}
         >
-          <.icon name="hero-clipboard-document" class="w-3.5 h-3.5" />
-        </button>
-        <div class="mt-1 mockup-code text-xs max-h-[calc(100vh-320px)] overflow-auto">
-          <pre class="whitespace-pre-wrap break-words"><code>{format_json(@log.response_body)}</code></pre>
-        </div>
-      </details>
-      <details :if={@resp_headers} id="trace-client-response-headers" class="mt-2">
-        <summary class="cursor-pointer text-[10px] uppercase tracking-wider text-primary font-semibold">
-          Headers returned to you
-        </summary>
-        <div class="mt-2 p-2 bg-base-200 rounded text-xs font-mono space-y-1">
-          <div :for={{key, value} <- @resp_headers} class="flex gap-2">
-            <span class="text-base-content/60 shrink-0">{key}:</span>
-            <span class="break-all">{value}</span>
-          </div>
-        </div>
-      </details>
+          <.trace_code
+            content={format_json(@log.response_body)}
+            copy_id="copy-response-json"
+            max_height="max-h-[calc(100vh-320px)]"
+          />
+        </.trace_toggle>
+        <.trace_toggle
+          :if={@resp_headers}
+          id="trace-client-response-headers"
+          label="Headers returned to you"
+          meta={header_count(@resp_headers)}
+        >
+          <.trace_headers headers={@resp_headers} />
+        </.trace_toggle>
+      </div>
     </div>
     """
   end
+
+  # One disclosure idiom for every artifact in the trace. Rendered as uppercase
+  # primary links, a header list and a response body carried identical weight and
+  # an attempt node read as four shouted sentences; the house idiom elsewhere in
+  # the app is a chevron, a sentence-case label, and its size in the margin.
+  attr :id, :string, required: true
+  attr :label, :string, required: true
+  attr :meta, :string, default: nil
+  attr :open, :boolean, default: false
+  attr :tone, :atom, default: :neutral
+  slot :inner_block, required: true
+
+  defp trace_toggle(assigns) do
+    ~H"""
+    <details id={@id} open={@open} class="group">
+      <summary class={[
+        "cursor-pointer select-none list-none -mx-2 flex items-center gap-2 rounded-md px-2 py-1.5",
+        "text-xs transition-colors hover:bg-base-200/60",
+        @tone == :error && "text-error/90 hover:text-error",
+        @tone == :neutral && "text-base-content/60 hover:text-base-content"
+      ]}>
+        <.icon
+          name="hero-chevron-right"
+          class="size-3 shrink-0 transition-transform group-open:rotate-90"
+        />
+        <span class="font-medium">{@label}</span>
+        <span :if={@meta} class="ml-auto shrink-0 font-mono text-[10px] text-base-content/40">
+          {@meta}
+        </span>
+      </summary>
+      <div class="mt-1 mb-2 pl-5">
+        {render_slot(@inner_block)}
+      </div>
+    </details>
+    """
+  end
+
+  # Groups an attempt's artifacts by the direction they travelled, so the node
+  # reads as a hop rather than as a list of payloads with no sides.
+  attr :icon, :string, required: true
+  attr :label, :string, required: true
+  slot :inner_block, required: true
+
+  defp trace_section(assigns) do
+    ~H"""
+    <div class="mt-2.5 border-t border-base-300/50 pt-2">
+      <div class="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-base-content/40 font-semibold">
+        <.icon name={@icon} class="size-3 shrink-0" />
+        {@label}
+      </div>
+      <div class="mt-0.5">
+        {render_slot(@inner_block)}
+      </div>
+    </div>
+    """
+  end
+
+  attr :content, :string, required: true
+  attr :copy_id, :string, default: nil
+  attr :max_height, :string, default: "max-h-64"
+
+  defp trace_code(assigns) do
+    ~H"""
+    <div class="relative">
+      <button
+        :if={@copy_id}
+        id={@copy_id}
+        phx-hook="CopyButton"
+        data-copy={@content}
+        class="absolute right-2 top-2 z-10 px-2 py-1 rounded bg-base-100/10 text-[10px] font-medium text-base-content/60 hover:text-primary transition-colors"
+        title="Copy JSON"
+      >
+        <.icon name="hero-clipboard-document" class="w-3.5 h-3.5" />
+      </button>
+      <div class={["mockup-code text-xs overflow-auto", @max_height]}>
+        <pre class="whitespace-pre-wrap break-words"><code>{@content}</code></pre>
+      </div>
+    </div>
+    """
+  end
+
+  attr :headers, :list, required: true
+
+  defp trace_headers(assigns) do
+    ~H"""
+    <div class="rounded bg-base-200 p-2 font-mono text-[11px] space-y-1">
+      <div :for={{key, value} <- header_pairs(@headers)} class="flex gap-2">
+        <span class="text-base-content/50 shrink-0">{key}:</span>
+        <span class="break-all">{value}</span>
+      </div>
+    </div>
+    """
+  end
+
+  # Stored headers are JSON pairs; the client's own arrive already zipped.
+  defp header_pairs(headers) do
+    Enum.map(headers, fn
+      [key, value] -> {key, value}
+      {key, value} -> {key, value}
+      other -> {other, ""}
+    end)
+  end
+
+  # Spelled out: a bare number in the margin of a row already labelled "Headers"
+  # sits in the same column as "12.4 KB" and reads as a size.
+  defp header_count([_one]), do: "1 header"
+  defp header_count(headers) when is_list(headers), do: "#{length(headers)} headers"
+  defp header_count(_), do: nil
+
+  defp payload_size(body) when is_binary(body), do: format_bytes(byte_size(body))
+  defp payload_size(_), do: nil
 
   defp change_count([_one]), do: "1 thing"
   defp change_count(changes), do: "#{length(changes)} things"

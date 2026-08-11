@@ -627,7 +627,8 @@ defmodule DodoRouterWeb.LogLiveTest do
         |> element("[role=tab][phx-value-tab=trace]")
         |> render_click()
 
-      assert html =~ "Response, converted"
+      assert has_element?(live, "#trace-response-body-1")
+      assert html =~ "converted"
       assert html =~ "hello"
     end
 
@@ -667,7 +668,7 @@ defmodule DodoRouterWeb.LogLiveTest do
         |> element("[role=tab][phx-value-tab=trace]")
         |> render_click()
 
-      assert html =~ "Response Headers"
+      assert has_element?(live, "#trace-response-headers-1")
       assert html =~ "x-request-id"
       assert html =~ "req-123"
     end
@@ -707,9 +708,10 @@ defmodule DodoRouterWeb.LogLiveTest do
         |> element("[role=tab][phx-value-tab=trace]")
         |> render_click()
 
+      assert has_element?(live, "#trace-error-body-0")
       assert html =~ "Error response"
       assert html =~ "rate limited"
-      assert html =~ "Response, converted"
+      assert has_element?(live, "#trace-response-body-1")
       assert html =~ "fallback response"
     end
 
