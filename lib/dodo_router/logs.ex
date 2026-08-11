@@ -5,6 +5,7 @@ defmodule DodoRouter.Logs do
 
   import Ecto.Query
   alias DodoRouter.Repo
+  alias DodoRouter.Logs.CacheRegression
   alias DodoRouter.Logs.RequestLog
   alias DodoRouter.Routers.Router
   alias DodoRouter.Accounts.User
@@ -634,6 +635,34 @@ defmodule DodoRouter.Logs do
       offset: ^offset
     )
     |> Repo.all()
+  end
+
+  @doc """
+  Cache verdicts for several sessions at once, as
+  `%{session_id => CacheRegression.verdict()}`.
+
+  Loads only the six columns the classifier reads — bodies and headers are the
+  bulk of a log row and none of them matter here, so a page of sessions costs
+  one small query rather than twenty large ones.
+  """
+  def cache_verdicts(%Router{} = router, session_ids) when is_list(session_ids) do
+    from(l in RequestLog,
+      where: l.router_id == ^router.id and l.session_id in ^session_ids,
+      order_by: [asc: l.inserted_at],
+      select: %RequestLog{
+        id: l.id,
+        session_id: l.session_id,
+        inserted_at: l.inserted_at,
+        prompt_tokens: l.prompt_tokens,
+        cache_read_tokens: l.cache_read_tokens,
+        cache_write_tokens: l.cache_write_tokens,
+        final_provider: l.final_provider,
+        final_model: l.final_model
+      }
+    )
+    |> Repo.all()
+    |> Enum.group_by(& &1.session_id)
+    |> Map.new(fn {session_id, logs} -> {session_id, CacheRegression.classify(logs)} end)
   end
 
   @doc """

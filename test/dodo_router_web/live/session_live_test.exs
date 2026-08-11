@@ -170,4 +170,89 @@ defmodule DodoRouterWeb.SessionLiveTest do
       assert Enum.all?(logs, &(&1.session_name == new_name))
     end
   end
+
+  describe "cache regression" do
+    # Reads pinned at 38k while the conversation grows — the AGENTS.md
+    # breakpoint signature.
+    defp regressed_session(router, session_id) do
+      turn(router, session_id, 20_000, 400, ["hello"])
+      turn(router, session_id, 38_000, 400, ["hello", "and now the long part"])
+
+      for {prompt, turns} <- [
+            {9_000, ["hello", "and now the LONG part"]},
+            {12_000, ["hello", "and now the LONG part", "more"]},
+            {15_000, ["hello", "and now the LONG part", "more", "still more"]},
+            {18_000, ["hello", "and now the LONG part", "more", "still more", "yet more"]}
+          ] do
+        turn(router, session_id, 38_000, prompt, turns)
+      end
+    end
+
+    defp healthy_session(router, session_id) do
+      for {read, n} <- Enum.with_index([10_000, 12_000, 14_000, 16_000]) do
+        turn(router, session_id, read, 300, Enum.map(0..n, &"turn #{&1}"))
+      end
+    end
+
+    defp turn(router, session_id, read, prompt, contents) do
+      body =
+        Jason.encode!(%{
+          "messages" => Enum.map(contents, &%{"role" => "user", "content" => &1})
+        })
+
+      LogsFixtures.log_with_session(router, session_id, %{
+        prompt_tokens: prompt,
+        cache_read_tokens: read,
+        final_provider: "anthropic",
+        final_model: "claude-opus-5",
+        request_body: body
+      })
+    end
+
+    test "a regressed session is marked in the list", %{conn: conn, router: router} do
+      regressed_session(router, "broken-session")
+
+      {:ok, _live, html} = live(conn, ~p"/routers/#{router.id}/sessions")
+
+      assert html =~ "Cache stopped hitting"
+    end
+
+    test "a healthy session is not marked", %{conn: conn, router: router} do
+      healthy_session(router, "fine-session")
+
+      {:ok, _live, html} = live(conn, ~p"/routers/#{router.id}/sessions")
+
+      refute html =~ "Cache stopped hitting"
+    end
+
+    test "the session view explains what happened and where", %{conn: conn, router: router} do
+      regressed_session(router, "broken-session")
+
+      {:ok, live, html} = live(conn, ~p"/routers/#{router.id}/sessions/broken-session")
+
+      assert html =~ "The prompt cache stopped hitting"
+      # The turn that diverged carries the marker, and the notice links to it.
+      diverged = Enum.at(DodoRouter.Logs.list_logs_by_session(router, "broken-session"), 2)
+      assert has_element?(live, "a[href='#turn-#{diverged.id}']")
+      assert has_element?(live, "#turn-#{diverged.id}.ring-warning\\/60")
+    end
+
+    test "the notice shows what changed inside the shared prefix", %{conn: conn, router: router} do
+      regressed_session(router, "broken-session")
+
+      {:ok, live, _html} = live(conn, ~p"/routers/#{router.id}/sessions/broken-session")
+
+      assert has_element?(live, "details summary", "What changed in the cached prefix")
+      assert has_element?(live, "details ins", "LONG")
+      assert has_element?(live, "details del", "long")
+    end
+
+    test "a healthy session view says nothing about the cache", %{conn: conn, router: router} do
+      healthy_session(router, "fine-session")
+
+      {:ok, _live, html} = live(conn, ~p"/routers/#{router.id}/sessions/fine-session")
+
+      refute html =~ "The prompt cache stopped hitting"
+    end
+  end
 end
