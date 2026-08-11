@@ -1098,6 +1098,7 @@ defmodule DodoRouterWeb.LogLive.Show do
         meta={payload_size(@hop.edge.normalized_request)}
       >
         <.trace_code
+          id="trace-normalized"
           content={format_json(@hop.edge.normalized_request)}
           copy_id="copy-normalized-request"
         />
@@ -1254,6 +1255,7 @@ defmodule DodoRouterWeb.LogLive.Show do
               meta={payload_size(@attempt["outbound_body"])}
             >
               <.trace_code
+                id={"trace-outbound-#{@hop.index}"}
                 content={format_json(@attempt["outbound_body"])}
                 copy_id={"copy-outbound-body-#{@hop.index}"}
               />
@@ -1272,6 +1274,7 @@ defmodule DodoRouterWeb.LogLive.Show do
                 It differs from the normalized request on the edge above.
               </p>
               <.trace_code
+                id={"trace-rebuilt-#{@hop.index}"}
                 content={format_json(@hop.request_body)}
                 copy_id={"copy-attempt-request-#{@hop.index}"}
               />
@@ -1308,7 +1311,10 @@ defmodule DodoRouterWeb.LogLive.Show do
               label="Error response — the provider's own bytes"
               meta={payload_size(@attempt["error_body"])}
             >
-              <.trace_code content={format_json(@attempt["error_body"])} />
+              <.trace_code
+                id={"trace-error-#{@hop.index}"}
+                content={format_json(@attempt["error_body"])}
+              />
             </.trace_toggle>
 
             <%!-- `response_body` is what the *adapter* returned: Anthropic runs
@@ -1324,7 +1330,10 @@ defmodule DodoRouterWeb.LogLive.Show do
               <p class="mb-1 text-base-content/40">
                 This provider's own response bytes are not stored for a successful attempt.
               </p>
-              <.trace_code content={format_json(@attempt["response_body"])} />
+              <.trace_code
+                id={"trace-response-#{@hop.index}"}
+                content={format_json(@attempt["response_body"])}
+              />
             </.trace_toggle>
 
             <.trace_toggle
@@ -1380,6 +1389,7 @@ defmodule DodoRouterWeb.LogLive.Show do
           meta={payload_size(@log.response_body)}
         >
           <.trace_code
+            id="trace-client-response"
             content={format_json(@log.response_body)}
             copy_id="copy-response-json"
             max_height="max-h-[calc(100vh-320px)]"
@@ -1454,25 +1464,71 @@ defmodule DodoRouterWeb.LogLive.Show do
     """
   end
 
+  # A payload, as a collapsible tree. The pretty-printed text stays in the markup
+  # and is what renders without JS — `JsonTree` hides it and builds the tree from
+  # the same string, so a payload that is not JSON (an upstream error page, a
+  # truncated body) simply keeps the text it always had. daisyUI's `mockup-code`
+  # used to wrap these: it painted three fake macOS window dots above every
+  # payload and forced a dark panel in both themes, which is decoration a log
+  # reader has no use for.
+  attr :id, :string, required: true
   attr :content, :string, required: true
   attr :copy_id, :string, default: nil
-  attr :max_height, :string, default: "max-h-64"
+  attr :max_height, :string, default: "max-h-72"
 
   defp trace_code(assigns) do
     ~H"""
-    <div class="relative">
-      <button
-        :if={@copy_id}
-        id={@copy_id}
-        phx-hook="CopyButton"
-        data-copy={@content}
-        class="absolute right-2 top-2 z-10 px-2 py-1 rounded bg-base-100/10 text-[10px] font-medium text-base-content/60 hover:text-primary transition-colors"
-        title="Copy JSON"
+    <div>
+      <div class="flex items-center justify-end gap-1">
+        <div id={"#{@id}-controls"} hidden class="flex items-center gap-1">
+          <button
+            type="button"
+            data-json-action="expand"
+            class="rounded px-1.5 py-0.5 text-[10px] font-medium text-base-content/50 hover:bg-base-200 hover:text-base-content transition-colors"
+          >
+            expand all
+          </button>
+          <button
+            type="button"
+            data-json-action="collapse"
+            class="rounded px-1.5 py-0.5 text-[10px] font-medium text-base-content/50 hover:bg-base-200 hover:text-base-content transition-colors"
+          >
+            collapse all
+          </button>
+          <button
+            type="button"
+            data-json-action="raw"
+            title="Show the raw JSON text"
+            class="rounded px-1.5 py-0.5 text-[10px] font-medium text-base-content/50 hover:bg-base-200 hover:text-base-content transition-colors"
+          >
+            raw
+          </button>
+        </div>
+        <button
+          :if={@copy_id}
+          id={@copy_id}
+          phx-hook="CopyButton"
+          data-copy={@content}
+          class="rounded px-1.5 py-0.5 text-[10px] font-medium text-base-content/50 hover:bg-base-200 hover:text-primary transition-colors"
+          title="Copy JSON"
+        >
+          <.icon name="hero-clipboard-document" class="size-3.5" />
+        </button>
+      </div>
+      <div
+        id={"#{@id}-json"}
+        phx-hook="JsonTree"
+        phx-update="ignore"
+        data-controls={"#{@id}-controls"}
+        class={[
+          "rounded-lg border border-base-300/60 bg-base-200/40 p-2 overflow-auto",
+          @max_height
+        ]}
       >
-        <.icon name="hero-clipboard-document" class="w-3.5 h-3.5" />
-      </button>
-      <div class={["mockup-code text-xs overflow-auto", @max_height]}>
-        <pre class="whitespace-pre-wrap break-words"><code>{@content}</code></pre>
+        <pre
+          data-json-fallback
+          class="font-mono text-[11px] whitespace-pre-wrap break-words"
+        ><code>{@content}</code></pre>
       </div>
     </div>
     """

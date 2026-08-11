@@ -1069,6 +1069,36 @@ defmodule DodoRouterWeb.LogLiveTest do
       assert html =~ "partial so far"
     end
 
+    test "a payload renders as text and is upgraded to a tree", %{conn: conn, user: user} do
+      # The tree is built client-side from the <pre> the server renders, so the
+      # markup has to keep carrying the text: that is what a payload which is
+      # not JSON falls back to, and what the hook reads instead of a second copy
+      # in a data- attribute.
+      {router, _api_key} = RoutersFixtures.router_fixture(user)
+      ir = Jason.encode!(%{"messages" => [%{"role" => "user", "content" => "hi"}]})
+
+      log =
+        LogsFixtures.log_fixture(router, %{
+          attempted_steps: [
+            %{
+              "position" => 0,
+              "provider" => "openai",
+              "model" => "gpt-4o",
+              "status" => "success",
+              "request_body" => ir
+            }
+          ]
+        })
+
+      {:ok, live, _html} = live(conn, ~p"/logs/#{log.request_id}")
+      html = live |> element("[role=tab][phx-value-tab=trace]") |> render_click()
+
+      assert has_element?(live, "#trace-normalized-json[phx-hook=JsonTree][phx-update=ignore]")
+      assert has_element?(live, "#trace-normalized-json [data-json-fallback]")
+      assert has_element?(live, "#trace-normalized-controls [data-json-action=expand]")
+      assert html =~ "messages"
+    end
+
     test "a converted response is not passed off as the provider's own bytes", %{
       conn: conn,
       user: user
