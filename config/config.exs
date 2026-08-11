@@ -24,6 +24,11 @@ config :dodo_router,
   ecto_repos: [DodoRouter.Repo],
   generators: [timestamp_type: :utc_datetime]
 
+# Appended to every cookie name we set. Empty everywhere but a dev workspace,
+# where it keeps two branches on localhost from overwriting each other's login
+# (see config/dev.exs and scripts/dev-workspace.sh).
+config :dodo_router, :cookie_suffix, ""
+
 # Configures the endpoint
 config :dodo_router, DodoRouterWeb.Endpoint,
   url: [host: "localhost"],

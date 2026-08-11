@@ -1,5 +1,14 @@
 import Config
 
+# Set by scripts/dev-workspace.sh in each jj workspace's .envrc, so several
+# branches can run at once without sharing a database, a port, or — because
+# cookies are not scoped by port — a session cookie.
+workspace_suffix =
+  case System.get_env("DODO_WORKSPACE", "") do
+    "" -> ""
+    name -> "_" <> String.replace(name, "-", "_")
+  end
+
 # Configure your database
 config :dodo_router, DodoRouter.Repo,
   username: System.get_env("DB_USERNAME", "postgres"),
@@ -9,7 +18,9 @@ config :dodo_router, DodoRouter.Repo,
   port: String.to_integer(System.get_env("DB_PORT", "5432")),
   stacktrace: true,
   show_sensitive_data_on_connection_error: true,
-  pool_size: 10
+  pool_size: String.to_integer(System.get_env("DB_POOL_SIZE", "10"))
+
+config :dodo_router, :cookie_suffix, workspace_suffix
 
 # For development, we disable any cache and enable
 # debugging and code reloading.

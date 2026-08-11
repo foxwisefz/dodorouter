@@ -704,6 +704,36 @@ When integrating a new provider or changing how an existing one handles reasonin
 3. **Document the mapping** in the table above if it differs from existing formats.
 4. **Test the seam** — write a test that builds the adapter's request body with a step that has `reasoning_effort` set and assert the provider-native field appears. Also assert that a client-provided value is preserved.
 
+## Running Several Branches at Once
+
+`scripts/dev-workspace.sh` gives each jj workspace everything it needs to run at the same time as every other one:
+
+```bash
+scripts/dev-workspace.sh new charts        # jj workspace + port + database + deps + migrations
+scripts/dev-workspace.sh list              # what is configured, and what is running right now
+scripts/dev-workspace.sh open charts       # Chrome with a cookie jar of its own
+scripts/dev-workspace.sh rm charts         # forget the workspace and drop its database
+cd ../dodo-charts && mix phx.server        # you launch the server; the script never does
+```
+
+Workspaces are sibling directories (`../dodo-<name>`), matching the layout already in use. `setup all` retrofits the ones that predate the script.
+
+**Secrets are sourced, not copied.** A workspace `.envrc` starts with `source_env ../dodo_router/.envrc`, so rotating a provider key in the main repo reaches every workspace. It then overrides only what has to differ:
+
+| Variable | Why it must differ |
+|---|---|
+| `PORT` | two dev servers cannot share 4000 |
+| `DB_NAME` | a migration on one branch must not rewrite another branch's schema |
+| `TEST_PORT` | `config/test.exs` runs a real server (`server: true`), so concurrent `mix test` runs collide on 4002 |
+| `DODO_WORKSPACE` | derives the test database name and the cookie suffix |
+| `DB_POOL_SIZE` | 10 connections × N workspaces exhausts Postgres' default 100 |
+
+**Cookies are not scoped by port.** `localhost:4000` and `localhost:4011` share one cookie jar, so without intervention logging into one branch silently logs you out of the other — with a session that decodes (the dev `secret_key_base` is shared) but names a user id from a different database. Every cookie name we set therefore takes `:cookie_suffix` from `DODO_WORKSPACE`: `Application.compile_env(:dodo_router, :cookie_suffix, "")` in `DodoRouterWeb.Endpoint` and `DodoRouterWeb.UserAuth`. The suffix is `""` in every environment but a dev workspace, so **production and test cookie names are unchanged** — never let it become non-empty outside dev, as it would log out every user on deploy. `open` additionally gives each workspace its own Chrome profile, which is what makes several branches usable in parallel rather than merely runnable.
+
+Because `:cookie_suffix` is read with `compile_env`, a workspace whose `.envrc` changes after it was built boots with an explicit "different value set during runtime" error rather than a mystery. Recompile.
+
+**New databases are cloned from `dodo_router_dev` by default** (~64 MB, a template copy when the main dev server is idle, a dump/restore when it is not), because most of what is worth testing in a branch — the Trace, the logs list, cache accounting — needs real request logs to look at. `--fresh` gives an empty database with migrations instead.
+
 ## Releases and Deployment
 
 This application is deployed using Elixir releases with **hot upgrades** — code is updated without restarting the BEAM VM or dropping in-flight requests.
