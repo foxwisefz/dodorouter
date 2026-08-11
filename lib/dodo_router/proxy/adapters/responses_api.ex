@@ -42,7 +42,7 @@ defmodule DodoRouter.Proxy.Adapters.ResponsesAPI do
       |> Map.put("stream", true)
 
     headers = build_headers(api_key, opts)
-    payload_size_bytes = body |> Jason.encode!() |> byte_size()
+    payload_size_bytes = Adapter.record_outbound_body(body)
     start_time = System.monotonic_time(:millisecond)
 
     into_fun = fn

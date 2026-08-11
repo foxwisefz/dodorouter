@@ -187,6 +187,10 @@ defmodule DodoRouter.Proxy.Adapters.TestProvider do
   # Nothing is sent anywhere; the point is to exercise the two policy functions
   # so the fidelity record a real provider would produce also shows up here.
   defp simulate_upstream_request(request, api_key, client_headers) do
-    {request_headers(api_key, client_headers), Adapter.sanitize_request(request)}
+    body = Adapter.sanitize_request(request)
+    # A real adapter records the finished body where it measures the payload;
+    # the simulator does the same so the whole path stays testable.
+    _payload_size_bytes = Adapter.record_outbound_body(body)
+    {request_headers(api_key, client_headers), body}
   end
 end

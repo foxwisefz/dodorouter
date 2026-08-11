@@ -527,6 +527,43 @@ defmodule DodoRouter.Proxy.Adapter do
     :ok
   end
 
+  # ── Outbound body ─────────────────────────────────────────────────────────
+  #
+  # The bytes a provider actually received. `state.request` — the OpenAI-shaped
+  # IR — is *not* that: reasoning-effort injection, `sanitize_request/1`,
+  # passthrough merging and cache_control placement all happen after it, inside
+  # the adapter's own request builder, and that output is what an operator
+  # debugging a provider 400 needs to see.
+  #
+  # Recorded here rather than returned in each adapter's meta for the same
+  # reason `Fidelity` is: a per-adapter convention reached one adapter out of
+  # twelve. `FallbackChain` resets before each step and harvests after, so a
+  # step cannot inherit the previous one's body. **Anything that moves an
+  # adapter call into its own task must carry this across with it.**
+  @outbound_body_key :__outbound_body__
+
+  @doc """
+  Records the request body an adapter is about to send, and returns its encoded
+  size in bytes.
+
+  It does both on purpose. Every adapter already had to encode the finished
+  body to report `payload_size_bytes`, so folding the record into that one line
+  puts it at the single point every adapter reaches with the real bytes in
+  hand — rather than adding a separate call that eleven of twelve adapters
+  would forget, which is precisely how this got missed the first time.
+  """
+  def record_outbound_body(body) do
+    Process.put(@outbound_body_key, body)
+    body |> Jason.encode!() |> byte_size()
+  end
+
+  @doc "Takes and clears the recorded outbound body."
+  def take_outbound_body do
+    body = Process.get(@outbound_body_key)
+    Process.delete(@outbound_body_key)
+    body
+  end
+
   @doc """
   The client's untranslated fields, for an adapter whose format matches theirs.
 

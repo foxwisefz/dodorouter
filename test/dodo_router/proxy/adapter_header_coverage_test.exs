@@ -147,4 +147,35 @@ defmodule DodoRouter.Proxy.AdapterHeaderCoverageTest do
       end
     end
   end
+
+  describe "every adapter records the bytes it sends" do
+    # The same gap in the other direction: `outbound_body` was populated by one
+    # adapter out of twelve, so the Trace could not show an operator what any
+    # other provider actually received. `Adapter.record_outbound_body/1` both
+    # records it and returns the payload size every adapter already needed, so
+    # complying is the path of least resistance rather than an extra step.
+    #
+    # Unlike the header sweep there is no public function to call — the record
+    # happens inside a request builder — so this reads the source. A blunt
+    # instrument, but it is the difference between a new adapter failing loudly
+    # and silently dropping off the Trace.
+    #
+    # The rule is "whoever makes the request records the bytes", so adapters
+    # that delegate their transport (Groq, Mistral, xAI, DeepSeek, Codex) are
+    # exempt by construction rather than by a hand-kept list that would go
+    # stale: the module they delegate to is swept on its own.
+    test "every adapter that makes its own request records what it sent" do
+      for module <- Registry.registered_modules() do
+        Code.ensure_loaded!(module)
+        source = module.module_info(:compile)[:source] |> to_string() |> File.read!()
+
+        if source =~ ~r/Req\.(post|request|get)\(/ do
+          assert source =~ "record_outbound_body",
+                 "#{inspect(module)} makes its own HTTP request but never calls " <>
+                   "Adapter.record_outbound_body/1, so the Trace cannot show the bytes it " <>
+                   "sent. Call it where the payload size is computed — it returns that size."
+        end
+      end
+    end
+  end
 end

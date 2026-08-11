@@ -579,6 +579,31 @@ defmodule DodoRouterWeb.ProxyIntegrationTest do
     end
   end
 
+  describe "outbound body" do
+    test "the attempt records the bytes the provider received", %{metadata: metadata} do
+      # `request_body` on an attempt is the OpenAI-shaped IR, copied onto every
+      # attempt in the chain. What an operator debugging a provider 400 needs
+      # is the adapter's own builder output — after effort injection,
+      # sanitisation and passthrough merging.
+      %{router: router, api_key: api_key} = create_router_with_test_provider(metadata)
+
+      {:ok, response} =
+        make_request(
+          "/r/#{router.slug}/v1/chat/completions",
+          %{"model" => "test-model", "messages" => [%{"role" => "user", "content" => "Hello"}]},
+          api_key,
+          metadata
+        )
+
+      [request_id] = response.headers["x-request-id"]
+      log = DodoRouter.Repo.get_by(DodoRouter.Logs.RequestLog, request_id: request_id)
+
+      [attempt] = log.attempted_steps
+      assert attempt["outbound_body"]
+      assert Jason.decode!(attempt["outbound_body"])["messages"]
+    end
+  end
+
   describe "anthropic-ratelimit-* forwarding" do
     # Claude Code paces itself off anthropic-ratelimit-unified-*. Swallowing
     # them makes it fly blind — and streaming is every real agent request.
