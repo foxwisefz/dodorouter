@@ -579,6 +579,57 @@ defmodule DodoRouterWeb.ProxyIntegrationTest do
     end
   end
 
+  describe "x-request-id" do
+    # The header is the only handle a user has on a request. If it does not
+    # name the row we logged, an operator handed one cannot find the request —
+    # and streaming is most agent traffic.
+    for {label, path, body} <- [
+          {"OpenAI streaming", "/v1/chat/completions",
+           %{"model" => "test-model", "messages" => [%{"role" => "user", "content" => "Hello"}]}},
+          {"Anthropic streaming", "/v1/messages",
+           %{
+             "model" => "test-model",
+             "messages" => [%{"role" => "user", "content" => "Hello"}],
+             "max_tokens" => 1024
+           }},
+          {"Responses streaming", "/v1/responses", %{"model" => "test-model", "input" => "Hello"}}
+        ] do
+      test "#{label} logs the request id it handed the client", %{metadata: metadata} do
+        %{router: router, api_key: api_key} = create_router_with_test_provider(metadata)
+
+        {:ok, response} =
+          make_request(
+            "/r/#{router.slug}#{unquote(path)}",
+            unquote(Macro.escape(body)),
+            api_key,
+            metadata,
+            stream: true
+          )
+
+        assert response.status == 200
+        [request_id] = response.headers["x-request-id"]
+
+        assert DodoRouter.Repo.get_by(DodoRouter.Logs.RequestLog, request_id: request_id),
+               "no log row carries the request id the client was handed"
+      end
+    end
+
+    test "sync keeps matching too", %{metadata: metadata} do
+      %{router: router, api_key: api_key} = create_router_with_test_provider(metadata)
+
+      {:ok, response} =
+        make_request(
+          "/r/#{router.slug}/v1/chat/completions",
+          %{"model" => "test-model", "messages" => [%{"role" => "user", "content" => "Hello"}]},
+          api_key,
+          metadata
+        )
+
+      [request_id] = response.headers["x-request-id"]
+      assert DodoRouter.Repo.get_by(DodoRouter.Logs.RequestLog, request_id: request_id)
+    end
+  end
+
   # ===========================================================================
   # Helpers
   # ===========================================================================

@@ -224,6 +224,9 @@ defmodule DodoRouterWeb.ResponsesProxyController do
 
       dispatch_opts =
         [
+          # The same id already went back as x-request-id; without it here the
+          # log row gets a fresh one and the header names nothing.
+          request_id: request_id,
           session: session,
           recording_id: recording_id,
           client_headers: client_headers
