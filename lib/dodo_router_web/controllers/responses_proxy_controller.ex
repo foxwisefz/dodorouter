@@ -49,7 +49,7 @@ defmodule DodoRouterWeb.ResponsesProxyController do
 
   # See AnthropicProxyController: ingress conversion drops travel to the
   # request log alongside the header and egress-allowlist drops.
-  defp fidelity_opts([]), do: []
+  defp fidelity_opts(fields) when fields == [], do: []
 
   defp fidelity_opts(fields) do
     [
@@ -322,7 +322,9 @@ defmodule DodoRouterWeb.ResponsesProxyController do
             "request_id=#{request_id} router=#{router.slug} model=#{params["model"]}"
         )
 
-        fields
+        # The values travel with the names: we never store the client's body,
+        # so the log row is the only surviving record of what was asked for.
+        Map.take(params, fields)
     end
   end
 end

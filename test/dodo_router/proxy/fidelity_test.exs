@@ -285,6 +285,87 @@ defmodule DodoRouter.Proxy.FidelityTest do
     end
   end
 
+  describe "a dropped field carries what the client actually asked for" do
+    test "the egress allowlist records the value it dropped, not just the name", %{
+      router: router
+    } do
+      # We deliberately do not store the client's original body, so the diff is
+      # the only record of what was asked for. "logit_bias dropped" without the
+      # value cannot answer "what did I ask for that you didn't forward?".
+      log =
+        dispatch(router, Map.put(request(), "logit_bias", %{"1" => -100}), client_headers: [])
+
+      change = find(log, "request_body", "logit_bias")
+      assert change["value"] == ~s({"1":-100})
+    end
+
+    test "a field lost crossing formats records its value too", %{router: router} do
+      log =
+        dispatch(router, request(),
+          client_headers: [],
+          client_format: :anthropic,
+          passthrough_request_fields: %{"context_management" => %{"edits" => [%{"type" => "x"}]}}
+        )
+
+      change = find(log, "request_body", "context_management")
+      assert change["value"] == ~s({"edits":[{"type":"x"}]})
+    end
+
+    test "secrets inside a dropped value are redacted like every other payload" do
+      Fidelity.reset()
+
+      Fidelity.record_dropped_body_fields(
+        %{"metadata" => %{"token" => "Bearer abcdefghijklmnopqrstuvwxyz"}},
+        :not_in_provider_allowlist
+      )
+
+      assert [change] = Fidelity.take().changes
+      refute change["value"] =~ "abcdefghijklmnopqrstuvwxyz"
+      assert change["value"] =~ "REDACTED"
+    end
+
+    test "an oversized value is cut with a marker, never silently" do
+      # Claude Code sends bodies in the megabytes; a dropped field can be one of
+      # the big ones. Cutting is fine, cutting invisibly is a second loss on top
+      # of the one we are reporting.
+      Fidelity.reset()
+      Fidelity.record_dropped_body_fields(%{"blob" => String.duplicate("x", 20_000)}, :dropped)
+
+      assert [change] = Fidelity.take().changes
+      assert String.length(change["value"]) < 20_000
+      assert change["value"] =~ "truncated"
+    end
+
+    test "a caller with only field names records no value rather than a fake one" do
+      Fidelity.reset()
+      Fidelity.record_dropped_body_fields(["mystery"], :unsupported_by_format_conversion)
+
+      assert [change] = Fidelity.take().changes
+      assert change["name"] == "mystery"
+      refute Map.has_key?(change, "value")
+    end
+
+    test "the response channel records values on the same terms" do
+      Fidelity.reset()
+
+      Fidelity.record_dropped_response_fields(
+        %{"container" => %{"id" => "cntr_1"}},
+        "the client's format has no place for it"
+      )
+
+      assert [change] = Fidelity.take().changes
+      assert change["channel"] == "response_body"
+      assert change["value"] == ~s({"id":"cntr_1"})
+    end
+
+    test "header drops carry no value — the ones we strip are credentials", %{router: router} do
+      log = dispatch(router, request(), client_headers: [{"cookie", "_dodo_router_key=secret"}])
+
+      change = find(log, "request_header", "cookie")
+      refute Map.has_key?(change, "value")
+    end
+  end
+
   describe "a clean request records nothing" do
     test "no changes means an empty list, not a row full of noise", %{router: router} do
       log = dispatch(router, request(), client_headers: [{"x-client-trace", "abc"}])

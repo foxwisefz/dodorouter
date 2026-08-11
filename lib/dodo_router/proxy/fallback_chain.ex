@@ -271,7 +271,7 @@ defmodule DodoRouter.Proxy.FallbackChain do
           {:ok, response, Map.put(meta, :response_passthrough, fields)}
         else
           Fidelity.record_dropped_response_fields(
-            fields |> Map.keys() |> Enum.sort(),
+            fields,
             "the client's format has no place for it"
           )
 
@@ -301,7 +301,7 @@ defmodule DodoRouter.Proxy.FallbackChain do
       Map.put(state.request, Adapter.passthrough_key(), fields)
     else
       Fidelity.record_dropped_body_fields(
-        fields |> Map.keys() |> Enum.sort(),
+        fields,
         :unsupported_by_format_conversion,
         state.passthrough_detail
       )

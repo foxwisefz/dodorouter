@@ -5,7 +5,7 @@ defmodule DodoRouter.Proxy do
 
   alias DodoRouter.Routers
   alias DodoRouter.Routers.Router
-  alias DodoRouter.Proxy.{Adapter, FallbackChain}
+  alias DodoRouter.Proxy.{Adapter, FallbackChain, Fidelity}
   alias DodoRouter.Logs
   alias DodoRouter.Redact
 
@@ -214,23 +214,11 @@ defmodule DodoRouter.Proxy do
   # controllers pass them in as `:dropped_request_fields`.
   defp collect_fidelity_changes(attempted_steps, opts) do
     ingress =
-      case Keyword.get(opts, :dropped_request_fields, []) do
-        [] ->
-          []
-
-        fields ->
-          detail = Keyword.get(opts, :dropped_request_fields_detail)
-
-          Enum.map(fields, fn field ->
-            %{
-              "channel" => "request_body",
-              "name" => to_string(field),
-              "action" => "dropped",
-              "reason" => "unsupported_by_format_conversion"
-            }
-            |> then(&if detail, do: Map.put(&1, "detail", detail), else: &1)
-          end)
-      end
+      Fidelity.dropped_body_changes(
+        Keyword.get(opts, :dropped_request_fields, []),
+        :unsupported_by_format_conversion,
+        Keyword.get(opts, :dropped_request_fields_detail)
+      )
 
     per_step = Enum.flat_map(attempted_steps, &(&1[:fidelity_changes] || []))
 

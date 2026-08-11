@@ -271,11 +271,12 @@ defmodule DodoRouter.Proxy.Adapter do
   # reporting them would put noise on every single request log.
   @proxy_owned_request_fields ~w(router_slug)
 
+  # Records the value as well as the name: the client's original body is not
+  # stored anywhere, so "logit_bias dropped" on its own cannot tell an operator
+  # what was asked for.
   defp record_dropped_fields(request) do
     request
-    |> Map.keys()
-    |> Enum.reject(&(&1 in @allowed_request_fields or &1 in @proxy_owned_request_fields))
-    |> Enum.sort()
+    |> Map.drop(@allowed_request_fields ++ @proxy_owned_request_fields)
     |> Fidelity.record_dropped_body_fields(:not_in_provider_allowlist)
 
     request

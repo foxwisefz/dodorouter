@@ -36,8 +36,19 @@ defmodule DodoRouter.Proxy.Fidelity do
   """
 
   alias DodoRouter.Proxy.Adapter
+  alias DodoRouter.Redact
 
   @key :__dodo_fidelity__
+
+  # We deliberately do not store the client's original request body
+  # (dodo_router-5ha), which makes this diff the *only* record of what was
+  # asked for — so a row that names a field without showing it cannot answer
+  # the one question the panel exists for. Recording the value costs the
+  # dropped fields rather than the whole body, but a dropped field can still be
+  # one of the megabyte-sized ones a coding agent sends, so it is capped. The
+  # cut is announced: silently halving a value is a second loss on top of the
+  # one being reported.
+  @value_limit 2_000
 
   @empty %{changes: [], outbound_headers: nil}
 
@@ -119,33 +130,102 @@ defmodule DodoRouter.Proxy.Fidelity do
   @doc """
   Records request-body fields removed by a whitelist.
 
+  `fields` is a map of `name => value` — the value is what the client asked
+  for, and is recorded alongside the name (redacted and length-capped) so the
+  row stands on its own. A bare list of names is still accepted for callers
+  that genuinely have no value to hand over; those rows carry no `"value"` key
+  rather than a fabricated one.
+
   `reason` is `:not_in_provider_allowlist` for the per-step egress allowlist or
   `:unsupported_by_format_conversion` for an ingress converter that has no
   translation for the field yet.
   """
   def record_dropped_body_fields(fields, reason, detail \\ nil)
 
-  def record_dropped_body_fields([], _reason, _detail), do: :ok
-
   def record_dropped_body_fields(fields, reason, detail) do
-    fields
-    |> Enum.map(&change("request_body", &1, "dropped", reason, detail))
-    |> Enum.each(&record/1)
+    record_dropped("request_body", fields, reason, detail)
   end
 
   @doc """
   Records native response fields the proxy did not pass back to the client.
+
+  Takes the same `name => value` map as `record_dropped_body_fields/3`, for the
+  same reason: the client never sees these, so the log is the only place they
+  survive at all.
   """
   def record_dropped_response_fields(fields, detail \\ nil)
 
-  def record_dropped_response_fields([], _detail), do: :ok
-
   def record_dropped_response_fields(fields, detail) do
-    fields
-    |> Enum.map(
-      &change("response_body", &1, "dropped", :unsupported_by_format_conversion, detail)
-    )
+    record_dropped("response_body", fields, :unsupported_by_format_conversion, detail)
+  end
+
+  @doc """
+  Builds the same rows `record_dropped_body_fields/3` records, without touching
+  the buffer.
+
+  The ingress format converters run once, before any routing step exists, so
+  their losses are attached to the log directly by `Proxy` rather than harvested
+  per step — but they are the same rows, and must be redacted and capped the
+  same way.
+  """
+  def dropped_body_changes(fields, reason, detail \\ nil) do
+    build_dropped("request_body", fields, reason, detail)
+  end
+
+  defp record_dropped(channel, fields, reason, detail) do
+    channel
+    |> build_dropped(fields, reason, detail)
     |> Enum.each(&record/1)
+  end
+
+  defp build_dropped(channel, fields, reason, detail) do
+    fields
+    |> normalize_fields()
+    |> Enum.map(fn {name, value} ->
+      channel
+      |> change(name, "dropped", reason, detail)
+      |> maybe_put("value", preview(value))
+    end)
+  end
+
+  # Sorted so a request that drops the same set of fields twice (once per
+  # fallback step) reads identically on both steps.
+  defp normalize_fields(fields) when is_map(fields) do
+    fields |> Enum.map(fn {name, value} -> {name, {:value, value}} end) |> Enum.sort()
+  end
+
+  defp normalize_fields(fields) when is_list(fields) do
+    Enum.map(fields, fn
+      {name, value} -> {name, {:value, value}}
+      name -> {name, :no_value}
+    end)
+  end
+
+  defp preview(:no_value), do: nil
+
+  defp preview({:value, value}) do
+    value
+    |> encode_value()
+    |> Redact.redact_secrets()
+    |> truncate()
+  end
+
+  defp encode_value(value) do
+    case Jason.encode(value) do
+      {:ok, json} -> json
+      _not_encodable -> inspect(value)
+    end
+  end
+
+  defp truncate(value) do
+    case String.length(value) do
+      length when length > @value_limit ->
+        String.slice(value, 0, @value_limit) <>
+          "… [truncated, #{length - @value_limit} more characters]"
+
+      _within_limit ->
+        value
+    end
   end
 
   @doc """

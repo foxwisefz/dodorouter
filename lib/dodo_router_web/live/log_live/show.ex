@@ -53,6 +53,7 @@ defmodule DodoRouterWeb.LogLive.Show do
     req_headers = parse_headers(log.request_headers)
     resp_headers = parse_headers(log.response_headers)
     available_tools = MessageNormalizer.extract_tools(req_params)
+    fidelity_changes = Enum.reject(log.fidelity_changes || [], &Fidelity.hidden?/1)
 
     socket =
       socket
@@ -66,11 +67,11 @@ defmodule DodoRouterWeb.LogLive.Show do
       |> assign(:available_tools, available_tools)
       |> assign(:selected_tool, nil)
       |> assign(:active_tab, "conversation")
-      |> assign(:show_req_headers, false)
-      |> assign(:show_resp_headers, false)
       |> assign(:expanded_messages, MapSet.new())
       |> assign(:truncation_flags, log.truncation_flags || [])
-      |> assign(:fidelity_changes, Enum.reject(log.fidelity_changes || [], &Fidelity.hidden?/1))
+      |> assign(:fidelity_changes, fidelity_changes)
+      |> assign(:trace, build_trace(log, fidelity_changes))
+      |> assign(:client_format, client_format(log, req_headers))
       |> assign(:finish_reason, extract_finish_reason(log.response_body))
       |> assign(:evaluations, Evaluations.list_for_log(socket.assigns.current_user, log.id))
       |> assign(:replay_count, Logs.replay_counts([log.id]) |> Map.get(log.id, 0))
@@ -90,14 +91,6 @@ defmodule DodoRouterWeb.LogLive.Show do
 
   def handle_event("hide_tool", _params, socket) do
     {:noreply, assign(socket, :selected_tool, nil)}
-  end
-
-  def handle_event("toggle_req_headers", _params, socket) do
-    {:noreply, update(socket, :show_req_headers, &(!&1))}
-  end
-
-  def handle_event("toggle_resp_headers", _params, socket) do
-    {:noreply, update(socket, :show_resp_headers, &(!&1))}
   end
 
   def handle_event("toggle_message", %{"index" => idx}, socket) do
@@ -465,9 +458,9 @@ defmodule DodoRouterWeb.LogLive.Show do
               <%= for {attempt, _idx} <- Enum.with_index(@log.attempted_steps) do %>
                 <div
                   phx-click="set_tab"
-                  phx-value-tab="fallback_trace"
+                  phx-value-tab="trace"
                   role="button"
-                  title="Open the fallback trace"
+                  title="Open the trace"
                   class="flex items-center gap-1.5 text-xs rounded px-1 -mx-1 py-0.5 cursor-pointer hover:bg-secondary/60 transition-colors"
                 >
                   <%= if attempt["status"] == "success" do %>
@@ -500,6 +493,10 @@ defmodule DodoRouterWeb.LogLive.Show do
         <div class="flex-1 overflow-hidden flex flex-col">
           <!-- Tabs -->
           <div class="border-b border-base-300/30 px-4 pt-2">
+            <%!-- Two modes, not four peers. "Conversation" is a different axis —
+                 what was *said*. "Trace" is the wire: client, us, each provider
+                 we tried, and back. The three tabs it replaces were single hops
+                 lifted out of that sequence and stripped of their position. --%>
             <div class="flex gap-1 overflow-x-auto whitespace-nowrap" role="tablist">
               <button
                 type="button"
@@ -520,50 +517,21 @@ defmodule DodoRouterWeb.LogLive.Show do
               <button
                 type="button"
                 phx-click="set_tab"
-                phx-value-tab="raw_request"
+                phx-value-tab="trace"
                 role="tab"
-                aria-selected={@active_tab == "raw_request"}
+                aria-selected={@active_tab == "trace"}
                 class={[
-                  "px-3 py-1.5 text-xs font-medium rounded-t-lg transition",
-                  @active_tab == "raw_request" &&
+                  "px-3 py-1.5 text-xs font-medium rounded-t-lg transition flex items-center gap-1.5",
+                  @active_tab == "trace" &&
                     "bg-base-100 text-base-content border-t border-x border-base-300/30 -mb-px",
-                  @active_tab != "raw_request" &&
+                  @active_tab != "trace" &&
                     "text-base-content/60 hover:text-base-content hover:bg-base-200/50"
                 ]}
               >
-                Sent to Provider
-              </button>
-              <button
-                type="button"
-                phx-click="set_tab"
-                phx-value-tab="raw_response"
-                role="tab"
-                aria-selected={@active_tab == "raw_response"}
-                class={[
-                  "px-3 py-1.5 text-xs font-medium rounded-t-lg transition",
-                  @active_tab == "raw_response" &&
-                    "bg-base-100 text-base-content border-t border-x border-base-300/30 -mb-px",
-                  @active_tab != "raw_response" &&
-                    "text-base-content/60 hover:text-base-content hover:bg-base-200/50"
-                ]}
-              >
-                Final Response
-              </button>
-              <button
-                type="button"
-                phx-click="set_tab"
-                phx-value-tab="fallback_trace"
-                role="tab"
-                aria-selected={@active_tab == "fallback_trace"}
-                class={[
-                  "px-3 py-1.5 text-xs font-medium rounded-t-lg transition",
-                  @active_tab == "fallback_trace" &&
-                    "bg-base-100 text-base-content border-t border-x border-base-300/30 -mb-px",
-                  @active_tab != "fallback_trace" &&
-                    "text-base-content/60 hover:text-base-content hover:bg-base-200/50"
-                ]}
-              >
-                {if length(@log.attempted_steps) > 1, do: "Fallback Trace", else: "Provider Details"}
+                Trace
+                <span :if={@fidelity_changes != []} class="badge badge-xs badge-ghost">
+                  {length(@fidelity_changes)}
+                </span>
               </button>
             </div>
           </div>
@@ -609,17 +577,20 @@ defmodule DodoRouterWeb.LogLive.Show do
                   </div>
                   <button
                     phx-click="set_tab"
-                    phx-value-tab="fallback_trace"
+                    phx-value-tab="trace"
                     class="mt-3 text-sm text-error font-medium hover:underline"
                   >
-                    Full fallback trace with headers and bodies →
+                    Full trace with headers and bodies →
                   </button>
                 </div>
                 <%!-- "We changed nothing" is the product's central claim, so silence is the
      wrong way to say it. A clean request states it outright instead of
      rendering blank space where the panel would be. --%>
                 <%= if @fidelity_changes == [] do %>
-                  <div class="mb-4 flex items-center gap-2 rounded-lg border border-success/30 bg-success/5 px-4 py-2.5">
+                  <div
+                    id="fidelity-clean"
+                    class="mb-4 flex items-center gap-2 rounded-lg border border-success/30 bg-success/5 px-4 py-2.5"
+                  >
                     <.icon name="hero-check-circle" class="w-4 h-4 text-success shrink-0" />
                     <span class="text-sm">
                       <span class="font-semibold">Passed through unchanged</span>
@@ -629,69 +600,22 @@ defmodule DodoRouterWeb.LogLive.Show do
                     </span>
                   </div>
                 <% end %>
+                <%!-- The edits themselves live on the Trace, hung off the hop that
+                     made them. A floating table here could only point at a step
+                     three clicks away, which is what it used to do. --%>
                 <%= if length(@fidelity_changes) > 0 do %>
-                  <div class="mb-4 rounded-lg border border-base-300 bg-base-100 overflow-hidden">
-                    <button
-                      type="button"
-                      phx-click={
-                        JS.toggle(to: "#fidelity-changes")
-                        |> JS.toggle(to: "#fidelity-show")
-                        |> JS.toggle(to: "#fidelity-hide")
-                      }
-                      class="w-full flex items-center gap-2 px-4 py-2.5 text-left hover:bg-base-200/60 transition-colors"
-                    >
-                      <.icon name="hero-scissors" class="w-4 h-4 text-base-content/50 shrink-0" />
-                      <span class="text-sm font-semibold">What the proxy changed</span>
-                      <span class="badge badge-sm badge-ghost">{length(@fidelity_changes)}</span>
-                      <span id="fidelity-show" class="ml-auto text-xs text-base-content/40">
-                        show
-                      </span>
-                      <span id="fidelity-hide" class="ml-auto hidden text-xs text-base-content/40">
-                        hide
-                      </span>
-                    </button>
-                    <div id="fidelity-changes" class="hidden border-t border-base-300">
-                      <table class="table table-xs">
-                        <thead>
-                          <tr>
-                            <th>Where</th>
-                            <th>What</th>
-                            <th>Action</th>
-                            <th>Why</th>
-                            <th>Step</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          <tr :for={change <- @fidelity_changes}>
-                            <td class="text-base-content/60 whitespace-nowrap">
-                              {fidelity_channel_label(change["channel"])}
-                            </td>
-                            <td class="font-mono break-all">{change["name"]}</td>
-                            <td>
-                              <span class={[
-                                "badge badge-xs",
-                                if(change["action"] == "rewritten",
-                                  do: "badge-info",
-                                  else: "badge-ghost"
-                                )
-                              ]}>
-                                {change["action"]}
-                              </span>
-                            </td>
-                            <td class="text-base-content/60">
-                              {DodoRouter.Proxy.Fidelity.explain(change["reason"])}
-                              <span :if={change["detail"]} class="block text-base-content/40">
-                                {change["detail"]}
-                              </span>
-                            </td>
-                            <td class="text-base-content/50 whitespace-nowrap">
-                              {fidelity_step_label(change)}
-                            </td>
-                          </tr>
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
+                  <button
+                    type="button"
+                    id="fidelity-summary"
+                    phx-click="set_tab"
+                    phx-value-tab="trace"
+                    class="mb-4 w-full flex items-center gap-2 rounded-lg border border-base-300 bg-base-100 px-4 py-2.5 text-left hover:bg-base-200/60 transition-colors"
+                  >
+                    <.icon name="hero-scissors" class="w-4 h-4 text-base-content/50 shrink-0" />
+                    <span class="text-sm font-semibold">What the proxy changed</span>
+                    <span class="badge badge-sm badge-ghost">{length(@fidelity_changes)}</span>
+                    <span class="ml-auto text-xs text-primary">see it on the trace →</span>
+                  </button>
                 <% end %>
                 <%= if length(@truncation_flags) > 0 do %>
                   <div class="alert alert-warning mb-4">
@@ -750,353 +674,34 @@ defmodule DodoRouterWeb.LogLive.Show do
               </div>
             <% end %>
 
-            <%= if @active_tab == "raw_request" do %>
-              <div class="p-4 space-y-3">
-                <% final_attempt = List.last(@log.attempted_steps) %>
-                <%= if final_attempt do %>
-                  <div class="space-y-2">
-                    <%= if final_attempt["endpoint"] do %>
-                      <div class="flex items-center gap-2">
-                        <span class="text-[10px] uppercase tracking-wider text-base-content/40 font-semibold">
-                          Endpoint
-                        </span>
-                        <span class="font-mono text-base-content/70 text-xs break-all">
-                          {final_attempt["endpoint"]}
-                        </span>
-                      </div>
+            <%!-- The Trace: one node per hop, in wire order, with everything the
+                 proxy removed or rewrote hanging off the edge that produced it.
+                 The tabs this replaced modelled the hops as unordered peers, so
+                 a fallback chain had nowhere to render and the fidelity panel's
+                 "Step" column pointed at a tab three clicks away. --%>
+            <%= if @active_tab == "trace" do %>
+              <div class="p-4">
+                <div class="text-sm text-base-content/60 mb-4">{trace_summary(@log)}</div>
+                <div>
+                  <%= for hop <- @trace do %>
+                    <.trace_edge :if={hop.edge} hop={hop} />
+                    <%= case hop.kind do %>
+                      <% :client_request -> %>
+                        <.trace_client_request
+                          format={@client_format}
+                          req_headers={@req_headers}
+                        />
+                      <% :attempt -> %>
+                        <.trace_attempt hop={hop} />
+                      <% :client_response -> %>
+                        <.trace_client_response
+                          log={@log}
+                          format={@client_format}
+                          resp_headers={@resp_headers}
+                        />
                     <% end %>
-                    <%= if final_attempt["provider_key_id"] && final_attempt["provider_key_slug"] do %>
-                      <div class="flex items-center gap-2">
-                        <span class="text-[10px] uppercase tracking-wider text-base-content/40 font-semibold">
-                          API Key
-                        </span>
-                        <.link
-                          navigate={
-                            ~p"/providers?highlight=#{final_attempt["provider_key_id"]}&provider=#{final_attempt["provider_key_slug"]}"
-                          }
-                          class="text-xs text-primary hover:underline"
-                        >
-                          {final_attempt["provider_key_label"] || "Key"}
-                        </.link>
-                      </div>
-                    <% end %>
-                    <%= if final_attempt["outbound_headers"] do %>
-                      <div>
-                        <button
-                          type="button"
-                          phx-click={JS.toggle(to: "#original-outbound-headers")}
-                          class="text-[10px] uppercase tracking-wider text-primary hover:underline font-semibold"
-                        >
-                          Outbound Headers
-                        </button>
-                        <div id="original-outbound-headers" class="hidden">
-                          <div class="mt-2 p-2 bg-base-200 rounded text-xs font-mono space-y-1">
-                            <%= for [key, value] <- final_attempt["outbound_headers"] do %>
-                              <div class="flex gap-2">
-                                <span class="text-base-content/60 shrink-0">{key}:</span>
-                                <span class="break-all">{value}</span>
-                              </div>
-                            <% end %>
-                          </div>
-                        </div>
-                      </div>
-                    <% end %>
-                    <%= if final_attempt["outbound_body"] do %>
-                      <div>
-                        <button
-                          type="button"
-                          phx-click={JS.toggle(to: "#original-outbound-body")}
-                          class="text-[10px] uppercase tracking-wider text-primary hover:underline font-semibold"
-                        >
-                          Outbound Request (sent to provider)
-                        </button>
-                        <div id="original-outbound-body" class="hidden">
-                          <div class="mt-2 mockup-code text-xs max-h-64 overflow-auto">
-                            <pre><code><%= format_json(final_attempt["outbound_body"]) %></code></pre>
-                          </div>
-                        </div>
-                      </div>
-                    <% end %>
-                  </div>
-                <% end %>
-                <%= if @req_headers do %>
-                  <div>
-                    <button
-                      type="button"
-                      phx-click="toggle_req_headers"
-                      class="text-xs text-primary hover:underline"
-                    >
-                      {if @show_req_headers, do: "Hide headers", else: "Show headers"}
-                    </button>
-                    <%= if @show_req_headers do %>
-                      <div class="mt-2 p-2 bg-base-200 rounded text-xs font-mono space-y-1">
-                        <%= for {key, value} <- @req_headers do %>
-                          <div class="flex gap-2">
-                            <span class="text-base-content/60 shrink-0">{key}:</span>
-                            <span class="break-all">{value}</span>
-                          </div>
-                        <% end %>
-                      </div>
-                    <% end %>
-                  </div>
-                <% end %>
-                <div class="relative">
-                  <button
-                    id="copy-request-json"
-                    phx-hook="CopyButton"
-                    data-copy={format_json(@log.request_body)}
-                    class="absolute right-2 top-2 z-10 px-2 py-1 rounded bg-base-100/10 text-[10px] font-medium text-base-content/60 hover:text-primary transition-colors"
-                    title="Copy request JSON"
-                  >
-                    <.icon name="hero-clipboard-document" class="w-3.5 h-3.5" />
-                  </button>
-                  <div class="mockup-code text-xs max-h-[calc(100vh-240px)] overflow-auto">
-                    <pre class="whitespace-pre-wrap break-words"><code><%= format_json(@log.request_body) %></code></pre>
-                  </div>
+                  <% end %>
                 </div>
-              </div>
-            <% end %>
-
-            <%= if @active_tab == "raw_response" do %>
-              <div class="p-4 space-y-3">
-                <%= if @resp_headers do %>
-                  <div>
-                    <button
-                      type="button"
-                      phx-click="toggle_resp_headers"
-                      class="text-xs text-primary hover:underline"
-                    >
-                      {if @show_resp_headers, do: "Hide headers", else: "Show headers"}
-                    </button>
-                    <%= if @show_resp_headers do %>
-                      <div class="mt-2 p-2 bg-base-200 rounded text-xs font-mono space-y-1">
-                        <%= for {key, value} <- @resp_headers do %>
-                          <div class="flex gap-2">
-                            <span class="text-base-content/60 shrink-0">{key}:</span>
-                            <span class="break-all">{value}</span>
-                          </div>
-                        <% end %>
-                      </div>
-                    <% end %>
-                  </div>
-                <% end %>
-                <div class="relative">
-                  <button
-                    id="copy-response-json"
-                    phx-hook="CopyButton"
-                    data-copy={format_json(@log.response_body)}
-                    class="absolute right-2 top-2 z-10 px-2 py-1 rounded bg-base-100/10 text-[10px] font-medium text-base-content/60 hover:text-primary transition-colors"
-                    title="Copy response JSON"
-                  >
-                    <.icon name="hero-clipboard-document" class="w-3.5 h-3.5" />
-                  </button>
-                  <div class="mockup-code text-xs max-h-[calc(100vh-240px)] overflow-auto">
-                    <pre class="whitespace-pre-wrap break-words"><code><%= format_json(@log.response_body) %></code></pre>
-                  </div>
-                </div>
-              </div>
-            <% end %>
-
-            <%= if @active_tab == "fallback_trace" do %>
-              <div class="p-4 space-y-3">
-                <div class="text-sm text-base-content/60 mb-2">
-                  <%!-- A single successful attempt was never "retried". --%>
-                  {cond do
-                    @log.status == "error" ->
-                      "All #{length(@log.attempted_steps)} providers failed — each attempt below with its actual response."
-
-                    length(@log.attempted_steps) <= 1 ->
-                      "Served on the first attempt — exactly what went upstream and came back."
-
-                    true ->
-                      "Fell back through #{length(@log.attempted_steps)} providers before one answered."
-                  end}
-                </div>
-                <%= for {attempt, idx} <- Enum.with_index(@log.attempted_steps) do %>
-                  <div class={[
-                    "border rounded-lg overflow-hidden",
-                    attempt["status"] == "success" && "border-success/30",
-                    attempt["status"] != "success" && "border-error/30"
-                  ]}>
-                    <div class={[
-                      "px-3 py-2 flex items-center justify-between text-xs",
-                      attempt["status"] == "success" && "bg-success/5",
-                      attempt["status"] != "success" && "bg-error/5"
-                    ]}>
-                      <div class="flex items-center gap-2">
-                        <span class="font-mono text-base-content/40">#{idx + 1}</span>
-                        <div class="w-4 h-4 rounded flex items-center justify-center shrink-0 bg-base-200">
-                          <.provider_logo
-                            slug={
-                              normalize_slug(
-                                Registry.to_key_slug(
-                                  attempt["provider"],
-                                  attempt["plan_type"] || "standard"
-                                )
-                              )
-                            }
-                            class="w-3 h-3"
-                          />
-                        </div>
-                        <span class="font-medium">{attempt["provider"]} / {attempt["model"]}</span>
-                        <%= if attempt["plan_type"] do %>
-                          <span class="badge badge-sm">{attempt["plan_type"]}</span>
-                        <% end %>
-                        <%= if effort = attempt_effort(attempt) do %>
-                          <span
-                            class="badge badge-sm badge-accent badge-outline"
-                            title="Reasoning effort"
-                          >
-                            effort: {effort}
-                          </span>
-                        <% end %>
-                        <%= if attempt["status"] == "success" do %>
-                          <span class="text-success font-medium">Success</span>
-                        <% else %>
-                          <span class="text-error font-medium">{attempt["error"]}</span>
-                        <% end %>
-                      </div>
-                      <span class="font-mono text-base-content/60">{attempt["latency_ms"]}ms</span>
-                    </div>
-
-                    <div class="px-3 py-2 space-y-2 text-xs">
-                      <%= if attempt["endpoint"] do %>
-                        <div class="flex items-center gap-2">
-                          <span class="text-[10px] uppercase tracking-wider text-base-content/40 font-semibold">
-                            Endpoint
-                          </span>
-                          <span class="font-mono text-base-content/70 break-all">
-                            {attempt["endpoint"]}
-                          </span>
-                        </div>
-                      <% end %>
-
-                      <%= if attempt["provider_key_id"] && attempt["provider_key_slug"] do %>
-                        <div class="flex items-center gap-2">
-                          <span class="text-[10px] uppercase tracking-wider text-base-content/40 font-semibold">
-                            API Key
-                          </span>
-                          <.link
-                            navigate={
-                              ~p"/providers?highlight=#{attempt["provider_key_id"]}&provider=#{attempt["provider_key_slug"]}"
-                            }
-                            class="font-mono text-primary hover:underline"
-                          >
-                            {attempt["provider_key_label"]}
-                          </.link>
-                        </div>
-                      <% end %>
-
-                      <%= if attempt["outbound_headers"] do %>
-                        <div>
-                          <button
-                            type="button"
-                            phx-click={JS.toggle(to: "#step-outbound-headers-#{idx}")}
-                            class="text-[10px] uppercase tracking-wider text-primary hover:underline font-semibold mb-1"
-                          >
-                            Outbound Headers
-                          </button>
-                          <div id={"step-outbound-headers-#{idx}"} class="hidden">
-                            <div class="p-2 bg-base-200 rounded text-xs font-mono space-y-1">
-                              <%= for [key, value] <- attempt["outbound_headers"] do %>
-                                <div class="flex gap-2">
-                                  <span class="text-base-content/60 shrink-0">{key}:</span>
-                                  <span class="break-all">{value}</span>
-                                </div>
-                              <% end %>
-                            </div>
-                          </div>
-                        </div>
-                      <% end %>
-
-                      <%= if attempt["error_body"] do %>
-                        <div>
-                          <div class="text-[10px] uppercase tracking-wider text-base-content/40 font-semibold mb-1">
-                            Error Response
-                          </div>
-                          <div class="mockup-code text-xs">
-                            <pre><code><%= format_json(attempt["error_body"]) %></code></pre>
-                          </div>
-                        </div>
-                      <% end %>
-
-                      <%= if attempt["request_body"] do %>
-                        <div>
-                          <button
-                            type="button"
-                            phx-click={JS.toggle(to: "#step-request-#{idx}")}
-                            class="text-[10px] uppercase tracking-wider text-primary hover:underline font-semibold mb-1"
-                          >
-                            {if idx == 0,
-                              do: "Request body sent",
-                              else: "Request body sent (re-converted)"}
-                          </button>
-                          <div id={"step-request-#{idx}"} class="hidden">
-                            <div class="mockup-code text-xs max-h-64 overflow-auto">
-                              <pre><code><%= format_json(attempt["request_body"]) %></code></pre>
-                            </div>
-                          </div>
-                        </div>
-                      <% end %>
-
-                      <%= if attempt["outbound_body"] do %>
-                        <div>
-                          <button
-                            type="button"
-                            phx-click={JS.toggle(to: "#step-outbound-body-#{idx}")}
-                            class="text-[10px] uppercase tracking-wider text-primary hover:underline font-semibold mb-1"
-                          >
-                            Outbound Request (sent to provider)
-                          </button>
-                          <div id={"step-outbound-body-#{idx}"} class="hidden">
-                            <div class="mockup-code text-xs max-h-64 overflow-auto">
-                              <pre><code><%= format_json(attempt["outbound_body"]) %></code></pre>
-                            </div>
-                          </div>
-                        </div>
-                      <% end %>
-
-                      <%= if attempt["response_body"] do %>
-                        <div>
-                          <button
-                            type="button"
-                            phx-click={JS.toggle(to: "#step-response-#{idx}")}
-                            class="text-[10px] uppercase tracking-wider text-primary hover:underline font-semibold mb-1"
-                          >
-                            Response Body
-                          </button>
-                          <div id={"step-response-#{idx}"} class="hidden">
-                            <div class="mockup-code text-xs max-h-64 overflow-auto">
-                              <pre><code><%= format_json(attempt["response_body"]) %></code></pre>
-                            </div>
-                          </div>
-                        </div>
-                      <% end %>
-
-                      <%= if attempt["response_headers"] do %>
-                        <div>
-                          <button
-                            type="button"
-                            phx-click={JS.toggle(to: "#step-headers-#{idx}")}
-                            class="text-[10px] uppercase tracking-wider text-primary hover:underline font-semibold mb-1"
-                          >
-                            Response Headers
-                          </button>
-                          <div id={"step-headers-#{idx}"} class="hidden">
-                            <div class="p-2 bg-base-200 rounded text-xs font-mono space-y-1">
-                              <%= for [key, value] <- attempt["response_headers"] do %>
-                                <div class="flex gap-2">
-                                  <span class="text-base-content/60 shrink-0">{key}:</span>
-                                  <span class="break-all">{value}</span>
-                                </div>
-                              <% end %>
-                            </div>
-                          </div>
-                        </div>
-                      <% end %>
-                    </div>
-                  </div>
-                <% end %>
               </div>
             <% end %>
           </div>
@@ -1300,14 +905,424 @@ defmodule DodoRouterWeb.LogLive.Show do
   defp fidelity_channel_label("response_body"), do: "Response field"
   defp fidelity_channel_label(other), do: other
 
-  # Ingress-conversion changes happen before any step exists, so they carry no
-  # provider — saying so beats printing a blank cell next to the per-step rows.
-  defp fidelity_step_label(%{"provider" => provider, "step" => step})
-       when is_binary(provider) and is_integer(step) do
-    "#{step + 1} · #{provider}"
+  # A proxied request is a sequence — client, us, each provider we tried, back
+  # to the client — so the page renders it as one. Every recorded change carries
+  # the step that produced it, which means each edit can hang off the edge it
+  # belongs to instead of a table pointing at a step elsewhere in the UI.
+  defp build_trace(log, changes) do
+    attempts = log.attempted_steps || []
+
+    request_changes = Enum.filter(changes, &(&1["channel"] in ["request_header", "request_body"]))
+    response_changes = Enum.filter(changes, &(&1["channel"] == "response_body"))
+
+    # Ingress conversions run before any step exists, so their losses belong to
+    # the client -> proxy hop rather than to any provider.
+    pre_routing = Enum.filter(request_changes, &is_nil(&1["step"]))
+
+    attempt_hops =
+      attempts
+      |> Enum.with_index()
+      |> Enum.map(fn {attempt, index} ->
+        own = Enum.filter(request_changes, &(&1["step"] == (attempt["position"] || index)))
+        edge_changes = if index == 0, do: pre_routing ++ own, else: own
+
+        %{
+          kind: :attempt,
+          key: "attempt-#{index}",
+          index: index,
+          attempt: attempt,
+          request_body: attempt["request_body"] || (index == 0 && log.request_body) || nil,
+          edge: %{
+            label: if(index == 0, do: nil, else: "fell back"),
+            changes: edge_changes,
+            # Stated once, on the first hop, because "unchanged" is a claim
+            # about the whole journey — not about one edge that happens to be
+            # quiet while another lost a field.
+            clean_summary: if(index == 0 and changes == [], do: passthrough_summary(log))
+          }
+        }
+      end)
+
+    orphaned = if attempts == [], do: pre_routing, else: []
+
+    client_response = %{
+      kind: :client_response,
+      key: "client-response",
+      index: length(attempts),
+      attempt: List.last(attempts),
+      request_body: nil,
+      edge: %{
+        label: nil,
+        changes: orphaned ++ response_changes,
+        clean_summary: if(attempts == [] and changes == [], do: passthrough_summary(log))
+      }
+    }
+
+    client_request = %{
+      kind: :client_request,
+      key: "client-request",
+      index: 0,
+      attempt: nil,
+      request_body: nil,
+      edge: nil
+    }
+
+    [client_request] ++ attempt_hops ++ [client_response]
   end
 
-  defp fidelity_step_label(_change), do: "before routing"
+  defp trace_summary(log) do
+    count = length(log.attempted_steps || [])
+
+    cond do
+      log.status == "error" ->
+        "All #{count} providers failed — every hop below, with what actually went over the wire."
+
+      count <= 1 ->
+        "One hop — served on the first attempt."
+
+      true ->
+        "Fell back through #{count} providers before one answered."
+    end
+  end
+
+  # Nothing on the row states the client's format outright: their request body
+  # is not stored, and the logged response body is the proxy's OpenAI-shaped IR
+  # rather than the bytes the egress wrote — reading it alone labels every
+  # Anthropic client "openai", which is the mislabeling this view exists to fix.
+  # The headers the client actually sent are theirs and do carry the marker;
+  # the IR's shape is only the fallback, and nil is a fine answer.
+  defp client_format(log, headers) do
+    names = for {key, _value} <- headers || [], do: String.downcase(key)
+
+    if "anthropic-version" in names or "anthropic-beta" in names do
+      "anthropic"
+    else
+      case Jason.decode(log.response_body || "") do
+        {:ok, %{"output" => _}} -> "responses"
+        {:ok, %{"choices" => _}} -> "openai"
+        {:ok, %{"type" => type}} when type in ["message", "error"] -> "anthropic"
+        _undeterminable -> nil
+      end
+    end
+  end
+
+  attr :hop, :map, required: true
+
+  defp trace_edge(assigns) do
+    ~H"""
+    <div
+      id={"trace-edge-#{@hop.key}"}
+      class="relative ml-[8px] border-l-2 border-dashed border-base-300/80 pl-7 py-3 space-y-2"
+    >
+      <div :if={@hop.edge.label} class="flex items-center gap-1.5 text-xs font-medium text-warning">
+        <.icon name="hero-arrow-uturn-down" class="size-3.5 shrink-0" />
+        {@hop.edge.label}
+      </div>
+      <div :if={@hop.edge.clean_summary} class="flex items-start gap-2 text-xs text-success">
+        <.icon name="hero-check-circle" class="size-4 shrink-0 mt-px" />
+        <span>
+          <span class="font-semibold">Passed through unchanged</span>
+          <span class="text-base-content/60">— {@hop.edge.clean_summary}</span>
+        </span>
+      </div>
+      <div
+        :if={@hop.edge.changes != []}
+        class="flex items-center gap-1.5 text-xs font-medium text-base-content/70"
+      >
+        <.icon name="hero-scissors" class="size-3.5 shrink-0" />
+        we changed {change_count(@hop.edge.changes)}
+      </div>
+      <div
+        :for={{change, position} <- Enum.with_index(@hop.edge.changes)}
+        class="rounded-lg border border-base-300/70 bg-base-200/40 px-3 py-2 text-xs space-y-1"
+      >
+        <div class="flex flex-wrap items-center gap-2">
+          <span class={[
+            "badge badge-xs",
+            if(change["action"] == "rewritten", do: "badge-info", else: "badge-ghost")
+          ]}>
+            {change["action"]}
+          </span>
+          <span class="text-base-content/50">{fidelity_channel_label(change["channel"])}</span>
+          <span class="font-mono font-medium break-all">{change["name"]}</span>
+        </div>
+        <div class="text-base-content/60">{Fidelity.explain(change["reason"])}</div>
+        <div :if={change["detail"]} class="text-base-content/40">{change["detail"]}</div>
+        <%!-- The client's original body is not stored, so this value is the only
+             surviving record of what they asked for. Collapsed by default: a
+             dropped field can be one of the big ones. --%>
+        <details :if={change["value"]} id={"trace-value-#{@hop.key}-#{position}"}>
+          <summary class="cursor-pointer text-primary hover:underline">
+            what you sent
+          </summary>
+          <pre class="mt-1 max-h-48 overflow-auto rounded bg-base-300/40 p-2 font-mono whitespace-pre-wrap break-all"><code>{change["value"]}</code></pre>
+        </details>
+      </div>
+    </div>
+    """
+  end
+
+  attr :format, :string, default: nil
+  attr :req_headers, :list, default: nil
+
+  defp trace_client_request(assigns) do
+    ~H"""
+    <div id="trace-node-client-request" class="relative pl-7">
+      <span class="absolute left-0 top-1 size-[18px] rounded-full border-2 border-primary bg-base-100">
+      </span>
+      <div class="flex flex-wrap items-center gap-2">
+        <span class="text-sm font-semibold">You sent</span>
+        <span
+          :if={@format}
+          class="badge badge-sm badge-ghost font-mono"
+          title="Inferred from the headers you sent — your request body is not stored"
+        >
+          {@format} format
+        </span>
+        <span :if={@req_headers} class="text-xs text-base-content/50">
+          {length(@req_headers)} headers
+        </span>
+      </div>
+      <%!-- Naming the normalized request "what you sent" is the mislabeling this
+           view exists to fix: we never stored the client's body. --%>
+      <p class="mt-1 text-xs text-base-content/40">
+        Your request body is not stored — what follows is the headers you sent and what we changed.
+      </p>
+      <details :if={@req_headers} id="trace-client-headers" class="mt-2">
+        <summary class="cursor-pointer text-[10px] uppercase tracking-wider text-primary font-semibold">
+          Headers you sent
+        </summary>
+        <div class="mt-2 p-2 bg-base-200 rounded text-xs font-mono space-y-1">
+          <div :for={{key, value} <- @req_headers} class="flex gap-2">
+            <span class="text-base-content/60 shrink-0">{key}:</span>
+            <span class="break-all">{value}</span>
+          </div>
+        </div>
+      </details>
+    </div>
+    """
+  end
+
+  attr :hop, :map, required: true
+
+  defp trace_attempt(assigns) do
+    assigns = assign(assigns, :attempt, assigns.hop.attempt)
+
+    ~H"""
+    <div id={"trace-node-attempt-#{@hop.index}"} class="relative pl-7">
+      <span class={[
+        "absolute left-0 top-1 size-[18px] rounded-full border-2 bg-base-100",
+        @attempt["status"] == "success" && "border-success",
+        @attempt["status"] != "success" && "border-error"
+      ]}>
+      </span>
+      <div class={[
+        "border rounded-lg overflow-hidden",
+        @attempt["status"] == "success" && "border-success/30",
+        @attempt["status"] != "success" && "border-error/30"
+      ]}>
+        <div class={[
+          "px-3 py-2 flex items-center justify-between gap-2 text-xs",
+          @attempt["status"] == "success" && "bg-success/5",
+          @attempt["status"] != "success" && "bg-error/5"
+        ]}>
+          <div class="flex flex-wrap items-center gap-2">
+            <span class="font-semibold">Attempt {@hop.index + 1}</span>
+            <div class="w-4 h-4 rounded flex items-center justify-center shrink-0 bg-base-200">
+              <.provider_logo
+                slug={
+                  normalize_slug(
+                    Registry.to_key_slug(@attempt["provider"], @attempt["plan_type"] || "standard")
+                  )
+                }
+                class="w-3 h-3"
+              />
+            </div>
+            <span class="font-medium">{@attempt["provider"]} / {@attempt["model"]}</span>
+            <span :if={@attempt["plan_type"]} class="badge badge-sm">{@attempt["plan_type"]}</span>
+            <span
+              :if={attempt_effort(@attempt)}
+              class="badge badge-sm badge-accent badge-outline"
+              title="Reasoning effort"
+            >
+              effort: {attempt_effort(@attempt)}
+            </span>
+            <%= if @attempt["status"] == "success" do %>
+              <span class="text-success font-medium">✓ Success</span>
+            <% else %>
+              <span class="text-error font-medium">
+                ✗ {@attempt["http_status"]} {@attempt["error"]}
+              </span>
+            <% end %>
+          </div>
+          <span class="font-mono text-base-content/60 shrink-0">
+            {fmt_ms(@attempt["latency_ms"])}
+          </span>
+        </div>
+
+        <div class="px-3 py-2 space-y-2 text-xs">
+          <div :if={@attempt["endpoint"]} class="flex items-center gap-2">
+            <span class="text-[10px] uppercase tracking-wider text-base-content/40 font-semibold">
+              Endpoint
+            </span>
+            <span class="font-mono text-base-content/70 break-all">{@attempt["endpoint"]}</span>
+          </div>
+
+          <div
+            :if={@attempt["provider_key_id"] && @attempt["provider_key_slug"]}
+            class="flex items-center gap-2"
+          >
+            <span class="text-[10px] uppercase tracking-wider text-base-content/40 font-semibold">
+              API Key
+            </span>
+            <.link
+              navigate={
+                ~p"/providers?highlight=#{@attempt["provider_key_id"]}&provider=#{@attempt["provider_key_slug"]}"
+              }
+              class="font-mono text-primary hover:underline"
+            >
+              {@attempt["provider_key_label"]}
+            </.link>
+          </div>
+
+          <details :if={@attempt["outbound_headers"]} id={"trace-outbound-headers-#{@hop.index}"}>
+            <summary class="cursor-pointer text-[10px] uppercase tracking-wider text-primary font-semibold">
+              Outbound Headers
+            </summary>
+            <div class="mt-1 p-2 bg-base-200 rounded font-mono space-y-1">
+              <div :for={[key, value] <- @attempt["outbound_headers"]} class="flex gap-2">
+                <span class="text-base-content/60 shrink-0">{key}:</span>
+                <span class="break-all">{value}</span>
+              </div>
+            </div>
+          </details>
+
+          <div :if={@attempt["error_body"]}>
+            <div class="text-[10px] uppercase tracking-wider text-base-content/40 font-semibold mb-1">
+              Error Response
+            </div>
+            <div class="mockup-code text-xs max-h-64 overflow-auto">
+              <pre><code>{format_json(@attempt["error_body"])}</code></pre>
+            </div>
+          </div>
+
+          <details :if={@hop.request_body} id={"trace-request-body-#{@hop.index}"} class="relative">
+            <summary class="cursor-pointer text-[10px] uppercase tracking-wider text-primary font-semibold">
+              {if @hop.index == 0,
+                do: "Request body (normalized)",
+                else: "Request body (re-converted for this provider)"}
+            </summary>
+            <button
+              id={"copy-attempt-request-#{@hop.index}"}
+              phx-hook="CopyButton"
+              data-copy={format_json(@hop.request_body)}
+              class="absolute right-2 top-6 z-10 px-2 py-1 rounded bg-base-100/10 text-[10px] font-medium text-base-content/60 hover:text-primary transition-colors"
+              title="Copy request JSON"
+            >
+              <.icon name="hero-clipboard-document" class="w-3.5 h-3.5" />
+            </button>
+            <div class="mt-1 mockup-code text-xs max-h-64 overflow-auto">
+              <pre class="whitespace-pre-wrap break-words"><code>{format_json(@hop.request_body)}</code></pre>
+            </div>
+          </details>
+
+          <details :if={@attempt["outbound_body"]} id={"trace-outbound-body-#{@hop.index}"}>
+            <summary class="cursor-pointer text-[10px] uppercase tracking-wider text-primary font-semibold">
+              Outbound Request (sent to provider)
+            </summary>
+            <div class="mt-1 mockup-code text-xs max-h-64 overflow-auto">
+              <pre class="whitespace-pre-wrap break-words"><code>{format_json(@attempt["outbound_body"])}</code></pre>
+            </div>
+          </details>
+
+          <details :if={@attempt["response_body"]} id={"trace-response-body-#{@hop.index}"}>
+            <summary class="cursor-pointer text-[10px] uppercase tracking-wider text-primary font-semibold">
+              Response Body
+            </summary>
+            <div class="mt-1 mockup-code text-xs max-h-64 overflow-auto">
+              <pre class="whitespace-pre-wrap break-words"><code>{format_json(@attempt["response_body"])}</code></pre>
+            </div>
+          </details>
+
+          <details :if={@attempt["response_headers"]} id={"trace-response-headers-#{@hop.index}"}>
+            <summary class="cursor-pointer text-[10px] uppercase tracking-wider text-primary font-semibold">
+              Response Headers
+            </summary>
+            <div class="mt-1 p-2 bg-base-200 rounded font-mono space-y-1">
+              <div :for={[key, value] <- @attempt["response_headers"]} class="flex gap-2">
+                <span class="text-base-content/60 shrink-0">{key}:</span>
+                <span class="break-all">{value}</span>
+              </div>
+            </div>
+          </details>
+        </div>
+      </div>
+    </div>
+    """
+  end
+
+  attr :log, :map, required: true
+  attr :format, :string, default: nil
+  attr :resp_headers, :list, default: nil
+
+  defp trace_client_response(assigns) do
+    ~H"""
+    <div id="trace-node-client-response" class="relative pl-7">
+      <span class="absolute left-0 top-1 size-[18px] rounded-full border-2 border-primary bg-base-100">
+      </span>
+      <div class="flex flex-wrap items-center gap-2">
+        <span class="text-sm font-semibold">You received</span>
+        <span
+          :if={@format}
+          class="badge badge-sm badge-ghost font-mono"
+          title="Inferred from the headers you sent — your request body is not stored"
+        >
+          {@format} format
+        </span>
+        <span :if={@log.http_status} class="text-xs font-mono text-base-content/50">
+          {@log.http_status}
+        </span>
+      </div>
+      <%!-- The row stores the IR, not the bytes the egress wrote. For an
+           OpenAI-format client those are the same thing; for anyone else they
+           are not, and saying "returned to you" over a converted body is the
+           same lie as calling the outbound request the client's own. --%>
+      <details :if={@log.response_body} id="trace-client-response-body" class="relative mt-2">
+        <summary class="cursor-pointer text-[10px] uppercase tracking-wider text-primary font-semibold">
+          {if @format in [nil, "openai"],
+            do: "Response body returned to you",
+            else: "Response body, recorded before conversion to #{@format}"}
+        </summary>
+        <button
+          id="copy-response-json"
+          phx-hook="CopyButton"
+          data-copy={format_json(@log.response_body)}
+          class="absolute right-2 top-6 z-10 px-2 py-1 rounded bg-base-100/10 text-[10px] font-medium text-base-content/60 hover:text-primary transition-colors"
+          title="Copy response JSON"
+        >
+          <.icon name="hero-clipboard-document" class="w-3.5 h-3.5" />
+        </button>
+        <div class="mt-1 mockup-code text-xs max-h-[calc(100vh-320px)] overflow-auto">
+          <pre class="whitespace-pre-wrap break-words"><code>{format_json(@log.response_body)}</code></pre>
+        </div>
+      </details>
+      <details :if={@resp_headers} id="trace-client-response-headers" class="mt-2">
+        <summary class="cursor-pointer text-[10px] uppercase tracking-wider text-primary font-semibold">
+          Headers returned to you
+        </summary>
+        <div class="mt-2 p-2 bg-base-200 rounded text-xs font-mono space-y-1">
+          <div :for={{key, value} <- @resp_headers} class="flex gap-2">
+            <span class="text-base-content/60 shrink-0">{key}:</span>
+            <span class="break-all">{value}</span>
+          </div>
+        </div>
+      </details>
+    </div>
+    """
+  end
+
+  defp change_count([_one]), do: "1 thing"
+  defp change_count(changes), do: "#{length(changes)} things"
 
   defp attempt_error_message(attempt) do
     case attempt["error_body"] do
