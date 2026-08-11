@@ -81,6 +81,14 @@ custom classes must fully style the input
 - Implement **subtle micro-interactions** (e.g., button hover effects, and smooth transitions)
 - Ensure **clean typography, spacing, and layout balance** for a refined, premium look
 - Focus on **delightful details** like hover effects, loading states, and smooth page transitions
+- Leverage Intuition through Visualization: Do not force users to perform analytical tasks when the visual cortex can do the work. Use humane information visualization to make patterns obvious at a glance
+- Build Ambient Awareness: Design systems that provide a normative baseline of "normal" activity. This allows users to intuitively detect anomalies (like the sound of silence or breaking glass) without constant active monitoring
+- Group by Context, Not Production: Stop organizing data based on where it comes from (host vs. app vs. metrics). Instead, aggregate information based on the specific task the user is trying to accomplish
+- Normalize Data with Base Rates: Never display raw numbers that might cause unnecessary panic. Always include the base rate or context so users can instantly judge if a metric is actually a problem or just expected noise
+- Automate the Mundane: If a task involves manually correlating data sets or setting static thresholds, it is an inhuman task. Automate these processes to save users from cognitive fatigue
+- Bound Moments of Attention: When an incident or emergency occurs, create a distinct, time-boxed environment (like a war room) for high-intensity work. This keeps the burden of "high attention" from bleeding into the rest of the day
+
+
 
 
 <!-- phoenix-gen-auth-start -->
