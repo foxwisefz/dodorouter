@@ -623,6 +623,7 @@ Related rules for streaming egress:
 
 * **Defer `send_chunked/2` until the first chunk.** While nothing has been sent the HTTP status is still revisable, so a request that fails before producing content returns a real 400/502 instead of `200 OK` with an error buried in the SSE body (which SDKs report as a successful empty response).
 * **Don't invent values the provider didn't give you.** `stop_sequence` was hardcoded `nil`, which is a lie whenever a client's stop sequence actually matched.
+* **Response headers have to be parked, not returned.** A streaming adapter only *returns* the provider's headers when the stream finishes, by which point the egress committed its own head long ago — so `anthropic-ratelimit-*` never reached a streaming client, and Claude Code, which paces itself off `anthropic-ratelimit-unified-*`, flew blind on every real agent request. A streaming adapter calls `Adapter.record_stream_response_headers/1` the moment the upstream head arrives and before the first chunk is forwarded; the egress reads them in the same breath as `send_chunked`. Same inline-process property `Fidelity` relies on, and the same caveat: **anything that moves an adapter call into its own task must carry this across with it.**
 
 ### Everything removed or rewritten gets recorded
 

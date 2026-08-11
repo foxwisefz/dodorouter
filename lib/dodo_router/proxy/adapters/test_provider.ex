@@ -29,6 +29,13 @@ defmodule DodoRouter.Proxy.Adapters.TestProvider do
   alias DodoRouter.Proxy.Adapter
   alias DodoRouter.Routers.RoutingStep
 
+  # Real providers return rate-limit headers alongside the response; the
+  # simulator does too, so the egress paths that forward them are testable.
+  @ratelimit_headers [
+    {"anthropic-ratelimit-unified-remaining", "42"},
+    {"anthropic-ratelimit-unified-reset", "2026-08-11T12:00:00Z"}
+  ]
+
   @doc false
   def request_headers(api_key, client_headers) do
     Adapter.build_forwarded_headers(client_headers, [
@@ -83,7 +90,7 @@ defmodule DodoRouter.Proxy.Adapters.TestProvider do
       }
     }
 
-    {:ok, response, %{headers: [{"content-type", "application/json"}]}}
+    {:ok, response, %{headers: [{"content-type", "application/json"} | @ratelimit_headers]}}
   end
 
   @impl Adapter
@@ -100,6 +107,12 @@ defmodule DodoRouter.Proxy.Adapters.TestProvider do
 
   defp do_stream(%RoutingStep{} = step, send_chunk) do
     content = "Hello from #{step.model}"
+
+    # As a real streaming adapter does: park the head's headers before the
+    # first chunk, while the egress can still add to its own response.
+    Adapter.record_stream_response_headers([
+      {"content-type", "text/event-stream"} | @ratelimit_headers
+    ])
 
     # Send chunks inline (same process), mirroring how real adapters call
     # send_chunk from Req.post's into callback, which runs in the caller process.
@@ -163,7 +176,7 @@ defmodule DodoRouter.Proxy.Adapters.TestProvider do
       }
     }
 
-    {:ok, response, %{headers: [{"content-type", "text/event-stream"}]}}
+    {:ok, response, %{headers: [{"content-type", "text/event-stream"} | @ratelimit_headers]}}
   end
 
   # Lets tests exercise an adapter that raises mid-chain (e.g. a malformed

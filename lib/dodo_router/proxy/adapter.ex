@@ -489,6 +489,44 @@ defmodule DodoRouter.Proxy.Adapter do
   @doc false
   def response_passthrough_key, do: @response_passthrough_key
 
+  # ── Streaming response headers ────────────────────────────────────────────
+  #
+  # A streaming adapter learns the provider's response headers when the head
+  # arrives, but only *returns* them when the stream is finished — by which
+  # time the egress has long since committed its own response head and can no
+  # longer add anything. Rate-limit headers are the reason this matters: Claude
+  # Code paces itself off `anthropic-ratelimit-unified-*`, and on the streaming
+  # path (every real agent request) it was flying blind.
+  #
+  # So the adapter parks them here the moment it has them, and the egress picks
+  # them up just before it opens the stream. Adapters run inline in the
+  # caller's process — the same property `Fidelity` relies on — so a process
+  # key is the seam. **Anything that moves an adapter call into its own task
+  # must carry this across with it.**
+  @stream_response_headers_key :__stream_response_headers__
+
+  @doc """
+  Parks the provider's response headers for the egress to read before it
+  commits its own response head. Call from a streaming adapter as soon as the
+  upstream head is known, and before the first chunk is forwarded.
+  """
+  def record_stream_response_headers(headers) do
+    Process.put(@stream_response_headers_key, headers)
+    :ok
+  end
+
+  @doc """
+  Response headers parked by the streaming adapter, or `nil`. Reading does not
+  consume them — a stream is opened once, but `finish_stream` may ask again.
+  """
+  def stream_response_headers, do: Process.get(@stream_response_headers_key)
+
+  @doc "Clears parked headers so one request cannot inherit another's."
+  def reset_stream_response_headers do
+    Process.delete(@stream_response_headers_key)
+    :ok
+  end
+
   @doc """
   The client's untranslated fields, for an adapter whose format matches theirs.
 

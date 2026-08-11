@@ -579,6 +579,49 @@ defmodule DodoRouterWeb.ProxyIntegrationTest do
     end
   end
 
+  describe "anthropic-ratelimit-* forwarding" do
+    # Claude Code paces itself off anthropic-ratelimit-unified-*. Swallowing
+    # them makes it fly blind — and streaming is every real agent request.
+    test "sync /v1/messages carries them", %{metadata: metadata} do
+      %{router: router, api_key: api_key} = create_router_with_test_provider(metadata)
+
+      {:ok, response} =
+        make_request(
+          "/r/#{router.slug}/v1/messages",
+          %{
+            "model" => "test-model",
+            "messages" => [%{"role" => "user", "content" => "Hello"}],
+            "max_tokens" => 1024
+          },
+          api_key,
+          metadata
+        )
+
+      assert response.status == 200
+      assert response.headers["anthropic-ratelimit-unified-remaining"] == ["42"]
+    end
+
+    test "streaming /v1/messages carries them too", %{metadata: metadata} do
+      %{router: router, api_key: api_key} = create_router_with_test_provider(metadata)
+
+      {:ok, response} =
+        make_request(
+          "/r/#{router.slug}/v1/messages",
+          %{
+            "model" => "test-model",
+            "messages" => [%{"role" => "user", "content" => "Hello"}],
+            "max_tokens" => 1024
+          },
+          api_key,
+          metadata,
+          stream: true
+        )
+
+      assert response.status == 200
+      assert response.headers["anthropic-ratelimit-unified-remaining"] == ["42"]
+    end
+  end
+
   describe "x-request-id" do
     # The header is the only handle a user has on a request. If it does not
     # name the row we logged, an operator handed one cannot find the request —

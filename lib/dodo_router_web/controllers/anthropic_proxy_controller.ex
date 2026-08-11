@@ -4,6 +4,7 @@ defmodule DodoRouterWeb.AnthropicProxyController do
   require Logger
 
   alias DodoRouter.Proxy
+  alias DodoRouter.Proxy.Adapter
   alias DodoRouterWeb.AnthropicFormat
 
   def create(conn, params) do
@@ -284,6 +285,7 @@ defmodule DodoRouterWeb.AnthropicProxyController do
     Process.put(:__anthropic_serving_model__, openai_params["model"] || "unknown")
     # Keep-alive means the next request may land in this same process.
     Process.delete(:__stream_opened__)
+    Adapter.reset_stream_response_headers()
 
     send_chunk = &raw_send_chunk/1
 
@@ -340,6 +342,19 @@ defmodule DodoRouterWeb.AnthropicProxyController do
   defp open_stream(request_id) do
     if Process.get(:__stream_opened__) != true do
       Process.put(:__stream_opened__, true)
+
+      # Last moment the response head is still revisable. The adapter parked
+      # the provider's headers when the upstream head arrived; this is where
+      # the rate-limit ones get onto our own response, matching what the sync
+      # path does from the dispatch meta.
+      Process.put(
+        :__stream_conn__,
+        forward_ratelimit_headers(
+          Process.get(:__stream_conn__),
+          Adapter.stream_response_headers()
+        )
+      )
+
       model = Process.get(:__anthropic_serving_model__) || "unknown"
       raw_send_chunk(anthropic_message_start_event(model, request_id))
       raw_send_chunk(anthropic_content_block_start_event())

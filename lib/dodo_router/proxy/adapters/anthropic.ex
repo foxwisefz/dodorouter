@@ -204,6 +204,9 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
           if resp.private[:stream_acc] == nil do
             ttfb = System.monotonic_time(:millisecond) - start_time
             initial_acc = %{initial_stream_acc() | first_chunk_time: ttfb}
+            # The head has arrived and nothing has been forwarded yet — the one
+            # moment the egress can still put anything on its own response.
+            Adapter.record_stream_response_headers(resp.headers)
             Req.Response.put_private(resp, :stream_acc, initial_acc)
           else
             resp
