@@ -959,14 +959,25 @@ defmodule DodoRouter.Proxy.Adapter do
   #      `reasoning_effort` or `thinking`), that value wins and the step
   #      default is *not* applied.
 
-  # Anthropic extended-thinking budget_tokens mapped per effort level.
-  @anthropic_thinking_budget %{
-    "minimal" => 1_024,
-    "low" => 4_096,
-    "medium" => 10_000,
-    "high" => 16_000,
-    "xhigh" => 24_000,
-    "max" => 32_000
+  # Canonical level -> Anthropic's `output_config.effort` level.
+  #
+  # Anthropic's ladder is low/medium/high/xhigh/max, so every canonical level
+  # but `minimal` passes through unchanged; `minimal` folds into `low`, the
+  # shallowest depth Anthropic can express. `none` is not here — it is not a
+  # depth, it is an off switch, and has its own clause below.
+  #
+  # There is deliberately no token table. `thinking.budget_tokens` was removed
+  # on Opus 4.7, 4.8, Opus 5, Sonnet 5 and Fable 5 — every current Claude
+  # model — and returns a 400 when sent; it survives only on 4.6 and older,
+  # where `effort` also works. So the switch is unconditional rather than
+  # gated on a per-model capability table, which would go stale silently.
+  @anthropic_effort %{
+    "minimal" => "low",
+    "low" => "low",
+    "medium" => "medium",
+    "high" => "high",
+    "xhigh" => "xhigh",
+    "max" => "max"
   }
 
   # Gemini thinkingBudget mapped per effort level (Gemini 2.5 accepts 0..24576).
@@ -987,8 +998,8 @@ defmodule DodoRouter.Proxy.Adapter do
     * `:openai`     — sets top-level `reasoning_effort` (OpenAI, xAI, …)
     * `:on_off`     — sets `thinking: %{"type" => "enabled"}` (DeepSeek, z.ai,
                       Moonshot-style providers that only accept on/off)
-    * `:anthropic`  — sets `thinking: %{"type" => "enabled", "budget_tokens" => n}`
-                      and guarantees `max_tokens` exceeds the budget
+    * `:anthropic`  — sets `output_config.effort` plus `thinking: %{"type" =>
+                      "adaptive"}` (Anthropic removed `budget_tokens`)
     * `:gemini`     — sets `generationConfig.thinkingConfig.thinkingBudget`
     * `:responses`  — sets `reasoning: %{"effort" => level}` (Responses API)
     * `:none`       — no-op
@@ -1032,26 +1043,29 @@ defmodule DodoRouter.Proxy.Adapter do
     end
   end
 
-  # Anthropic extended thinking with a token budget.
+  # Anthropic reasoning depth: `output_config.effort`.
+  #
+  # `none` asks for no thinking at all, which is a thinking-block concern
+  # rather than a depth. (Fable 5 forbids disabling thinking outright and will
+  # 400 — there is no way to express "off" on a model that is always on, and a
+  # provider error is the honest answer to a step that asks for one.)
   def inject_reasoning_effort(body, "none", :anthropic) do
-    if Map.has_key?(body, "thinking"), do: Map.delete(body, "thinking"), else: body
+    put_adaptive_thinking(body, %{"type" => "disabled"})
   end
 
   def inject_reasoning_effort(body, effort, :anthropic) do
-    if Map.has_key?(body, "thinking") do
-      body
-    else
-      case Map.get(@anthropic_thinking_budget, effort) do
-        nil ->
-          body
+    case Map.get(@anthropic_effort, effort) do
+      nil ->
+        body
 
-        budget ->
-          # Anthropic requires max_tokens > budget_tokens. Bump max_tokens so
-          # there's still headroom for the actual completion.
-          body
-          |> Map.put("thinking", %{"type" => "enabled", "budget_tokens" => budget})
-          |> ensure_anthropic_max_tokens(budget)
-      end
+      level ->
+        # Effort sets depth; the thinking block is what turns thinking on at
+        # all. Omitting it means *no* thinking on Opus 4.7/4.8 and adaptive on
+        # Opus 5 / Sonnet 5 / Fable 5, so a step that asked for depth has to
+        # say `adaptive` explicitly to mean the same thing on both.
+        body
+        |> put_anthropic_effort(level)
+        |> put_adaptive_thinking(%{"type" => "adaptive"})
     end
   end
 
@@ -1077,15 +1091,23 @@ defmodule DodoRouter.Proxy.Adapter do
     end
   end
 
-  defp ensure_anthropic_max_tokens(body, budget) do
-    # Reserve headroom for the visible completion after the thinking budget.
-    min_completion = 4_096
-    required = budget + min_completion
+  # `output_config` also carries structured outputs (`format`), so the step
+  # default merges into whatever the client already built rather than replacing
+  # it — and never overrides an effort the client picked.
+  defp put_anthropic_effort(body, level) do
+    config = Map.get(body, "output_config") || %{}
 
-    case body["max_tokens"] do
-      n when is_integer(n) and n > budget -> body
-      _ -> Map.put(body, "max_tokens", required)
+    if Map.has_key?(config, "effort") do
+      body
+    else
+      Map.put(body, "output_config", Map.put(config, "effort", level))
     end
+  end
+
+  defp put_adaptive_thinking(body, thinking) do
+    if Map.has_key?(body, "thinking"),
+      do: body,
+      else: Map.put(body, "thinking", thinking)
   end
 
   defp put_gemini_thinking(body, budget) do

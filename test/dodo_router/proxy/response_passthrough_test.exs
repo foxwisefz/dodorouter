@@ -81,6 +81,67 @@ defmodule DodoRouter.Proxy.ChannelThreeTest do
     end
   end
 
+  describe "content blocks the IR cannot hold" do
+    # The IR reduces `content` over `text` and `tool_use`; a thinking or
+    # server-tool block has nowhere to go. Anthropic requires thinking blocks
+    # be echoed back unchanged to continue on the same model, so losing them
+    # doesn't just cost a display — it makes the conversation unresumable.
+    defp thinking_response do
+      %{
+        "id" => "msg_01thinks",
+        "role" => "assistant",
+        "model" => "claude-opus-5",
+        "content" => [
+          %{"type" => "thinking", "thinking" => "let me work through it", "signature" => "sig_1"},
+          %{"type" => "redacted_thinking", "data" => "encrypted"},
+          %{"type" => "text", "text" => "The answer is 4."},
+          %{
+            "type" => "tool_use",
+            "id" => "toolu_1",
+            "name" => "calc",
+            "input" => %{"n" => 2}
+          }
+        ],
+        "stop_reason" => "tool_use",
+        "usage" => %{"input_tokens" => 10, "output_tokens" => 2}
+      }
+    end
+
+    test "the native block list rides along when a block could not be translated" do
+      ir = Anthropic.convert_to_openai_format(thinking_response())
+      passthrough = Map.fetch!(ir, Adapter.response_passthrough_key())
+
+      assert passthrough["content"] == thinking_response()["content"]
+    end
+
+    test "an Anthropic client gets its blocks back byte-identical, in order" do
+      ir = Anthropic.convert_to_openai_format(thinking_response())
+      {passthrough, ir} = Map.pop(ir, Adapter.response_passthrough_key())
+
+      client = AnthropicFormat.from_openai_response(ir, passthrough)
+
+      assert client["content"] == thinking_response()["content"]
+    end
+
+    test "the translated view is unchanged — OpenAI clients still read text and tool calls" do
+      ir = Anthropic.convert_to_openai_format(thinking_response())
+      message = get_in(ir, ["choices", Access.at(0), "message"])
+
+      assert message["content"] == "The answer is 4."
+      assert [%{"id" => "toolu_1"}] = message["tool_calls"]
+      refute String.contains?(message["content"], "let me work through it")
+    end
+
+    test "a fully translatable response carries no content, so nothing reports a false loss" do
+      # Every ordinary Anthropic response would otherwise record `content` as
+      # dropped on an OpenAI-family client — which it wasn't.
+      ir = Anthropic.convert_to_openai_format(anthropic_response())
+      passthrough = Map.fetch!(ir, Adapter.response_passthrough_key())
+
+      refute Map.has_key?(passthrough, "content")
+    end
+  end
+
   describe "the streaming tail" do
     test "message_delta extras reach the accumulator" do
       {acc, _chunks} =

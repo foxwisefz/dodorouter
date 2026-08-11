@@ -611,7 +611,13 @@ The passthrough wins on collision in this direction, because the only overlap is
 
 **Streaming carries the tail only.** The stream accumulator collects untranslated `message_delta` fields and the egress merges them into the `message_delta` it emits (which is also how `stop_sequence` stopped being hardcoded `nil` there). `message_start` fields — the real id, `container` — are already on the wire by the time the tail arrives and **cannot** be back-filled; a streaming client gets the synthesised id.
 
-**Known gap: content blocks.** `convert_to_openai_format/1` reduces `content` over `text` and `tool_use` only, so `thinking`, `redacted_thinking`, and server-tool result blocks are dropped on the sync path — and Anthropic requires thinking blocks be passed back unchanged on the same model in multi-turn. That is a separate fix from this passthrough, which covers top-level fields.
+**Content blocks ride the same passthrough — on the sync path.** `convert_to_openai_format/1` reduces `content` over `text` and `tool_use` only, so `thinking`, `redacted_thinking`, server-tool blocks, and the `fallback` block Opus 5 / Fable 5 emit when a refusal is re-served have nowhere to go in the IR. When any such block appears, the **whole** native list travels in the passthrough under `"content"` and the Anthropic egress restores it 1:1 (`Map.merge(built, provider_passthrough)` already prefers it). The whole list rather than just the untranslatable part, because the reduction concatenates text blocks — their boundaries and interleaving cannot be recovered from what it produced.
+
+It is carried **only** when something was untranslatable. Otherwise the egress rebuilds an identical array from the flattened text and tool calls, and carrying it would make every ordinary Anthropic response record `content` as lost to an OpenAI-family client — a loss that didn't happen.
+
+This is not a display nicety: Anthropic requires thinking blocks be echoed back unchanged to continue on the same model and rejects modified ones, so a client that never receives them cannot resume its own conversation.
+
+**Streaming still drops them.** `process_anthropic_events/2` ignores a non-`tool_use` `content_block_start` and lets `thinking_delta` fall through its catch-all, and the OpenAI-shaped delta stream has no representation to carry them in — restoring them needs the egress to re-emit `content_block_start`/`thinking_delta`/`content_block_stop` at the right positions. Same class of problem as the un-back-fillable `message_start` above.
 
 Related rules for streaming egress:
 
@@ -668,7 +674,7 @@ Every adapter's request builder **must** call `Adapter.inject_reasoning_effort(b
 
 * `:openai` — top-level `reasoning_effort`
 * `:responses` — `reasoning.effort` (OpenAI Responses API / Codex backend)
-* `:anthropic` — `thinking.type = "enabled"` plus a `budget_tokens` value, with `max_tokens` bumped to exceed the budget
+* `:anthropic` — `output_config.effort`, plus `thinking.type = "adaptive"` so the depth applies at all
 * `:gemini` — `generationConfig.thinkingConfig.thinkingBudget`
 * `:on_off` — `thinking.type = "enabled"` or `"disabled"` (DeepSeek, z.ai, Moonshot-style providers)
 * `:none` — no injection
@@ -685,15 +691,21 @@ none, minimal, low, medium, high, xhigh, max
 
 The helper maps them to provider-specific values:
 
-| Level | Anthropic budget | Gemini budget | OpenAI/xAI/Responses |
-|-------|------------------|---------------|----------------------|
-| none  | omit             | 0             | omit                 |
-| minimal | 1,024          | 0             | "minimal"            |
-| low   | 4,096            | 2,048         | "low"                |
-| medium| 10,000           | 8,192         | "medium"             |
-| high  | 16,000           | 16,384        | "high"               |
-| xhigh | 24,000           | 24,576        | "high"               |
-| max   | 32,000           | 24,576        | "high"               |
+| Level | Anthropic `output_config.effort` | Gemini budget | OpenAI/xAI/Responses |
+|-------|----------------------------------|---------------|----------------------|
+| none  | *(no effort; `thinking.type = "disabled"`)* | 0    | omit                 |
+| minimal | "low"                          | 0             | verbatim             |
+| low   | "low"                            | 2,048         | verbatim             |
+| medium| "medium"                         | 8,192         | verbatim             |
+| high  | "high"                           | 16,384        | verbatim             |
+| xhigh | "xhigh"                          | 24,576        | verbatim             |
+| max   | "max"                            | 24,576        | verbatim             |
+
+**Anthropic sends no token budget.** `thinking.budget_tokens` was removed on Opus 4.7, Opus 4.8, Opus 5, Sonnet 5 and Fable 5 — every current Claude model — and returns a 400 when sent; it survives only on 4.6 and older, which also accept `effort`. The switch is therefore unconditional rather than gated on a per-model table, which is the kind of capability folklore that goes stale silently. `minimal` folds into `low` because `low` is the shallowest depth Anthropic can express, and `max_tokens` is left exactly as the client set it — the old bump existed only to satisfy `max_tokens > budget_tokens`.
+
+Two edges worth knowing: `none` sends `thinking.type = "disabled"`, which **Fable 5 rejects outright** (thinking is always on there, so a step asking for none has no honest translation and the provider error is the truthful answer); and `output_config` also carries structured outputs, so the injection merges into the object the client's `response_format` built rather than replacing it.
+
+**OpenAI-family levels travel verbatim** — never clamped or rewritten. Which levels a model accepts is the step author's choice, and an unsupported one surfaces as a provider error in the logs rather than a silent downgrade.
 
 ### Adding or Modifying an Adapter
 

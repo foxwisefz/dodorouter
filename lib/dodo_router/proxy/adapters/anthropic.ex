@@ -350,6 +350,11 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
         do: Map.put(body, "stop_sequences", List.wrap(request["stop"])),
         else: body
 
+    # Build the client's own `output_config` first — its `effort` outranks the
+    # step default, and `inject_reasoning_effort/3` merges into whatever is
+    # already there rather than replacing it.
+    body = put_output_config(body, request)
+
     # Forward a client-supplied thinking block (if any) so it takes precedence
     # over the step-level default. An explicit disable is translated to
     # omission: Claude 5 models reject thinking.type=disabled outright, and on
@@ -370,7 +375,6 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
       end
 
     body = put_tool_choice(body, request["tool_choice"], request["parallel_tool_calls"])
-    body = put_output_config(body, request)
 
     # Tools
     body =
@@ -727,9 +731,41 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
   # invisible to the client unless carried.
   @translated_response_fields ~w(content stop_reason usage model stop_sequence)
 
+  # The block types the reduction above knows how to render into the IR.
+  @translated_block_types ~w(text tool_use)
+
   defp untranslated_response(anthropic_response) do
-    Map.drop(anthropic_response, @translated_response_fields)
+    anthropic_response
+    |> Map.drop(@translated_response_fields)
+    |> carry_native_content(anthropic_response["content"])
   end
+
+  # `content` is normally rebuilt by the egress from the flattened text and
+  # tool calls, so carrying it would be noise — and would make every ordinary
+  # Anthropic response report `content` as lost to an OpenAI-family client,
+  # which it wasn't.
+  #
+  # The moment a block the reduction cannot render appears — `thinking`,
+  # `redacted_thinking`, a server-tool block, the `fallback` block Opus 5 and
+  # Fable 5 emit when a refusal is re-served — the flattened view is no longer
+  # a faithful summary, so the whole native list travels and an Anthropic
+  # egress restores it 1:1. The whole list, not just the untranslatable part:
+  # the reduction concatenates text blocks, so their original boundaries and
+  # interleaving cannot be recovered from what it produced.
+  #
+  # This matters beyond display. Anthropic requires thinking blocks be echoed
+  # back unchanged to continue a conversation on the same model, and rejects
+  # ones whose content was modified — so a client that never receives them
+  # cannot resume its own conversation.
+  defp carry_native_content(passthrough, content) when is_list(content) do
+    if Enum.all?(content, &(&1["type"] in @translated_block_types)) do
+      passthrough
+    else
+      Map.put(passthrough, "content", content)
+    end
+  end
+
+  defp carry_native_content(passthrough, _content), do: passthrough
 
   defp put_if(map, nil, _key, _value), do: map
   defp put_if(map, _present, key, value), do: Map.put(map, key, value)

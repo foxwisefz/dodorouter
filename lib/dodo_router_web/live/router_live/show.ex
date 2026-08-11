@@ -1143,10 +1143,10 @@ defmodule DodoRouterWeb.RouterLive.Show do
                 <% end %>
               </select>
               <p :if={@step_efforts_known} class="text-xs text-base-content/50 mt-1.5">
-                Levels this model supports (from models.dev), sent to the provider as-is. Leave unset to honor the client request or provider default.
+                Levels this model supports (from models.dev), translated into whatever depth control the provider actually takes — a level for OpenAI-family and Anthropic, a token budget for Gemini, on/off for providers with only a switch. Leave unset to honor the client request or provider default.
               </p>
               <p :if={!@step_efforts_known} class="text-xs text-base-content/50 mt-1.5">
-                Supported levels unknown for this model — the value is sent to the provider as-is; unsupported levels will error visibly in the logs. Leave unset to honor the client request or provider default.
+                Supported levels unknown for this model — the level is translated into the provider's own depth control and an unsupported one will error visibly in the logs rather than being silently downgraded. Leave unset to honor the client request or provider default.
               </p>
             </div>
             <%!-- z.ai specific options --%>

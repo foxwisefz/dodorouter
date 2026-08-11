@@ -352,16 +352,36 @@ defmodule DodoRouter.Proxy.AdapterTest do
       assert body["thinking"] == %{"type" => "enabled"}
     end
 
-    test ":anthropic sets thinking with a token budget" do
-      body = Adapter.inject_reasoning_effort(%{"max_tokens" => 64_000}, "high", :anthropic)
-      assert body["thinking"] == %{"type" => "enabled", "budget_tokens" => 16_000}
-      # Keeps client max_tokens since it exceeds the budget
-      assert body["max_tokens"] == 64_000
+    test ":anthropic sets output_config.effort and adaptive thinking" do
+      body = Adapter.inject_reasoning_effort(%{"max_tokens" => 4096}, "high", :anthropic)
+
+      assert body["output_config"]["effort"] == "high"
+      assert body["thinking"] == %{"type" => "adaptive"}
     end
 
-    test ":anthropic bumps max_tokens when it does not exceed the budget" do
-      body = Adapter.inject_reasoning_effort(%{"max_tokens" => 4096}, "high", :anthropic)
-      assert body["max_tokens"] > 16_000
+    test ":anthropic never emits budget_tokens, which 400s on every current Claude model" do
+      for level <- ~w(minimal low medium high xhigh max) do
+        body = Adapter.inject_reasoning_effort(%{"max_tokens" => 4096}, level, :anthropic)
+        refute Map.has_key?(body["thinking"], "budget_tokens"), "leaked a budget for #{level}"
+      end
+    end
+
+    test ":anthropic leaves max_tokens exactly as the client set it" do
+      # The old bump existed only to satisfy max_tokens > budget_tokens. With
+      # no budget there is nothing to satisfy, and the ceiling is the client's.
+      body = Adapter.inject_reasoning_effort(%{"max_tokens" => 512}, "max", :anthropic)
+      assert body["max_tokens"] == 512
+    end
+
+    test ":anthropic folds 'minimal' into Anthropic's lowest level" do
+      body = Adapter.inject_reasoning_effort(%{}, "minimal", :anthropic)
+      assert body["output_config"]["effort"] == "low"
+    end
+
+    test ":anthropic disables thinking for 'none'" do
+      body = Adapter.inject_reasoning_effort(%{}, "none", :anthropic)
+      assert body["thinking"] == %{"type" => "disabled"}
+      refute Map.has_key?(body, "output_config")
     end
 
     test ":anthropic respects an existing thinking field" do
@@ -373,6 +393,32 @@ defmodule DodoRouter.Proxy.AdapterTest do
         )
 
       assert body["thinking"] == %{"type" => "disabled"}
+    end
+
+    test ":anthropic respects a client effort already in output_config" do
+      body =
+        Adapter.inject_reasoning_effort(
+          %{"output_config" => %{"effort" => "low"}},
+          "max",
+          :anthropic
+        )
+
+      assert body["output_config"]["effort"] == "low"
+    end
+
+    test ":anthropic merges into output_config rather than replacing it" do
+      # `format` carries structured outputs; dropping it would silently turn a
+      # schema-constrained request into a free-text one.
+      format = %{"type" => "json_schema", "schema" => %{"type" => "object"}}
+
+      body =
+        Adapter.inject_reasoning_effort(
+          %{"output_config" => %{"format" => format}},
+          "high",
+          :anthropic
+        )
+
+      assert body["output_config"] == %{"format" => format, "effort" => "high"}
     end
 
     test ":gemini sets generationConfig.thinkingConfig.thinkingBudget" do
