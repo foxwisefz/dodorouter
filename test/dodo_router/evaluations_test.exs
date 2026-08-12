@@ -195,6 +195,205 @@ defmodule DodoRouter.EvaluationsTest do
     assert Evaluations.candidate_successful?(%DodoRouter.Logs.RequestLog{status: "fallback"})
   end
 
+  describe "tool-calling candidates" do
+    # A tool call IS the answer for a tool-calling request: the model that
+    # calls record_call_type with the right arguments did the task, and the
+    # OpenAI shape puts an empty string in content when it does.
+    @tool_call_response Jason.encode!(%{
+                          "choices" => [
+                            %{
+                              "finish_reason" => "tool_calls",
+                              "index" => 0,
+                              "message" => %{
+                                "content" => "",
+                                "role" => "assistant",
+                                "tool_calls" => [
+                                  %{
+                                    "id" => "toolu_01WKh8zeBYSE6yHcQWSRC2rX",
+                                    "type" => "function",
+                                    "function" => %{
+                                      "name" => "record_call_type",
+                                      "arguments" => %{
+                                        "call_type" => "Vendor",
+                                        "customer_company" => "",
+                                        "reasoning" => "Ken Lee is pitching to SketchDeck."
+                                      }
+                                    }
+                                  }
+                                ]
+                              }
+                            }
+                          ]
+                        })
+
+    test "a tool call is the candidate's answer, not an empty response" do
+      content = Evaluations.extract_message_content(@tool_call_response)
+
+      assert content =~ "record_call_type"
+      assert content =~ "Vendor"
+      assert content =~ "Ken Lee is pitching to SketchDeck."
+    end
+
+    test "arguments serialized as a JSON string survive too" do
+      response =
+        Jason.encode!(%{
+          "choices" => [
+            %{
+              "message" => %{
+                "content" => nil,
+                "tool_calls" => [
+                  %{
+                    "type" => "function",
+                    "function" => %{
+                      "name" => "get_weather",
+                      "arguments" => ~s({"city":"Lisbon"})
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        })
+
+      content = Evaluations.extract_message_content(response)
+
+      assert content =~ "get_weather"
+      assert content =~ "Lisbon"
+    end
+
+    test "text alongside a tool call keeps both" do
+      response =
+        Jason.encode!(%{
+          "choices" => [
+            %{
+              "message" => %{
+                "content" => "Let me look that up.",
+                "tool_calls" => [
+                  %{
+                    "type" => "function",
+                    "function" => %{"name" => "search", "arguments" => "{}"}
+                  }
+                ]
+              }
+            }
+          ]
+        })
+
+      content = Evaluations.extract_message_content(response)
+
+      assert content =~ "Let me look that up."
+      assert content =~ "search"
+    end
+
+    test "a response with neither text nor tool calls is still nothing to judge" do
+      response = Jason.encode!(%{"choices" => [%{"message" => %{"content" => nil}}]})
+
+      refute Evaluations.extract_message_content(response)
+    end
+
+    defp judge_prompt_for(request_body) do
+      %Evaluation{
+        judge_model: "test-model",
+        criteria: "Records the call type correctly",
+        request_log: %RequestLog{request_body: request_body}
+      }
+      |> Evaluations.judge_request("[tool_call] record_call_type({\"call_type\":\"Vendor\"})")
+      |> Map.fetch!("messages")
+      |> List.last()
+      |> Map.fetch!("content")
+    end
+
+    defp request_with_tools(tool_choice) do
+      Jason.encode!(%{
+        "messages" => [%{"role" => "user", "content" => "Classify this call"}],
+        "tool_choice" => tool_choice,
+        "tools" => [
+          %{
+            "type" => "function",
+            "function" => %{"name" => "record_call_type", "description" => "Classify the call"}
+          }
+        ]
+      })
+    end
+
+    # Without this the rubric has to say "a tool call is an acceptable
+    # answer" in prose, and every rubric that forgets scores a correct call
+    # against an empty text body.
+    test "the judge is told a tool call is a valid answer when tools were offered" do
+      prompt = judge_prompt_for(request_with_tools("auto"))
+
+      assert prompt =~ "ANSWER SHAPE"
+      assert prompt =~ "record_call_type"
+      assert prompt =~ "[tool_call]"
+      assert prompt =~ ~r/not deduct|no penalty/i
+    end
+
+    test "a required tool call makes a text-only answer a failure" do
+      for choice <- [
+            "required",
+            "any",
+            %{"type" => "function", "function" => %{"name" => "record_call_type"}}
+          ] do
+        assert judge_prompt_for(request_with_tools(choice)) =~ ~r/required a tool call/i
+      end
+    end
+
+    test "optional tools leave a plain text answer legitimate" do
+      prompt = judge_prompt_for(request_with_tools("auto"))
+
+      assert prompt =~ ~r/optional/i
+      refute prompt =~ ~r/required a tool call/i
+    end
+
+    test "a request without tools gets no tool guidance at all" do
+      body = Jason.encode!(%{"messages" => [%{"role" => "user", "content" => "What is 2+2?"}]})
+
+      refute judge_prompt_for(body) =~ "ANSWER SHAPE"
+    end
+
+    # The seam: extraction feeds the judge prompt, so a tool call that
+    # survives extraction but not the prompt is the same silent zero.
+    test "the judge prompt carries the tool call and the tools that were offered" do
+      evaluation = %Evaluation{
+        judge_model: "test-model",
+        criteria: "Records the call type correctly",
+        request_log: %RequestLog{
+          request_body:
+            Jason.encode!(%{
+              "messages" => [%{"role" => "user", "content" => "Classify this call"}],
+              "tool_choice" => "auto",
+              "tools" => [
+                %{
+                  "type" => "function",
+                  "function" => %{
+                    "name" => "record_call_type",
+                    "description" => "Record how to classify the call",
+                    "parameters" => %{
+                      "type" => "object",
+                      "properties" => %{"call_type" => %{"type" => "string"}}
+                    }
+                  }
+                }
+              ]
+            })
+        }
+      }
+
+      content = Evaluations.extract_message_content(@tool_call_response)
+      request = Evaluations.judge_request(evaluation, content)
+      prompt = request["messages"] |> List.last() |> Map.fetch!("content")
+
+      # What the candidate did.
+      assert prompt =~ "record_call_type"
+      assert prompt =~ "Vendor"
+
+      # What it could have done instead — without the tool definitions the
+      # judge cannot tell a correct call from a plausible-looking one.
+      assert prompt =~ "Record how to classify the call"
+      assert prompt =~ "call_type"
+    end
+  end
+
   test "generates every candidate repetition before judging it" do
     user = AccountsFixtures.user_fixture()
     {router, _key} = RoutersFixtures.router_fixture(user)

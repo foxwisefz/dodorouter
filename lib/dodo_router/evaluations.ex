@@ -13,7 +13,11 @@ defmodule DodoRouter.Evaluations do
   # accuracy and gives the user something to audit) and reports gaps in
   # the rubric itself, so a thin rubric surfaces instead of silently
   # producing confident-looking numbers.
-  @prompt_version "v3"
+  # v4: tool calls are part of the answer, the offered tools are part of the
+  # request, and the shape a valid answer may take is stated rather than
+  # left for each rubric to remember. Scores from v3 and earlier judged a
+  # tool-calling candidate against an empty response — not comparable.
+  @prompt_version "v4"
   @benchmark_concurrency 3
   # Character budget per SOURCE block in the judge prompt, so a long source
   # conversation can't overflow the judge model's context window.
@@ -623,7 +627,7 @@ defmodule DodoRouter.Evaluations do
   defp judge_prompt(evaluation, source, candidate_content) do
     """
     Score the assistant response from 0 to 100 against the criteria. Intent match and completeness matter most. First work through the response against each criterion in the reasoning field, then score — the score must follow from the reasoning. If the criteria or examples are too vague or incomplete to judge confidently, name what is missing in rubric_gaps (empty array if the rubric was sufficient).
-
+    #{answer_shape(source.request_body)}
     CRITERIA:
     #{evaluation.criteria}
 
@@ -644,10 +648,71 @@ defmodule DodoRouter.Evaluations do
     """
   end
 
+  # What a valid answer looks like is derived from the request rather than
+  # left to the rubric: the request already states whether tools were
+  # offered and whether one was mandatory, and a rubric that forgets to say
+  # "a tool call is fine" otherwise scores a correct call as an empty reply.
+  defp answer_shape(request_body) do
+    case tool_policy(request_body) do
+      :none ->
+        ""
+
+      {names, required?} ->
+        """
+
+        ANSWER SHAPE:
+        This request offered tools#{tool_name_list(names)}, and a tool call is a complete answer to it. Calls appear in SOURCE_RESPONSE as `[tool_call] name({arguments})`; judge the tool chosen and the correctness of its arguments against the tool definitions in SOURCE_REQUEST. Do not deduct points for a short or absent text body when a call answers the request — an empty content field is how this API reports a tool call, not a missing answer. #{tool_requirement(required?)}
+        """
+    end
+  end
+
+  defp tool_policy(request_body) do
+    with body when is_binary(body) <- request_body,
+         {:ok, decoded} <- Jason.decode(body),
+         tools when is_list(tools) and tools != [] <- decoded["tools"] do
+      {tool_names(tools), tool_required?(decoded["tool_choice"])}
+    else
+      _ -> :none
+    end
+  end
+
+  defp tool_names(tools) do
+    tools
+    |> Enum.map(fn
+      %{"function" => %{"name" => name}} when is_binary(name) -> name
+      %{"name" => name} when is_binary(name) -> name
+      _ -> nil
+    end)
+    |> Enum.reject(&is_nil/1)
+  end
+
+  defp tool_name_list([]), do: ""
+  defp tool_name_list(names), do: " (#{Enum.join(names, ", ")})"
+
+  # "required"/"any" and a named function all mandate a call; "auto", "none"
+  # and an absent field leave the model free to answer in prose.
+  defp tool_required?(choice) when choice in ["required", "any"], do: true
+  defp tool_required?(%{"type" => type}) when type in ["function", "tool"], do: true
+  defp tool_required?(%{"name" => name}) when is_binary(name), do: true
+  defp tool_required?(_), do: false
+
+  defp tool_requirement(true),
+    do: "The request required a tool call, so an answer that makes none does not satisfy it."
+
+  defp tool_requirement(false),
+    do:
+      "Tools were optional here: a text answer is equally legitimate if it fully addresses the request, and calling a tool that was not needed is itself a flaw worth naming."
+
+  # Messages, plus the tools the candidate was allowed to call: scoring a
+  # tool call without the schema it was made against is guesswork, since a
+  # wrong tool and a right one look equally plausible from the call alone.
+  # Sampling params stay out — they name the candidate's configuration.
   defp source_conversation(request_body) do
     with body when is_binary(body) <- request_body,
-         {:ok, %{"messages" => messages}} when is_list(messages) <- Jason.decode(body) do
-      Jason.encode!(messages, pretty: true)
+         {:ok, %{"messages" => messages} = decoded} when is_list(messages) <- Jason.decode(body) do
+      decoded
+      |> Map.take(["messages", "tools", "tool_choice"])
+      |> Jason.encode!(pretty: true)
     else
       _ -> request_body || ""
     end
@@ -677,11 +742,62 @@ defmodule DodoRouter.Evaluations do
     end
   end
 
-  defp response_content(%{"choices" => [%{"message" => %{"content" => content}} | _]})
-       when is_binary(content),
-       do: content
+  # For a tool-calling request the tool call IS the answer, and the OpenAI
+  # shape puts "" (not nil) in content when the model makes one — so reading
+  # content alone doesn't fail the run, it silently judges a blank response
+  # and scores it zero. Text and calls are both carried, in that order.
+  defp response_content(%{"choices" => [%{"message" => message} | _]}) when is_map(message) do
+    [text_content(message["content"]), tool_calls_text(message["tool_calls"])]
+    |> Enum.reject(&(&1 in [nil, ""]))
+    |> case do
+      [] -> nil
+      parts -> Enum.join(parts, "\n\n")
+    end
+  end
 
   defp response_content(_), do: nil
+
+  defp text_content(content) when is_binary(content), do: content
+
+  defp text_content(parts) when is_list(parts) do
+    parts
+    |> Enum.map(fn
+      %{"text" => text} when is_binary(text) -> text
+      _ -> nil
+    end)
+    |> Enum.reject(&is_nil/1)
+    |> Enum.join("\n")
+  end
+
+  defp text_content(_), do: nil
+
+  defp tool_calls_text(calls) when is_list(calls) and calls != [] do
+    calls
+    |> Enum.map(&tool_call_text/1)
+    |> Enum.reject(&is_nil/1)
+    |> Enum.join("\n")
+  end
+
+  defp tool_calls_text(_), do: nil
+
+  # Arguments arrive either as the JSON string OpenAI specifies or as an
+  # already-decoded map (what the Anthropic conversion produces). Rendered
+  # as one line per call so a multi-call answer stays legible to the judge.
+  defp tool_call_text(%{"function" => %{"name" => name} = function}) when is_binary(name) do
+    "[tool_call] #{name}(#{tool_arguments_text(function["arguments"])})"
+  end
+
+  defp tool_call_text(_), do: nil
+
+  defp tool_arguments_text(arguments) when is_binary(arguments), do: arguments
+  defp tool_arguments_text(nil), do: ""
+
+  defp tool_arguments_text(arguments) do
+    case Jason.encode(arguments) do
+      {:ok, encoded} -> encoded
+      _ -> inspect(arguments)
+    end
+  end
 
   defp normalize_scores(scores) when is_map(scores) do
     Map.new(scores, fn {key, value} ->
