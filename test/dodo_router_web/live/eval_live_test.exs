@@ -811,4 +811,14 @@ defmodule DodoRouterWeb.EvalLiveTest do
     assert length(cx_values) == 2
     assert length(Enum.uniq(cx_values)) == 2
   end
+
+  test "hands the agent API to the user, per router", %{conn: conn, user: user} do
+    {router, _api_key} = RoutersFixtures.router_fixture(user)
+
+    {:ok, live, _html} = live(conn, ~p"/evals")
+
+    # The command is the only way an agent learns the surface exists, so it
+    # has to name a real router of this user's, not a placeholder slug.
+    assert has_element?(live, "#agent-access", "/r/#{router.slug}/agent")
+  end
 end

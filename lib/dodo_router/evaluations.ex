@@ -40,6 +40,39 @@ defmodule DodoRouter.Evaluations do
     |> Repo.all()
   end
 
+  @doc """
+  The user's evaluations anchored to logs of one router.
+
+  The agent API authenticates with a router's API key, so what it can list is
+  scoped to that router: a key handed to one product must not enumerate
+  another product's evaluations.
+
+  Paged, unlike `list_evaluations/1`: this is polled by a program against a
+  router that accumulates evaluations indefinitely.
+  """
+  def list_for_router(%User{} = user, router_id, opts \\ []) do
+    limit = Keyword.get(opts, :limit, 50)
+    offset = Keyword.get(opts, :offset, 0)
+
+    run_counts =
+      from(r in EvaluationRun,
+        where: r.evaluation_id == parent_as(:evaluation).id,
+        select: count()
+      )
+
+    from(e in Evaluation,
+      as: :evaluation,
+      join: l in assoc(e, :request_log),
+      where: e.evaluated_by_id == ^user.id and l.router_id == ^router_id,
+      order_by: [desc: e.inserted_at],
+      limit: ^limit,
+      offset: ^offset,
+      select_merge: %{run_count: subquery(run_counts)},
+      preload: [request_log: :router]
+    )
+    |> Repo.all()
+  end
+
   def list_for_log(%User{} = user, request_log_id) do
     from(e in Evaluation,
       where: e.evaluated_by_id == ^user.id and e.request_log_id == ^request_log_id,

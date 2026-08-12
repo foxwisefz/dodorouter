@@ -11,6 +11,7 @@ defmodule DodoRouterWeb.EvalLive.Index do
      socket
      |> assign(:page_title, "Evaluations")
      |> assign(:empty?, evaluations == [])
+     |> assign(:agent_base, DodoRouterWeb.Endpoint.url())
      |> stream(:evaluations, evaluations)}
   end
 
@@ -52,6 +53,30 @@ defmodule DodoRouterWeb.EvalLive.Index do
               <span>Judge: {evaluation.judge_model}</span>
             </div>
           </.link>
+        </div>
+
+        <div
+          :if={@nav_routers != []}
+          id="agent-access"
+          class="rounded-2xl border border-base-300/60 bg-base-100 p-5"
+        >
+          <h2 class="font-semibold">Run evals from your coding agent</h2>
+          <p class="mt-1 max-w-2xl text-sm text-base-content/55">
+            Give your agent a router's API key and this one command. It reads back the whole
+            workflow — find a real request, replay it on other models, score the answers — so it
+            can compare quality against price without you in the loop.
+          </p>
+
+          <div class="mt-4 space-y-2">
+            <div :for={router <- @nav_routers} class="text-sm">
+              <span class="text-xs uppercase tracking-wider text-base-content/45">
+                {router.name}
+              </span>
+              <code class="mt-1 block overflow-x-auto rounded-lg bg-base-200/70 px-3 py-2 font-mono text-xs">
+                curl -H "Authorization: Bearer $DODO_API_KEY" {@agent_base}/r/{router.slug}/agent
+              </code>
+            </div>
+          </div>
         </div>
       </div>
     </Layouts.app>

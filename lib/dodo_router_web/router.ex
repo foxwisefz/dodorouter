@@ -41,6 +41,25 @@ defmodule DodoRouterWeb.Router do
     post "/recordings/active/stop", RecordingsController, :stop
   end
 
+  # Agent API - lets a coding agent working on a product measure quality vs
+  # price for that product's own traffic, using the router key it already has.
+  # `/agent` is the discovery endpoint; it describes everything below it.
+  # Static eval paths precede `/evals/:id` so "targets" isn't read as an id.
+  scope "/r/:router_slug", DodoRouterWeb do
+    pipe_through :proxy_api
+
+    get "/agent", EvalsController, :guide
+
+    get "/logs", LogsController, :index
+    get "/logs/:id", LogsController, :show
+
+    get "/evals/targets", EvalsController, :targets
+    get "/evals", EvalsController, :index
+    post "/evals", EvalsController, :create
+    get "/evals/:id", EvalsController, :show
+    post "/evals/:id/run", EvalsController, :run
+  end
+
   # Legacy endpoint (backwards compatibility)
   scope "/v1", DodoRouterWeb do
     pipe_through :proxy_api

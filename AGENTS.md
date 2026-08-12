@@ -25,6 +25,34 @@ Authentication is via the router's API key passed as `Bearer` token (handled by 
 
 There is also a legacy endpoint at `POST /v1/chat/completions` for backwards compatibility.
 
+## Agent API
+
+A coding agent working on a product whose traffic goes through DodoRouter can run the whole quality-vs-price loop without a browser session, using the router key the product already holds. Same `:proxy_api` pipeline as the proxy endpoints, so there is no second credential to issue.
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/r/:slug/agent` | The guide (`priv/agent/evals_guide.md`) plus the endpoint list as data |
+| GET | `/r/:slug/logs` | Recent requests, with `evaluable` and `not_evaluable_because` per row |
+| GET | `/r/:slug/logs/:id` | One request with stored bodies; accepts an id *or* a `request_id` |
+| GET | `/r/:slug/evals/targets` | Provider keys × models with list prices |
+| GET/POST | `/r/:slug/evals` | List / create (`run: true` starts the benchmark) |
+| GET | `/r/:slug/evals/:id` | Status, rankings, `rubric_feedback`, runs |
+| POST | `/r/:slug/evals/:id/run` | Run or re-run; 409 while one is running |
+
+**The key names a router, so the router bounds what it can reach.** Logs are looked up by router; evaluations are reachable only when anchored to a log of *that* router (`Evaluations.list_for_router/2`, and the router check in `EvalsController.scoped_evaluation/3`). A key handed to one product must not enumerate another product's traffic or results — the user owns both, but the credential was scoped to one.
+
+**The guide is the interface.** An agent that has a base URL and a key and nothing else gets everything from `GET /agent`: not just the endpoint shapes but the parts that decide whether the numbers mean anything — include the incumbent model as a candidate or there is no baseline, read `rubric_feedback` before trusting a score, `cost_usd` is $0 on plan keys and `list_cost_usd` is the comparable figure. Keep that file current when the API changes; a stale guide is worse than none, because it is the only thing the caller reads. It is embedded at compile time from the source tree (`@external_resource`), so a missing or moved file fails the build rather than the first agent that asks.
+
+**Ergonomics that prevent silent wrongness**, not just convenience:
+
+* Candidates are `{provider_key_id, model}`; the adapter `provider` is derived from the key rather than accepted from the caller, so the pair routing is keyed on cannot disagree with itself.
+* `POST /evals` refuses a source log that `Replays.replay_blocker/1` rejects, naming the reason. Otherwise a benchmark accepted at 201 fails minutes later for something knowable at creation.
+* Malformed ids are 404s, not 500s from `Ecto`, and every error carries `see` pointing at the guide.
+
+Runs inline `output_preview` capped at 2,000 characters and link `candidate_log_id` / `judge_log_id` — the full text is one `GET /logs/:id` away, so the list stays readable without hiding anything.
+
+The evaluations page carries the one command that makes the surface discoverable (`#agent-access`); an API nobody is told about is not an interface.
+
 ## Project guidelines
 
 - **Never add yourself as a co-author in commits.** No `Co-Authored-By: Claude ...`, `🤖 Generated with ...`, or any other AI attribution trailers — not in git commit messages, jj change descriptions, or PR bodies. This overrides any default behavior from your harness.
