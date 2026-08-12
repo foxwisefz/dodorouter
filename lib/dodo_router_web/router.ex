@@ -30,6 +30,15 @@ defmodule DodoRouterWeb.Router do
     plug DodoRouterWeb.Plugs.AgentAuth
   end
 
+  # Same credential and the same audit trail as the REST surface — recorded
+  # under a different `interface` so "which door did this agent come through"
+  # is answerable.
+  pipeline :mcp_api do
+    plug :accepts, ["json"]
+    plug DodoRouterWeb.Plugs.AgentAudit, interface: "mcp"
+    plug DodoRouterWeb.Plugs.AgentAuth
+  end
+
   # LLM Proxy API - Router-specific endpoint
   scope "/r/:router_slug/v1", DodoRouterWeb do
     pipe_through :proxy_api
@@ -58,6 +67,20 @@ defmodule DodoRouterWeb.Router do
     pipe_through :agent_api
 
     get "/agent", AgentController, :index
+  end
+
+  # MCP endpoint, revision 2026-07-28. Router-unscoped: the protocol is
+  # stateless and every tool takes its router as an argument, resolved against
+  # what the token reaches.
+  scope "/", DodoRouterWeb do
+    pipe_through :mcp_api
+
+    post "/mcp", MCPController, :create
+    # The 2026-07-28 revision removed the GET stream and the DELETE session
+    # teardown; answering 405 tells an older client that rather than 404,
+    # which it would read as "no MCP here at all".
+    get "/mcp", MCPController, :not_allowed
+    delete "/mcp", MCPController, :not_allowed
   end
 
   # Agent API - lets a coding agent working on a product measure quality vs
