@@ -275,6 +275,20 @@
               <span class="sidebar-label truncate">API Keys</span>
             </a>
             <a
+              href={~p"/agent-tokens"}
+              title="Agent Tokens"
+              class={[
+                "sidebar-item flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm transition-colors",
+                String.starts_with?(@conn.request_path, "/agent-tokens") &&
+                  "font-medium text-accent bg-accent/10",
+                !String.starts_with?(@conn.request_path, "/agent-tokens") &&
+                  "text-base-content/60 hover:bg-secondary"
+              ]}
+            >
+              <.icon name="hero-cpu-chip" class="size-4 shrink-0" />
+              <span class="sidebar-label truncate">Agent Tokens</span>
+            </a>
+            <a
               href={~p"/providers"}
               title="Providers"
               class={[
@@ -423,6 +437,18 @@
               ]}
             >
               <.icon name="hero-key" class="size-4" /> API Keys
+            </a>
+            <a
+              href={~p"/agent-tokens"}
+              class={[
+                "flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm transition-colors",
+                String.starts_with?(@conn.request_path, "/agent-tokens") &&
+                  "font-medium text-accent bg-accent/10",
+                !String.starts_with?(@conn.request_path, "/agent-tokens") &&
+                  "text-base-content/60 hover:bg-secondary"
+              ]}
+            >
+              <.icon name="hero-cpu-chip" class="size-4" /> Agent Tokens
             </a>
             <a
               href={~p"/providers"}

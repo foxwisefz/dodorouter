@@ -50,6 +50,16 @@ defmodule DodoRouterWeb.Router do
     post "/recordings/active/stop", RecordingsController, :stop
   end
 
+  # The unscoped entry point. Everything else is under /r/:router_slug, so
+  # without this a caller holding only a base URL and a token cannot discover
+  # its first slug — and the per-router guide can only onboard someone who
+  # already knows what it was meant to tell them.
+  scope "/", DodoRouterWeb do
+    pipe_through :agent_api
+
+    get "/agent", AgentController, :index
+  end
+
   # Agent API - lets a coding agent working on a product measure quality vs
   # price for that product's own traffic.
   #
@@ -117,6 +127,7 @@ defmodule DodoRouterWeb.Router do
 
       live "/providers", ProvidersLive.Index, :index
       live "/api-keys", ApiKeysLive.Index, :index
+      live "/agent-tokens", AgentTokenLive.Index, :index
 
       live "/logs", LogLive.Index, :index
       live "/logs/:id", LogLive.Show, :show

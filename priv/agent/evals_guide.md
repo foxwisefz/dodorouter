@@ -13,8 +13,14 @@ model scores every answer. You get a score, a latency and a price per model.
 
     Base URL: {{BASE}}
     Router:   {{SLUG}}
-    Auth:     Authorization: Bearer $DODO_API_KEY   (the router's API key —
-              the same one the product uses to make proxy calls)
+    Auth:     Authorization: Bearer $DODO_AGENT_TOKEN
+
+The token is an **agent token**, minted at /agent-tokens — not the router's
+proxy API key, which cannot read this surface. It carries scopes; a 403 names
+the one you are missing.
+
+Holding a token but no router slug? `GET {{BASE_ROOT}}/agent` lists every
+router this token reaches, each with its own guide.
 
 Everything is JSON. Money is a JSON number in USD. Times are ISO 8601 UTC.
 Every error names this guide in its `see` field.
@@ -31,12 +37,19 @@ truncated or is not a chat request cannot be replayed; `not_evaluable_because`
 says which. Pick an evaluable one.
 
 Nothing to evaluate yet? Make the product issue one real call through the
-router (or send one yourself to `{{BASE}}/v1/chat/completions`), then list
-again. There is no way to evaluate a prompt that was never served — the point
-of the source log is that it is real traffic, with the real system prompt,
-tools and history attached.
+router, then list again. You cannot send that call yourself with this token —
+`{{BASE}}/v1/chat/completions` takes the router's **proxy API key**, which is a
+different credential precisely so that reading traffic and sending it are
+granted separately.
 
-`GET {{BASE}}/logs/:id` returns the full stored request and response bodies.
+There is no way to evaluate a prompt that was never served — the point of the
+source log is that it is real traffic, with the real system prompt, tools and
+history attached.
+
+`GET {{BASE}}/logs/:id` returns the full stored request and response bodies,
+if your token holds `logs:read_bodies`. Without it the fields come back as
+`{"withheld": "..."}` rather than missing, so you can tell "empty" from
+"not yours to read".
 Read them before writing criteria: the criteria have to be about *this* task.
 
 ### 2. See what you can try
@@ -133,6 +146,7 @@ call, and evaluate that new log with the same criteria and the same judge.
 
 | Method | Path | Purpose |
 |---|---|---|
+| GET | `{{BASE_ROOT}}/agent` | **Start here.** Every router this token reaches, and its scopes |
 | GET | `/agent` | This guide, and the endpoint list as data |
 | GET | `/logs` | Recent requests. `limit`, `offset`, `status`, `provider`, `model`, `call_type`, `favorites_only` |
 | GET | `/logs/:id` | One request with bodies. Accepts an id or a `request_id` |

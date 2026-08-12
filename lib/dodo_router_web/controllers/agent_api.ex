@@ -49,8 +49,17 @@ defmodule DodoRouterWeb.AgentApi do
 
   @doc """
   Where an agent that got something wrong can read what to do instead.
+
+  Falls back to the unscoped entry point when the failure happened before a
+  router was resolved — pointing a program at a browser page would be no help
+  at all, and a 401 is exactly when the caller needs somewhere to go.
   """
-  def guide_url(conn), do: "#{DodoRouterWeb.Endpoint.url()}/r/#{router_slug(conn)}/agent"
+  def guide_url(conn) do
+    case conn.path_params["router_slug"] do
+      nil -> "#{DodoRouterWeb.Endpoint.url()}/agent"
+      slug -> "#{DodoRouterWeb.Endpoint.url()}/r/#{slug}/agent"
+    end
+  end
 
   def router_slug(conn), do: conn.assigns.current_router.slug
 

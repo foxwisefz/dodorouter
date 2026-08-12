@@ -85,6 +85,7 @@ defmodule DodoRouterWeb.EvalsController do
       base_url: base,
       guide:
         @guide
+        |> String.replace("{{BASE_ROOT}}", DodoRouterWeb.Endpoint.url())
         |> String.replace("{{BASE}}", base)
         |> String.replace("{{SLUG}}", router_slug(conn)),
       endpoints: Enum.map(@endpoints, &Map.put(&1, :url, base <> &1.path))

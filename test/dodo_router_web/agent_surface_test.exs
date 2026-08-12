@@ -123,6 +123,65 @@ defmodule DodoRouterWeb.AgentSurfaceTest do
     end
   end
 
+  describe "self-onboarding" do
+    test "a token with only a base url can find its routers", %{
+      conn: conn,
+      user: user,
+      router: router
+    } do
+      {second, _key} = RoutersFixtures.router_fixture(user)
+      {_token, raw} = AgentsFixtures.token_for_routers_fixture(user, [router, second])
+
+      body = conn |> auth(raw) |> get("/agent") |> json_response(200)
+
+      slugs = Enum.map(body["routers"], & &1["slug"])
+      assert router.slug in slugs
+      assert second.slug in slugs
+
+      # Each entry hands over the URL of its own guide, so the next call needs
+      # no construction by the caller.
+      assert Enum.all?(body["routers"], &String.ends_with?(&1["guide"], "/agent"))
+      assert body["next"] =~ "/agent"
+    end
+
+    test "names the scopes it holds and the vocabulary of the rest", %{conn: conn, user: user} do
+      {_token, raw} =
+        AgentsFixtures.scoped_token_fixture(user, ["logs:read"], %{"name" => "Reader"})
+
+      body = conn |> auth(raw) |> get("/agent") |> json_response(200)
+
+      assert body["token"]["name"] == "Reader"
+      assert body["token"]["scopes"] == ["logs:read"]
+      # The full vocabulary, so a 403 later is actionable rather than cryptic.
+      assert "logs:read_bodies" in Enum.map(body["scopes"], & &1["name"])
+      assert Enum.any?(body["scopes"], &(&1["name"] == "logs:read_bodies" and &1["sensitive"]))
+    end
+
+    test "says so when a token reaches nothing rather than returning a bare empty list", %{
+      conn: conn,
+      user: user
+    } do
+      {router, _key} = RoutersFixtures.router_fixture(user)
+      {_token, raw} = AgentsFixtures.token_for_routers_fixture(user, [router])
+      DodoRouter.Repo.delete!(router)
+
+      body = conn |> auth(raw) |> get("/agent") |> json_response(200)
+
+      assert body["routers"] == []
+      assert body["next"] =~ "reaches no routers"
+    end
+
+    test "still requires a credential, and points a refused caller somewhere fetchable", %{
+      conn: conn
+    } do
+      body = conn |> get("/agent") |> json_response(401)
+
+      # Not the browser page — a program cannot use that.
+      assert body["see"] =~ "/agent"
+      refute body["see"] =~ "agent-tokens"
+    end
+  end
+
   describe "scopes" do
     test "withholds bodies visibly rather than omitting them", %{
       conn: conn,

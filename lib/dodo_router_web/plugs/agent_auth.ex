@@ -141,9 +141,11 @@ defmodule DodoRouterWeb.Plugs.AgentAuth do
 
   defp error_body(message, type), do: %{error: %{message: message, type: type}}
 
+  # The unscoped entry point, not the browser page: a refused caller here is a
+  # program, and it needs somewhere it can actually fetch.
   defp guide_url(conn) do
     case conn.path_params["router_slug"] do
-      nil -> "#{DodoRouterWeb.Endpoint.url()}/agent-tokens"
+      nil -> "#{DodoRouterWeb.Endpoint.url()}/agent"
       slug -> "#{DodoRouterWeb.Endpoint.url()}/r/#{slug}/agent"
     end
   end
