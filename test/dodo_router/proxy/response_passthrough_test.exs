@@ -81,6 +81,140 @@ defmodule DodoRouter.Proxy.ChannelThreeTest do
     end
   end
 
+  describe "content blocks the IR cannot hold" do
+    # The IR reduces `content` over `text` and `tool_use`; a thinking or
+    # server-tool block has nowhere to go. Anthropic requires thinking blocks
+    # be echoed back unchanged to continue on the same model, so losing them
+    # doesn't just cost a display — it makes the conversation unresumable.
+    defp thinking_response do
+      %{
+        "id" => "msg_01thinks",
+        "role" => "assistant",
+        "model" => "claude-opus-5",
+        "content" => [
+          %{"type" => "thinking", "thinking" => "let me work through it", "signature" => "sig_1"},
+          %{"type" => "redacted_thinking", "data" => "encrypted"},
+          %{"type" => "text", "text" => "The answer is 4."},
+          %{
+            "type" => "tool_use",
+            "id" => "toolu_1",
+            "name" => "calc",
+            "input" => %{"n" => 2}
+          }
+        ],
+        "stop_reason" => "tool_use",
+        "usage" => %{"input_tokens" => 10, "output_tokens" => 2}
+      }
+    end
+
+    test "the native block list rides along when a block could not be translated" do
+      ir = Anthropic.convert_to_openai_format(thinking_response())
+      passthrough = Map.fetch!(ir, Adapter.response_passthrough_key())
+
+      assert passthrough["content"] == thinking_response()["content"]
+    end
+
+    test "an Anthropic client gets its blocks back byte-identical, in order" do
+      ir = Anthropic.convert_to_openai_format(thinking_response())
+      {passthrough, ir} = Map.pop(ir, Adapter.response_passthrough_key())
+
+      client = AnthropicFormat.from_openai_response(ir, passthrough)
+
+      assert client["content"] == thinking_response()["content"]
+    end
+
+    test "the translated view is unchanged — OpenAI clients still read text and tool calls" do
+      ir = Anthropic.convert_to_openai_format(thinking_response())
+      message = get_in(ir, ["choices", Access.at(0), "message"])
+
+      assert message["content"] == "The answer is 4."
+      assert [%{"id" => "toolu_1"}] = message["tool_calls"]
+      refute String.contains?(message["content"], "let me work through it")
+    end
+
+    test "a fully translatable response carries no content, so nothing reports a false loss" do
+      # Every ordinary Anthropic response would otherwise record `content` as
+      # dropped on an OpenAI-family client — which it wasn't.
+      ir = Anthropic.convert_to_openai_format(anthropic_response())
+      passthrough = Map.fetch!(ir, Adapter.response_passthrough_key())
+
+      refute Map.has_key?(passthrough, "content")
+    end
+  end
+
+  describe "the Responses round trip" do
+    alias DodoRouter.Proxy.Adapters.ResponsesAPI
+    alias DodoRouterWeb.ResponsesFormat
+
+    defp completed_acc do
+      {acc, _chunks} =
+        ResponsesAPI.process_events(
+          %{
+            model: "gpt-5.5",
+            content: "hi",
+            tool_calls: %{},
+            usage: nil,
+            finish_reason: nil,
+            first_chunk_time: 1,
+            sse_buffer: ""
+          },
+          [
+            %{
+              "type" => "response.completed",
+              "response" => %{
+                "id" => "resp_realid",
+                "model" => "gpt-5.5",
+                "output" => [],
+                "usage" => %{"input_tokens" => 1, "output_tokens" => 1, "total_tokens" => 2},
+                "text" => %{"format" => %{"type" => "json_schema"}},
+                "instructions" => "be nice"
+              }
+            }
+          ]
+        )
+
+      acc
+    end
+
+    test "native response fields the IR cannot hold reach a Responses client" do
+      ir = ResponsesAPI.build_final_response(completed_acc(), %{})
+      {passthrough, ir} = Map.pop(ir, Adapter.response_passthrough_key())
+
+      client = ResponsesFormat.from_openai_response(ir, "req-1", passthrough)
+
+      assert client["text"] == %{"format" => %{"type" => "json_schema"}}
+      assert client["instructions"] == "be nice"
+    end
+
+    test "the provider's real response id comes back, which is what chains the next turn" do
+      # `previous_response_id` refers to it; a synthesised id cannot be chained.
+      ir = ResponsesAPI.build_final_response(completed_acc(), %{})
+      {passthrough, ir} = Map.pop(ir, Adapter.response_passthrough_key())
+
+      assert ResponsesFormat.from_openai_response(ir, "req-1", passthrough)["id"] == "resp_realid"
+    end
+
+    test "a client with no passthrough still gets a well-formed response" do
+      ir = ResponsesAPI.build_final_response(completed_acc(), %{})
+      {_passthrough, ir} = Map.pop(ir, Adapter.response_passthrough_key())
+
+      client = ResponsesFormat.from_openai_response(ir, "req-1")
+
+      assert client["id"] == "resp_req-1"
+      assert client["object"] == "response"
+    end
+
+    test "translated fields are not duplicated into the passthrough" do
+      ir = ResponsesAPI.build_final_response(completed_acc(), %{})
+      passthrough = Map.fetch!(ir, Adapter.response_passthrough_key())
+
+      for translated <- ~w(model output usage) do
+        refute Map.has_key?(passthrough, translated),
+               "#{translated} is translated and must not also ride the passthrough"
+      end
+    end
+  end
+
   describe "the streaming tail" do
     test "message_delta extras reach the accumulator" do
       {acc, _chunks} =
@@ -97,6 +231,38 @@ defmodule DodoRouter.Proxy.ChannelThreeTest do
       assert acc.passthrough["stop_sequence"] == "END"
       assert acc.passthrough["context_management"] == %{"applied_edits" => []}
       refute Map.has_key?(acc.passthrough, "stop_reason")
+    end
+  end
+
+  describe "the streaming message id" do
+    test "Anthropic's real id is captured from message_start, before any delta" do
+      # It arrives at the head of the stream, not the tail — early enough for
+      # the egress to use instead of synthesising one, which is what makes
+      # previous_message_id cache diagnostics usable through the proxy.
+      {acc, _chunks} =
+        Anthropic.process_anthropic_events(Anthropic.initial_stream_acc(), [
+          %{"type" => "message_start", "message" => %{"id" => "msg_01realstream"}},
+          %{
+            "type" => "content_block_delta",
+            "index" => 0,
+            "delta" => %{"type" => "text_delta", "text" => "hi"}
+          }
+        ])
+
+      assert acc.message_id == "msg_01realstream"
+    end
+
+    test "no id when the provider never sent one" do
+      {acc, _chunks} =
+        Anthropic.process_anthropic_events(Anthropic.initial_stream_acc(), [
+          %{
+            "type" => "content_block_delta",
+            "index" => 0,
+            "delta" => %{"type" => "text_delta", "text" => "hi"}
+          }
+        ])
+
+      assert acc.message_id == nil
     end
   end
 end

@@ -955,7 +955,7 @@ defmodule DodoRouterWeb.RouterLive.Show do
                     :if={log.call_type}
                     class="px-1.5 py-0.5 rounded text-xs font-medium bg-base-300/50 text-base-content/70"
                   >
-                    {call_type_label(log.call_type)}
+                    {call_type_name(log.call_type)}
                   </span>
                   <span class={[
                     "px-1.5 py-0.5 rounded text-xs font-medium",
@@ -1143,10 +1143,10 @@ defmodule DodoRouterWeb.RouterLive.Show do
                 <% end %>
               </select>
               <p :if={@step_efforts_known} class="text-xs text-base-content/50 mt-1.5">
-                Levels this model supports (from models.dev), sent to the provider as-is. Leave unset to honor the client request or provider default.
+                Levels this model supports (from models.dev), translated into whatever depth control the provider actually takes — a level for OpenAI-family and Anthropic, a token budget for Gemini, on/off for providers with only a switch. Leave unset to honor the client request or provider default.
               </p>
               <p :if={!@step_efforts_known} class="text-xs text-base-content/50 mt-1.5">
-                Supported levels unknown for this model — the value is sent to the provider as-is; unsupported levels will error visibly in the logs. Leave unset to honor the client request or provider default.
+                Supported levels unknown for this model — the level is translated into the provider's own depth control and an unsupported one will error visibly in the logs rather than being silently downgraded. Leave unset to honor the client request or provider default.
               </p>
             </div>
             <%!-- z.ai specific options --%>
@@ -1291,11 +1291,6 @@ defmodule DodoRouterWeb.RouterLive.Show do
   defp status_badge_class("error"), do: "bg-error/20 text-error"
   defp status_badge_class("pending"), do: "bg-info/20 text-info"
   defp status_badge_class(_), do: "bg-base-300 text-base-content/60"
-
-  defp call_type_label("completion"), do: "chat"
-  defp call_type_label("tool_call"), do: "tools"
-  defp call_type_label("tool_enabled_completion"), do: "chat+tools"
-  defp call_type_label(other), do: other
 
   defp last_message_preview(log) do
     if is_nil(Map.get(log, :request_body)) do

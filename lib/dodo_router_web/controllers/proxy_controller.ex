@@ -157,6 +157,9 @@ defmodule DodoRouterWeb.ProxyController do
 
     result =
       Proxy.dispatch_streaming(router, params, send_chunk,
+        # The same id already went back as x-request-id; without it here the
+        # log row gets a fresh one and the header names nothing.
+        request_id: request_id,
         session: session,
         recording_id: recording_id,
         client_headers: client_headers

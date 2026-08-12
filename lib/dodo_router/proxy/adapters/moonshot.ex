@@ -76,7 +76,7 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
         "headers=#{inspect(safe_headers(headers))}"
     )
 
-    payload_size_bytes = body |> Jason.encode!() |> byte_size()
+    payload_size_bytes = Adapter.record_outbound_body(body)
     start_time = FinchTelemetry.mark_request_start()
 
     case Req.post(url, headers: headers, json: body, receive_timeout: @timeout_ms) do
@@ -135,7 +135,7 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
         "headers=#{inspect(safe_headers(headers))}"
     )
 
-    payload_size_bytes = body |> Jason.encode!() |> byte_size()
+    payload_size_bytes = Adapter.record_outbound_body(body)
 
     # Track partial content in process dict so it survives error paths
     Process.delete(:__moonshot_stream_acc__)

@@ -348,4 +348,29 @@ defmodule DodoRouterWeb.ResponsesFormatTest do
   end
 
   defp unique, do: System.unique_integer([:positive])
+
+  describe "passthrough_fields/1" do
+    test "carries the untranslated fields with their values" do
+      # A Responses request served by a Responses-format adapter never needed
+      # translating, so `text` (structured outputs) and the stateful-
+      # conversation fields should reach the wire as the client sent them.
+      params = %{
+        "model" => "gpt-5.5",
+        "input" => "hi",
+        "text" => %{"format" => %{"type" => "json_schema"}},
+        "previous_response_id" => "resp_123"
+      }
+
+      assert ResponsesFormat.passthrough_fields(params) == %{
+               "text" => %{"format" => %{"type" => "json_schema"}},
+               "previous_response_id" => "resp_123"
+             }
+    end
+
+    test "cannot carry a field the converter consumed back over a routing decision" do
+      params = %{"model" => "gpt-5.5", "input" => "hi", "tools" => [], "reasoning" => %{}}
+
+      assert ResponsesFormat.passthrough_fields(params) == %{}
+    end
+  end
 end

@@ -579,6 +579,125 @@ defmodule DodoRouterWeb.ProxyIntegrationTest do
     end
   end
 
+  describe "outbound body" do
+    test "the attempt records the bytes the provider received", %{metadata: metadata} do
+      # `request_body` on an attempt is the OpenAI-shaped IR, copied onto every
+      # attempt in the chain. What an operator debugging a provider 400 needs
+      # is the adapter's own builder output — after effort injection,
+      # sanitisation and passthrough merging.
+      %{router: router, api_key: api_key} = create_router_with_test_provider(metadata)
+
+      {:ok, response} =
+        make_request(
+          "/r/#{router.slug}/v1/chat/completions",
+          %{"model" => "test-model", "messages" => [%{"role" => "user", "content" => "Hello"}]},
+          api_key,
+          metadata
+        )
+
+      [request_id] = response.headers["x-request-id"]
+      log = DodoRouter.Repo.get_by(DodoRouter.Logs.RequestLog, request_id: request_id)
+
+      [attempt] = log.attempted_steps
+      assert attempt["outbound_body"]
+      assert Jason.decode!(attempt["outbound_body"])["messages"]
+    end
+  end
+
+  describe "anthropic-ratelimit-* forwarding" do
+    # Claude Code paces itself off anthropic-ratelimit-unified-*. Swallowing
+    # them makes it fly blind — and streaming is every real agent request.
+    test "sync /v1/messages carries them", %{metadata: metadata} do
+      %{router: router, api_key: api_key} = create_router_with_test_provider(metadata)
+
+      {:ok, response} =
+        make_request(
+          "/r/#{router.slug}/v1/messages",
+          %{
+            "model" => "test-model",
+            "messages" => [%{"role" => "user", "content" => "Hello"}],
+            "max_tokens" => 1024
+          },
+          api_key,
+          metadata
+        )
+
+      assert response.status == 200
+      assert response.headers["anthropic-ratelimit-unified-remaining"] == ["42"]
+    end
+
+    test "streaming /v1/messages carries them too", %{metadata: metadata} do
+      %{router: router, api_key: api_key} = create_router_with_test_provider(metadata)
+
+      {:ok, response} =
+        make_request(
+          "/r/#{router.slug}/v1/messages",
+          %{
+            "model" => "test-model",
+            "messages" => [%{"role" => "user", "content" => "Hello"}],
+            "max_tokens" => 1024
+          },
+          api_key,
+          metadata,
+          stream: true
+        )
+
+      assert response.status == 200
+      assert response.headers["anthropic-ratelimit-unified-remaining"] == ["42"]
+    end
+  end
+
+  describe "x-request-id" do
+    # The header is the only handle a user has on a request. If it does not
+    # name the row we logged, an operator handed one cannot find the request —
+    # and streaming is most agent traffic.
+    for {label, path, body} <- [
+          {"OpenAI streaming", "/v1/chat/completions",
+           %{"model" => "test-model", "messages" => [%{"role" => "user", "content" => "Hello"}]}},
+          {"Anthropic streaming", "/v1/messages",
+           %{
+             "model" => "test-model",
+             "messages" => [%{"role" => "user", "content" => "Hello"}],
+             "max_tokens" => 1024
+           }},
+          {"Responses streaming", "/v1/responses", %{"model" => "test-model", "input" => "Hello"}}
+        ] do
+      test "#{label} logs the request id it handed the client", %{metadata: metadata} do
+        %{router: router, api_key: api_key} = create_router_with_test_provider(metadata)
+
+        {:ok, response} =
+          make_request(
+            "/r/#{router.slug}#{unquote(path)}",
+            unquote(Macro.escape(body)),
+            api_key,
+            metadata,
+            stream: true
+          )
+
+        assert response.status == 200
+        [request_id] = response.headers["x-request-id"]
+
+        assert DodoRouter.Repo.get_by(DodoRouter.Logs.RequestLog, request_id: request_id),
+               "no log row carries the request id the client was handed"
+      end
+    end
+
+    test "sync keeps matching too", %{metadata: metadata} do
+      %{router: router, api_key: api_key} = create_router_with_test_provider(metadata)
+
+      {:ok, response} =
+        make_request(
+          "/r/#{router.slug}/v1/chat/completions",
+          %{"model" => "test-model", "messages" => [%{"role" => "user", "content" => "Hello"}]},
+          api_key,
+          metadata
+        )
+
+      [request_id] = response.headers["x-request-id"]
+      assert DodoRouter.Repo.get_by(DodoRouter.Logs.RequestLog, request_id: request_id)
+    end
+  end
+
   # ===========================================================================
   # Helpers
   # ===========================================================================

@@ -4,6 +4,8 @@ defmodule DodoRouterWeb.AnthropicProxyController do
   require Logger
 
   alias DodoRouter.Proxy
+  alias DodoRouter.Proxy.Adapter
+  alias DodoRouter.Proxy.Adapters.Anthropic, as: AnthropicAdapter
   alias DodoRouterWeb.AnthropicFormat
 
   def create(conn, params) do
@@ -284,6 +286,7 @@ defmodule DodoRouterWeb.AnthropicProxyController do
     Process.put(:__anthropic_serving_model__, openai_params["model"] || "unknown")
     # Keep-alive means the next request may land in this same process.
     Process.delete(:__stream_opened__)
+    Adapter.reset_stream_response_headers()
 
     send_chunk = &raw_send_chunk/1
 
@@ -306,6 +309,9 @@ defmodule DodoRouterWeb.AnthropicProxyController do
         openai_params,
         anthropic_send_chunk,
         [
+          # The same id already went back as x-request-id; without it here the
+          # log row gets a fresh one and the header names nothing.
+          request_id: request_id,
           session: session,
           recording_id: recording_id,
           client_headers: client_headers,
@@ -337,8 +343,25 @@ defmodule DodoRouterWeb.AnthropicProxyController do
   defp open_stream(request_id) do
     if Process.get(:__stream_opened__) != true do
       Process.put(:__stream_opened__, true)
+
+      # Last moment the response head is still revisable. The adapter parked
+      # the provider's headers when the upstream head arrived; this is where
+      # the rate-limit ones get onto our own response, matching what the sync
+      # path does from the dispatch meta.
+      Process.put(
+        :__stream_conn__,
+        forward_ratelimit_headers(
+          Process.get(:__stream_conn__),
+          Adapter.stream_response_headers()
+        )
+      )
+
       model = Process.get(:__anthropic_serving_model__) || "unknown"
-      raw_send_chunk(anthropic_message_start_event(model, request_id))
+      # Anthropic's own id when Anthropic is serving: it names a message in
+      # their store, which is what `previous_message_id` cache diagnostics
+      # refer to. Any other provider has none, so we synthesise one.
+      message_id = AnthropicAdapter.stream_message_id() || "msg_#{request_id}"
+      raw_send_chunk(anthropic_message_start_event(model, message_id))
       raw_send_chunk(anthropic_content_block_start_event())
     end
 
@@ -437,11 +460,11 @@ defmodule DodoRouterWeb.AnthropicProxyController do
     end
   end
 
-  defp anthropic_message_start_event(model, request_id) do
+  defp anthropic_message_start_event(model, message_id) do
     event_data = %{
       "type" => "message_start",
       "message" => %{
-        "id" => "msg_#{request_id}",
+        "id" => message_id,
         "type" => "message",
         "role" => "assistant",
         "content" => [],

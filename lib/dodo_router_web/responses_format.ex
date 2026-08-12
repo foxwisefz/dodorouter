@@ -29,6 +29,24 @@ defmodule DodoRouterWeb.ResponsesFormat do
     |> Enum.sort()
   end
 
+  @doc """
+  The untranslated fields *with their values*, for a step that speaks the
+  Responses format back to us.
+
+  Same contract as `DodoRouterWeb.AnthropicFormat.passthrough_fields/1`: the
+  loss is at the IR, not the provider, so a Responses request served by a
+  Responses-format adapter should reach the wire whole. `FallbackChain` hands
+  this to a step declaring `request_format: :responses` and records it as lost
+  against any step that doesn't.
+
+  Safe to merge by construction — these are exactly the keys `@consumed_fields`
+  does *not* contain, so it can never carry a stale `model` or `tools` back
+  over a routing decision.
+  """
+  def passthrough_fields(responses_params) when is_map(responses_params) do
+    Map.take(responses_params, unknown_fields(responses_params))
+  end
+
   def to_openai_params(responses_params) do
     messages = convert_input_to_messages(responses_params["input"])
 
@@ -66,7 +84,7 @@ defmodule DodoRouterWeb.ResponsesFormat do
 
   defp client_reasoning_effort(_), do: nil
 
-  def from_openai_response(openai_response, request_id) do
+  def from_openai_response(openai_response, request_id, provider_passthrough \\ %{}) do
     choice = get_in(openai_response, ["choices", Access.at(0)]) || %{}
     message = choice["message"] || %{}
     usage = openai_response["usage"] || %{}
@@ -124,7 +142,17 @@ defmodule DodoRouterWeb.ResponsesFormat do
       "user" => nil,
       "metadata" => %{}
     }
+    |> restore_provider_passthrough(provider_passthrough)
   end
+
+  # When a Responses-format provider served the request, the response never
+  # needed translating either. The passthrough wins on collision by design: the
+  # fields it overlaps with are ones synthesised above — most of them hardcoded
+  # `nil` — and the provider's real values are strictly better. Chief among
+  # them the real `resp_…` id, which is what a client needs to chain the next
+  # turn with `previous_response_id`.
+  defp restore_provider_passthrough(built, passthrough) when map_size(passthrough) == 0, do: built
+  defp restore_provider_passthrough(built, passthrough), do: Map.merge(built, passthrough)
 
   def convert_sse_chunk(openai_sse_data, request_id) when is_binary(openai_sse_data) do
     openai_sse_data

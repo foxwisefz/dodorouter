@@ -34,7 +34,11 @@ defmodule DodoRouterWeb.SessionLive.Index do
   def handle_info({:log_created, _log}, socket) do
     # Refresh sessions list when new logs come in
     sessions = Logs.list_sessions(socket.assigns.router, limit: 50)
-    {:noreply, assign(socket, :sessions, sessions)}
+
+    {:noreply,
+     socket
+     |> assign(:sessions, sessions)
+     |> assign_cache_verdicts(sessions)}
   end
 
   def handle_info(_msg, socket), do: {:noreply, socket}
@@ -76,6 +80,13 @@ defmodule DodoRouterWeb.SessionLive.Index do
                     {session.session_name}
                   </div>
                 <% end %>
+                <div
+                  :if={regressed?(@cache_verdicts, session)}
+                  class="flex items-center gap-1.5 mt-1.5 text-xs font-medium text-warning"
+                  title="The cached prefix stopped hitting partway through this session — open it to see where."
+                >
+                  <.icon name="hero-exclamation-triangle" class="size-3.5" /> Cache stopped hitting
+                </div>
               </div>
               <div class="text-right text-sm text-base-content/60">
                 <div>{pluralize(session.request_count, "request")}</div>
@@ -157,5 +168,17 @@ defmodule DodoRouterWeb.SessionLive.Index do
     |> assign(:sessions, sessions)
     |> assign(:page, page)
     |> assign(:per_page, per_page)
+    |> assign_cache_verdicts(sessions)
+  end
+
+  defp assign_cache_verdicts(socket, sessions) do
+    verdicts =
+      Logs.cache_verdicts(socket.assigns.router, Enum.map(sessions, & &1.session_id))
+
+    assign(socket, :cache_verdicts, verdicts)
+  end
+
+  defp regressed?(verdicts, session) do
+    match?({:regressed, _}, Map.get(verdicts, session.session_id))
   end
 end

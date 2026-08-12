@@ -2,12 +2,14 @@ defmodule DodoRouterWeb.Endpoint do
   use Phoenix.Endpoint, otp_app: :dodo_router
   require Logger
 
+  @cookie_suffix Application.compile_env(:dodo_router, :cookie_suffix, "")
+
   # The session will be stored in the cookie and signed,
   # this means its contents can be read but not tampered with.
   # Set :encryption_salt if you would also like to encrypt it.
   @session_options [
     store: :cookie,
-    key: "_dodo_router_key",
+    key: "_dodo_router_key" <> @cookie_suffix,
     signing_salt: "IPNBAiLl",
     same_site: "Lax"
   ]

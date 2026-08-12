@@ -21,6 +21,7 @@ defmodule DodoRouter.Proxy.Adapters.Google do
   require Logger
 
   alias DodoRouter.Proxy.Adapter
+  alias DodoRouter.Proxy.Fidelity
   alias DodoRouter.Proxy.FinchTelemetry
   alias DodoRouter.Routers.RoutingStep
 
@@ -47,7 +48,7 @@ defmodule DodoRouter.Proxy.Adapters.Google do
     body = build_gemini_request(request, step)
 
     headers = request_headers(api_key, client_headers)
-    payload_size_bytes = body |> Jason.encode!() |> byte_size()
+    payload_size_bytes = Adapter.record_outbound_body(body)
     start_time = FinchTelemetry.mark_request_start()
 
     case Req.post(url, headers: headers, json: body, receive_timeout: @timeout_ms) do
@@ -93,7 +94,7 @@ defmodule DodoRouter.Proxy.Adapters.Google do
     body = build_gemini_request(request, step)
 
     headers = request_headers(api_key, client_headers)
-    payload_size_bytes = body |> Jason.encode!() |> byte_size()
+    payload_size_bytes = Adapter.record_outbound_body(body)
     start_time = FinchTelemetry.mark_request_start()
     Process.delete(:__google_stream_acc__)
 
@@ -410,8 +411,26 @@ defmodule DodoRouter.Proxy.Adapters.Google do
       ]
     }
 
+    record_untranslated_response(gemini_response)
+
     if usage, do: Map.put(response, "usage", usage), else: response
   end
+
+  # Consumed above; everything else Gemini returns at the top level —
+  # `modelVersion`, `promptFeedback` (why a prompt was blocked), `responseId` —
+  # has no place in the OpenAI-shaped IR and no client that speaks Gemini to
+  # restore it for, so the only honest thing is to say it was dropped.
+  @translated_response_fields ~w(candidates usageMetadata)
+
+  defp record_untranslated_response(gemini_response) when is_map(gemini_response) do
+    gemini_response
+    |> Map.drop(@translated_response_fields)
+    |> Fidelity.record_dropped_response_fields(
+      "no equivalent in the OpenAI Chat Completions format"
+    )
+  end
+
+  defp record_untranslated_response(_), do: :ok
 
   defp parse_gemini_sse(data, buffer) do
     combined = buffer <> data

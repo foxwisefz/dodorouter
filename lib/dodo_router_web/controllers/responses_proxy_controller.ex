@@ -49,12 +49,13 @@ defmodule DodoRouterWeb.ResponsesProxyController do
 
   # See AnthropicProxyController: ingress conversion drops travel to the
   # request log alongside the header and egress-allowlist drops.
-  defp fidelity_opts(fields) when fields == [], do: []
+  defp fidelity_opts(fields) when map_size(fields) == 0, do: []
 
   defp fidelity_opts(fields) do
     [
-      dropped_request_fields: fields,
-      dropped_request_fields_detail: "responses -> openai request conversion"
+      client_format: :responses,
+      passthrough_request_fields: fields,
+      passthrough_detail: "no equivalent in the OpenAI Chat Completions format"
     ]
   end
 
@@ -82,7 +83,13 @@ defmodule DodoRouterWeb.ResponsesProxyController do
       {:ok, openai_response, timing} ->
         total_ms = System.monotonic_time(:millisecond) - start_time
         provider_ms = timing[:provider_ms] || 0
-        responses_response = ResponsesFormat.from_openai_response(openai_response, request_id)
+
+        responses_response =
+          ResponsesFormat.from_openai_response(
+            openai_response,
+            request_id,
+            timing[:response_passthrough] || %{}
+          )
 
         conn
         |> put_resp_header("x-request-id", request_id)
@@ -224,17 +231,25 @@ defmodule DodoRouterWeb.ResponsesProxyController do
 
       dispatch_opts =
         [
+          # The same id already went back as x-request-id; without it here the
+          # log row gets a fresh one and the header names nothing.
+          request_id: request_id,
           session: session,
           recording_id: recording_id,
           client_headers: client_headers
         ] ++ fidelity_opts(dropped_fields)
 
       case Proxy.dispatch_streaming(router, openai_params, responses_send_chunk, dispatch_opts) do
-        {:ok, openai_response, _timing} ->
+        {:ok, openai_response, timing} ->
           Logger.info("[ResponsesProxy] request_id=#{request_id} streaming succeeded")
 
           # Convert the OpenAI response to Responses API format for response.completed
-          completed_response = ResponsesFormat.from_openai_response(openai_response, request_id)
+          completed_response =
+            ResponsesFormat.from_openai_response(
+              openai_response,
+              request_id,
+              timing[:response_passthrough] || %{}
+            )
 
           completed_response =
             completed_response
@@ -311,20 +326,23 @@ defmodule DodoRouterWeb.ResponsesProxyController do
   # See AnthropicProxyController: the conversion is a whitelist, so anything it
   # doesn't carry is dropped in silence. Logging it turns that into a work
   # queue rather than a bug report from a confused client.
+  # The warning stays even though Responses-format steps now receive these
+  # fields: a translation we haven't written is still a gap the moment the
+  # request falls back to any other provider.
   defp warn_dropped_fields(params, request_id, router) do
-    case ResponsesFormat.unknown_fields(params) do
-      [] ->
-        []
+    case ResponsesFormat.passthrough_fields(params) do
+      untranslated when map_size(untranslated) == 0 ->
+        %{}
 
-      fields ->
+      untranslated ->
         Logger.warning(
-          "[ResponsesProxy] dropped_fields=#{Enum.join(fields, ",")} " <>
+          "[ResponsesProxy] dropped_fields=#{untranslated |> Map.keys() |> Enum.join(",")} " <>
             "request_id=#{request_id} router=#{router.slug} model=#{params["model"]}"
         )
 
         # The values travel with the names: we never store the client's body,
         # so the log row is the only surviving record of what was asked for.
-        Map.take(params, fields)
+        untranslated
     end
   end
 end

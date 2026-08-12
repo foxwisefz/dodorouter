@@ -46,7 +46,7 @@ defmodule DodoRouter.Proxy.Adapters.OpenAI do
 
     headers = request_headers(api_key, client_headers)
 
-    payload_size_bytes = body |> Jason.encode!() |> byte_size()
+    payload_size_bytes = Adapter.record_outbound_body(body)
     start_time = FinchTelemetry.mark_request_start()
 
     case Req.post(url, headers: headers, json: body, receive_timeout: @timeout_ms) do
@@ -95,7 +95,7 @@ defmodule DodoRouter.Proxy.Adapters.OpenAI do
 
     headers = request_headers(api_key, client_headers)
 
-    payload_size_bytes = body |> Jason.encode!() |> byte_size()
+    payload_size_bytes = Adapter.record_outbound_body(body)
     start_time = FinchTelemetry.mark_request_start()
     Process.delete(:__openai_stream_acc__)
 

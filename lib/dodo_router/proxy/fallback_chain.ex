@@ -79,6 +79,8 @@ defmodule DodoRouter.Proxy.FallbackChain do
 
     result = execute_step(step, state)
     fidelity = Fidelity.take()
+    # Adapters that return it in their own meta still win; this covers the rest.
+    outbound_body = Adapter.take_outbound_body()
 
     case result do
       {:ok, response, meta} ->
@@ -104,7 +106,7 @@ defmodule DodoRouter.Proxy.FallbackChain do
           cache_write_tokens: step_usage.cache_write_tokens,
           fidelity_changes: attribute(fidelity, step),
           outbound_headers: meta[:outbound_headers] || fidelity.outbound_headers,
-          outbound_body: meta[:outbound_body],
+          outbound_body: meta[:outbound_body] || outbound_body,
           request_body: state.request,
           response_body: response,
           response_headers: meta[:headers]
@@ -161,7 +163,7 @@ defmodule DodoRouter.Proxy.FallbackChain do
             if(is_binary(partial_content), do: String.length(partial_content), else: nil),
           fidelity_changes: attribute(fidelity, step),
           outbound_headers: details[:outbound_headers] || fidelity.outbound_headers,
-          outbound_body: details[:outbound_body],
+          outbound_body: details[:outbound_body] || outbound_body,
           request_body: state.request,
           response_headers: details[:headers]
         }
@@ -238,6 +240,7 @@ defmodule DodoRouter.Proxy.FallbackChain do
     # they build the upstream request (see DodoRouter.Proxy.Fidelity). Clearing
     # it here is what keeps step N's record from carrying step N-1's drops.
     Fidelity.reset()
+    Adapter.take_outbound_body()
 
     # Streaming egress needs the serving model *before* the first chunk — an
     # Anthropic `message_start` carries it, and there is no revising it later.

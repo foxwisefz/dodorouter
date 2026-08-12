@@ -23,6 +23,7 @@ defmodule DodoRouter.Proxy.Adapters.Cohere do
   require Logger
 
   alias DodoRouter.Proxy.Adapter
+  alias DodoRouter.Proxy.Fidelity
   alias DodoRouter.Proxy.FinchTelemetry
   alias DodoRouter.Routers.RoutingStep
 
@@ -47,7 +48,7 @@ defmodule DodoRouter.Proxy.Adapters.Cohere do
 
     headers = request_headers(api_key, client_headers)
 
-    payload_size_bytes = body |> Jason.encode!() |> byte_size()
+    payload_size_bytes = Adapter.record_outbound_body(body)
     start_time = FinchTelemetry.mark_request_start()
 
     case Req.post(url, headers: headers, json: body, receive_timeout: @timeout_ms) do
@@ -92,7 +93,7 @@ defmodule DodoRouter.Proxy.Adapters.Cohere do
 
     headers = request_headers(api_key, client_headers)
 
-    payload_size_bytes = body |> Jason.encode!() |> byte_size()
+    payload_size_bytes = Adapter.record_outbound_body(body)
     start_time = FinchTelemetry.mark_request_start()
 
     into_fun = fn
@@ -226,8 +227,25 @@ defmodule DodoRouter.Proxy.Adapters.Cohere do
       "choices" => [%{"index" => 0, "message" => openai_message, "finish_reason" => "stop"}]
     }
 
+    record_untranslated_response(cohere_response)
+
     if usage, do: Map.put(response, "usage", usage), else: response
   end
+
+  # Consumed above; everything else Cohere returns at the top level — `id`,
+  # `finish_reason` (the IR hardcodes "stop"), `logprobs` — has no place in the
+  # OpenAI-shaped IR and no Cohere-speaking client to restore it for.
+  @translated_response_fields ~w(message usage)
+
+  defp record_untranslated_response(cohere_response) when is_map(cohere_response) do
+    cohere_response
+    |> Map.drop(@translated_response_fields)
+    |> Fidelity.record_dropped_response_fields(
+      "no equivalent in the OpenAI Chat Completions format"
+    )
+  end
+
+  defp record_untranslated_response(_), do: :ok
 
   defp parse_cohere_sse(data, buffer) do
     combined = buffer <> data

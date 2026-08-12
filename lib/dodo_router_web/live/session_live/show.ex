@@ -2,8 +2,10 @@ defmodule DodoRouterWeb.SessionLive.Show do
   use DodoRouterWeb, :live_view
 
   alias DodoRouter.Logs
+  alias DodoRouter.Logs.CacheRegression
   alias DodoRouter.Logs.MessageNormalizer
   alias DodoRouter.Routers
+  alias DodoRouter.TextDiff
 
   @impl true
   def mount(%{"router_id" => router_id, "session_id" => session_id}, _session, socket) do
@@ -134,21 +136,31 @@ defmodule DodoRouterWeb.SessionLive.Show do
           </div>
         </div>
       </div>
+
+      <.cache_regression_notice :if={@cache_regression} finding={@cache_regression} />
       
     <!-- Request timeline -->
       <h2 class="text-lg font-semibold mb-3">Requests</h2>
       <div class="space-y-2">
         <%= for log <- @logs do %>
           <a
+            id={"turn-#{log.id}"}
             href={~p"/logs/#{log.id}" <> "?return_to=" <> URI.encode_www_form("/routers/#{@router.id}/sessions/#{@session_id}")}
             class={[
               "block p-3 rounded-lg text-sm transition-colors",
               log.status == "pending" && "bg-info/10 animate-pulse",
               log.status == "success" && "bg-success/10 hover:bg-success/20",
               log.status == "fallback" && "bg-warning/10 hover:bg-warning/20",
-              log.status == "error" && "bg-error/10 hover:bg-error/20"
+              log.status == "error" && "bg-error/10 hover:bg-error/20",
+              diverging_turn?(@cache_regression, log) && "ring-2 ring-warning/60"
             ]}
           >
+            <div
+              :if={diverging_turn?(@cache_regression, log)}
+              class="flex items-center gap-1.5 text-xs font-medium text-warning mb-2"
+            >
+              <.icon name="hero-scissors" class="size-3.5" /> Cache stopped hitting here
+            </div>
             <div class="flex items-center justify-between">
               <div class="flex items-center gap-3">
                 <span class={[
@@ -171,7 +183,7 @@ defmodule DodoRouterWeb.SessionLive.Show do
                   :if={log.call_type}
                   class="px-1.5 py-0.5 rounded text-xs font-medium bg-base-300/50 text-base-content/70"
                 >
-                  {call_type_label(log.call_type)}
+                  {call_type_name(log.call_type)}
                 </span>
                 <span class={[
                   "px-1.5 py-0.5 rounded text-xs font-medium",
@@ -198,6 +210,81 @@ defmodule DodoRouterWeb.SessionLive.Show do
     </div>
     """
   end
+
+  # A broken cache prefix produces no error and no latency change — the only
+  # symptom is the bill — so the session view has to say it out loud.
+  attr :finding, :map, required: true
+
+  defp cache_regression_notice(assigns) do
+    assigns =
+      assign(assigns, :diff, prefix_diff(assigns.finding.last_hit, assigns.finding.diverged_at))
+
+    ~H"""
+    <div class="mb-6 rounded-xl border border-warning/40 bg-warning/5 overflow-hidden">
+      <div class="p-4">
+        <div class="flex items-start gap-3">
+          <.icon name="hero-exclamation-triangle" class="size-5 text-warning shrink-0 mt-0.5" />
+          <div class="flex-1 min-w-0">
+            <h3 class="font-semibold">The prompt cache stopped hitting</h3>
+            <p class="text-sm text-base-content/70 mt-1">
+              From
+              <a href={"#turn-#{@finding.diverged_at.id}"} class="link link-warning font-medium">
+                {format_time(@finding.diverged_at.inserted_at)}
+              </a>
+              onward, {@finding.turns} turns read back the same
+              <span class="font-mono">{@finding.pinned_read}</span>
+              tokens while the conversation grew by
+              <span class="font-mono">{@finding.uncached_growth}</span>
+              — input that was re-sent at full price instead of being read back at a tenth of it.
+            </p>
+          </div>
+        </div>
+
+        <details :if={@diff} class="mt-3 group">
+          <summary class="cursor-pointer text-sm font-medium text-base-content/70 hover:text-base-content select-none">
+            What changed in the cached prefix
+          </summary>
+          <p class="text-xs text-base-content/50 mt-2">
+            The region both requests share, which should have come back byte-identical.
+          </p>
+          <div class="mt-2 max-h-80 overflow-y-auto rounded-lg bg-base-100 border border-base-300 p-3">
+            <.diff_block segments={@diff.segments} />
+          </div>
+        </details>
+
+        <p :if={!@diff} class="text-xs text-base-content/50 mt-3">
+          No prefix diff to show — the request bodies were not recorded, or the shared region is
+          unchanged and the breakpoint moved for a reason outside the messages (a changed tool
+          list, system prompt, or model).
+        </p>
+      </div>
+    </div>
+    """
+  end
+
+  attr :segments, :list, required: true
+
+  defp diff_block(assigns) do
+    assigns = assign(assigns, :segments, TextDiff.compact_for_display(assigns.segments))
+
+    ~H"""
+    <div class="whitespace-pre-wrap break-words leading-relaxed font-mono text-xs">
+      <%= for {op, text} <- @segments do %>
+        <%= case op do %>
+          <% :eq -> %>
+            <span class="text-base-content/40">{text}</span>
+          <% :del -> %>
+            <del class="bg-error/15 text-error rounded-sm no-underline">{text}</del>
+          <% :ins -> %>
+            <ins class="bg-success/15 text-success rounded-sm no-underline">{text}</ins>
+        <% end %>
+      <% end %>
+    </div>
+    """
+  end
+
+  defp diverging_turn?(nil, _log), do: false
+  defp diverging_turn?(finding, log), do: finding.diverged_at.id == log.id
 
   # Per-request spend. Plan/subscription traffic bills nothing marginal, so
   # "$0" alone reads like missing data — show the would-have-cost instead.
@@ -254,16 +341,78 @@ defmodule DodoRouterWeb.SessionLive.Show do
     |> assign(:stats, stats)
     |> assign(:logs, logs)
     |> assign(:session_name, session_name)
+    |> assign(:cache_regression, cache_regression(logs))
+  end
+
+  # The classifier names the turn; the view also needs the turn *before* it —
+  # the last one that still read its prefix back — to have something to diff
+  # against.
+  defp cache_regression(logs) do
+    case CacheRegression.classify(logs) do
+      {:regressed, finding} ->
+        Map.put(finding, :last_hit, previous_log(logs, finding.diverged_at))
+
+      _ ->
+        nil
+    end
+  end
+
+  defp previous_log(logs, %{id: id}) do
+    logs
+    |> Enum.take_while(&(&1.id != id))
+    |> List.last()
+  end
+
+  # What the two requests share is supposed to be byte-stable: the second is an
+  # extension of the first, so everything up to the first's length should come
+  # back unchanged. Rendering only that region is the diagnosis — anything
+  # highlighted here is what moved the breakpoint.
+  defp prefix_diff(nil, _diverged), do: nil
+
+  defp prefix_diff(last_hit, diverged) do
+    before = render_prefix(last_hit)
+    unchanged_length = before |> String.split("\n") |> length()
+    after_ = diverged |> render_prefix() |> take_lines(unchanged_length)
+
+    case TextDiff.diff(before, after_, granularity: :line) do
+      %{stats: %{ins: 0, del: 0}} -> nil
+      diff -> diff
+    end
+  end
+
+  defp take_lines(text, count) do
+    text |> String.split("\n") |> Enum.take(count) |> Enum.join("\n")
+  end
+
+  # System prompt and messages in wire order — the prefix the cache is keyed
+  # on. Tool definitions render ahead of both upstream, but they are not stored
+  # per turn, so a change there shows up as an unexplained diff rather than a
+  # wrong one.
+  defp render_prefix(log) do
+    {messages, params} = MessageNormalizer.parse_request_body(log.request_body)
+
+    system =
+      case params["system"] do
+        text when is_binary(text) -> ["system: " <> text]
+        _ -> []
+      end
+
+    (system ++ Enum.map(messages, &render_message/1)) |> Enum.join("\n")
+  end
+
+  defp render_message(%{role: role, content: content} = message) do
+    tools =
+      case message[:tool_calls] do
+        calls when is_list(calls) and calls != [] -> " " <> Jason.encode!(calls)
+        _ -> ""
+      end
+
+    "#{role}: #{content}#{tools}"
   end
 
   defp format_latency(nil), do: "0"
   defp format_latency(%Decimal{} = ms), do: ms |> Decimal.round(0) |> Decimal.to_integer()
   defp format_latency(ms), do: round(ms)
-
-  defp call_type_label("completion"), do: "chat"
-  defp call_type_label("tool_call"), do: "tools"
-  defp call_type_label("tool_enabled_completion"), do: "chat+tools"
-  defp call_type_label(other), do: other
 
   defp status_badge_class("success"), do: "bg-success/20 text-success"
   defp status_badge_class("fallback"), do: "bg-warning/20 text-warning"

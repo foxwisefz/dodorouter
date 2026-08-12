@@ -352,6 +352,19 @@ defmodule DodoRouterWeb.Components.Charts do
 
   # ---- formatting helpers (public: the dashboard reuses them) ----
 
+  @doc """
+  Human name for `request_logs.call_type`.
+
+  One function because there were three: the logs list said "Chat", the detail
+  sidebar said "Completion", and the session view said "chat" — three names for
+  one stored value, which reads as three different things rather than one.
+  """
+  def call_type_name("tool_call"), do: "Tool call"
+  def call_type_name("tool_enabled_completion"), do: "Chat + tools"
+  def call_type_name("completion"), do: "Chat"
+  def call_type_name(nil), do: "Chat"
+  def call_type_name(other), do: other
+
   def format_usd(nil), do: "$0"
   def format_usd(%Decimal{} = d), do: d |> Decimal.to_float() |> format_usd()
   def format_usd(+0.0), do: "$0"

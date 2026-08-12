@@ -714,7 +714,12 @@ defmodule DodoRouterWeb.LogLive.Replay do
             <.icon name="hero-x-circle" class="w-5 h-5 text-error" />
             <span class="font-medium">The replay failed — nothing to compare</span>
           </div>
-          <pre class="mockup-code text-xs overflow-x-auto p-4"><code>{format_json(@selected.response_body)}</code></pre>
+          <.json_panel
+            id="replay-error-body"
+            content={format_json(@selected.response_body)}
+            copy_id="replay-error-body-copy"
+            max_height="max-h-96"
+          />
         </div>
 
         <%= if @selected.status != "error" do %>
@@ -825,11 +830,25 @@ defmodule DodoRouterWeb.LogLive.Replay do
                 do: "Original · answer at message #{@anchor_index + 1} (from history)",
                 else: "Original response"}
             </div>
-            <pre class="mockup-code text-xs overflow-x-auto max-h-[70vh] overflow-y-auto p-4"><code>{if @partial?, do: baseline_raw_json(@baseline_msg), else: format_json(@source.response_body)}</code></pre>
+            <.json_panel
+              id="compare-raw-source"
+              content={
+                if @partial?,
+                  do: baseline_raw_json(@baseline_msg),
+                  else: format_json(@source.response_body)
+              }
+              copy_id="compare-raw-source-copy"
+              max_height="max-h-[70vh]"
+            />
           </div>
           <div>
             <div class="text-xs font-medium text-base-content/50 mb-1">Replay response</div>
-            <pre class="mockup-code text-xs overflow-x-auto max-h-[70vh] overflow-y-auto p-4"><code>{format_json(@selected.response_body)}</code></pre>
+            <.json_panel
+              id="compare-raw-selected"
+              content={format_json(@selected.response_body)}
+              copy_id="compare-raw-selected-copy"
+              max_height="max-h-[70vh]"
+            />
           </div>
         </div>
         

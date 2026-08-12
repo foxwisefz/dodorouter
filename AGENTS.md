@@ -81,6 +81,14 @@ custom classes must fully style the input
 - Implement **subtle micro-interactions** (e.g., button hover effects, and smooth transitions)
 - Ensure **clean typography, spacing, and layout balance** for a refined, premium look
 - Focus on **delightful details** like hover effects, loading states, and smooth page transitions
+- Leverage Intuition through Visualization: Do not force users to perform analytical tasks when the visual cortex can do the work. Use humane information visualization to make patterns obvious at a glance
+- Build Ambient Awareness: Design systems that provide a normative baseline of "normal" activity. This allows users to intuitively detect anomalies (like the sound of silence or breaking glass) without constant active monitoring
+- Group by Context, Not Production: Stop organizing data based on where it comes from (host vs. app vs. metrics). Instead, aggregate information based on the specific task the user is trying to accomplish
+- Normalize Data with Base Rates: Never display raw numbers that might cause unnecessary panic. Always include the base rate or context so users can instantly judge if a metric is actually a problem or just expected noise
+- Automate the Mundane: If a task involves manually correlating data sets or setting static thresholds, it is an inhuman task. Automate these processes to save users from cognitive fatigue
+- Bound Moments of Attention: When an incident or emergency occurs, create a distinct, time-boxed environment (like a war room) for high-intensity work. This keeps the burden of "high attention" from bleeding into the rest of the day
+
+
 
 
 <!-- phoenix-gen-auth-start -->
@@ -595,7 +603,9 @@ The rule is **format match, not a provider-capability matrix** — a per-provide
 
 `request_format` is **declared, not inferred from `endpoint_path`** — the path only happens to correlate, and a provider moving its route must not silently change what we forward. `adapter_header_coverage_test.exs` sweeps the registry so a new adapter can neither skip the declaration nor drift from its own endpoint path. The passthrough is built from the keys the converter did *not* consume, so it can never carry a stale `model`/`max_tokens`/`thinking` back over a routing decision; `build_anthropic_request` merges it under the body it built as a second guard.
 
-Two known limits: a same-format adapter pointed at a merely Claude-*compatible* third party may reject a field we now forward (the 400 is truthful — it's the client's field), and the **response** half doesn't exist yet, so a feature like `context_management` takes effect without the client being able to see its `applied_edits`. `ResponsesFormat` → `Adapters.ResponsesAPI` has the identical round-trip loss and has not been migrated.
+One known limit: a same-format adapter pointed at a merely Claude-*compatible* third party may reject a field we now forward (the 400 is truthful — it's the client's field).
+
+**`ResponsesFormat` → `Adapters.ResponsesAPI` runs the same rule**, in both directions. `ResponsesFormat.passthrough_fields/1` carries `text` (the Responses spelling of structured outputs), `previous_response_id` and the rest into a step declaring `request_format: :responses`; the adapter merges them under the body it built. On the way back, the `response.completed` event's own object minus what the conversion consumed rides `Adapter.response_passthrough_key/0`, and `ResponsesFormat.from_openai_response/3` merges it over the response it synthesises. That egress hardcodes `instructions`, `temperature`, `previous_response_id` and `text.format` to `nil`/defaults, so the passthrough is what stops those from being lies — and it restores the provider's real `resp_…` id, which is the value a client needs to chain the next turn with `previous_response_id`.
 
 **The contract:** a field that is a real parameter of the upstream API belongs in `@allowed_request_fields`. `Map.take/2` means an allowed field only travels when the client actually sent it, so allowing one costs nothing for clients that don't use it. Getting this wrong is asymmetric and invisible: `parallel_tool_calls` was honoured on an Anthropic step and silently dropped on every OpenAI-family fallback of the same request.
 
@@ -609,14 +619,21 @@ Two known limits: a same-format adapter pointed at a merely Claude-*compatible* 
 
 The passthrough wins on collision in this direction, because the only overlap is the `id` the egress would otherwise synthesise — and the provider's real one is strictly better (cache diagnostics reference it). It is still never allowed to become the IR's own `id`, which OpenAI-family clients read and expect to be a `chatcmpl-` value.
 
-**Streaming carries the tail only.** The stream accumulator collects untranslated `message_delta` fields and the egress merges them into the `message_delta` it emits (which is also how `stop_sequence` stopped being hardcoded `nil` there). `message_start` fields — the real id, `container` — are already on the wire by the time the tail arrives and **cannot** be back-filled; a streaming client gets the synthesised id.
+**Streaming carries the tail, plus the id.** The stream accumulator collects untranslated `message_delta` fields and the egress merges them into the `message_delta` it emits (which is also how `stop_sequence` stopped being hardcoded `nil` there). The real `msg_…` id is not a tail field at all — Anthropic sends it in `message_start`, *before* any delta, so it is in hand when the egress opens its own stream and a streaming client now gets the provider's id rather than a synthesised one. That matters because `previous_message_id` cache diagnostics refer to it. The accumulator is parked in the process key **before** chunks are forwarded, not after, so a frame carrying `message_start` and a delta together does not hand the egress a stale one. Other `message_start` fields (`container`) are still not carried.
 
-**Known gap: content blocks.** `convert_to_openai_format/1` reduces `content` over `text` and `tool_use` only, so `thinking`, `redacted_thinking`, and server-tool result blocks are dropped on the sync path — and Anthropic requires thinking blocks be passed back unchanged on the same model in multi-turn. That is a separate fix from this passthrough, which covers top-level fields.
+**Content blocks ride the same passthrough — on the sync path.** `convert_to_openai_format/1` reduces `content` over `text` and `tool_use` only, so `thinking`, `redacted_thinking`, server-tool blocks, and the `fallback` block Opus 5 / Fable 5 emit when a refusal is re-served have nowhere to go in the IR. When any such block appears, the **whole** native list travels in the passthrough under `"content"` and the Anthropic egress restores it 1:1 (`Map.merge(built, provider_passthrough)` already prefers it). The whole list rather than just the untranslatable part, because the reduction concatenates text blocks — their boundaries and interleaving cannot be recovered from what it produced.
+
+It is carried **only** when something was untranslatable. Otherwise the egress rebuilds an identical array from the flattened text and tool calls, and carrying it would make every ordinary Anthropic response record `content` as lost to an OpenAI-family client — a loss that didn't happen.
+
+This is not a display nicety: Anthropic requires thinking blocks be echoed back unchanged to continue on the same model and rejects modified ones, so a client that never receives them cannot resume its own conversation.
+
+**Streaming still drops them.** `process_anthropic_events/2` ignores a non-`tool_use` `content_block_start` and lets `thinking_delta` fall through its catch-all, and the OpenAI-shaped delta stream has no representation to carry them in — restoring them needs the egress to re-emit `content_block_start`/`thinking_delta`/`content_block_stop` at the right positions. Same class of problem as the un-back-fillable `message_start` above.
 
 Related rules for streaming egress:
 
 * **Defer `send_chunked/2` until the first chunk.** While nothing has been sent the HTTP status is still revisable, so a request that fails before producing content returns a real 400/502 instead of `200 OK` with an error buried in the SSE body (which SDKs report as a successful empty response).
 * **Don't invent values the provider didn't give you.** `stop_sequence` was hardcoded `nil`, which is a lie whenever a client's stop sequence actually matched.
+* **Response headers have to be parked, not returned.** A streaming adapter only *returns* the provider's headers when the stream finishes, by which point the egress committed its own head long ago — so `anthropic-ratelimit-*` never reached a streaming client, and Claude Code, which paces itself off `anthropic-ratelimit-unified-*`, flew blind on every real agent request. A streaming adapter calls `Adapter.record_stream_response_headers/1` the moment the upstream head arrives and before the first chunk is forwarded; the egress reads them in the same breath as `send_chunked`. Same inline-process property `Fidelity` relies on, and the same caveat: **anything that moves an adapter call into its own task must carry this across with it.**
 
 ### Everything removed or rewritten gets recorded
 
@@ -637,7 +654,7 @@ Use `Fidelity.record_header_rewrite/2` when a header is transformed rather than 
 | Field | What it really is |
 |---|---|
 | `request_body` | `state.request`, the OpenAI-shaped IR. **Request-level, not per-attempt** — the same value is copied onto every attempt in the chain. The only exception is a midstream fallback, where `reconstruct_request/1` appends the partial response the previous provider streamed. The Trace therefore renders it once, on the edge into the first attempt, and inside a later node *only* when it differs from the first attempt's copy. |
-| `outbound_body` | The bytes that provider actually received — but **only `Adapters.ResponsesAPI` records it**. Every other adapter leaves it `nil`, and the node says the bytes were not recorded rather than showing the IR in their place. |
+| `outbound_body` | The bytes that provider actually received — the adapter's own request-builder output, after effort injection, `sanitize_request/1`, passthrough merging and cache_control placement. Recorded by `Adapter.record_outbound_body/1`, which **also returns the payload size** every adapter already had to compute: folding the two together puts the record at the one line every adapter reaches holding the real bytes, rather than a separate call eleven of twelve would forget — which is exactly how this spent its first life populated by one adapter out of twelve. `FallbackChain` resets before each step and harvests after, next to `Fidelity.take/0`; an adapter that returns `outbound_body` in its own meta still wins. `adapter_header_coverage_test.exs` sweeps the registry and fails any adapter that calls `Req.*` without recording — delegating adapters are exempt by construction, since the module they delegate to is swept on its own. |
 | `response_body` | What the **adapter returned**, already converted: `Adapters.Anthropic.convert_to_openai_format/1` runs before this is ever stored. The provider's own bytes are not kept for a successful attempt. |
 | `error_body` | `details[:body]`, raw off the wire. The one response artifact on an attempt the provider itself wrote. |
 
@@ -668,7 +685,7 @@ Every adapter's request builder **must** call `Adapter.inject_reasoning_effort(b
 
 * `:openai` — top-level `reasoning_effort`
 * `:responses` — `reasoning.effort` (OpenAI Responses API / Codex backend)
-* `:anthropic` — `thinking.type = "enabled"` plus a `budget_tokens` value, with `max_tokens` bumped to exceed the budget
+* `:anthropic` — `output_config.effort`, plus `thinking.type = "adaptive"` so the depth applies at all
 * `:gemini` — `generationConfig.thinkingConfig.thinkingBudget`
 * `:on_off` — `thinking.type = "enabled"` or `"disabled"` (DeepSeek, z.ai, Moonshot-style providers)
 * `:none` — no injection
@@ -685,15 +702,21 @@ none, minimal, low, medium, high, xhigh, max
 
 The helper maps them to provider-specific values:
 
-| Level | Anthropic budget | Gemini budget | OpenAI/xAI/Responses |
-|-------|------------------|---------------|----------------------|
-| none  | omit             | 0             | omit                 |
-| minimal | 1,024          | 0             | "minimal"            |
-| low   | 4,096            | 2,048         | "low"                |
-| medium| 10,000           | 8,192         | "medium"             |
-| high  | 16,000           | 16,384        | "high"               |
-| xhigh | 24,000           | 24,576        | "high"               |
-| max   | 32,000           | 24,576        | "high"               |
+| Level | Anthropic `output_config.effort` | Gemini budget | OpenAI/xAI/Responses |
+|-------|----------------------------------|---------------|----------------------|
+| none  | *(no effort; `thinking.type = "disabled"`)* | 0    | omit                 |
+| minimal | "low"                          | 0             | verbatim             |
+| low   | "low"                            | 2,048         | verbatim             |
+| medium| "medium"                         | 8,192         | verbatim             |
+| high  | "high"                           | 16,384        | verbatim             |
+| xhigh | "xhigh"                          | 24,576        | verbatim             |
+| max   | "max"                            | 24,576        | verbatim             |
+
+**Anthropic sends no token budget.** `thinking.budget_tokens` was removed on Opus 4.7, Opus 4.8, Opus 5, Sonnet 5 and Fable 5 — every current Claude model — and returns a 400 when sent; it survives only on 4.6 and older, which also accept `effort`. The switch is therefore unconditional rather than gated on a per-model table, which is the kind of capability folklore that goes stale silently. `minimal` folds into `low` because `low` is the shallowest depth Anthropic can express, and `max_tokens` is left exactly as the client set it — the old bump existed only to satisfy `max_tokens > budget_tokens`.
+
+Two edges worth knowing: `none` sends `thinking.type = "disabled"`, which **Fable 5 rejects outright** (thinking is always on there, so a step asking for none has no honest translation and the provider error is the truthful answer); and `output_config` also carries structured outputs, so the injection merges into the object the client's `response_format` built rather than replacing it.
+
+**OpenAI-family levels travel verbatim** — never clamped or rewritten. Which levels a model accepts is the step author's choice, and an unsupported one surfaces as a provider error in the logs rather than a silent downgrade.
 
 ### Adding or Modifying an Adapter
 
@@ -703,6 +726,36 @@ When integrating a new provider or changing how an existing one handles reasonin
 2. **Pick the appropriate format** and call `Adapter.inject_reasoning_effort/3` in the adapter's request builder.
 3. **Document the mapping** in the table above if it differs from existing formats.
 4. **Test the seam** — write a test that builds the adapter's request body with a step that has `reasoning_effort` set and assert the provider-native field appears. Also assert that a client-provided value is preserved.
+
+## Running Several Branches at Once
+
+`scripts/dev-workspace.sh` gives each jj workspace everything it needs to run at the same time as every other one:
+
+```bash
+scripts/dev-workspace.sh new charts        # jj workspace + port + database + deps + migrations
+scripts/dev-workspace.sh list              # what is configured, and what is running right now
+scripts/dev-workspace.sh open charts       # Chrome with a cookie jar of its own
+scripts/dev-workspace.sh rm charts         # forget the workspace and drop its database
+cd ../dodo-charts && mix phx.server        # you launch the server; the script never does
+```
+
+Workspaces are sibling directories (`../dodo-<name>`), matching the layout already in use. `setup all` retrofits the ones that predate the script.
+
+**Secrets are sourced, not copied.** A workspace `.envrc` starts with `source_env ../dodo_router/.envrc`, so rotating a provider key in the main repo reaches every workspace. It then overrides only what has to differ:
+
+| Variable | Why it must differ |
+|---|---|
+| `PORT` | two dev servers cannot share 4000 |
+| `DB_NAME` | a migration on one branch must not rewrite another branch's schema |
+| `TEST_PORT` | `config/test.exs` runs a real server (`server: true`), so concurrent `mix test` runs collide on 4002 |
+| `DODO_WORKSPACE` | derives the test database name and the cookie suffix |
+| `DB_POOL_SIZE` | 10 connections × N workspaces exhausts Postgres' default 100 |
+
+**Cookies are not scoped by port.** `localhost:4000` and `localhost:4011` share one cookie jar, so without intervention logging into one branch silently logs you out of the other — with a session that decodes (the dev `secret_key_base` is shared) but names a user id from a different database. Every cookie name we set therefore takes `:cookie_suffix` from `DODO_WORKSPACE`: `Application.compile_env(:dodo_router, :cookie_suffix, "")` in `DodoRouterWeb.Endpoint` and `DodoRouterWeb.UserAuth`. The suffix is `""` in every environment but a dev workspace, so **production and test cookie names are unchanged** — never let it become non-empty outside dev, as it would log out every user on deploy. `open` additionally gives each workspace its own Chrome profile, which is what makes several branches usable in parallel rather than merely runnable.
+
+Because `:cookie_suffix` is read with `compile_env`, a workspace whose `.envrc` changes after it was built boots with an explicit "different value set during runtime" error rather than a mystery. Recompile.
+
+**New databases are cloned from `dodo_router_dev` by default** (~64 MB, a template copy when the main dev server is idle, a dump/restore when it is not), because most of what is worth testing in a branch — the Trace, the logs list, cache accounting — needs real request logs to look at. `--fresh` gives an empty database with migrations instead.
 
 ## Releases and Deployment
 

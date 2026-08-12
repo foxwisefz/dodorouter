@@ -478,15 +478,48 @@ defmodule DodoRouter.Proxy.Adapters.AnthropicTest do
       assert hd(assistant_msg["content"])["type"] == "tool_use"
     end
 
-    test "injects step reasoning_effort as thinking budget" do
+    test "injects step reasoning_effort as output_config.effort" do
       request = %{"messages" => [%{"role" => "user", "content" => "hi"}]}
-      step = %RoutingStep{model: "claude-sonnet-4-20250514", reasoning_effort: "high"}
+      step = %RoutingStep{model: "claude-opus-5", reasoning_effort: "xhigh"}
 
       body = Anthropic.build_anthropic_request(request, step)
 
-      assert body["thinking"]["type"] == "enabled"
-      assert body["thinking"]["budget_tokens"] == 16_000
-      assert body["max_tokens"] > 16_000
+      assert body["output_config"]["effort"] == "xhigh"
+      assert body["thinking"] == %{"type" => "adaptive"}
+      refute Map.has_key?(body["thinking"], "budget_tokens")
+      assert body["max_tokens"] == 4096
+    end
+
+    test "a client reasoning_effort outranks the step default" do
+      request = %{
+        "messages" => [%{"role" => "user", "content" => "hi"}],
+        "reasoning_effort" => "low"
+      }
+
+      step = %RoutingStep{model: "claude-opus-5", reasoning_effort: "max"}
+      body = Anthropic.build_anthropic_request(request, step)
+
+      assert body["output_config"]["effort"] == "low"
+    end
+
+    test "step effort does not displace a client response_format" do
+      request = %{
+        "messages" => [%{"role" => "user", "content" => "hi"}],
+        "response_format" => %{
+          "type" => "json_schema",
+          "json_schema" => %{"schema" => %{"type" => "object"}}
+        }
+      }
+
+      step = %RoutingStep{model: "claude-opus-5", reasoning_effort: "high"}
+      body = Anthropic.build_anthropic_request(request, step)
+
+      assert body["output_config"]["effort"] == "high"
+
+      assert body["output_config"]["format"] == %{
+               "type" => "json_schema",
+               "schema" => %{"type" => "object"}
+             }
     end
 
     test "preserves client thinking when provided" do

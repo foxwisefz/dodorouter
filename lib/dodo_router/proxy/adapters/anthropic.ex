@@ -144,7 +144,7 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
     body = build_anthropic_request(request, step)
     headers = request_headers(api_key, client_headers)
 
-    payload_size_bytes = body |> Jason.encode!() |> byte_size()
+    payload_size_bytes = Adapter.record_outbound_body(body)
     start_time = FinchTelemetry.mark_request_start()
 
     case Req.post(url, headers: headers, json: body, receive_timeout: @timeout_ms) do
@@ -191,7 +191,7 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
     body = build_anthropic_request(request, step) |> Map.put("stream", true)
     headers = request_headers(api_key, client_headers)
 
-    payload_size_bytes = body |> Jason.encode!() |> byte_size()
+    payload_size_bytes = Adapter.record_outbound_body(body)
     start_time = FinchTelemetry.mark_request_start()
     Process.delete(:__anthropic_stream_acc__)
 
@@ -204,6 +204,9 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
           if resp.private[:stream_acc] == nil do
             ttfb = System.monotonic_time(:millisecond) - start_time
             initial_acc = %{initial_stream_acc() | first_chunk_time: ttfb}
+            # The head has arrived and nothing has been forwarded yet — the one
+            # moment the egress can still put anything on its own response.
+            Adapter.record_stream_response_headers(resp.headers)
             Req.Response.put_private(resp, :stream_acc, initial_acc)
           else
             resp
@@ -215,9 +218,13 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
           {{:events, events}, buffer} ->
             # Convert and forward as OpenAI format
             {acc, openai_chunks} = process_anthropic_events(acc, events)
-            Enum.each(openai_chunks, &send_chunk.(&1))
             acc = %{acc | sse_buffer: buffer}
+            # Park before forwarding, not after: the egress reads the real
+            # message id from here while handling the very first chunk, and a
+            # frame carrying `message_start` and a delta together would
+            # otherwise hand it a stale accumulator.
             Process.put(:__anthropic_stream_acc__, acc)
+            Enum.each(openai_chunks, &send_chunk.(&1))
             {:cont, {req, Req.Response.put_private(resp, :stream_acc, acc)}}
 
           {:done, _buffer} ->
@@ -350,6 +357,11 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
         do: Map.put(body, "stop_sequences", List.wrap(request["stop"])),
         else: body
 
+    # Build the client's own `output_config` first — its `effort` outranks the
+    # step default, and `inject_reasoning_effort/3` merges into whatever is
+    # already there rather than replacing it.
+    body = put_output_config(body, request)
+
     # Forward a client-supplied thinking block (if any) so it takes precedence
     # over the step-level default. An explicit disable is translated to
     # omission: Claude 5 models reject thinking.type=disabled outright, and on
@@ -370,7 +382,6 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
       end
 
     body = put_tool_choice(body, request["tool_choice"], request["parallel_tool_calls"])
-    body = put_output_config(body, request)
 
     # Tools
     body =
@@ -727,9 +738,41 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
   # invisible to the client unless carried.
   @translated_response_fields ~w(content stop_reason usage model stop_sequence)
 
+  # The block types the reduction above knows how to render into the IR.
+  @translated_block_types ~w(text tool_use)
+
   defp untranslated_response(anthropic_response) do
-    Map.drop(anthropic_response, @translated_response_fields)
+    anthropic_response
+    |> Map.drop(@translated_response_fields)
+    |> carry_native_content(anthropic_response["content"])
   end
+
+  # `content` is normally rebuilt by the egress from the flattened text and
+  # tool calls, so carrying it would be noise — and would make every ordinary
+  # Anthropic response report `content` as lost to an OpenAI-family client,
+  # which it wasn't.
+  #
+  # The moment a block the reduction cannot render appears — `thinking`,
+  # `redacted_thinking`, a server-tool block, the `fallback` block Opus 5 and
+  # Fable 5 emit when a refusal is re-served — the flattened view is no longer
+  # a faithful summary, so the whole native list travels and an Anthropic
+  # egress restores it 1:1. The whole list, not just the untranslatable part:
+  # the reduction concatenates text blocks, so their original boundaries and
+  # interleaving cannot be recovered from what it produced.
+  #
+  # This matters beyond display. Anthropic requires thinking blocks be echoed
+  # back unchanged to continue a conversation on the same model, and rejects
+  # ones whose content was modified — so a client that never receives them
+  # cannot resume its own conversation.
+  defp carry_native_content(passthrough, content) when is_list(content) do
+    if Enum.all?(content, &(&1["type"] in @translated_block_types)) do
+      passthrough
+    else
+      Map.put(passthrough, "content", content)
+    end
+  end
+
+  defp carry_native_content(passthrough, _content), do: passthrough
 
   defp put_if(map, nil, _key, _value), do: map
   defp put_if(map, _present, key, value), do: Map.put(map, key, value)
@@ -774,20 +817,46 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
       stop_reason: nil,
       first_chunk_time: nil,
       sse_buffer: "",
+      # Anthropic's own `msg_…` id, off `message_start`. It arrives before any
+      # delta, so the egress still has it in hand when it emits its own
+      # `message_start` — see `process_anthropic_events/2`.
+      message_id: nil,
       # Native fields off `message_delta` that the OpenAI chunk shape has no
       # place for — `context_management` applied edits, `stop_details` behind a
       # refusal, the `stop_sequence` that actually matched. Collected here
       # because the tail event is emitted after the client's `message_delta`
-      # can still carry them; `message_start` fields (the real `msg_…` id,
-      # `container`) are already on the wire by then and cannot be back-filled.
+      # can still carry them. Other `message_start` fields (`container`) are
+      # already on the wire by then and cannot be back-filled.
       passthrough: %{}
     }
+  end
+
+  @doc """
+  Anthropic's real message id for the stream in flight, or `nil`.
+
+  Read by the Anthropic egress at the moment it opens its own stream. The
+  adapter runs inline in the caller's process — the same property `Fidelity`
+  relies on — and parks the accumulator there as it goes.
+  """
+  def stream_message_id do
+    case Process.get(:__anthropic_stream_acc__) do
+      %{message_id: id} -> id
+      _ -> nil
+    end
   end
 
   @doc false
   def process_anthropic_events(acc, events) do
     Enum.reduce(events, {acc, []}, fn event, {acc, chunks} ->
       case event["type"] do
+        # Anthropic sends this before any delta, so the real `msg_…` id is in
+        # hand before the egress has to emit its own `message_start` — early
+        # enough to use it rather than synthesise one. It names a message in
+        # Anthropic's store, which is what `previous_message_id` cache
+        # diagnostics refer to; a synthesised id cannot be used for that.
+        "message_start" ->
+          {%{acc | message_id: get_in(event, ["message", "id"])}, chunks}
+
         "content_block_start" ->
           case event["content_block"] do
             %{"type" => "tool_use"} = block ->

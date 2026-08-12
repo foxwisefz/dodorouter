@@ -42,7 +42,7 @@ defmodule DodoRouter.Proxy.Adapters.ResponsesAPI do
       |> Map.put("stream", true)
 
     headers = build_headers(api_key, opts)
-    payload_size_bytes = body |> Jason.encode!() |> byte_size()
+    payload_size_bytes = Adapter.record_outbound_body(body)
     start_time = System.monotonic_time(:millisecond)
 
     into_fun = fn
@@ -158,6 +158,24 @@ defmodule DodoRouter.Proxy.Adapters.ResponsesAPI do
     |> maybe_put_tools(request["tools"])
     |> put_reasoning(request)
     |> Adapter.inject_reasoning_effort(step.reasoning_effort, :responses)
+    |> restore_client_passthrough(request)
+  end
+
+  # A Responses-format request served by a Responses-format adapter never
+  # needed translating, so the fields the IR could not carry — `text`
+  # (structured outputs), `previous_response_id`, and whatever OpenAI ships
+  # next — go back on the wire as the client sent them. `FallbackChain` only
+  # attaches them when the formats match; a fallback to anything else reports
+  # them as lost against that step instead.
+  #
+  # The body wins every collision, and the passthrough is built from the keys
+  # the converter did *not* consume, so it cannot carry a stale `model` or
+  # `tools` back over a routing decision.
+  defp restore_client_passthrough(body, request) do
+    case Adapter.client_passthrough(request) do
+      fields when map_size(fields) == 0 -> body
+      fields -> Map.merge(fields, body)
+    end
   end
 
   defp put_reasoning(body, %{} = request) do
@@ -393,6 +411,9 @@ defmodule DodoRouter.Proxy.Adapters.ResponsesAPI do
               %{sacc | finish_reason: finish_reason}
             end
 
+          new_acc =
+            Map.put(new_acc, :passthrough, untranslated_response(event["response"] || %{}))
+
           {new_acc, chunks ++ [build_openai_chunk(%{}, finish_reason)]}
 
         _ ->
@@ -453,12 +474,29 @@ defmodule DodoRouter.Proxy.Adapters.ResponsesAPI do
       "_meta" => meta
     }
 
-    if acc.usage do
-      Map.put(response, "usage", acc.usage)
-    else
-      response
-    end
+    response =
+      if acc.usage do
+        Map.put(response, "usage", acc.usage)
+      else
+        response
+      end
+
+    Map.put(response, Adapter.response_passthrough_key(), Map.get(acc, :passthrough) || %{})
   end
+
+  # Consumed by the conversion above, or rebuilt by the egress from what was
+  # consumed. Everything else on the provider's `response` object — the real
+  # `resp_…` id a client needs for `previous_response_id`, `text.format`,
+  # `instructions`, `incomplete_details`, whatever ships next — is invisible
+  # unless carried, and the egress currently hardcodes several of them to
+  # `nil`, which is a lie whenever the provider said otherwise.
+  @translated_response_fields ~w(object created_at model status output output_text usage)
+
+  defp untranslated_response(response) when is_map(response) do
+    Map.drop(response, @translated_response_fields)
+  end
+
+  defp untranslated_response(_), do: %{}
 
   # ── Headers ────────────────────────────────────────────────────────────────
 
