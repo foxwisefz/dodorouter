@@ -61,6 +61,8 @@ defmodule DodoRouter.MixProject do
       {:bcrypt_elixir, "~> 3.0"},
       # SPIKE (dodo_router-5m5.5): verifying whether OAuth 2.1 is viable for the
       # MCP endpoint before committing to it. Remove if the answer is no.
+      # Dev-only: required by `mix attesto_phoenix.install` scaffolding.
+      {:igniter, "~> 0.5", only: [:dev], runtime: false},
       {:attesto, "~> 1.14"},
       {:attesto_phoenix, "~> 2.12"},
       {:attesto_mcp, "~> 1.1"},

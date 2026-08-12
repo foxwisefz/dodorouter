@@ -7,6 +7,56 @@
 # General application configuration
 import Config
 
+config :dodo_router, AttestoPhoenix.Config,
+  issuer: System.get_env("ATTESTO_ISSUER") || "https://localhost",
+  keystore: DodoRouter.AuthZ.Keystore,
+  repo: DodoRouter.Repo,
+  load_client: {DodoRouter.AuthZ.ClientStore, :load_client},
+  verify_client_secret: {DodoRouter.AuthZ.ClientStore, :verify_client_secret},
+  load_principal: {DodoRouter.AuthZ.PrincipalStore, :load_principal},
+  build_principal: {DodoRouter.AuthZ.PrincipalStore, :build_principal},
+  authorize_scope: {DodoRouter.AuthZ.ScopePolicy, :authorize_scope},
+  authenticate_resource_owner: {DodoRouter.AuthZ.ConsentPolicy, :authenticate_resource_owner},
+  consent: {DodoRouter.AuthZ.ConsentPolicy, :consent},
+  on_event: {DodoRouter.AuthZ.EventSink, :on_event},
+  oauth_path_prefix: "/oauth",
+  # The agent-surface scopes are the same names bearer agent tokens use, so a
+  # scope means one thing regardless of which credential carried it.
+  scopes_supported: [
+    "openid",
+    "offline_access",
+    "logs:read",
+    "logs:read_bodies",
+    "evals:read",
+    "evals:write"
+  ],
+  code_store: AttestoPhoenix.Store.EctoCodeStore,
+  refresh_store: AttestoPhoenix.Store.EctoRefreshStore,
+  nonce_store: AttestoPhoenix.Store.EctoNonceStore,
+  replay_check: {AttestoPhoenix.Store.EctoReplayCheck, :check_and_record},
+  par_store: AttestoPhoenix.Store.EctoPARStore,
+  consent_grant_store: AttestoPhoenix.Store.EctoConsentGrantStore,
+  sweep_interval_ms: 60000,
+  dpop_enabled: true,
+  dpop_nonce_required: false,
+  require_https: true,
+  # A desktop assistant cannot be pre-registered — nobody knows its loopback
+  # callback port until it starts — so RFC 7591 self-registration is the only
+  # way it can connect at all. Registering grants nothing on its own: a client
+  # gets no token until a signed-in user completes consent.
+  registration_enabled: true,
+  register_client: {DodoRouter.AuthZ.RegistrationStore, :register_client},
+  unregister_client: {DodoRouter.AuthZ.RegistrationStore, :unregister_client},
+  client_registration_access_token_hash:
+    {DodoRouter.AuthZ.RegistrationStore, :client_registration_access_token_hash},
+  client_redirect_uris: {DodoRouter.AuthZ.ClientStore, :client_redirect_uris},
+  client_public?: {DodoRouter.AuthZ.ClientStore, :client_public?},
+  client_native?: {DodoRouter.AuthZ.ClientStore, :client_native?},
+  client_grant_types: {DodoRouter.AuthZ.ClientStore, :client_grant_types},
+  client_requires_dpop?: {DodoRouter.AuthZ.ClientStore, :client_requires_dpop?},
+  client_requires_mtls?: {DodoRouter.AuthZ.ClientStore, :client_requires_mtls?},
+  client_id: {DodoRouter.AuthZ.ClientStore, :client_id}
+
 config :dodo_router, :scopes,
   user: [
     default: true,

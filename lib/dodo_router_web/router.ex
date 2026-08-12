@@ -213,4 +213,12 @@ defmodule DodoRouterWeb.Router do
     post "/users/log-in", UserSessionController, :create
     delete "/users/log-out", UserSessionController, :delete
   end
+
+  use AttestoPhoenix.Router
+
+  # registration: true mounts RFC 7591 dynamic client registration, which is
+  # what lets an assistant connect without being pre-registered by hand.
+  scope "/" do
+    attesto_routes(registration: true)
+  end
 end
