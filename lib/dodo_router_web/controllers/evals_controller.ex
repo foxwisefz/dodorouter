@@ -15,9 +15,16 @@ defmodule DodoRouterWeb.EvalsController do
   use DodoRouterWeb, :controller
 
   import DodoRouterWeb.AgentApi
+  import DodoRouterWeb.Plugs.AgentAuth, only: [require_scopes: 2]
 
   alias DodoRouter.{Evaluations, Logs, Providers, Replays}
   alias DodoRouter.Proxy.Adapter.Registry
+  alias DodoRouterWeb.Plugs.AgentAudit
+
+  # `guide` is documentation and needs no scope beyond a valid credential —
+  # an agent that cannot read the instructions cannot discover what it may do.
+  plug :require_scopes, ["evals:read"] when action in [:targets, :index, :show]
+  plug :require_scopes, ["evals:write"] when action in [:create, :run]
 
   # The full text of a candidate answer is on its own log; inline it only far
   # enough to see what happened at a glance.
@@ -146,8 +153,9 @@ defmodule DodoRouterWeb.EvalsController do
           maybe_run(user, evaluation, params["run"] in [true, "true", "1"])
 
           conn
+          |> AgentAudit.annotate(target_type: "evaluation", target_id: evaluation.id)
           |> put_status(201)
-          |> json(show_payload(user, evaluation.id))
+          |> json(show_payload(conn, user, evaluation.id))
 
         {:error, changeset} ->
           error(conn, 422, "Evaluation is invalid", "invalid_request_error", %{
@@ -163,8 +171,17 @@ defmodule DodoRouterWeb.EvalsController do
     user = current_user(conn)
 
     case scoped_evaluation(conn, user, id) do
-      {:ok, evaluation} -> json(conn, show_payload(user, evaluation.id))
-      {:error, message} -> error(conn, 404, message, "not_found")
+      {:ok, evaluation} ->
+        conn
+        |> AgentAudit.annotate(
+          target_type: "evaluation",
+          target_id: evaluation.id,
+          returned_bodies: may_read_bodies?(conn)
+        )
+        |> json(show_payload(conn, user, evaluation.id))
+
+      {:error, message} ->
+        error(conn, 404, message, "not_found")
     end
   end
 
@@ -326,7 +343,7 @@ defmodule DodoRouterWeb.EvalsController do
     }
   end
 
-  defp show_payload(user, id) do
+  defp show_payload(conn, user, id) do
     evaluation = Evaluations.get_evaluation!(user, id)
     runs = Evaluations.latest_batch_runs(evaluation)
 
@@ -349,7 +366,7 @@ defmodule DodoRouterWeb.EvalsController do
       summary: summary_payload(evaluation),
       rankings: Enum.map(Evaluations.rankings(evaluation), &ranking_payload/1),
       rubric_feedback: Evaluations.rubric_feedback(runs),
-      runs: Enum.map(runs, &run_payload/1)
+      runs: Enum.map(runs, &run_payload(conn, &1))
     }
   end
 
@@ -375,7 +392,9 @@ defmodule DodoRouterWeb.EvalsController do
     }
   end
 
-  defp run_payload(run) do
+  # A candidate's answer is generated from the product's own prompt, so it is
+  # traffic text like any other and rides the same scope as a stored body.
+  defp run_payload(conn, run) do
     %{
       id: run.id,
       status: run.status,
@@ -393,7 +412,7 @@ defmodule DodoRouterWeb.EvalsController do
       cost_usd: money(run.candidate_cost_usd),
       list_cost_usd: money(run.candidate_list_cost_usd),
       judge_cost_usd: money(run.judge_cost_usd),
-      output_preview: truncate(run.candidate_output, @output_preview),
+      output_preview: body_or_marker(conn, truncate(run.candidate_output, @output_preview)),
       candidate_log_id: run.candidate_log_id,
       judge_log_id: run.judge_log_id
     }

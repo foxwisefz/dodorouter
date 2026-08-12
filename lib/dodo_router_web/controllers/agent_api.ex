@@ -16,18 +16,36 @@ defmodule DodoRouterWeb.AgentApi do
   import Plug.Conn
   import Phoenix.Controller, only: [json: 2]
 
-  alias DodoRouter.Accounts
+  alias DodoRouter.Agents.Principal
 
   @max_limit 100
   @default_limit 20
 
   @doc """
-  The user who owns the authenticated router.
-
-  Router keys authenticate a router; every context below the proxy is scoped
-  to a user, so the two are bridged here rather than in each controller.
+  The user behind the authenticated agent credential.
   """
-  def current_user(conn), do: Accounts.get_user!(conn.assigns.current_router.user_id)
+  def current_user(conn), do: principal(conn).user
+
+  def principal(conn), do: conn.assigns.agent_principal
+
+  @doc """
+  Whether this credential may read prompt and response text.
+
+  Callers must use this to *mark* what they withheld rather than quietly
+  omitting it — a field that vanishes without explanation is the same failure
+  as a silently dropped request field, and an agent has no way to tell
+  "there was nothing there" from "you may not see it".
+  """
+  def may_read_bodies?(conn), do: Principal.allows?(principal(conn), "logs:read_bodies")
+
+  @doc """
+  Either the value, or a marker naming the scope that would have shown it.
+  """
+  def body_or_marker(conn, value) do
+    if may_read_bodies?(conn),
+      do: value,
+      else: %{withheld: "requires the logs:read_bodies scope"}
+  end
 
   @doc """
   Where an agent that got something wrong can read what to do instead.

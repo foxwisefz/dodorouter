@@ -2,6 +2,7 @@ defmodule DodoRouterWeb.EvalsControllerTest do
   use DodoRouterWeb.ConnCase, async: true
 
   alias DodoRouter.AccountsFixtures
+  alias DodoRouter.AgentsFixtures
   alias DodoRouter.Evaluations
   alias DodoRouter.Logs.EvaluationRun
   alias DodoRouter.LogsFixtures
@@ -11,7 +12,8 @@ defmodule DodoRouterWeb.EvalsControllerTest do
 
   setup do
     user = AccountsFixtures.user_fixture()
-    {router, api_key} = RoutersFixtures.router_fixture(user)
+    {router, _proxy_key} = RoutersFixtures.router_fixture(user)
+    {_token, api_key} = AgentsFixtures.agent_token_fixture(user)
     provider_key = ProvidersFixtures.provider_key_fixture(user, %{"label" => "prod key"})
 
     log =
@@ -63,7 +65,7 @@ defmodule DodoRouterWeb.EvalsControllerTest do
       assert Enum.all?(body["endpoints"], &String.contains?(&1["url"], "/r/#{router.slug}"))
     end
 
-    test "requires the router API key", %{conn: conn, router: router} do
+    test "requires an agent token", %{conn: conn, router: router} do
       assert json_response(get(conn, "/r/#{router.slug}/agent"), 401)
     end
   end

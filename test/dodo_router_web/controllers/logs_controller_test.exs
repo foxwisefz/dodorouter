@@ -2,12 +2,14 @@ defmodule DodoRouterWeb.LogsControllerTest do
   use DodoRouterWeb.ConnCase, async: true
 
   alias DodoRouter.AccountsFixtures
+  alias DodoRouter.AgentsFixtures
   alias DodoRouter.LogsFixtures
   alias DodoRouter.RoutersFixtures
 
   setup do
     user = AccountsFixtures.user_fixture()
-    {router, api_key} = RoutersFixtures.router_fixture(user)
+    {router, _proxy_key} = RoutersFixtures.router_fixture(user)
+    {_token, api_key} = AgentsFixtures.agent_token_fixture(user)
     %{user: user, router: router, api_key: api_key}
   end
 
@@ -21,9 +23,25 @@ defmodule DodoRouterWeb.LogsControllerTest do
   end
 
   describe "GET /r/:router_slug/logs" do
-    test "requires the router API key", %{conn: conn, router: router} do
+    test "requires an agent token", %{conn: conn, router: router} do
       conn = get(conn, "/r/#{router.slug}/logs")
-      assert json_response(conn, 401)["error"]["type"] == "authentication_error"
+
+      assert json_response(conn, 401)["error"]["type"] == "unauthorized"
+      # RFC 6750 challenge, so an OAuth resource server can later replace the
+      # bearer check without changing how a refusal looks to a client.
+      assert [challenge] = get_resp_header(conn, "www-authenticate")
+      assert challenge =~ "Bearer"
+    end
+
+    test "the router's own proxy key does not open this surface", %{
+      conn: conn,
+      user: user
+    } do
+      {router, proxy_key} = RoutersFixtures.router_fixture(user)
+
+      conn = conn |> auth(proxy_key) |> get("/r/#{router.slug}/logs")
+
+      assert json_response(conn, 401)["error"]["type"] == "unauthorized"
     end
 
     test "lists the router's requests with cost and token figures", %{
@@ -63,7 +81,7 @@ defmodule DodoRouterWeb.LogsControllerTest do
       assert log["not_evaluable_because"] =~ "not valid JSON"
     end
 
-    test "a router key cannot read another router's traffic", %{
+    test "a token cannot read another router's traffic", %{
       conn: conn,
       user: user,
       router: router,

@@ -12,8 +12,12 @@ defmodule DodoRouterWeb.LogsController do
   use DodoRouterWeb, :controller
 
   import DodoRouterWeb.AgentApi
+  import DodoRouterWeb.Plugs.AgentAuth, only: [require_scopes: 2]
 
   alias DodoRouter.{Logs, Replays}
+  alias DodoRouterWeb.Plugs.AgentAudit
+
+  plug :require_scopes, ["logs:read"] when action in [:index, :show]
 
   def index(conn, params) do
     router = conn.assigns.current_router
@@ -47,7 +51,13 @@ defmodule DodoRouterWeb.LogsController do
 
     case fetch_log(user, id) do
       %{router_id: router_id} = log when router_id == router.id ->
-        json(conn, detail(log))
+        conn
+        |> AgentAudit.annotate(
+          target_type: "request_log",
+          target_id: log.id,
+          returned_bodies: may_read_bodies?(conn)
+        )
+        |> json(detail(conn, log))
 
       _ ->
         error(conn, 404, "No log #{id} on router #{router.slug}", "not_found")
@@ -93,12 +103,16 @@ defmodule DodoRouterWeb.LogsController do
     }
   end
 
-  defp detail(log) do
+  # Bodies are the one field on this surface that carries the product's real
+  # traffic, so they ride their own scope. When it is absent the key stays
+  # present and says so — an agent must be able to tell "empty" from "not
+  # yours to read".
+  defp detail(conn, log) do
     log
     |> summary()
     |> Map.merge(%{
-      request_body: maybe_json(log.request_body),
-      response_body: maybe_json(log.response_body),
+      request_body: body_or_marker(conn, maybe_json(log.request_body)),
+      response_body: body_or_marker(conn, maybe_json(log.response_body)),
       truncation_flags: log.truncation_flags,
       replayed_from_id: log.replayed_from_id,
       traffic_type: log.traffic_type

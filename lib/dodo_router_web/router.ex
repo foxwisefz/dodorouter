@@ -21,6 +21,15 @@ defmodule DodoRouterWeb.Router do
     plug DodoRouterWeb.Plugs.ApiAuth
   end
 
+  # Audit runs before auth on purpose: a call refused for a bad or unscoped
+  # token is exactly the one worth having a record of, and a plug that only
+  # sees authenticated requests cannot write it.
+  pipeline :agent_api do
+    plug :accepts, ["json"]
+    plug DodoRouterWeb.Plugs.AgentAudit, interface: "rest"
+    plug DodoRouterWeb.Plugs.AgentAuth
+  end
+
   # LLM Proxy API - Router-specific endpoint
   scope "/r/:router_slug/v1", DodoRouterWeb do
     pipe_through :proxy_api
@@ -42,11 +51,18 @@ defmodule DodoRouterWeb.Router do
   end
 
   # Agent API - lets a coding agent working on a product measure quality vs
-  # price for that product's own traffic, using the router key it already has.
+  # price for that product's own traffic.
+  #
+  # Deliberately NOT :proxy_api. A router's proxy key exists to send traffic;
+  # these endpoints read traffic back, and giving one credential both turns a
+  # leaked .env from "someone burns my tokens" into "someone has every prompt
+  # my product ever sent". Agent tokens are separately issued, scoped and
+  # revocable, and every call here is recorded.
+  #
   # `/agent` is the discovery endpoint; it describes everything below it.
   # Static eval paths precede `/evals/:id` so "targets" isn't read as an id.
   scope "/r/:router_slug", DodoRouterWeb do
-    pipe_through :proxy_api
+    pipe_through :agent_api
 
     get "/agent", EvalsController, :guide
 
