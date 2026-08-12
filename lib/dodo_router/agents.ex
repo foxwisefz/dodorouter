@@ -14,6 +14,7 @@ defmodule DodoRouter.Agents do
   alias DodoRouter.Accounts.User
   alias DodoRouter.Agents.{AgentToken, ApiCall, Principal}
   alias DodoRouter.Repo
+  alias DodoRouter.Routers
 
   require Logger
 
@@ -27,10 +28,22 @@ defmodule DodoRouter.Agents do
   def list_tokens(%User{} = user) do
     from(t in AgentToken,
       where: t.user_id == ^user.id,
-      order_by: [desc: t.inserted_at],
-      preload: [:router]
+      order_by: [desc: t.inserted_at]
     )
     |> Repo.all()
+  end
+
+  @doc """
+  The routers a token reaches, resolved for display.
+
+  `all_routers` is answered live rather than from a stored list — that is the
+  whole point of the flag, and a UI that showed a snapshot would under-report
+  what the credential can actually reach today.
+  """
+  def routers_for(%User{} = user, %AgentToken{all_routers: true}), do: Routers.list_routers(user)
+
+  def routers_for(%User{} = user, %AgentToken{router_ids: ids}) do
+    user |> Routers.list_routers() |> Enum.filter(&(&1.id in ids))
   end
 
   def get_token(%User{} = user, id) do
@@ -47,7 +60,33 @@ defmodule DodoRouter.Agents do
   def create_token(%User{} = user, attrs) do
     attrs
     |> AgentToken.create_changeset(user.id)
+    |> validate_router_ownership(user)
     |> Repo.insert()
+  end
+
+  # The ids arrive as client params. `Principal.allows_router?/2` re-checks
+  # ownership on every request, so an unowned id could never actually be used —
+  # but storing one would show a router in the token's own summary that its
+  # holder cannot reach, and a credential that misreports its reach is worse
+  # than one that is refused at mint time.
+  defp validate_router_ownership(%Ecto.Changeset{valid?: false} = changeset, _user),
+    do: changeset
+
+  defp validate_router_ownership(changeset, user) do
+    ids = Ecto.Changeset.get_field(changeset, :router_ids) || []
+    owned = user |> Routers.list_routers() |> MapSet.new(& &1.id)
+
+    case Enum.reject(ids, &MapSet.member?(owned, &1)) do
+      [] ->
+        changeset
+
+      unowned ->
+        Ecto.Changeset.add_error(
+          changeset,
+          :router_ids,
+          "not your routers: #{Enum.join(unowned, ", ")}"
+        )
+    end
   end
 
   def change_token(attrs \\ %{}, user_id \\ nil),

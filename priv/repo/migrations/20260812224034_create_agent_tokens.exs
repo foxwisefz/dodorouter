@@ -34,16 +34,27 @@ defmodule DodoRouter.Repo.Migrations.CreateAgentTokens do
       add :revoked_at, :utc_datetime
       add :last_used_at, :utc_datetime
 
-      # Optional narrowing to one router. Null means every router the owner
-      # has, which is the useful default for a coding agent working across a
-      # product's dev and prod routers.
-      add :router_id, references(:routers, type: :binary_id, on_delete: :delete_all)
+      # Which routers this credential reaches. One app is usually several
+      # routers (a router per module), so a token covers a set rather than
+      # one — minting a credential per module would be friction with no
+      # security gain, since they are the same app and the same agent.
+      #
+      # `all_routers` is a separate, explicit flag rather than "router_ids is
+      # empty means everything". The difference matters: `all_routers` also
+      # covers routers that do not exist yet, and that is a thing someone
+      # should tick on purpose, not inherit from a null column. It is also
+      # the only way to reach a *different* app's routers under the same
+      # account, which is the blast radius worth making visible.
+      #
+      # No FK array constraint exists in Postgres; ownership is enforced in
+      # DodoRouter.Agents.Principal, which has to check the owner anyway.
+      add :router_ids, {:array, :binary_id}, null: false, default: []
+      add :all_routers, :boolean, null: false, default: false
 
       timestamps(type: :utc_datetime)
     end
 
     create unique_index(:agent_tokens, [:token_hash])
     create index(:agent_tokens, [:user_id])
-    create index(:agent_tokens, [:router_id])
   end
 end

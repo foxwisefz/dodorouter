@@ -9,7 +9,16 @@ defmodule DodoRouter.Agents.Principal do
   """
 
   @enforce_keys [:kind, :user, :scopes]
-  defstruct [:kind, :user, :scopes, :id, :name, :token, :router_id]
+  defstruct [
+    :kind,
+    :user,
+    :scopes,
+    :id,
+    :name,
+    :token,
+    router_ids: [],
+    all_routers: false
+  ]
 
   @type t :: %__MODULE__{
           kind: String.t(),
@@ -18,9 +27,8 @@ defmodule DodoRouter.Agents.Principal do
           id: String.t() | nil,
           name: String.t() | nil,
           token: DodoRouter.Agents.AgentToken.t() | nil,
-          # Set when the credential is pinned to one router; nil means every
-          # router its owner has.
-          router_id: String.t() | nil
+          router_ids: [String.t()],
+          all_routers: boolean()
         }
 
   alias DodoRouter.Agents.{AgentToken, Scopes}
@@ -33,7 +41,8 @@ defmodule DodoRouter.Agents.Principal do
       user: user,
       scopes: token.scopes,
       token: token,
-      router_id: token.router_id
+      router_ids: token.router_ids || [],
+      all_routers: token.all_routers
     }
   end
 
@@ -42,13 +51,16 @@ defmodule DodoRouter.Agents.Principal do
   @doc """
   Whether this principal may act on the given router.
 
-  Two conditions, not one: the router must belong to the credential's owner,
-  and — when the credential was pinned to a single router — it must be that
-  one. The pin is what makes a token handed to one product unable to read
-  another product's traffic, even though the same person owns both.
+  Ownership is checked on every call rather than trusted from the stored list,
+  so a router that changed hands cannot be reached through a token minted
+  before the change. The list narrows what an owner granted; it never widens it.
+
+  `all_routers` is the deliberately unbounded case — every router the owner has
+  now *and later*, across all their apps — which is why it has to be chosen
+  explicitly rather than being what an empty list happens to mean.
   """
   def allows_router?(%__MODULE__{} = principal, router) do
     router.user_id == principal.user.id and
-      (is_nil(principal.router_id) or principal.router_id == router.id)
+      (principal.all_routers or router.id in principal.router_ids)
   end
 end

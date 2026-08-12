@@ -28,11 +28,17 @@ defmodule DodoRouter.Agents.AgentToken do
     field :revoked_at, :utc_datetime
     field :last_used_at, :utc_datetime
 
+    # One app is usually several routers — a router per module — so a token
+    # covers a set. `all_routers` is separate rather than "empty means all",
+    # because it also grants routers that don't exist yet and every other app
+    # under the same account, and that should be ticked rather than inherited.
+    field :router_ids, {:array, :binary_id}, default: []
+    field :all_routers, :boolean, default: false
+
     # Only ever populated in memory, on the one response that mints it.
     field :token, :string, virtual: true, redact: true
 
     belongs_to :user, DodoRouter.Accounts.User
-    belongs_to :router, DodoRouter.Routers.Router
 
     timestamps(type: :utc_datetime)
   end
@@ -44,11 +50,12 @@ defmodule DodoRouter.Agents.AgentToken do
     {token, hash, prefix} = generate()
 
     %__MODULE__{}
-    |> cast(attrs, [:name, :scopes, :expires_at, :router_id])
+    |> cast(attrs, [:name, :scopes, :expires_at, :router_ids, :all_routers])
     |> validate_required([:name])
     |> validate_length(:name, min: 1, max: 120)
     |> validate_scopes()
     |> validate_expiry()
+    |> validate_reach()
     |> put_change(:user_id, user_id)
     |> put_change(:token_hash, hash)
     |> put_change(:token_prefix, prefix)
@@ -67,6 +74,30 @@ defmodule DodoRouter.Agents.AgentToken do
       end
     end)
     |> validate_length(:scopes, min: 1, message: "pick at least one")
+  end
+
+  # A credential has to say what it reaches. Neither a router nor `all_routers`
+  # means a token that can authenticate but do nothing, which reads as a bug to
+  # whoever holds it; and defaulting the empty case to "everything" is the
+  # permissive-by-omission move this field exists to avoid.
+  defp validate_reach(changeset) do
+    router_ids = get_field(changeset, :router_ids) || []
+    all? = get_field(changeset, :all_routers) || false
+
+    cond do
+      all? and router_ids != [] ->
+        add_error(
+          changeset,
+          :router_ids,
+          "leave empty when granting all routers, so the grant reads one way"
+        )
+
+      not all? and router_ids == [] ->
+        add_error(changeset, :router_ids, "pick at least one router, or grant all routers")
+
+      true ->
+        changeset
+    end
   end
 
   # An expiry in the past would mint a credential that is dead on arrival —

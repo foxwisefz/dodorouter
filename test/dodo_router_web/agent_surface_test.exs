@@ -239,19 +239,72 @@ defmodule DodoRouterWeb.AgentSurfaceTest do
       assert stored.token == nil
     end
 
-    test "a token pinned to one router cannot reach another", %{
+    test "one token reaches every router of the app it was minted for", %{
       conn: conn,
       user: user,
       router: router
     } do
-      {other_router, _key} = RoutersFixtures.router_fixture(user)
-      {_token, raw} = AgentsFixtures.agent_token_fixture(user, %{"router_id" => router.id})
+      # An app is usually several routers — one per module — and an agent
+      # working on it should not need a credential per module.
+      {second_module, _key} = RoutersFixtures.router_fixture(user)
+      {other_app, _key} = RoutersFixtures.router_fixture(user)
+
+      {_token, raw} =
+        AgentsFixtures.token_for_routers_fixture(user, [router, second_module])
 
       assert conn |> auth(raw) |> get("/r/#{router.slug}/logs") |> json_response(200)
+      assert conn |> auth(raw) |> get("/r/#{second_module.slug}/logs") |> json_response(200)
 
-      # Same owner, same account — but this credential was handed to one
-      # product, so it cannot enumerate another's traffic.
-      assert conn |> auth(raw) |> get("/r/#{other_router.slug}/logs") |> json_response(404)
+      # Same owner, same account — but a different app, and this credential
+      # was not granted it.
+      assert conn |> auth(raw) |> get("/r/#{other_app.slug}/logs") |> json_response(404)
+    end
+
+    test "all_routers covers a router created after the token was minted", %{
+      conn: conn,
+      user: user
+    } do
+      {_token, raw} = AgentsFixtures.agent_token_fixture(user, %{"all_routers" => true})
+      {later, _key} = RoutersFixtures.router_fixture(user)
+
+      # This is the unbounded grant, and it is exactly why it has to be an
+      # explicit tick rather than what an empty router list happens to mean.
+      assert conn |> auth(raw) |> get("/r/#{later.slug}/logs") |> json_response(200)
+    end
+
+    test "a listed router does not cover one created later", %{conn: conn, user: user} do
+      {first, _key} = RoutersFixtures.router_fixture(user)
+      {_token, raw} = AgentsFixtures.token_for_routers_fixture(user, [first])
+      {later, _key} = RoutersFixtures.router_fixture(user)
+
+      assert conn |> auth(raw) |> get("/r/#{later.slug}/logs") |> json_response(404)
+    end
+
+    test "a token must say what it reaches", %{user: user} do
+      assert {:error, changeset} =
+               Agents.create_token(user, %{
+                 "name" => "reaches nothing",
+                 "scopes" => ["logs:read"],
+                 "all_routers" => false,
+                 "router_ids" => []
+               })
+
+      assert {"pick at least one router, or grant all routers", _} = changeset.errors[:router_ids]
+    end
+
+    test "a token cannot name a router its owner does not have", %{conn: _conn, user: user} do
+      stranger = AccountsFixtures.user_fixture()
+      {stranger_router, _key} = RoutersFixtures.router_fixture(stranger)
+
+      assert {:error, changeset} =
+               Agents.create_token(user, %{
+                 "name" => "not mine",
+                 "scopes" => ["logs:read"],
+                 "all_routers" => false,
+                 "router_ids" => [stranger_router.id]
+               })
+
+      assert changeset.errors[:router_ids]
     end
 
     test "a token cannot reach another user's router", %{conn: conn, user: user} do
