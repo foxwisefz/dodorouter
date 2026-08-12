@@ -44,6 +44,31 @@ defmodule DodoRouter.Evaluations do
     |> Repo.all()
   end
 
+  @doc """
+  Distinct judge setups the user has picked before, most recently used first.
+
+  A judge is a key/model pair, not an evaluation: the same pair reached
+  through ten evaluations is one entry, dated by its latest use. The caller
+  is responsible for dropping pairs whose key or model is no longer
+  configured — this only reports what was chosen, not what still works.
+  """
+  def recent_judges(%User{} = user, limit \\ 6) do
+    from(e in Evaluation,
+      where:
+        e.evaluated_by_id == ^user.id and not is_nil(e.judge_provider_key_id) and
+          not is_nil(e.judge_model),
+      group_by: [e.judge_provider_key_id, e.judge_model],
+      order_by: [desc: max(e.inserted_at)],
+      limit: ^limit,
+      select: %{
+        provider_key_id: e.judge_provider_key_id,
+        model: e.judge_model,
+        last_used_at: max(e.inserted_at)
+      }
+    )
+    |> Repo.all()
+  end
+
   def get_evaluation(%User{} = user, id) do
     from(e in Evaluation,
       where: e.id == ^id and e.evaluated_by_id == ^user.id,

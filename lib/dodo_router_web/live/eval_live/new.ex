@@ -11,13 +11,6 @@ defmodule DodoRouterWeb.EvalLive.New do
     log = Logs.get_log!(socket.assigns.current_user, id)
     targets = Replays.list_targets(socket.assigns.current_user)
 
-    target_options =
-      for target <- targets, model <- target.models do
-        model_id = model[:id] || model["id"] || model
-        model_name = model[:display_name] || model["display_name"] || model_id
-        {"#{target.display_name} · #{model_name}", "#{target.provider_key.id}|#{model_id}"}
-      end
-
     target_lookup =
       for target <- targets, model <- target.models, into: %{} do
         model_id = model[:id] || model["id"] || model
@@ -31,22 +24,10 @@ defmodule DodoRouterWeb.EvalLive.New do
          }}
       end
 
-    provider_options =
-      Enum.map(targets, fn target ->
-        {"#{target.display_name} · #{target.provider_key.label || "Key"}", target.provider_key.id}
-      end)
+    provider_options = Enum.map(targets, &{key_label(&1), &1.provider_key.id})
 
     models_by_provider =
-      Map.new(targets, fn target ->
-        models =
-          Enum.map(target.models, fn model ->
-            model_id = model[:id] || model["id"] || model
-            model_name = model[:display_name] || model["display_name"] || model_id
-            {model_name, "#{target.provider_key.id}|#{model_id}"}
-          end)
-
-        {target.provider_key.id, models}
-      end)
+      Map.new(targets, fn target -> {target.provider_key.id, model_options(target)} end)
 
     source = duplication_source(socket.assigns.current_user, params["from"])
 
@@ -66,19 +47,92 @@ defmodule DodoRouterWeb.EvalLive.New do
           |> Enum.filter(&Map.has_key?(target_lookup, &1))
       end
 
+    judge_target = judge_target_value(source, target_lookup)
+
     {:ok,
      socket
      |> assign(:page_title, "Create evaluation")
      |> assign(:log, log)
-     |> assign(:target_options, target_options)
      |> assign(:target_lookup, target_lookup)
+     |> assign(:target_labels, target_labels(targets))
      |> assign(:provider_options, provider_options)
      |> assign(:models_by_provider, models_by_provider)
      |> assign(:picker_models, [])
      |> assign(:picker_form, to_form(%{"provider" => "", "target" => ""}, as: :picker))
      |> assign(:selected_targets, selected_targets)
-     |> assign(:judge_target_value, judge_target_value(source, target_lookup))
+     |> assign(:recent_judges, recent_judges(socket.assigns.current_user, target_lookup))
+     |> assign_judge(judge_target)
      |> assign(:form, form)}
+  end
+
+  # A judge is one key and one model, so it is picked the way a candidate is:
+  # a short list of keys, then that key's models. One flat key×model select
+  # is every model the account can reach, repeated per key.
+  defp assign_judge(socket, nil), do: assign_judge_key(socket, nil)
+
+  defp assign_judge(socket, target) do
+    key_id = target |> String.split("|", parts: 2) |> List.first()
+
+    socket
+    |> assign_judge_key(key_id)
+    |> assign(:judge_target_value, target)
+  end
+
+  defp assign_judge_key(socket, key_id) do
+    socket
+    |> assign(:judge_key, key_id)
+    |> assign(:judge_models, Map.get(socket.assigns.models_by_provider, key_id, []))
+    |> assign(:judge_target_value, nil)
+  end
+
+  # The model select only ever offers one key's models, so a model left over
+  # from the previously selected key is dropped rather than silently billed
+  # to the new one.
+  defp sync_judge(socket, params) do
+    key = blank_to_nil(params["judge_key"])
+    target = blank_to_nil(params["judge_target"])
+
+    cond do
+      is_nil(key) -> assign_judge(socket, nil)
+      target && String.starts_with?(target, key <> "|") -> assign_judge(socket, target)
+      true -> assign_judge_key(socket, key)
+    end
+  end
+
+  defp blank_to_nil(value) when value in [nil, ""], do: nil
+  defp blank_to_nil(value), do: value
+
+  # Past picks are only offered while the key and model are both still
+  # configured — a chip that silently resolves to a deleted key would fail
+  # at benchmark time, long after the click.
+  defp recent_judges(user, target_lookup) do
+    user
+    |> Evaluations.recent_judges()
+    |> Enum.map(&"#{&1.provider_key_id}|#{&1.model}")
+    |> Enum.filter(&Map.has_key?(target_lookup, &1))
+  end
+
+  defp target_labels(targets) do
+    for target <- targets, model <- target.models, into: %{} do
+      model_id = model[:id] || model["id"] || model
+      model_name = model[:display_name] || model["display_name"] || model_id
+      {"#{target.provider_key.id}|#{model_id}", "#{key_label(target)} · #{model_name}"}
+    end
+  end
+
+  defp key_label(target) do
+    case target.provider_key.label do
+      label when label in [nil, ""] -> "#{target.display_name} · Key"
+      label -> "#{target.display_name} · #{label}"
+    end
+  end
+
+  defp model_options(target) do
+    Enum.map(target.models, fn model ->
+      model_id = model[:id] || model["id"] || model
+      model_name = model[:display_name] || model["display_name"] || model_id
+      {model_name, "#{target.provider_key.id}|#{model_id}"}
+    end)
   end
 
   # Duplication seeds the builder from an existing evaluation instead of
@@ -125,7 +179,16 @@ defmodule DodoRouterWeb.EvalLive.New do
     {:noreply,
      socket
      |> assign(:form, form)
-     |> assign(:selected_targets, params["candidate_target_values"] || [])}
+     |> assign(:selected_targets, params["candidate_target_values"] || [])
+     |> sync_judge(params)}
+  end
+
+  def handle_event("pick_recent_judge", %{"target" => target}, socket) do
+    if Map.has_key?(socket.assigns.target_lookup, target) do
+      {:noreply, assign_judge(socket, target)}
+    else
+      {:noreply, socket}
+    end
   end
 
   def handle_event("pick_provider", %{"picker" => %{"provider" => provider}}, socket) do
@@ -358,15 +421,47 @@ defmodule DodoRouterWeb.EvalLive.New do
                 />
               </div>
               <div class="mt-4 rounded-xl bg-primary/5 p-4 ring-1 ring-primary/10">
-                <.input
-                  name="evaluation[judge_target]"
-                  type="select"
-                  value={@judge_target_value}
-                  label="Judge model"
-                  options={@target_options}
-                  prompt="Select a configured model"
-                  required
-                />
+                <div :if={@recent_judges != []} id="recent-judges" class="mb-3">
+                  <p class="mb-2 text-xs font-medium text-base-content/50">Recently used</p>
+                  <div class="flex flex-wrap gap-2">
+                    <button
+                      :for={target <- @recent_judges}
+                      type="button"
+                      phx-click="pick_recent_judge"
+                      phx-value-target={target}
+                      class={[
+                        "btn btn-xs gap-1.5 rounded-full font-normal transition",
+                        if(@judge_target_value == target,
+                          do: "btn-primary",
+                          else: "btn-ghost border border-base-300/70 hover:border-primary/40"
+                        )
+                      ]}
+                    >
+                      <.icon name="hero-scale" class="size-3" />
+                      {@target_labels[target]}
+                    </button>
+                  </div>
+                </div>
+                <div class="grid gap-3 sm:grid-cols-2">
+                  <.input
+                    name="evaluation[judge_key]"
+                    type="select"
+                    value={@judge_key}
+                    label="Judge key"
+                    options={@provider_options}
+                    prompt="Choose provider key"
+                  />
+                  <.input
+                    name="evaluation[judge_target]"
+                    type="select"
+                    value={@judge_target_value}
+                    label="Judge model"
+                    options={@judge_models}
+                    prompt="Choose model"
+                    disabled={@judge_models == []}
+                    required
+                  />
+                </div>
               </div>
             </section>
 

@@ -36,6 +36,11 @@ defmodule DodoRouterWeb.EvalLiveTest do
     assert has_element?(live, "#selected-candidates input[value='#{provider_key.id}|test-model']") or
              has_element?(live, "#selected-candidates", "test-model")
 
+    # The judge key gates its own model list, so it is chosen first.
+    live
+    |> form("#eval-form", %{"evaluation" => %{"judge_key" => provider_key.id}})
+    |> render_change()
+
     live
     |> form("#eval-form", %{
       "evaluation" => %{
@@ -43,6 +48,7 @@ defmodule DodoRouterWeb.EvalLiveTest do
         "criteria" => "Answer accurately without unnecessary detail",
         "candidate_target_values" => ["#{provider_key.id}|test-model"],
         "repetitions" => "3",
+        "judge_key" => provider_key.id,
         "judge_target" => "#{provider_key.id}|test-model"
       }
     })
@@ -68,6 +74,118 @@ defmodule DodoRouterWeb.EvalLiveTest do
 
     assert {:ok, show_live, _html} = live(conn, URI.parse(path).path)
     assert has_element?(show_live, "#eval-summary")
+  end
+
+  test "the judge is picked as a key and then that key's models", %{conn: conn, user: user} do
+    {router, _api_key} = RoutersFixtures.router_fixture(user)
+    prod_key = ProvidersFixtures.provider_key_fixture(user, %{"label" => "prod key"})
+    backup_key = ProvidersFixtures.provider_key_fixture(user, %{"label" => "backup key"})
+    log = LogsFixtures.log_fixture(router)
+
+    {:ok, live, _html} = live(conn, ~p"/logs/#{log.id}/evals/new")
+
+    # Both keys are offered by label, so which one the judge bills is a
+    # visible choice and not a guess between identical model rows.
+    for key <- [prod_key, backup_key] do
+      assert has_element?(
+               live,
+               "select[name='evaluation[judge_key]'] option[value='#{key.id}']",
+               key.label
+             )
+    end
+
+    # The model select stays empty — and inert — until a key names it.
+    assert has_element?(live, "select[name='evaluation[judge_target]'][disabled]")
+
+    live
+    |> form("#eval-form", %{"evaluation" => %{"judge_key" => backup_key.id}})
+    |> render_change()
+
+    assert has_element?(
+             live,
+             "select[name='evaluation[judge_target]'] option[value='#{backup_key.id}|test-model']"
+           )
+
+    refute has_element?(
+             live,
+             "select[name='evaluation[judge_target]'] option[value='#{prod_key.id}|test-model']"
+           )
+
+    # Switching keys drops the model chosen under the old one rather than
+    # billing it to the new key.
+    live
+    |> form("#eval-form", %{
+      "evaluation" => %{
+        "judge_key" => prod_key.id,
+        "judge_target" => "#{backup_key.id}|test-model"
+      }
+    })
+    |> render_change()
+
+    refute has_element?(live, "select[name='evaluation[judge_target]'] option[selected]")
+  end
+
+  test "a judge used before can be picked again in one click", %{conn: conn, user: user} do
+    {router, _api_key} = RoutersFixtures.router_fixture(user)
+    provider_key = ProvidersFixtures.provider_key_fixture(user, %{"label" => "prod key"})
+    log = LogsFixtures.log_fixture(router)
+
+    {:ok, _evaluation} =
+      Evaluations.create_evaluation(user, log, %{
+        name: "Earlier eval",
+        criteria: "Be useful",
+        judge_model: "test-model",
+        judge_provider_key_id: provider_key.id,
+        candidate_targets: [
+          %{
+            "provider_key_id" => provider_key.id,
+            "provider" => "test_provider",
+            "model" => "test-model"
+          }
+        ]
+      })
+
+    {:ok, live, _html} = live(conn, ~p"/logs/#{log.id}/evals/new")
+
+    chip = "#recent-judges button[phx-value-target='#{provider_key.id}|test-model']"
+
+    # The chip names all three parts of the past pick, since a bare model
+    # name doesn't say whose key paid for it.
+    assert has_element?(live, chip, "prod key")
+    assert has_element?(live, chip, "test-model")
+
+    live |> element(chip) |> render_click()
+
+    assert has_element?(
+             live,
+             "select[name='evaluation[judge_target]'] option[selected][value='#{provider_key.id}|test-model']"
+           )
+
+    assert has_element?(
+             live,
+             "select[name='evaluation[judge_key]'] option[selected][value='#{provider_key.id}']"
+           )
+  end
+
+  test "a recent judge whose key is gone is not offered", %{conn: conn, user: user} do
+    {router, _api_key} = RoutersFixtures.router_fixture(user)
+    provider_key = ProvidersFixtures.provider_key_fixture(user, %{"label" => "prod key"})
+    log = LogsFixtures.log_fixture(router)
+
+    {:ok, _evaluation} =
+      Evaluations.create_evaluation(user, log, %{
+        name: "Earlier eval",
+        criteria: "Be useful",
+        judge_model: "retired-model",
+        judge_provider_key_id: provider_key.id,
+        candidate_targets: []
+      })
+
+    {:ok, live, _html} = live(conn, ~p"/logs/#{log.id}/evals/new")
+
+    # The model is no longer in the catalog, so replaying the pick would
+    # only fail later, at benchmark time.
+    refute has_element?(live, "#recent-judges")
   end
 
   test "mounting the evaluation page never starts a benchmark", %{conn: conn, user: user} do
