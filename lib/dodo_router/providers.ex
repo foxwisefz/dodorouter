@@ -99,13 +99,18 @@ defmodule DodoRouter.Providers do
   @doc """
   Deletes a provider key and its stored secret.
 
-  Returns `{:error, :in_use}` when a row still references the key under a
-  restricting foreign key — today only `evaluations.judge_provider_key_id`,
-  which restricts because an evaluation is re-runnable and a re-run needs a
-  working judge credential. Pass `reassign_judge_to: %ProviderKey{}` to move
-  those references to another key of the same provider first; the move and
-  the delete share a transaction, so a refused delete never leaves the
-  evaluations pointing at a judge the user did not choose.
+  Returns `{:error, :in_use}` when an evaluation still references the key,
+  as its judge or as one of its candidates. Both keep an evaluation
+  re-runnable, so neither may be silently orphaned. Pass
+  `reassign_to: %ProviderKey{}` to move every reference to another key of
+  the same provider first; the move and the delete share a transaction, so
+  a refused delete never leaves an evaluation pointing at a key the user
+  did not choose.
+
+  Only the judge reference is enforced by the database
+  (`evaluations_judge_provider_key_id_fkey`, `ON DELETE RESTRICT`).
+  Candidates live in a JSON column with no foreign key, so they are checked
+  here — a delete Postgres is happy to accept still breaks the next re-run.
 
   The row goes first and the secret second. The other order destroys the
   credential behind a key that is still there when the delete is refused —
@@ -114,7 +119,8 @@ defmodule DodoRouter.Providers do
   def delete_provider_key(%ProviderKey{} = provider_key, opts \\ []) do
     result =
       Repo.transaction(fn ->
-        with :ok <- reassign_judges(provider_key, opts[:reassign_judge_to]),
+        with :ok <- reassign_references(provider_key, opts[:reassign_to]),
+             :ok <- check_unreferenced(provider_key),
              {:ok, deleted} <- Repo.delete(delete_changeset(provider_key)) do
           deleted
         else
@@ -135,12 +141,21 @@ defmodule DodoRouter.Providers do
     end
   end
 
-  defp reassign_judges(_provider_key, nil), do: :ok
+  defp reassign_references(_provider_key, nil), do: :ok
 
-  defp reassign_judges(%ProviderKey{} = provider_key, %ProviderKey{} = replacement) do
-    # Cross-context on purpose: the reference being moved belongs to
-    # Evaluations, and only that context knows what a judge is.
-    DodoRouter.Evaluations.reassign_judge(provider_key, replacement)
+  defp reassign_references(%ProviderKey{} = provider_key, %ProviderKey{} = replacement) do
+    # Cross-context on purpose: the references being moved belong to
+    # Evaluations, and only that context knows what a judge or a candidate
+    # target is.
+    DodoRouter.Evaluations.reassign_provider_key(provider_key, replacement)
+  end
+
+  # Runs after any reassignment, so it sees what is actually left.
+  defp check_unreferenced(%ProviderKey{} = provider_key) do
+    case DodoRouter.Evaluations.reference_counts(provider_key) do
+      %{judge: 0, candidate: 0} -> :ok
+      _ -> {:error, :in_use}
+    end
   end
 
   defp delete_changeset(%ProviderKey{} = provider_key) do

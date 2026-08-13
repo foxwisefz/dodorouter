@@ -421,7 +421,12 @@ defmodule DodoRouterWeb.EvalsController do
       # been reassigned or deleted.
       judge_provider_key_id: run.judge_provider_key_id,
       judge_provider_key_label: run.judge_provider_key_label,
-      judge_provider_key_deleted: Evaluations.judge_key_deleted?(run)
+      judge_provider_key_deleted: Evaluations.judge_key_deleted?(run),
+      # `provider` above names the provider, never which of its keys
+      # answered — and a re-run needs that key to still exist.
+      candidate_provider_key_id: run.candidate_provider_key_id,
+      candidate_provider_key_label: run.candidate_provider_key_label,
+      candidate_provider_key_deleted: Evaluations.candidate_key_deleted?(run)
     }
   end
 

@@ -212,6 +212,49 @@ defmodule DodoRouterWeb.ProvidersLiveTest do
       assert html =~ "Add another z.ai Standard key"
     end
 
+    test "counts candidate references too, which no foreign key protects", %{
+      conn: conn,
+      user: user,
+      key: key,
+      evaluation: evaluation
+    } do
+      # A second evaluation uses the key only as a candidate — nothing in
+      # Postgres stops that delete, so the page has to.
+      {router, _} = DodoRouter.RoutersFixtures.router_fixture(user)
+      log = DodoRouter.LogsFixtures.log_fixture(router)
+      other = DodoRouter.ProvidersFixtures.provider_key_fixture(user, %{"label" => "Judge"})
+
+      {:ok, _second} =
+        DodoRouter.Evaluations.create_evaluation(user, log, %{
+          name: "Candidate only",
+          criteria: "Be useful",
+          judge_model: "test-model",
+          judge_provider_key_id: other.id,
+          candidate_targets: [
+            %{
+              "provider_key_id" => key.id,
+              "provider" => "zai_standard",
+              "model" => "glm-4.6"
+            }
+          ]
+        })
+
+      _ = evaluation
+
+      {:ok, live, _html} = live(conn, ~p"/providers")
+
+      html =
+        live
+        |> element("button[phx-click=\"delete\"][phx-value-id=\"#{key.id}\"]")
+        |> render_click()
+
+      # Two distinct evaluations, three roles between them — the headline
+      # counts evaluations, not references.
+      assert html =~ "2 evaluations"
+      assert html =~ "candidate in 2"
+      assert html =~ "judge of 1"
+    end
+
     test "keeps the stored secret when the delete is refused", %{conn: conn, key: key} do
       {:ok, live, _html} = live(conn, ~p"/providers")
 

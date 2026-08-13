@@ -43,6 +43,9 @@ defmodule DodoRouter.Logs.EvaluationRun do
     # naming what judged it even after the evaluation is repointed at
     # another key. See Evaluations.judge_key_deleted?/1.
     field :judge_provider_key_label, :string
+    # Same snapshot on the candidate side: candidate_provider names the
+    # provider, never which of that provider's keys answered.
+    field :candidate_provider_key_label, :string
 
     belongs_to :evaluation, DodoRouter.Logs.Evaluation
     belongs_to :judge_log, DodoRouter.Logs.RequestLog
@@ -83,7 +86,8 @@ defmodule DodoRouter.Logs.EvaluationRun do
       :evaluation_id,
       :judge_log_id,
       :judge_provider_key_id,
-      :judge_provider_key_label
+      :judge_provider_key_label,
+      :candidate_provider_key_label
     ])
     |> validate_required([:status, :evaluation_id, :judge_prompt_version])
     |> validate_inclusion(:status, ~w(pending running completed failed))

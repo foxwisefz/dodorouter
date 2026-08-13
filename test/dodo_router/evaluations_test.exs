@@ -763,7 +763,7 @@ defmodule DodoRouter.EvaluationsTest do
       run = run_judged_by(evaluation, judge)
 
       replacement = ProvidersFixtures.provider_key_fixture(user, %{"label" => "Key 2"})
-      assert :ok = Evaluations.reassign_judge(judge, replacement)
+      assert :ok = Evaluations.reassign_provider_key(judge, replacement)
 
       run = Repo.get!(EvaluationRun, run.id)
       assert run.judge_provider_key_id == judge.id
@@ -783,7 +783,7 @@ defmodule DodoRouter.EvaluationsTest do
       replacement = ProvidersFixtures.provider_key_fixture(user, %{"label" => "Key 2"})
 
       assert {:ok, _} =
-               DodoRouter.Providers.delete_provider_key(judge, reassign_judge_to: replacement)
+               DodoRouter.Providers.delete_provider_key(judge, reassign_to: replacement)
 
       run = Repo.get!(EvaluationRun, run.id)
 
@@ -822,7 +822,142 @@ defmodule DodoRouter.EvaluationsTest do
     end
   end
 
-  describe "reassign_judge/2" do
+  describe "candidate references to a provider key" do
+    setup do
+      user = AccountsFixtures.user_fixture()
+      {router, _key} = RoutersFixtures.router_fixture(user)
+
+      log =
+        LogsFixtures.log_fixture(router, %{
+          request_body:
+            Jason.encode!(%{
+              "model" => "original-model",
+              "messages" => [%{"role" => "user", "content" => "Say hello"}]
+            })
+        })
+
+      judge = ProvidersFixtures.provider_key_fixture(user, %{"label" => "Judge key"})
+      candidate = ProvidersFixtures.provider_key_fixture(user, %{"label" => "Candidate key"})
+
+      {:ok, evaluation} =
+        Evaluations.create_evaluation(user, log, %{
+          name: "Greeting benchmark",
+          criteria: "Say hello",
+          judge_model: "test-model",
+          judge_provider_key_id: judge.id,
+          candidate_targets: [
+            %{
+              "provider_key_id" => candidate.id,
+              "provider" => "test_provider",
+              "model" => "test-model"
+            }
+          ],
+          repetitions: 1
+        })
+
+      %{user: user, judge: judge, candidate: candidate, evaluation: evaluation}
+    end
+
+    test "are counted even though no foreign key enforces them", %{
+      judge: judge,
+      candidate: candidate
+    } do
+      assert Evaluations.reference_counts(judge) == %{judge: 1, candidate: 0, total: 1}
+      assert Evaluations.reference_counts(candidate) == %{judge: 0, candidate: 1, total: 1}
+    end
+
+    test "count one evaluation once when it fills both roles", %{
+      user: user,
+      judge: judge,
+      evaluation: evaluation
+    } do
+      evaluation
+      |> Ecto.Changeset.change(
+        candidate_targets: [
+          %{"provider_key_id" => judge.id, "provider" => "test_provider", "model" => "test-model"}
+        ]
+      )
+      |> Repo.update!()
+
+      _ = user
+
+      assert Evaluations.reference_counts(judge) == %{judge: 1, candidate: 1, total: 1}
+    end
+
+    test "stop a delete that would otherwise succeed silently", %{candidate: candidate} do
+      # candidate_targets is a JSON column with no FK, so Postgres has no
+      # opinion here — the refusal has to come from us, or the id dangles
+      # and the next re-run fails minutes later for something knowable now.
+      assert {:error, :in_use} = DodoRouter.Providers.delete_provider_key(candidate)
+      assert Repo.get(DodoRouter.Providers.ProviderKey, candidate.id)
+    end
+
+    test "move to the replacement, keeping provider and model", %{
+      user: user,
+      candidate: candidate,
+      evaluation: evaluation
+    } do
+      replacement = ProvidersFixtures.provider_key_fixture(user, %{"label" => "Key 2"})
+
+      assert {:ok, _} =
+               DodoRouter.Providers.delete_provider_key(candidate, reassign_to: replacement)
+
+      assert [target] = Repo.get!(Evaluation, evaluation.id).candidate_targets
+      assert target["provider_key_id"] == replacement.id
+      assert target["provider"] == "test_provider"
+      assert target["model"] == "test-model"
+    end
+
+    test "a run names the candidate key that produced it, and marks it deleted", %{
+      user: user,
+      candidate: candidate,
+      evaluation: evaluation
+    } do
+      assert {:ok, _} = Evaluations.run(user, evaluation)
+
+      assert [run] = Repo.all(from(r in EvaluationRun, where: r.evaluation_id == ^evaluation.id))
+      assert run.candidate_provider_key_id == candidate.id
+      assert run.candidate_provider_key_label == "Candidate key"
+      refute Evaluations.candidate_key_deleted?(run)
+
+      replacement = ProvidersFixtures.provider_key_fixture(user, %{"label" => "Key 2"})
+
+      assert {:ok, _} =
+               DodoRouter.Providers.delete_provider_key(candidate, reassign_to: replacement)
+
+      run = Repo.get!(EvaluationRun, run.id)
+      assert is_nil(run.candidate_provider_key_id)
+      assert run.candidate_provider_key_label == "Candidate key"
+      assert Evaluations.candidate_key_deleted?(run)
+    end
+
+    test "a target left dangling by an older delete fails by name, not by atom", %{
+      user: user,
+      evaluation: evaluation
+    } do
+      # Rows predating the refusal above still hold ids of deleted keys.
+      dangling = Ecto.UUID.generate()
+
+      evaluation
+      |> Ecto.Changeset.change(
+        candidate_targets: [
+          %{"provider_key_id" => dangling, "provider" => "test_provider", "model" => "test-model"}
+        ]
+      )
+      |> Repo.update!()
+
+      evaluation = Evaluations.get_evaluation!(user, evaluation.id)
+      assert {:ok, _} = Evaluations.run(user, evaluation)
+
+      assert [run] = Repo.all(from(r in EvaluationRun, where: r.evaluation_id == ^evaluation.id))
+      assert run.status == "failed"
+      assert run.error =~ "no longer configured"
+      assert run.error =~ "test-model"
+      refute run.error =~ "provider_key_not_found"
+    end
+  end
+
+  describe "reassign_provider_key/2" do
     setup do
       user = AccountsFixtures.user_fixture()
       {router, _key} = RoutersFixtures.router_fixture(user)
@@ -855,10 +990,10 @@ defmodule DodoRouter.EvaluationsTest do
     } do
       replacement = ProvidersFixtures.provider_key_fixture(user, %{"label" => "Key 2"})
 
-      assert :ok = Evaluations.reassign_judge(judge, replacement)
+      assert :ok = Evaluations.reassign_provider_key(judge, replacement)
       assert Repo.get!(Evaluation, evaluation.id).judge_provider_key_id == replacement.id
-      assert Evaluations.count_judge_uses(judge) == 0
-      assert Evaluations.count_judge_uses(replacement) == 1
+      assert Evaluations.reference_counts(judge).judge == 0
+      assert Evaluations.reference_counts(replacement).judge == 1
     end
 
     test "refuses a key from a different provider", %{user: user, judge: judge} do
@@ -867,16 +1002,16 @@ defmodule DodoRouter.EvaluationsTest do
       # there — the score would read as comparable when it is not.
       other = ProvidersFixtures.provider_key_fixture(user, %{"provider_slug" => "zai_standard"})
 
-      assert {:error, :provider_mismatch} = Evaluations.reassign_judge(judge, other)
-      assert Evaluations.count_judge_uses(judge) == 1
+      assert {:error, :provider_mismatch} = Evaluations.reassign_provider_key(judge, other)
+      assert Evaluations.reference_counts(judge).judge == 1
     end
 
     test "refuses a key belonging to someone else", %{judge: judge} do
       stranger = AccountsFixtures.user_fixture()
       theirs = ProvidersFixtures.provider_key_fixture(stranger)
 
-      assert {:error, :not_owned} = Evaluations.reassign_judge(judge, theirs)
-      assert Evaluations.count_judge_uses(judge) == 1
+      assert {:error, :not_owned} = Evaluations.reassign_provider_key(judge, theirs)
+      assert Evaluations.reference_counts(judge).judge == 1
     end
   end
 end

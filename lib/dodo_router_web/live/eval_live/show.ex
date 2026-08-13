@@ -645,7 +645,11 @@ defmodule DodoRouterWeb.EvalLive.Show do
                     </span>
                     <div>
                       <div class="font-medium">
-                        {run.candidate_provider} / {run.candidate_model} · run {run.repetition}
+                        {run.candidate_provider} / {run.candidate_model} · run {run.repetition}<span
+                          :if={Evaluations.candidate_key_deleted?(run)}
+                          class="ml-1.5 text-xs font-normal text-warning"
+                          title={"Answered with #{run.candidate_provider_key_label}, which has since been removed"}
+                        >key deleted</span>
                       </div>
                       <div class="text-sm text-base-content/60">
                         {run.summary || run.error || run_status_label(run)}

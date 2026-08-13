@@ -864,7 +864,7 @@ defmodule DodoRouterWeb.EvalLiveTest do
     } do
       replacement = ProvidersFixtures.provider_key_fixture(user, %{"label" => "Key 2"})
 
-      {:ok, _} = DodoRouter.Providers.delete_provider_key(judge, reassign_judge_to: replacement)
+      {:ok, _} = DodoRouter.Providers.delete_provider_key(judge, reassign_to: replacement)
 
       {:ok, _live, html} = live(conn, ~p"/evals/#{evaluation.id}")
 

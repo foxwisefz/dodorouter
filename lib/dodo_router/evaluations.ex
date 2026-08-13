@@ -108,15 +108,53 @@ defmodule DodoRouter.Evaluations do
   end
 
   @doc """
-  How many evaluations name this provider key as their judge.
+  How many evaluations reference this provider key, by role.
 
-  This is what makes `evaluations.judge_provider_key_id` a restricting
-  reference rather than a nulling one: an evaluation can be re-run, and a
-  re-run without a judge credential is not a degraded result, it is no
-  result at all.
+  Both roles keep an evaluation re-runnable, and a re-run missing either
+  credential is not a degraded result, it is no result at all. Only the
+  judge reference is a real foreign key (`ON DELETE RESTRICT`); candidates
+  live in the `candidate_targets` JSON column, where Postgres has no
+  opinion — so this count is the only thing standing between a delete and a
+  benchmark that fails minutes later for something knowable now.
   """
-  def count_judge_uses(%ProviderKey{id: key_id}) do
-    Repo.aggregate(from(e in Evaluation, where: e.judge_provider_key_id == ^key_id), :count)
+  def reference_counts(%ProviderKey{id: key_id}) do
+    judge =
+      Repo.aggregate(from(e in Evaluation, where: e.judge_provider_key_id == ^key_id), :count)
+
+    %{
+      judge: judge,
+      candidate: Repo.aggregate(candidate_targets_query(key_id), :count),
+      # Distinct, not judge + candidate: one evaluation commonly judges with
+      # the same key it benchmarks, and reporting that as two would overstate
+      # what the user is about to break.
+      total: Repo.aggregate(referencing_query(key_id), :count)
+    }
+  end
+
+  defp candidate_targets_query(key_id) do
+    from(e in Evaluation, where: ^candidate_reference(key_id))
+  end
+
+  defp referencing_query(key_id) do
+    # Composed as one dynamic: Ecto only accepts an interpolated dynamic at
+    # the top level of a where, never as one side of an `or`.
+    either =
+      dynamic([e], e.judge_provider_key_id == ^key_id or ^candidate_reference(key_id))
+
+    from(e in Evaluation, where: ^either)
+  end
+
+  # candidate_targets is jsonb[] — a Postgres array of objects, not a JSON
+  # array — so this unnests rather than using a containment operator.
+  defp candidate_reference(key_id) do
+    dynamic(
+      [e],
+      fragment(
+        "EXISTS (SELECT 1 FROM unnest(?) t WHERE t ->> 'provider_key_id' = ?)",
+        e.candidate_targets,
+        type(^key_id, :string)
+      )
+    )
   end
 
   @doc """
@@ -131,14 +169,23 @@ defmodule DodoRouter.Evaluations do
     is_nil(run.judge_provider_key_id) and not is_nil(run.judge_provider_key_label)
   end
 
-  @doc """
-  Moves every judge reference from one provider key to another.
+  @doc "The candidate counterpart of `judge_key_deleted?/1`."
+  def candidate_key_deleted?(%EvaluationRun{} = run) do
+    is_nil(run.candidate_provider_key_id) and not is_nil(run.candidate_provider_key_label)
+  end
 
-  Refuses a replacement from a different provider: the evaluation keeps its
-  `judge_model`, and a key from another provider cannot serve that model —
-  the row would claim a judge that never ran.
+  @doc """
+  Moves every reference — judge and candidate — from one key to another.
+
+  Refuses a replacement from a different provider: an evaluation keeps its
+  `judge_model` and each target its `model`, and a key from another provider
+  cannot serve those — the row would claim a run that never happened.
+
+  Candidate targets are rewritten rather than update_all'd because they are
+  a JSON array: only the matching element's `provider_key_id` changes, and
+  the order the user chose is preserved.
   """
-  def reassign_judge(%ProviderKey{} = from, %ProviderKey{} = to) do
+  def reassign_provider_key(%ProviderKey{} = from, %ProviderKey{} = to) do
     cond do
       from.user_id != to.user_id ->
         {:error, :not_owned}
@@ -150,8 +197,25 @@ defmodule DodoRouter.Evaluations do
         from(e in Evaluation, where: e.judge_provider_key_id == ^from.id)
         |> Repo.update_all(set: [judge_provider_key_id: to.id])
 
+        from.id
+        |> candidate_targets_query()
+        |> Repo.all()
+        |> Enum.each(&repoint_targets(&1, from.id, to.id))
+
         :ok
     end
+  end
+
+  defp repoint_targets(%Evaluation{} = evaluation, from_id, to_id) do
+    targets =
+      Enum.map(evaluation.candidate_targets, fn
+        %{"provider_key_id" => ^from_id} = target -> %{target | "provider_key_id" => to_id}
+        target -> target
+      end)
+
+    evaluation
+    |> Ecto.Changeset.change(candidate_targets: targets)
+    |> Repo.update!()
   end
 
   def get_evaluation(%User{} = user, id) do
@@ -342,9 +406,11 @@ defmodule DodoRouter.Evaluations do
 
   defp run_candidate(user, evaluation, target, repetition, batch_id) do
     started_at = System.monotonic_time(:millisecond)
+    candidate_key = Providers.get_provider_key(user, target["provider_key_id"])
 
     case create_run(evaluation, %{
-           candidate_provider_key_id: target["provider_key_id"],
+           candidate_provider_key_id: candidate_key && candidate_key.id,
+           candidate_provider_key_label: candidate_key && candidate_key.label,
            candidate_provider: target["provider"],
            candidate_model: target["model"],
            repetition: repetition,
@@ -429,10 +495,22 @@ defmodule DodoRouter.Evaluations do
         {:error,
          update_run!(run, %{
            status: "failed",
-           error: "Candidate generation error: #{inspect(reason)}",
+           error: candidate_failure_message(reason, target),
            duration_ms: System.monotonic_time(:millisecond) - started_at
          })}
     end
+  end
+
+  # A target whose key was deleted before deletes started asking about
+  # candidates. `:provider_key_not_found` tells the reader nothing about
+  # which of several targets is broken or what to do next.
+  defp candidate_failure_message(:provider_key_not_found, target) do
+    "The provider key for #{target["provider"]} / #{target["model"]} is no longer configured — " <>
+      "pick another key for this candidate and re-run."
+  end
+
+  defp candidate_failure_message(reason, _target) do
+    "Candidate generation error: #{inspect(reason)}"
   end
 
   defp judge_candidate(user, evaluation, run, candidate_content, started_at) do

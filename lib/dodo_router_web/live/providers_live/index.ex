@@ -218,16 +218,15 @@ defmodule DodoRouterWeb.ProvidersLive.Index do
     provider_key = Providers.get_provider_key!(user, id)
     replacement = Providers.get_provider_key(user, replacement_id)
 
-    case replacement &&
-           Providers.delete_provider_key(provider_key, reassign_judge_to: replacement) do
+    case replacement && Providers.delete_provider_key(provider_key, reassign_to: replacement) do
       {:ok, _} ->
         {:noreply,
          socket
          |> assign(:blocked_delete, nil)
-         |> key_removed("Judges moved to #{replacement.label}, key removed")}
+         |> key_removed("Evaluations moved to #{replacement.label}, key removed")}
 
       nil ->
-        {:noreply, put_flash(socket, :error, "Pick a key to move the judges to")}
+        {:noreply, put_flash(socket, :error, "Pick a key to move the evaluations to")}
 
       {:error, :in_use} ->
         {:noreply,
@@ -236,7 +235,7 @@ defmodule DodoRouterWeb.ProvidersLive.Index do
          |> put_flash(:error, "Something else still references this key")}
 
       {:error, _reason} ->
-        {:noreply, put_flash(socket, :error, "Could not move the judges to that key")}
+        {:noreply, put_flash(socket, :error, "Could not move the evaluations to that key")}
     end
   end
 
@@ -248,12 +247,27 @@ defmodule DodoRouterWeb.ProvidersLive.Index do
   end
 
   defp blocked_delete(provider_key) do
+    counts = Evaluations.reference_counts(provider_key)
+
     %{
       key_id: provider_key.id,
-      judge_count: Evaluations.count_judge_uses(provider_key),
-      candidates: Providers.reassignment_candidates(provider_key)
+      counts: counts,
+      replacements: Providers.reassignment_candidates(provider_key)
     }
   end
+
+  # "3 evaluations (judge of 2, candidate in 2)" — the total is distinct, so
+  # the roles can overlap and still add up to fewer evaluations than roles.
+  # Naming the roles matters because only one is a real foreign key, and a
+  # reader who deletes evaluations to unblock themselves needs to know which.
+  defp reference_summary(%{judge: judge, candidate: candidate, total: total}) do
+    roles = Enum.reject([role(judge, "judge of"), role(candidate, "candidate in")], &is_nil/1)
+
+    "#{pluralize(total, "evaluation")} (#{Enum.join(roles, ", ")})"
+  end
+
+  defp role(0, _name), do: nil
+  defp role(count, name), do: "#{name} #{count}"
 
   @impl true
   def handle_info(:poll_codex_device, socket) do
@@ -386,10 +400,11 @@ defmodule DodoRouterWeb.ProvidersLive.Index do
   attr :provider_name, :string, required: true
   attr :blocked, :map, required: true
 
-  # Shown in place of the crash a restricting foreign key used to produce.
-  # The reference is worth keeping — an evaluation can be re-run and a re-run
-  # needs a judge credential — so the way out is to name another key, not to
-  # force the delete through.
+  # Shown in place of the crash a restricting foreign key used to produce —
+  # and in place of the silent success the candidate references, which no
+  # foreign key protects, used to get. Either way the reference is worth
+  # keeping (the evaluation can be re-run), so the way out is to name
+  # another key, not to force the delete through.
   defp judge_block_notice(assigns) do
     ~H"""
     <div
@@ -398,11 +413,9 @@ defmodule DodoRouterWeb.ProvidersLive.Index do
     >
       <p class="text-sm mb-2">
         <span class="font-medium">{@key.label}</span>
-        is the judge for {@blocked.judge_count} {if @blocked.judge_count == 1,
-          do: "evaluation",
-          else: "evaluations"}, which can be re-run.
+        is used by {reference_summary(@blocked.counts)}, which can be re-run.
       </p>
-      <%= if @blocked.candidates == [] do %>
+      <%= if @blocked.replacements == [] do %>
         <div class="flex items-center gap-2">
           <p class="text-xs text-base-content/60 flex-1">
             Add another {@provider_name} key to move them to, then remove this one.
@@ -420,11 +433,11 @@ defmodule DodoRouterWeb.ProvidersLive.Index do
             name="replacement_id"
             class="flex-1 px-2 py-1.5 bg-base-100 border border-base-300/50 rounded text-sm focus:outline-none focus:border-primary/50"
           >
-            <option :for={candidate <- @blocked.candidates} value={candidate.id}>
-              {candidate.label} — {Providers.compact_key_hint(candidate.key_hint)}
+            <option :for={replacement <- @blocked.replacements} value={replacement.id}>
+              {replacement.label} — {Providers.compact_key_hint(replacement.key_hint)}
             </option>
           </select>
-          <button type="submit" class="btn btn-sm btn-primary">Move judges & remove</button>
+          <button type="submit" class="btn btn-sm btn-primary">Move & remove</button>
           <button type="button" phx-click="cancel_delete" class="btn btn-sm btn-ghost">Cancel</button>
         </form>
       <% end %>

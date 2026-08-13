@@ -284,7 +284,7 @@ defmodule DodoRouterWeb.EvalsControllerTest do
 
       {:ok, _} =
         DodoRouter.Providers.delete_provider_key(provider_key,
-          reassign_judge_to: replacement
+          reassign_to: replacement
         )
 
       conn = conn |> auth(api_key) |> get("/r/#{router.slug}/evals/#{evaluation.id}")
