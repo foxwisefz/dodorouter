@@ -105,10 +105,23 @@ defmodule DodoRouterWeb.EvalLive.Show do
       {:error, :already_running} ->
         assign(socket, :running?, true)
 
+      {:error, {:judge_key_unusable, blocker}} ->
+        put_flash(
+          socket,
+          :error,
+          "Not starting: the judge's key #{blocker.label} is #{humanize_status(blocker.status)}. " <>
+            "Every answer would be generated and paid for, then thrown away unscored. " <>
+            "Pick another judge key first."
+        )
+
       {:error, reason} ->
         put_flash(socket, :error, "Could not start benchmark: #{inspect(reason)}")
     end
   end
+
+  defp humanize_status("quota_exceeded"), do: "out of quota"
+  defp humanize_status("invalid"), do: "not authenticating"
+  defp humanize_status(other), do: String.replace(other, "_", " ")
 
   defp load(socket, evaluation) do
     batch_runs = Evaluations.latest_batch_runs(evaluation)
@@ -125,6 +138,8 @@ defmodule DodoRouterWeb.EvalLive.Show do
     |> assign(:rubric_feedback, Evaluations.rubric_feedback(batch_runs))
     |> assign(:retryable, Evaluations.retryable_counts(evaluation))
     |> assign(:shared_key_label, shared_key_label(evaluation))
+    |> assign(:preflight, Evaluations.preflight(socket.assigns.current_user, evaluation))
+    |> assign(:failure_digest, failure_digest(batch_runs))
     |> assign(:running?, Evaluations.benchmark_running?(evaluation))
   end
 
@@ -151,6 +166,53 @@ defmodule DodoRouterWeb.EvalLive.Show do
   end
 
   defp long_criteria?(_evaluation), do: false
+
+  # Eighteen failing rows are four facts wearing eighteen costumes. Group by
+  # the provider and the reason, because that is the shape of the decision
+  # they lead to: top up this account, wait out that rate limit.
+  defp failure_digest(runs) do
+    runs
+    |> Enum.filter(&(&1.status == "failed"))
+    |> Enum.group_by(fn run ->
+      {failing_provider(run), failure_kind(run.error), run.failure_stage}
+    end)
+    |> Enum.map(fn {{provider, kind, stage}, grouped} ->
+      %{
+        provider: provider,
+        kind: kind,
+        stage: stage,
+        count: length(grouped),
+        example: List.first(grouped).error
+      }
+    end)
+    |> Enum.sort_by(& &1.count, :desc)
+  end
+
+  # A judge failure belongs to whoever served the judge, not to the model
+  # being scored — filing it under the candidate is what made six healthy
+  # answers look like six broken models.
+  defp failing_provider(%{failure_stage: "judge"} = run) do
+    run.judge_provider_key_label || "judge"
+  end
+
+  defp failing_provider(run), do: run.candidate_provider || "unknown"
+
+  @failure_kinds [
+    {"out of quota", ~w(quota usage\ limit access_terminated billing credits)},
+    {"rate limited", ["rate limit", "rate_limited"]},
+    {"timed out", ["timed out", "timeout"]},
+    {"authentication refused", ["auth error", "auth_error", "unauthorized", "403"]}
+  ]
+
+  defp failure_kind(nil), do: "failed"
+
+  defp failure_kind(error) do
+    down = String.downcase(error)
+
+    Enum.find_value(@failure_kinds, "failed", fn {label, markers} ->
+      if Enum.any?(markers, &String.contains?(down, &1)), do: label
+    end)
+  end
 
   defp run_has_detail?(run) do
     map_size(run.criterion_scores) > 0 or run.issues != [] or
@@ -392,6 +454,62 @@ defmodule DodoRouterWeb.EvalLive.Show do
             — every repetition spends that account's quota twice, which is the usual
             cause of a batch that rate-limits itself. Consider a separate key for the judge.
           </p>
+        </div>
+
+        <%!-- Health the proxy already recorded, said before the run rather
+        than discovered one failed call at a time. --%>
+        <div
+          :if={@preflight.judge || @preflight.candidates != []}
+          id="key-preflight"
+          class={[
+            "rounded-2xl border p-4 text-sm",
+            @preflight.judge && "border-error/30 bg-error/5",
+            !@preflight.judge && "border-warning/30 bg-warning/5"
+          ]}
+        >
+          <div class="flex items-start gap-3">
+            <.icon
+              name="hero-exclamation-triangle"
+              class={["size-5 shrink-0", (@preflight.judge && "text-error") || "text-warning"]}
+            />
+            <div class="space-y-1">
+              <p :if={@preflight.judge} class="font-medium text-error">
+                The judge's key {@preflight.judge.label} is {humanize_status(@preflight.judge.status)} — this benchmark will not start.
+              </p>
+              <p :for={blocked <- @preflight.candidates} class="text-base-content/70">
+                Candidate {blocked.model} uses {blocked.label}, which is {humanize_status(
+                  blocked.status
+                )} — those runs will fail.
+              </p>
+              <p class="text-xs text-base-content/50">
+                Recorded from earlier traffic. Fix the key, or
+                <.link navigate={~p"/providers"} class="text-primary hover:underline">
+                  add another
+                </.link>
+                and duplicate this evaluation.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <%!-- The failure list, said once per cause instead of once per run. --%>
+        <div
+          :if={@failure_digest != []}
+          id="failure-digest"
+          class="rounded-2xl border border-base-300/60 bg-base-100 p-5 shadow-sm"
+        >
+          <h2 class="font-semibold">Why runs failed</h2>
+          <ul class="mt-3 space-y-2 text-sm">
+            <li :for={group <- @failure_digest} class="flex items-baseline gap-2">
+              <span class="rounded-full bg-base-200 px-2 py-0.5 text-xs font-semibold">
+                {group.count}
+              </span>
+              <span class="font-medium">{group.provider}</span>
+              <span class="text-base-content/60">
+                {group.kind}{if group.stage == "judge", do: " (as the judge)", else: ""}
+              </span>
+            </li>
+          </ul>
         </div>
 
         <div id="eval-summary" class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">

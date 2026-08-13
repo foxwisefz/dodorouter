@@ -25,6 +25,29 @@ defmodule DodoRouter.Providers.KeyHealthTest do
       assert KeyHealth.classify(403, nil, "Forbidden") == :unknown
     end
 
+    test "a 403 that says the account is out of quota is quota, not unknown" do
+      # Moonshot answers an exhausted subscription with 403, not 402 or 429.
+      # Only the auth markers were consulted for 401/403, so this landed as
+      # `unknown`, the key stayed "valid", and nothing warned before a
+      # benchmark spent nineteen minutes discovering it.
+      assert KeyHealth.classify(
+               403,
+               nil,
+               ~s({"error":{"message":"You've reached your usage limit for this billing cycle","type":"access_terminated_error"}})
+             ) == :quota
+
+      assert KeyHealth.classify(403, nil, "insufficient credits") == :quota
+      assert KeyHealth.classify(401, nil, "quota exceeded") == :quota
+    end
+
+    test "an auth failure still wins over a quota word in the same body" do
+      # "Your API key is invalid — check your billing settings" is an auth
+      # problem that happens to mention billing. A key that cannot
+      # authenticate is not merely out of money.
+      assert KeyHealth.classify(403, nil, "invalid_api_key — see your billing page") ==
+               :auth_invalid
+    end
+
     test "quota and billing signals" do
       assert KeyHealth.classify(402, nil, nil) == :quota
 

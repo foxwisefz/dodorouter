@@ -37,7 +37,11 @@ defmodule DodoRouter.Providers.KeyHealth do
     "credit balance",
     "quota exceeded",
     "exceeded your current quota",
-    "payment required"
+    "payment required",
+    # Moonshot's exhausted-subscription wording. "billing" above already
+    # matches its full sentence, but the limit can be reported without it.
+    "usage limit",
+    "access_terminated"
   ]
 
   @type class :: :ok | :auth_invalid | :quota | :rate_limit | :transient | :unknown
@@ -47,8 +51,21 @@ defmodule DodoRouter.Providers.KeyHealth do
 
   def classify(status, _reason, _body) when is_integer(status) and status in 200..299, do: :ok
 
+  # Auth is checked first: a body that says the key is invalid *and* mentions
+  # billing is an auth problem that happens to name a billing page, not an
+  # account that merely ran out of money.
+  #
+  # Quota is checked second because not every provider spends 402 or 429 on
+  # it — Moonshot answers an exhausted subscription with 403 and "You've
+  # reached your usage limit for this billing cycle". Reading only the auth
+  # markers here filed that as `unknown`, left the key "valid", and let a
+  # benchmark discover it one failed call at a time.
   def classify(status, _reason, body) when status in [401, 403] do
-    if body_matches?(body, @auth_markers), do: :auth_invalid, else: :unknown
+    cond do
+      body_matches?(body, @auth_markers) -> :auth_invalid
+      body_matches?(body, @quota_markers) -> :quota
+      true -> :unknown
+    end
   end
 
   def classify(402, _reason, _body), do: :quota

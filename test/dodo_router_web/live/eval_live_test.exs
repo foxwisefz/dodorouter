@@ -1226,6 +1226,53 @@ defmodule DodoRouterWeb.EvalLiveTest do
       assert has_element?(live, "#run-#{scored.id}", "Missing markers")
     end
 
+    test "failures are summarised by provider and cause, not one row per run", %{
+      conn: conn,
+      user: user,
+      evaluation: evaluation
+    } do
+      # Three more failures on one provider for one reason: the digest says
+      # that once, with a count.
+      for repetition <- 3..5 do
+        %EvaluationRun{}
+        |> EvaluationRun.changeset(%{
+          evaluation_id: evaluation.id,
+          batch_id: evaluation.last_batch_id,
+          status: "failed",
+          failure_stage: "candidate",
+          candidate_provider: "moonshot",
+          candidate_model: "kimi",
+          repetition: repetition,
+          error: "You've reached your usage limit for this billing cycle"
+        })
+        |> Repo.insert!()
+      end
+
+      {:ok, live, _html} = live(conn, ~p"/evals/#{evaluation.id}")
+
+      assert has_element?(live, "#failure-digest", "moonshot")
+      assert has_element?(live, "#failure-digest", "out of quota")
+      assert has_element?(live, "#failure-digest li", "3")
+      _ = user
+    end
+
+    test "a key the proxy already knows is exhausted is called out before running", %{
+      conn: conn,
+      user: user,
+      evaluation: evaluation
+    } do
+      key = DodoRouter.Providers.get_provider_key!(user, evaluation.judge_provider_key_id)
+      DodoRouter.Providers.apply_health(key.id, :quota, "usage limit reached")
+
+      {:ok, live, _html} = live(conn, ~p"/evals/#{evaluation.id}")
+
+      assert has_element?(live, "#key-preflight", "out of quota")
+
+      # And starting it is refused rather than half-run.
+      live |> element("#run-eval-button") |> render_click()
+      assert render(live) =~ "Not starting"
+    end
+
     test "errored runs can still be hidden when only the scores matter", %{
       conn: conn,
       evaluation: evaluation,

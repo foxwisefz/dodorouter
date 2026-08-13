@@ -60,6 +60,10 @@ defmodule DodoRouter.Proxy.Adapters.TestProvider do
   # the difference between a retry that helps and one that just burns time.
   @rate_limited_model "rate-limited-model"
   @rate_limited_once_model "rate-limited-once-model"
+  # An exhausted subscription, which Moonshot reports as 403 rather than
+  # 402 or 429. Waiting does not fix it, so a caller must stop rather than
+  # retry — the opposite response to @rate_limited_model.
+  @quota_exhausted_model "quota-exhausted-model"
   @call_table :dodo_test_provider_calls
 
   @impl Adapter
@@ -79,6 +83,10 @@ defmodule DodoRouter.Proxy.Adapters.TestProvider do
         if record_call(@rate_limited_once_model) == 1,
           do: rate_limited_failure(),
           else: ok_response(step)
+
+      @quota_exhausted_model ->
+        record_call(@quota_exhausted_model)
+        quota_exhausted_failure()
 
       _ ->
         ok_response(step)
@@ -123,6 +131,21 @@ defmodule DodoRouter.Proxy.Adapters.TestProvider do
       _ ->
         :ok
     end
+  end
+
+  defp quota_exhausted_failure do
+    {:error, :auth_error,
+     %{
+       status: 403,
+       body:
+         Jason.encode!(%{
+           "error" => %{
+             "message" => "You've reached your usage limit for this billing cycle",
+             "type" => "access_terminated_error"
+           }
+         }),
+       latency_ms: 1
+     }}
   end
 
   defp rate_limited_failure do

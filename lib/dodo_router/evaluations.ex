@@ -296,11 +296,24 @@ defmodule DodoRouter.Evaluations do
           repetition <- 1..evaluation.repetitions,
           do: {target, repetition}
 
+    # Keys the providers told us are exhausted while this batch was running.
+    # A billing-cycle limit does not clear in the seconds between runs, so
+    # the remaining repetitions on that key are abandoned rather than bought
+    # again — six identical 403s taught nobody anything the first one didn't.
+    exhausted = :ets.new(:exhausted_keys, [:set, :public])
+
     results =
       jobs
       |> Task.async_stream(
         fn {target, repetition} ->
-          result = safe_run_candidate(user, evaluation, target, repetition, batch_id)
+          result =
+            if :ets.member(exhausted, target["provider_key_id"]) do
+              skip_run(evaluation, target, repetition, batch_id)
+            else
+              user
+              |> safe_run_candidate(evaluation, target, repetition, batch_id)
+              |> note_exhaustion(exhausted, target)
+            end
 
           Phoenix.PubSub.broadcast(
             DodoRouter.PubSub,
@@ -320,6 +333,92 @@ defmodule DodoRouter.Evaluations do
       end)
 
     {:ok, results}
+  end
+
+  @doc """
+  Keys this benchmark would use that are already known to be unusable.
+
+  Returns `%{judge: blocker | nil, candidates: [blocker]}`. A blocker is
+  `%{key_id:, label:, status:, detail:, model:}` — `model` only for
+  candidates.
+
+  The health is already recorded by every request that ran through the
+  proxy (`Providers.record_attempts/1`), so this is reading evidence the
+  system already had rather than probing the provider. Discovering an
+  exhausted key one failed call at a time is what turns a benchmark into
+  nineteen wasted minutes.
+  """
+  def preflight(%User{} = user, %Evaluation{} = evaluation) do
+    %{
+      judge: blocker_for(user, evaluation.judge_provider_key_id),
+      candidates:
+        evaluation.candidate_targets
+        |> Enum.map(fn target ->
+          case blocker_for(user, target["provider_key_id"]) do
+            nil -> nil
+            blocker -> Map.put(blocker, :model, target["model"])
+          end
+        end)
+        |> Enum.reject(&is_nil/1)
+    }
+  end
+
+  # "invalid" and "quota_exceeded" are settled facts about the credential.
+  # A rate limit is not — it clears, and the backoff handles it.
+  @unusable_statuses ~w(invalid quota_exceeded)
+
+  # A run that was never attempted because an earlier one on the same key
+  # came back exhausted. Recorded rather than skipped silently: the batch
+  # still planned this measurement, and a missing row would read as though
+  # it was never asked for.
+  defp skip_run(evaluation, target, repetition, batch_id) do
+    {:ok, run} =
+      create_run(evaluation, %{
+        candidate_provider_key_id: target["provider_key_id"],
+        candidate_provider: target["provider"],
+        candidate_model: target["model"],
+        repetition: repetition,
+        batch_id: batch_id,
+        status: "failed",
+        failure_stage: "candidate",
+        error:
+          "Skipped — #{target["provider"]} reported this key is out of quota earlier in this batch"
+      })
+
+    {:error, run}
+  end
+
+  defp note_exhaustion({_tag, %EvaluationRun{} = run} = result, exhausted, target) do
+    if run.status == "failed" and quota_error?(run.error) do
+      :ets.insert(exhausted, {target["provider_key_id"], true})
+    end
+
+    result
+  end
+
+  defp note_exhaustion(result, _exhausted, _target), do: result
+
+  defp quota_error?(error) when is_binary(error) do
+    String.contains?(error, ["out of quota", "usage limit", "auth error", "quota"])
+  end
+
+  defp quota_error?(_error), do: false
+
+  defp blocker_for(_user, nil), do: nil
+
+  defp blocker_for(user, key_id) do
+    case Providers.get_provider_key(user, key_id) do
+      %ProviderKey{status: status} = key when status in @unusable_statuses ->
+        %{
+          key_id: key.id,
+          label: key.label,
+          status: key.status,
+          detail: key.last_error_detail
+        }
+
+      _ ->
+        nil
+    end
   end
 
   @doc """
@@ -427,35 +526,47 @@ defmodule DodoRouter.Evaluations do
   def enqueue(%User{} = user, %Evaluation{} = evaluation) do
     evaluation = get_evaluation!(user, evaluation.id)
 
-    if benchmark_running?(evaluation) do
-      {:error, :already_running}
-    else
-      batch_id = Ecto.UUID.generate()
+    cond do
+      benchmark_running?(evaluation) ->
+        {:error, :already_running}
 
-      evaluation
-      |> Ecto.Changeset.change(benchmark_status: "running", last_batch_id: batch_id)
-      |> Repo.update!()
+      # A judge that cannot authenticate loses every score in the batch, not
+      # one data point: each candidate is still generated and paid for, then
+      # thrown away unscored. Refusing costs nothing and says why.
+      blocker = preflight(user, evaluation).judge ->
+        {:error, {:judge_key_unusable, blocker}}
 
-      DodoRouter.BackgroundTask.start(available_task_supervisor(), fn ->
-        case register_benchmark(evaluation.id) do
-          :ok ->
-            result = run(user, evaluation, batch_id: batch_id)
-            status = benchmark_status(result)
-            evaluation |> Ecto.Changeset.change(benchmark_status: status) |> Repo.update!()
-
-            Phoenix.PubSub.broadcast(
-              DodoRouter.PubSub,
-              "evaluation:#{evaluation.id}",
-              {:benchmark_finished, result}
-            )
-
-          :already_running ->
-            :ok
-        end
-      end)
-
-      :ok
+      true ->
+        do_enqueue(user, evaluation)
     end
+  end
+
+  defp do_enqueue(%User{} = user, %Evaluation{} = evaluation) do
+    batch_id = Ecto.UUID.generate()
+
+    evaluation
+    |> Ecto.Changeset.change(benchmark_status: "running", last_batch_id: batch_id)
+    |> Repo.update!()
+
+    DodoRouter.BackgroundTask.start(available_task_supervisor(), fn ->
+      case register_benchmark(evaluation.id) do
+        :ok ->
+          result = run(user, evaluation, batch_id: batch_id)
+          status = benchmark_status(result)
+          evaluation |> Ecto.Changeset.change(benchmark_status: status) |> Repo.update!()
+
+          Phoenix.PubSub.broadcast(
+            DodoRouter.PubSub,
+            "evaluation:#{evaluation.id}",
+            {:benchmark_finished, result}
+          )
+
+        :already_running ->
+          :ok
+      end
+    end)
+
+    :ok
   end
 
   @doc """

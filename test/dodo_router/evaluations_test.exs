@@ -959,6 +959,137 @@ defmodule DodoRouter.EvaluationsTest do
     end
   end
 
+  describe "checking keys before spending the run" do
+    setup do
+      user = AccountsFixtures.user_fixture()
+      {router, _key} = RoutersFixtures.router_fixture(user)
+      judge = ProvidersFixtures.provider_key_fixture(user, %{"label" => "Judge key"})
+      candidate = ProvidersFixtures.provider_key_fixture(user, %{"label" => "Candidate key"})
+
+      log =
+        LogsFixtures.log_fixture(router, %{
+          request_body:
+            Jason.encode!(%{
+              "model" => "original-model",
+              "messages" => [%{"role" => "user", "content" => "Say hello"}]
+            })
+        })
+
+      {:ok, evaluation} =
+        Evaluations.create_evaluation(user, log, %{
+          name: "Preflight",
+          criteria: "Say hello",
+          judge_model: "judge-model",
+          judge_provider_key_id: judge.id,
+          candidate_targets: [
+            %{
+              "provider_key_id" => candidate.id,
+              "provider" => "test_provider",
+              "model" => "test-model"
+            }
+          ],
+          repetitions: 1
+        })
+
+      %{user: user, judge: judge, candidate: candidate, evaluation: evaluation}
+    end
+
+    test "a healthy pair blocks nothing", %{user: user, evaluation: evaluation} do
+      assert Evaluations.preflight(user, evaluation) == %{judge: nil, candidates: []}
+    end
+
+    test "an exhausted judge key blocks the whole benchmark", %{
+      user: user,
+      judge: judge,
+      evaluation: evaluation
+    } do
+      DodoRouter.Providers.apply_health(judge.id, :quota, "You've reached your usage limit")
+
+      assert %{judge: blocker} = Evaluations.preflight(user, evaluation)
+      assert blocker.label == "Judge key"
+      assert blocker.status == "quota_exceeded"
+    end
+
+    test "an exhausted candidate key is named but does not block", %{
+      user: user,
+      candidate: candidate,
+      evaluation: evaluation
+    } do
+      DodoRouter.Providers.apply_health(candidate.id, :quota, "out of credits")
+
+      assert %{judge: nil, candidates: [blocked]} = Evaluations.preflight(user, evaluation)
+      assert blocked.label == "Candidate key"
+      assert blocked.model == "test-model"
+    end
+
+    test "enqueue refuses when the judge cannot possibly score", %{
+      user: user,
+      judge: judge,
+      evaluation: evaluation
+    } do
+      DodoRouter.Providers.apply_health(judge.id, :quota, "You've reached your usage limit")
+
+      # Every candidate answer would be generated and paid for, then thrown
+      # away for want of a judge. Refusing is the cheaper truth.
+      assert {:error, {:judge_key_unusable, blocker}} = Evaluations.enqueue(user, evaluation)
+      assert blocker.label == "Judge key"
+
+      assert Repo.aggregate(
+               from(r in EvaluationRun, where: r.evaluation_id == ^evaluation.id),
+               :count
+             ) == 0
+    end
+  end
+
+  describe "abandoning a key that has run out mid-batch" do
+    test "stops repeating a key once the provider says it is exhausted" do
+      user = AccountsFixtures.user_fixture()
+      {router, _key} = RoutersFixtures.router_fixture(user)
+      key = ProvidersFixtures.provider_key_fixture(user, %{"label" => "Key 1"})
+
+      log =
+        LogsFixtures.log_fixture(router, %{
+          request_body:
+            Jason.encode!(%{
+              "model" => "original-model",
+              "messages" => [%{"role" => "user", "content" => "Say hello"}]
+            })
+        })
+
+      evaluation =
+        eval_with(user, log, key, %{
+          judge_model: "judge-model",
+          repetitions: 6,
+          candidate_targets: [
+            %{
+              "provider_key_id" => key.id,
+              "provider" => "test_provider",
+              "model" => "quota-exhausted-model"
+            }
+          ]
+        })
+
+      TestProvider.reset("quota-exhausted-model")
+
+      assert {:ok, _} = Evaluations.run(user, evaluation)
+
+      runs = Repo.all(from(r in EvaluationRun, where: r.evaluation_id == ^evaluation.id))
+      assert length(runs) == 6
+      assert Enum.all?(runs, &(&1.status == "failed"))
+
+      # Runs already in flight cannot be recalled — the first concurrent
+      # wave still reaches the provider. What a billing-cycle limit does not
+      # do is clear in the seconds afterwards, so every run *started* after
+      # that answer is abandoned rather than bought again.
+      calls = TestProvider.call_count("quota-exhausted-model")
+      assert calls <= 3
+      assert Enum.count(runs, &(&1.error =~ "out of quota")) == 6 - calls
+
+      # Every planned measurement still has a row saying why it never ran.
+      assert Enum.all?(runs, &is_binary(&1.error))
+    end
+  end
+
   describe "retrying only what failed" do
     setup do
       user = AccountsFixtures.user_fixture()
