@@ -11,7 +11,10 @@ defmodule DodoRouter.MixProject do
       aliases: aliases(),
       deps: deps(),
       releases: releases(),
-      compilers: [:phoenix_live_view] ++ Mix.compilers()
+      compilers: [:phoenix_live_view] ++ Mix.compilers(),
+      # Phoenix 1.8.11 wants the code reloader registered as a Mix listener;
+      # without it every dev request logs a warning with a stacktrace.
+      listeners: [Phoenix.CodeReloader]
     ]
   end
 

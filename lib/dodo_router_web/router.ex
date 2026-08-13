@@ -37,6 +37,12 @@ defmodule DodoRouterWeb.Router do
   # session — but deliberately not the generic :browser pipeline. attesto warns
   # about exactly this: CSRF protection would reject the externally-submitted
   # OAuth POSTs that are supposed to arrive without our token.
+  # attesto's controllers read their config from conn.private, so every one of
+  # its routes needs this — including the unauthenticated discovery documents.
+  pipeline :attesto_config do
+    plug DodoRouterWeb.Plugs.AttestoConfig
+  end
+
   pipeline :oauth_interactive do
     plug :accepts, ["html"]
     plug :fetch_session
@@ -247,7 +253,15 @@ defmodule DodoRouterWeb.Router do
   scope "/" do
     attesto_routes(
       registration: true,
-      route_pipelines: [interactive: [:oauth_interactive]]
+      # Mounts the RFC 9728 §3.1 resource-specific document at
+      # /.well-known/oauth-protected-resource/mcp — the exact URL the /mcp 401
+      # challenge advertises. Without it the challenge points at a 404 and a
+      # client can discover nothing.
+      protected_resource_paths: ["/mcp"],
+      pipeline: :attesto_config,
+      # A route-class override is the complete ordered list; attesto does not
+      # prepend the :pipeline default, so :attesto_config is repeated here.
+      route_pipelines: [interactive: [:attesto_config, :oauth_interactive]]
     )
   end
 

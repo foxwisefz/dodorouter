@@ -7,6 +7,12 @@
 # General application configuration
 import Config
 
+# Where attesto's controllers resolve their config from. They call
+# `AttestoPhoenix.Config.resolve!/0`, which reads this key — without it the
+# config below is never found and /oauth/authorize 500s building an empty
+# struct. The installer wires the config but not this pointer.
+config :attesto_phoenix, otp_app: :dodo_router
+
 config :dodo_router, AttestoPhoenix.Config,
   issuer: System.get_env("ATTESTO_ISSUER") || "https://localhost",
   # RFC 8707 resource identifier: the canonical URI of the MCP endpoint. Tokens

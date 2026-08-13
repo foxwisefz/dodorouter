@@ -18,7 +18,11 @@ defmodule DodoRouter.AuthZ.RegistrationStore do
 
   @impl true
   def register_client(attrs) when is_map(attrs) do
-    client_id = generate_client_id()
+    # attesto issues the client_id and returns it in the RFC 7591 response, so
+    # it has to be the one persisted. Generating our own here stored a row the
+    # client could never be resolved by: registration returned 201 and then
+    # /oauth/authorize rejected it as unknown.
+    client_id = attrs["client_id"] || generate_client_id()
     public? = attrs["token_endpoint_auth_method"] in [nil, "none"]
 
     %Client{}
@@ -31,7 +35,7 @@ defmodule DodoRouter.AuthZ.RegistrationStore do
       # Everything the client asserted, minus what we lifted into columns —
       # so a later question about what it claimed is answerable, and nothing
       # is silently dropped on the way in.
-      "metadata" => Map.drop(attrs, ~w(client_name redirect_uris grant_types)),
+      "metadata" => Map.drop(attrs, ~w(client_id client_name redirect_uris grant_types)),
       "registration_access_token_hash" => nil
     })
     |> Repo.insert()
