@@ -53,3 +53,4 @@ config :phoenix_live_view,
   enable_expensive_runtime_checks: true
 
 config :dodo_router, :env, :test
+config :dodo_router, :eval_rate_limit_backoff_ms, [0, 0]

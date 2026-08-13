@@ -31,6 +31,22 @@ defmodule DodoRouterWeb.EvalLive.Show do
     {:noreply, start_benchmark(socket)}
   end
 
+  def handle_event("retry_failed", _params, socket) do
+    user = socket.assigns.current_user
+    evaluation = socket.assigns.evaluation
+
+    if Evaluations.benchmark_running?(evaluation) do
+      {:noreply, put_flash(socket, :error, "A benchmark is already running")}
+    else
+      {:ok, _results} = Evaluations.retry_failed(user, evaluation)
+
+      {:noreply,
+       socket
+       |> load(Evaluations.get_evaluation!(user, evaluation.id))
+       |> put_flash(:info, "Retried the failed runs")}
+    end
+  end
+
   def handle_event("toggle_errored", %{"batch" => batch_dom_id}, socket) do
     shown = socket.assigns.show_errored
 
@@ -102,7 +118,32 @@ defmodule DodoRouterWeb.EvalLive.Show do
     |> assign(:rankings, rankings)
     |> assign(:chart_series, chart_series(batch_runs, rankings))
     |> assign(:rubric_feedback, Evaluations.rubric_feedback(batch_runs))
+    |> assign(:retryable, Evaluations.retryable_counts(evaluation))
+    |> assign(:shared_key_label, shared_key_label(evaluation))
     |> assign(:running?, Evaluations.benchmark_running?(evaluation))
+  end
+
+  # Judging and generating through one account is how a benchmark rate
+  # limits itself: every repetition of every target spends the same quota
+  # twice. Knowable before the run, so it is said before the run.
+  defp shared_key_label(evaluation) do
+    shared? =
+      Enum.any?(evaluation.candidate_targets, fn target ->
+        target["provider_key_id"] == evaluation.judge_provider_key_id
+      end)
+
+    if shared? and evaluation.judge_provider_key, do: evaluation.judge_provider_key.label
+  end
+
+  defp retry_description(%{judge: judge, candidate: candidate}) do
+    parts =
+      [
+        judge > 0 && "re-judge #{judge}",
+        candidate > 0 && "re-run #{candidate}"
+      ]
+      |> Enum.filter(&is_binary/1)
+
+    Enum.join(parts, ", ")
   end
 
   # One entry per ranked model: scored runs positioned by repetition slot
@@ -199,10 +240,17 @@ defmodule DodoRouterWeb.EvalLive.Show do
   end
 
   defp visible_runs(batch, show_errored) do
-    if MapSet.member?(show_errored, batch.dom_id),
-      do: batch.runs,
-      else: Enum.reject(batch.runs, &(&1.status == "failed"))
+    cond do
+      MapSet.member?(show_errored, batch.dom_id) -> batch.runs
+      # Hiding every row and offering a toggle is not a summary, it is an
+      # empty page with homework. When nothing succeeded, the errors are
+      # the result.
+      not any_succeeded?(batch) -> batch.runs
+      true -> Enum.reject(batch.runs, &(&1.status == "failed"))
+    end
   end
+
+  defp any_succeeded?(batch), do: Enum.any?(batch.runs, &(&1.status != "failed"))
 
   @impl true
   def render(assigns) do
@@ -224,6 +272,18 @@ defmodule DodoRouterWeb.EvalLive.Show do
                 <span class="rounded-full bg-primary/10 px-2.5 py-1 text-primary">
                   Judge: {@evaluation.judge_model}
                 </span>
+                <span
+                  :if={@evaluation.benchmark_status not in [nil, "draft", "completed"]}
+                  id="eval-status"
+                  class={[
+                    "rounded-full px-2.5 py-1",
+                    @evaluation.benchmark_status == "failed" && "bg-error/10 text-error",
+                    @evaluation.benchmark_status == "partial" && "bg-warning/10 text-warning",
+                    @evaluation.benchmark_status == "running" && "bg-primary/10 text-primary"
+                  ]}
+                >
+                  Last run: {@evaluation.benchmark_status}
+                </span>
               </div>
             </div>
           </div>
@@ -236,6 +296,17 @@ defmodule DodoRouterWeb.EvalLive.Show do
             >
               <.icon name="hero-document-duplicate" class="size-4" /> Duplicate
             </.link>
+            <button
+              :if={@retryable.judge + @retryable.candidate > 0}
+              id="retry-failed-button"
+              phx-click="retry_failed"
+              disabled={@running?}
+              class="btn btn-outline gap-2"
+              title="Repeats only what failed, reusing answers already paid for"
+            >
+              <.icon name="hero-arrow-uturn-left" class="size-4" />
+              Retry failed ({retry_description(@retryable)})
+            </button>
             <button
               id="run-eval-button"
               phx-click="run"
@@ -269,6 +340,20 @@ defmodule DodoRouterWeb.EvalLive.Show do
             max={planned_runs(@evaluation)}
           >
           </progress>
+        </div>
+
+        <div
+          :if={@shared_key_label}
+          id="shared-key-warning"
+          class="flex items-start gap-3 rounded-2xl border border-warning/30 bg-warning/5 p-4 text-sm"
+        >
+          <.icon name="hero-exclamation-triangle" class="size-5 shrink-0 text-warning" />
+          <p class="text-base-content/70">
+            The judge and at least one candidate both use
+            <span class="font-medium">{@shared_key_label}</span>
+            — every repetition spends that account's quota twice, which is the usual
+            cause of a batch that rate-limits itself. Consider a separate key for the judge.
+          </p>
         </div>
 
         <div id="eval-summary" class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -610,7 +695,7 @@ defmodule DodoRouterWeb.EvalLive.Show do
                   </span>
                 </div>
                 <button
-                  :if={batch.errored > 0}
+                  :if={batch.errored > 0 and any_succeeded?(batch)}
                   id={"toggle-errored-#{batch.dom_id}"}
                   type="button"
                   phx-click="toggle_errored"
@@ -651,8 +736,10 @@ defmodule DodoRouterWeb.EvalLive.Show do
                           title={"Answered with #{run.candidate_provider_key_label}, which has since been removed"}
                         >key deleted</span>
                       </div>
+                      <%!-- A subtitle, so it is bounded here too: what the
+                      column holds is not this template's call to trust. --%>
                       <div class="text-sm text-base-content/60">
-                        {run.summary || run.error || run_status_label(run)}
+                        {one_line(run.summary || run.error) || run_status_label(run)}
                       </div>
                       <div class="text-xs text-base-content/45">
                         {run.duration_ms || "—"} ms · prompt {run.judge_prompt_version}<span :if={
@@ -685,7 +772,8 @@ defmodule DodoRouterWeb.EvalLive.Show do
                     <span class={[
                       "rounded-full px-2.5 py-1 text-xs font-semibold",
                       run.status == "completed" && "bg-primary/10 text-primary",
-                      run.status != "completed" && "bg-base-200"
+                      run.failure_stage == "judge" && "bg-warning/10 text-warning",
+                      run.status != "completed" && run.failure_stage != "judge" && "bg-base-200"
                     ]}>
                       {run_status_label(run)}
                     </span>
@@ -710,6 +798,20 @@ defmodule DodoRouterWeb.EvalLive.Show do
                 >
                   <li :for={issue <- run.issues}>{issue}</li>
                 </ul>
+                <details :if={run.candidate_output not in [nil, ""]} class="group mt-4">
+                  <summary class="cursor-pointer text-sm font-medium text-base-content/60 hover:text-base-content">
+                    <.icon
+                      name="hero-chevron-right"
+                      class="size-3.5 transition-transform group-open:rotate-90"
+                    />
+                    The answer{if run.failure_stage == "judge",
+                      do: " — generated and paid for, never scored",
+                      else: ""}
+                  </summary>
+                  <div class="mt-2 max-h-96 overflow-auto rounded-xl bg-base-200/50 p-4 text-sm leading-6 text-base-content/70 whitespace-pre-wrap">
+                    {run.candidate_output}
+                  </div>
+                </details>
                 <details :if={run.reasoning} class="group mt-4">
                   <summary class="cursor-pointer text-sm font-medium text-base-content/60 hover:text-base-content">
                     <.icon
@@ -765,10 +867,27 @@ defmodule DodoRouterWeb.EvalLive.Show do
     end
   end
 
+  @summary_limit 240
+
+  defp one_line(nil), do: nil
+
+  defp one_line(text) do
+    collapsed = text |> String.replace(~r/\s+/, " ") |> String.trim()
+
+    if String.length(collapsed) > @summary_limit,
+      do: String.slice(collapsed, 0, @summary_limit) <> "…",
+      else: collapsed
+  end
+
   defp duration(nil), do: "—"
   defp duration(value) when value >= 1_000, do: "#{Float.round(value / 1_000, 1)}s"
   defp duration(value), do: "#{value}ms"
   defp humanize(value), do: value |> String.replace("_", " ") |> String.capitalize()
+  # A judge failure and a candidate failure are not the same news: one means
+  # the model never answered, the other that the answer is sitting there
+  # unscored. Reading them as the same "Errored" is what made a rate-limited
+  # judge look like six models failing.
+  defp run_status_label(%{status: "failed", failure_stage: "judge"}), do: "Judge failed"
   defp run_status_label(%{status: "failed"}), do: "Errored"
   defp run_status_label(%{status: "completed"}), do: "Scored"
   defp run_status_label(run), do: String.capitalize(run.status)

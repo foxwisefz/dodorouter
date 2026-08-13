@@ -49,15 +49,39 @@ defmodule DodoRouter.Proxy.Adapters.TestProvider do
   # anything recorded while building it.
   @failing_model "fail-model"
 
+  # An evaluation's judge has to answer with a parseable judgement or every
+  # run ends "failed" at the parse step, which makes the scored path — and
+  # anything downstream of a score — untestable.
+  @judge_model "judge-model"
+
+  # Rate limiting is the one failure a caller is supposed to retry rather
+  # than record, so a double that can only fail permanently cannot exercise
+  # backoff at all. The "once" variant clears on the second call, which is
+  # the difference between a retry that helps and one that just burns time.
+  @rate_limited_model "rate-limited-model"
+  @rate_limited_once_model "rate-limited-once-model"
+  @call_table :dodo_test_provider_calls
+
   @impl Adapter
   def call(request, %RoutingStep{} = step, api_key, client_headers) do
     maybe_crash(request)
     _ = simulate_upstream_request(request, api_key, client_headers)
 
-    if step.model == @failing_model do
-      simulated_failure()
-    else
-      ok_response(step)
+    case step.model do
+      @failing_model ->
+        simulated_failure()
+
+      @rate_limited_model ->
+        record_call(@rate_limited_model)
+        rate_limited_failure()
+
+      @rate_limited_once_model ->
+        if record_call(@rate_limited_once_model) == 1,
+          do: rate_limited_failure(),
+          else: ok_response(step)
+
+      _ ->
+        ok_response(step)
     end
   end
 
@@ -65,14 +89,73 @@ defmodule DodoRouter.Proxy.Adapters.TestProvider do
     {:error, :server_error, %{status: 500, body: "simulated failure", latency_ms: 1}}
   end
 
+  @doc "Call count for a model, for tests asserting on retries."
+  def call_count(model) do
+    ensure_call_table()
+
+    case :ets.lookup(@call_table, model) do
+      [{^model, count}] -> count
+      [] -> 0
+    end
+  end
+
+  @doc "Clears the counter for one model. Per-model so async tests don't collide."
+  def reset(model) do
+    ensure_call_table()
+    :ets.delete(@call_table, model)
+    :ok
+  end
+
+  defp record_call(model) do
+    ensure_call_table()
+    :ets.update_counter(@call_table, model, {2, 1}, {model, 0})
+  end
+
+  defp ensure_call_table do
+    case :ets.whereis(@call_table) do
+      :undefined ->
+        try do
+          :ets.new(@call_table, [:named_table, :public, write_concurrency: true])
+        rescue
+          ArgumentError -> :ok
+        end
+
+      _ ->
+        :ok
+    end
+  end
+
+  defp rate_limited_failure do
+    {:error, :rate_limited,
+     %{
+       status: 429,
+       body: Jason.encode!(%{"error" => %{"message" => "Error", "type" => "rate_limit_error"}}),
+       latency_ms: 1
+     }}
+  end
+
+  @judgement %{
+    "score" => 82,
+    "summary" => "Answers the question directly",
+    "reasoning" => "Checked each criterion against the reply.",
+    "criterion_scores" => %{"accuracy" => 90, "brevity" => 74},
+    "issues" => [],
+    "rubric_gaps" => []
+  }
+
   defp ok_response(step) do
+    content =
+      if step.model == @judge_model,
+        do: Jason.encode!(@judgement),
+        else: "Hello from #{step.model}"
+
     response = %{
       "choices" => [
         %{
           "index" => 0,
           "message" => %{
             "role" => "assistant",
-            "content" => "Hello from #{step.model}"
+            "content" => content
           },
           "finish_reason" => "stop"
         }

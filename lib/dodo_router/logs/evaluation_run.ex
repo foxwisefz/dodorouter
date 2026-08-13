@@ -21,6 +21,10 @@ defmodule DodoRouter.Logs.EvaluationRun do
     field :rubric_gaps, {:array, :string}, default: []
     field :raw_judge_response, :string
     field :error, :string
+    # "candidate" | "judge" — which half of the run failed. A judge failure
+    # keeps candidate_output, so it can be re-judged without paying for the
+    # answer twice. Nil unless status is "failed".
+    field :failure_stage, :string
     field :duration_ms, :integer
     field :judge_prompt_version, :string, default: "v1"
     field :candidate_provider, :string
@@ -69,6 +73,7 @@ defmodule DodoRouter.Logs.EvaluationRun do
       :rubric_gaps,
       :raw_judge_response,
       :error,
+      :failure_stage,
       :duration_ms,
       :judge_prompt_version,
       :candidate_provider_key_id,

@@ -6,7 +6,7 @@ defmodule DodoRouter.Evaluations do
   alias DodoRouter.Accounts.User
   alias DodoRouter.Logs.{Evaluation, EvaluationRun}
   alias DodoRouter.Providers.ProviderKey
-  alias DodoRouter.{Providers, Proxy, Replays, Repo}
+  alias DodoRouter.{Providers, Proxy, Redact, Replays, Repo}
 
   # v2: dropped the pass/fail verdict — scores and their distributions
   # carry the comparison; a binary threshold added noise, not signal.
@@ -20,6 +20,11 @@ defmodule DodoRouter.Evaluations do
   # tool-calling candidate against an empty response — not comparable.
   @prompt_version "v4"
   @benchmark_concurrency 3
+  # A rate limit is the provider saying "later", not a verdict on the model
+  # — recording it as a failed run turns a queueing problem into a missing
+  # data point, and a benchmark that fans out over one account produces
+  # them by the dozen. One ladder, shared by the candidate and judge calls.
+  @rate_limit_backoff_ms [2_000, 8_000]
   # Character budget per SOURCE block in the judge prompt, so a long source
   # conversation can't overflow the judge model's context window.
   @judge_source_limit 40_000
@@ -317,6 +322,97 @@ defmodule DodoRouter.Evaluations do
     {:ok, results}
   end
 
+  @doc """
+  Failed runs of the latest batch, split by the stage that failed.
+
+  A judge-stage failure is the cheap one to retry: the answer is already
+  paid for and stored, so only the scoring call is repeated.
+  """
+  def retryable_counts(%Evaluation{} = evaluation) do
+    failed = evaluation |> latest_batch_runs() |> Enum.filter(&(&1.status == "failed"))
+
+    %{
+      judge: Enum.count(failed, &judge_retryable?/1),
+      candidate: Enum.count(failed, &(not judge_retryable?(&1)))
+    }
+  end
+
+  @doc """
+  Re-runs only the failed runs of the latest batch, in place.
+
+  In place, not appended: a retry is the same measurement taken again, and
+  adding rows would inflate the batch and skew every average computed over
+  it.
+
+  What gets repeated depends on the stage. A judge failure re-scores the
+  stored answer — with the evaluation's *current* judge, since the judge is
+  a property of the evaluation and swapping it is the usual way out of a
+  rate-limited or overloaded scorer. A candidate failure calls the provider
+  again for the target that run recorded, not whatever the evaluation's
+  targets say now: the row measures one model, and quietly pointing it at a
+  different one would make the batch incomparable with itself.
+  """
+  def retry_failed(%User{} = user, %Evaluation{} = evaluation) do
+    evaluation = get_evaluation!(user, evaluation.id)
+    failed = evaluation |> latest_batch_runs() |> Enum.filter(&(&1.status == "failed"))
+
+    results =
+      failed
+      |> Task.async_stream(
+        fn run ->
+          result = safe_retry_run(user, evaluation, run)
+
+          Phoenix.PubSub.broadcast(
+            DodoRouter.PubSub,
+            "evaluation:#{evaluation.id}",
+            {:benchmark_progress, result}
+          )
+
+          result
+        end,
+        max_concurrency: @benchmark_concurrency,
+        ordered: false,
+        timeout: :infinity
+      )
+      |> Enum.map(fn
+        {:ok, result} -> result
+        {:exit, reason} -> {:error, {:candidate_task_exit, reason}}
+      end)
+
+    {:ok, results}
+  end
+
+  # Only a judge failure that still has its answer can skip regeneration;
+  # a "judge" stage with no stored output has nothing to re-score.
+  defp judge_retryable?(run) do
+    run.failure_stage == "judge" and is_binary(run.candidate_output) and
+      run.candidate_output != ""
+  end
+
+  defp safe_retry_run(user, evaluation, run) do
+    with_run_failure_guard(run, fn -> retry_run(user, evaluation, run) end)
+  end
+
+  defp retry_run(user, evaluation, run) do
+    started_at = System.monotonic_time(:millisecond)
+    output = run.candidate_output
+    judge_only? = judge_retryable?(run)
+
+    run = update_run!(run, %{status: "running", error: nil, failure_stage: nil})
+
+    if judge_only? do
+      judge_candidate(user, evaluation, run, output, started_at)
+    else
+      target = %{
+        "provider_key_id" => run.candidate_provider_key_id,
+        "provider" => run.candidate_provider,
+        "model" => run.candidate_model
+      }
+
+      generate_and_judge(user, evaluation, run, target, started_at)
+    end
+  end
+
   defp safe_run_candidate(user, evaluation, target, repetition, batch_id) do
     run_candidate(user, evaluation, target, repetition, batch_id)
   rescue
@@ -443,11 +539,15 @@ defmodule DodoRouter.Evaluations do
   end
 
   defp generate_and_judge(user, evaluation, run, target, started_at) do
-    case Replays.replay(user, evaluation.request_log, %{
-           provider_key_id: target["provider_key_id"],
-           model: target["model"],
-           traffic_type: "evaluation_candidate"
-         }) do
+    replay = fn ->
+      Replays.replay(user, evaluation.request_log, %{
+        provider_key_id: target["provider_key_id"],
+        model: target["model"],
+        traffic_type: "evaluation_candidate"
+      })
+    end
+
+    case with_rate_limit_backoff(replay) do
       {:ok, candidate_log} ->
         candidate_content = extract_message_content(candidate_log.response_body)
 
@@ -456,6 +556,7 @@ defmodule DodoRouter.Evaluations do
             {:error,
              update_run!(run, %{
                status: "failed",
+               failure_stage: "candidate",
                error: candidate_error_message(candidate_log),
                candidate_log_id: candidate_log.id,
                candidate_latency_ms: candidate_log.latency_ms,
@@ -469,6 +570,7 @@ defmodule DodoRouter.Evaluations do
             {:error,
              update_run!(run, %{
                status: "failed",
+               failure_stage: "candidate",
                error: "Candidate response contained no message content",
                candidate_log_id: candidate_log.id,
                candidate_latency_ms: candidate_log.latency_ms,
@@ -495,6 +597,7 @@ defmodule DodoRouter.Evaluations do
         {:error,
          update_run!(run, %{
            status: "failed",
+           failure_stage: "candidate",
            error: candidate_failure_message(reason, target),
            duration_ms: System.monotonic_time(:millisecond) - started_at
          })}
@@ -532,12 +635,16 @@ defmodule DodoRouter.Evaluations do
 
         request = judge_request(evaluation, candidate_content)
 
-        case Proxy.dispatch(evaluation.request_log.router, request,
-               steps: [step],
-               log_mode: :sync,
-               request_id: Ecto.UUID.generate(),
-               traffic_type: "evaluation_judge"
-             ) do
+        dispatch = fn ->
+          Proxy.dispatch(evaluation.request_log.router, request,
+            steps: [step],
+            log_mode: :sync,
+            request_id: Ecto.UUID.generate(),
+            traffic_type: "evaluation_judge"
+          )
+        end
+
+        case with_rate_limit_backoff(dispatch) do
           {:ok, response, meta} ->
             raw = response_content(response)
             duration = System.monotonic_time(:millisecond) - started_at
@@ -569,14 +676,22 @@ defmodule DodoRouter.Evaluations do
 
               {:error, reason} ->
                 {:error,
-                 update_run!(run, Map.merge(judge_attrs, %{status: "failed", error: reason}))}
+                 update_run!(
+                   run,
+                   Map.merge(judge_attrs, %{
+                     status: "failed",
+                     failure_stage: "judge",
+                     error: judge_parse_message(reason)
+                   })
+                 )}
             end
 
           error ->
             {:error,
              update_run!(run, %{
                status: "failed",
-               error: proxy_error_message(error),
+               failure_stage: "judge",
+               error: "Judge call failed — " <> proxy_error_message(error),
                duration_ms: System.monotonic_time(:millisecond) - started_at
              })}
         end
@@ -585,7 +700,8 @@ defmodule DodoRouter.Evaluations do
         {:error,
          update_run!(run, %{
            status: "failed",
-           error: "Judge setup error: #{inspect(reason)}",
+           failure_stage: "judge",
+           error: judge_setup_message(reason),
            duration_ms: System.monotonic_time(:millisecond) - started_at
          })}
     end
@@ -743,7 +859,15 @@ defmodule DodoRouter.Evaluations do
     |> Repo.insert()
   end
 
-  defp update_run!(run, attrs), do: run |> EvaluationRun.changeset(attrs) |> Repo.update!()
+  defp update_run!(run, attrs) do
+    attrs =
+      case Map.fetch(attrs, :error) do
+        {:ok, message} -> Map.put(attrs, :error, run_error_text(message))
+        :error -> attrs
+      end
+
+    run |> EvaluationRun.changeset(attrs) |> Repo.update!()
+  end
 
   @doc false
   def judge_request(evaluation, candidate_content) do
@@ -765,27 +889,199 @@ defmodule DodoRouter.Evaluations do
   end
 
   @doc false
-  def proxy_error_message({:error, :all_providers_failed, attempts}) do
-    inspect(%{error: :all_providers_failed, attempts: attempts})
+  # Every attempt the chain made, named. This used to `inspect/1` the whole
+  # attempts list into a user-facing column, which put Elixir map syntax —
+  # and the *judge's* provider — in front of someone reading a candidate row.
+  def proxy_error_message({:error, :all_providers_failed, attempts}) when is_list(attempts) do
+    case Enum.map(attempts, &attempt_summary/1) do
+      [] -> "every provider failed"
+      summaries -> "every provider failed (" <> Enum.join(summaries, "; ") <> ")"
+    end
   end
 
-  def proxy_error_message({:error, reason}), do: inspect(reason)
-  def proxy_error_message(error), do: inspect(error)
+  def proxy_error_message({:error, reason}), do: humanize_reason(reason)
+  def proxy_error_message(error), do: humanize_reason(error)
+
+  # Only these three fields, never the whole attempt: an attempt carries
+  # outbound_headers, and the Authorization header in it is the real
+  # credential — the proxy redacts when it *writes a log*, so anything built
+  # from the in-memory attempts goes around that redaction.
+  defp attempt_summary(attempt) do
+    provider = attempt[:provider] || attempt["provider"] || "provider"
+    reason = attempt[:error] || attempt["error"]
+    status = attempt[:http_status] || attempt["http_status"]
+
+    [provider, reason && humanize_reason(reason), status && "HTTP #{status}"]
+    |> Enum.reject(&is_nil/1)
+    |> Enum.join(" ")
+  end
+
+  @error_limit 2_000
+
+  @doc """
+  What may be stored in `evaluation_runs.error`.
+
+  Two guarantees, both learned the hard way: no credential (a message built
+  from live attempt data once put a working OAuth token on the page), and a
+  bounded length (a 10,706-character inspected map was rendered as a run's
+  one-line subtitle).
+
+  Applied at the write, not at each call site, so a new failure branch
+  cannot forget it.
+  """
+  def run_error_text(nil), do: nil
+
+  def run_error_text(message) when is_binary(message) do
+    redacted = Redact.redact_secrets(message)
+
+    marker = " … [truncated]"
+
+    if String.length(redacted) > @error_limit do
+      String.slice(redacted, 0, @error_limit - String.length(marker)) <> marker
+    else
+      redacted
+    end
+  end
+
+  def run_error_text(other), do: other |> inspect() |> run_error_text()
+
+  defp humanize_reason(reason) when is_atom(reason) or is_binary(reason) do
+    case to_string(reason) do
+      "rate_limited" -> "rate limited"
+      "timeout" -> "timed out"
+      "server_error" -> "server error"
+      "context_overflow" -> "context window exceeded"
+      "auth_invalid" -> "authentication rejected"
+      other -> String.replace(other, "_", " ")
+    end
+  end
+
+  defp humanize_reason(reason), do: inspect(reason)
+
+  defp judge_parse_message(reason),
+    do: "Judge response could not be scored — " <> humanize_reason(reason)
+
+  defp judge_setup_message(:provider_key_not_found),
+    do: "The judge's provider key is no longer configured — pick another key and re-run."
+
+  defp judge_setup_message(reason), do: "Judge setup failed — " <> humanize_reason(reason)
+
+  # Retries `fun` while it comes back rate limited, walking the backoff
+  # ladder. Delays are configurable so the test suite doesn't sleep.
+  defp with_rate_limit_backoff(fun) do
+    delays =
+      Application.get_env(:dodo_router, :eval_rate_limit_backoff_ms, @rate_limit_backoff_ms)
+
+    Enum.reduce_while(delays, fun.(), fn delay, result ->
+      if rate_limited?(result) do
+        Process.sleep(delay)
+        {:cont, fun.()}
+      else
+        {:halt, result}
+      end
+    end)
+  end
+
+  # Both shapes a rate limit can arrive in: a persisted candidate log whose
+  # attempts were all rate limited, and a judge dispatch that returned the
+  # attempts directly.
+  defp rate_limited?({:ok, %{attempted_steps: steps, status: "error"}}),
+    do: rate_limited_steps?(steps)
+
+  defp rate_limited?({:error, :all_providers_failed, attempts}), do: rate_limited_steps?(attempts)
+  defp rate_limited?(_result), do: false
+
+  defp rate_limited_steps?(steps) when is_list(steps) do
+    steps != [] and
+      Enum.all?(steps, fn step -> (step[:error] || step["error"]) == "rate_limited" end)
+  end
+
+  defp rate_limited_steps?(_steps), do: false
 
   @doc false
   def candidate_successful?(%{status: status}), do: status in ["success", "fallback"]
 
-  defp candidate_error_message(candidate_log) do
-    detail =
-      with body when is_binary(body) <- candidate_log.response_body,
-           {:ok, decoded} <- Jason.decode(body) do
-        decoded["detail"] || get_in(decoded, ["error", "message"]) || decoded["message"]
-      else
-        _ -> nil
-      end
+  @doc false
+  def candidate_error_message(candidate_log) do
+    cond do
+      reason = timeout_reason(candidate_log) -> reason
+      detail = provider_error_detail(candidate_log) -> detail
+      detail = attempt_error_detail(candidate_log) -> detail
+      true -> "Candidate call failed (HTTP #{candidate_log.http_status || "unknown"})"
+    end
+  end
 
-    detail ||
-      "Candidate provider returned an error (HTTP #{candidate_log.http_status || "unknown"})"
+  # When the chain fails, the log's own body is the proxy's synthesized
+  # error; what the provider actually said is on the attempt. Reading only
+  # the body is how a rate limit came out as a bare HTTP 502.
+  defp attempt_error_detail(candidate_log) do
+    steps = Map.get(candidate_log, :attempted_steps) || []
+
+    with step when not is_nil(step) <- List.last(steps),
+         reason when not is_nil(reason) <- step[:error] || step["error"] do
+      body_detail =
+        case Jason.decode(step[:error_body] || step["error_body"] || "") do
+          {:ok, decoded} when is_map(decoded) ->
+            join_error_detail(
+              get_in(decoded, ["error", "message"]) || decoded["message"],
+              get_in(decoded, ["error", "type"])
+            )
+
+          _ ->
+            nil
+        end
+
+      humanized = humanize_reason(reason)
+
+      cond do
+        is_nil(body_detail) -> "Candidate call #{humanized}"
+        String.contains?(String.downcase(body_detail), humanized) -> body_detail
+        true -> "#{humanized}: #{body_detail}"
+      end
+    else
+      _ -> nil
+    end
+  end
+
+  # Our own deadline, not the provider's answer: the 502 and the body are
+  # both ours, and "the provider returned an error" is a false accusation.
+  defp timeout_reason(candidate_log) do
+    timed_out? =
+      Enum.any?(Map.get(candidate_log, :attempted_steps) || [], fn step ->
+        (step[:error] || step["error"]) == "timeout"
+      end) or Map.get(candidate_log, :response_body) == "Request timed out"
+
+    if timed_out?, do: "Candidate timed out before answering"
+  end
+
+  # A provider's message is not always the informative half — Anthropic's
+  # rate-limit body carries the message "Error" and puts the meaning in
+  # `type`. Keep both, and never return a message that says nothing.
+  defp provider_error_detail(candidate_log) do
+    with body when is_binary(body) <- Map.get(candidate_log, :response_body),
+         {:ok, decoded} <- Jason.decode(body) do
+      message = decoded["detail"] || get_in(decoded, ["error", "message"]) || decoded["message"]
+      type = get_in(decoded, ["error", "type"]) || decoded["type"]
+
+      join_error_detail(message, type)
+    else
+      _ -> nil
+    end
+  end
+
+  defp join_error_detail(nil, nil), do: nil
+  defp join_error_detail(message, nil), do: message
+  defp join_error_detail(nil, type), do: humanize_reason(type)
+
+  defp join_error_detail(message, type) do
+    readable = humanize_reason(type)
+
+    cond do
+      # "Error", "error", and friends carry no information; the type does.
+      String.downcase(message) in ["error", "unknown", ""] -> readable
+      String.contains?(String.downcase(message), String.downcase(readable)) -> message
+      true -> "#{readable}: #{message}"
+    end
   end
 
   # The judge must stay blind to candidate identity: LLM judges show brand

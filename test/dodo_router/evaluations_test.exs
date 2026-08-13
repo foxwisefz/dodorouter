@@ -8,6 +8,7 @@ defmodule DodoRouter.EvaluationsTest do
   alias DodoRouter.ProvidersFixtures
   alias DodoRouter.RoutersFixtures
   alias DodoRouter.AccountsFixtures
+  alias DodoRouter.Proxy.Adapters.TestProvider
 
   test "creates a user-owned evaluation from a log and aggregates runs" do
     user = AccountsFixtures.user_fixture()
@@ -177,11 +178,23 @@ defmodule DodoRouter.EvaluationsTest do
     assert length(gaps) == 2
   end
 
-  test "formats all-providers-failed proxy errors without crashing" do
-    attempts = [%{provider: "moonshot", error: "bad_request", http_status: 400}]
+  test "names every attempt a failed chain made, in words" do
+    attempts = [
+      %{provider: "moonshot", error: "bad_request", http_status: 400},
+      %{provider: "anthropic", error: "rate_limited", http_status: 429}
+    ]
 
-    assert Evaluations.proxy_error_message({:error, :all_providers_failed, attempts}) =~
-             "all_providers_failed"
+    message = Evaluations.proxy_error_message({:error, :all_providers_failed, attempts})
+
+    # This column is read by a person, so it carries no Elixir syntax and no
+    # internal atom names — but it must still name each provider and why it
+    # failed, since that is the whole diagnostic value of the chain.
+    refute message =~ "%{"
+    refute message =~ "all_providers_failed"
+    assert message =~ "moonshot"
+    assert message =~ "HTTP 400"
+    assert message =~ "anthropic"
+    assert message =~ "rate limited"
   end
 
   test "provider error logs are not valid candidate answers" do
@@ -819,6 +832,406 @@ defmodule DodoRouter.EvaluationsTest do
         judge_provider_key_label: judge.label
       })
       |> Repo.insert!()
+    end
+  end
+
+  describe "which stage of a run failed" do
+    setup do
+      user = AccountsFixtures.user_fixture()
+      {router, _key} = RoutersFixtures.router_fixture(user)
+      provider_key = ProvidersFixtures.provider_key_fixture(user, %{"label" => "Key 1"})
+
+      log =
+        LogsFixtures.log_fixture(router, %{
+          request_body:
+            Jason.encode!(%{
+              "model" => "original-model",
+              "messages" => [%{"role" => "user", "content" => "Say hello"}]
+            })
+        })
+
+      %{user: user, provider_key: provider_key, log: log}
+    end
+
+    defp eval_with(user, log, key, attrs) do
+      {:ok, evaluation} =
+        Evaluations.create_evaluation(
+          user,
+          log,
+          Map.merge(
+            %{
+              name: "Staged",
+              criteria: "Say hello",
+              judge_model: "test-model",
+              judge_provider_key_id: key.id,
+              candidate_targets: [
+                %{
+                  "provider_key_id" => key.id,
+                  "provider" => "test_provider",
+                  "model" => "test-model"
+                }
+              ],
+              repetitions: 1
+            },
+            attrs
+          )
+        )
+
+      evaluation
+    end
+
+    test "a judge that fails leaves the answer intact and says so", %{
+      user: user,
+      provider_key: key,
+      log: log
+    } do
+      # The candidate answers; only the judge call fails.
+      evaluation = eval_with(user, log, key, %{judge_model: "fail-model"})
+
+      assert {:ok, _} = Evaluations.run(user, evaluation)
+      assert [run] = Repo.all(from(r in EvaluationRun, where: r.evaluation_id == ^evaluation.id))
+
+      assert run.status == "failed"
+      assert run.failure_stage == "judge"
+
+      # The work that was paid for survives, which is what makes this
+      # recoverable without re-generating the answer.
+      assert run.candidate_output =~ "Hello"
+      assert run.candidate_log_id
+    end
+
+    test "a candidate that fails is a different stage", %{
+      user: user,
+      provider_key: key,
+      log: log
+    } do
+      evaluation =
+        eval_with(user, log, key, %{
+          candidate_targets: [
+            %{
+              "provider_key_id" => key.id,
+              "provider" => "test_provider",
+              "model" => "fail-model"
+            }
+          ]
+        })
+
+      assert {:ok, _} = Evaluations.run(user, evaluation)
+      assert [run] = Repo.all(from(r in EvaluationRun, where: r.evaluation_id == ^evaluation.id))
+
+      assert run.status == "failed"
+      assert run.failure_stage == "candidate"
+      refute run.candidate_output =~ "Hello"
+    end
+
+    test "the error a judge failure records is readable, not an inspected map", %{
+      user: user,
+      provider_key: key,
+      log: log
+    } do
+      evaluation = eval_with(user, log, key, %{judge_model: "fail-model"})
+
+      assert {:ok, _} = Evaluations.run(user, evaluation)
+      assert [run] = Repo.all(from(r in EvaluationRun, where: r.evaluation_id == ^evaluation.id))
+
+      # `inspect(%{error: :all_providers_failed, attempts: [...]})` in a
+      # user-facing column is how this read before.
+      refute run.error =~ "%{"
+      refute run.error =~ ":all_providers_failed"
+      assert run.error =~ "Judge"
+      assert run.error =~ "test_provider"
+    end
+  end
+
+  describe "retrying only what failed" do
+    setup do
+      user = AccountsFixtures.user_fixture()
+      {router, _key} = RoutersFixtures.router_fixture(user)
+      key = ProvidersFixtures.provider_key_fixture(user, %{"label" => "Key 1"})
+
+      log =
+        LogsFixtures.log_fixture(router, %{
+          request_body:
+            Jason.encode!(%{
+              "model" => "original-model",
+              "messages" => [%{"role" => "user", "content" => "Say hello"}]
+            })
+        })
+
+      %{user: user, key: key, log: log}
+    end
+
+    test "re-judges an answer already paid for, without calling the candidate again", %{
+      user: user,
+      key: key,
+      log: log
+    } do
+      evaluation = eval_with(user, log, key, %{judge_model: "fail-model"})
+      assert {:ok, _} = Evaluations.run(user, evaluation)
+
+      assert [run] = Repo.all(from(r in EvaluationRun, where: r.evaluation_id == ^evaluation.id))
+      assert run.failure_stage == "judge"
+      candidate_log_id = run.candidate_log_id
+
+      # Point the judge at a model that answers with a real judgement.
+      evaluation
+      |> Ecto.Changeset.change(judge_model: "judge-model")
+      |> Repo.update!()
+
+      evaluation = Evaluations.get_evaluation!(user, evaluation.id)
+      assert {:ok, [_]} = Evaluations.retry_failed(user, evaluation)
+
+      retried = Repo.get!(EvaluationRun, run.id)
+      assert retried.status == "completed"
+      assert is_integer(retried.score)
+      assert is_nil(retried.failure_stage)
+
+      # The same candidate answer was reused — no second generation.
+      assert retried.candidate_log_id == candidate_log_id
+    end
+
+    test "calls the candidate again when that is what failed", %{user: user, key: key, log: log} do
+      evaluation =
+        eval_with(user, log, key, %{
+          candidate_targets: [
+            %{
+              "provider_key_id" => key.id,
+              "provider" => "test_provider",
+              "model" => "fail-model"
+            }
+          ]
+        })
+
+      assert {:ok, _} = Evaluations.run(user, evaluation)
+      assert [run] = Repo.all(from(r in EvaluationRun, where: r.evaluation_id == ^evaluation.id))
+      assert run.failure_stage == "candidate"
+      first_log_id = run.candidate_log_id
+
+      evaluation = Evaluations.get_evaluation!(user, evaluation.id)
+      assert {:ok, [_]} = Evaluations.retry_failed(user, evaluation)
+
+      retried = Repo.get!(EvaluationRun, run.id)
+
+      # The target is still the failing model, so it fails again — but a new
+      # candidate log proves the provider really was called a second time,
+      # which is the difference between this and the judge-stage retry.
+      assert retried.status == "failed"
+      assert retried.failure_stage == "candidate"
+      assert retried.candidate_log_id != first_log_id
+    end
+
+    test "leaves runs that already succeeded alone and keeps the batch intact", %{
+      user: user,
+      key: key,
+      log: log
+    } do
+      evaluation =
+        eval_with(user, log, key, %{
+          repetitions: 2,
+          judge_model: "judge-model",
+          candidate_targets: [
+            %{
+              "provider_key_id" => key.id,
+              "provider" => "test_provider",
+              "model" => "test-model"
+            },
+            %{
+              "provider_key_id" => key.id,
+              "provider" => "test_provider",
+              "model" => "fail-model"
+            }
+          ]
+        })
+
+      assert {:ok, _} = Evaluations.run(user, evaluation)
+      evaluation = Evaluations.get_evaluation!(user, evaluation.id)
+
+      before = Evaluations.summary(evaluation)
+      assert before.completed == 2
+      assert before.failed == 2
+
+      scored_ids =
+        from(r in EvaluationRun,
+          where: r.evaluation_id == ^evaluation.id and r.status == "completed",
+          select: {r.id, r.score}
+        )
+        |> Repo.all()
+        |> Map.new()
+
+      # Only the two failed runs are retried; they fail again, since the
+      # target is still the failing model.
+      assert {:ok, retried} = Evaluations.retry_failed(user, evaluation)
+      assert length(retried) == 2
+
+      # Retries update the runs in place, so the batch still has 4 rows and
+      # its averages stay comparable rather than gaining phantom runs.
+      after_retry = Evaluations.summary(Evaluations.get_evaluation!(user, evaluation.id))
+      assert after_retry.runs == 4
+      assert after_retry.completed == 2
+
+      for {id, score} <- scored_ids do
+        assert Repo.get!(EvaluationRun, id).score == score
+      end
+    end
+
+    test "reports how many runs are retryable, by stage", %{user: user, key: key, log: log} do
+      evaluation = eval_with(user, log, key, %{judge_model: "fail-model"})
+      assert {:ok, _} = Evaluations.run(user, evaluation)
+
+      evaluation = Evaluations.get_evaluation!(user, evaluation.id)
+      assert %{judge: 1, candidate: 0} = Evaluations.retryable_counts(evaluation)
+    end
+  end
+
+  describe "backing off a rate-limited provider" do
+    test "retries a rate-limited call and gives up after the configured attempts" do
+      user = AccountsFixtures.user_fixture()
+      {router, _key} = RoutersFixtures.router_fixture(user)
+      key = ProvidersFixtures.provider_key_fixture(user, %{"label" => "Key 1"})
+
+      log =
+        LogsFixtures.log_fixture(router, %{
+          request_body:
+            Jason.encode!(%{
+              "model" => "original-model",
+              "messages" => [%{"role" => "user", "content" => "Say hello"}]
+            })
+        })
+
+      evaluation =
+        eval_with(user, log, key, %{
+          judge_model: "judge-model",
+          candidate_targets: [
+            %{
+              "provider_key_id" => key.id,
+              "provider" => "test_provider",
+              "model" => "rate-limited-model"
+            }
+          ]
+        })
+
+      TestProvider.reset("rate-limited-model")
+
+      assert {:ok, _} = Evaluations.run(user, evaluation)
+      assert [run] = Repo.all(from(r in EvaluationRun, where: r.evaluation_id == ^evaluation.id))
+
+      # A rate limit is a "try again", not a verdict on the model — so the
+      # run only gives up after the whole ladder is spent.
+      assert run.status == "failed"
+      assert run.error =~ "rate limited"
+      assert TestProvider.call_count("rate-limited-model") == 3
+    end
+
+    test "a rate limit that clears is not a failed run" do
+      user = AccountsFixtures.user_fixture()
+      {router, _key} = RoutersFixtures.router_fixture(user)
+      key = ProvidersFixtures.provider_key_fixture(user, %{"label" => "Key 1"})
+
+      log =
+        LogsFixtures.log_fixture(router, %{
+          request_body:
+            Jason.encode!(%{
+              "model" => "original-model",
+              "messages" => [%{"role" => "user", "content" => "Say hello"}]
+            })
+        })
+
+      evaluation =
+        eval_with(user, log, key, %{
+          judge_model: "judge-model",
+          candidate_targets: [
+            %{
+              "provider_key_id" => key.id,
+              "provider" => "test_provider",
+              "model" => "rate-limited-once-model"
+            }
+          ]
+        })
+
+      TestProvider.reset("rate-limited-once-model")
+
+      assert {:ok, _} = Evaluations.run(user, evaluation)
+      assert [run] = Repo.all(from(r in EvaluationRun, where: r.evaluation_id == ^evaluation.id))
+
+      assert run.status == "completed"
+      assert TestProvider.call_count("rate-limited-once-model") == 2
+    end
+  end
+
+  describe "what a run's error column is allowed to hold" do
+    test "never a credential, however it got into the message" do
+      # The proxy redacts when it writes a request log, but the attempts it
+      # hands back in memory still carry the real Authorization header — so
+      # anything building a message out of them went around the redaction
+      # and put a live key on the page.
+      attempts = [
+        %{
+          provider: "anthropic",
+          error: "rate_limited",
+          http_status: 429,
+          outbound_headers: [
+            {"authorization", "Bearer sk-ant-oat01-OL_-HAMa-TlcjYpI4LLsWfBOJXA7scSs6a1UXRuToGSU"}
+          ]
+        }
+      ]
+
+      message = Evaluations.proxy_error_message({:error, :all_providers_failed, attempts})
+
+      refute message =~ "sk-ant-oat01"
+      refute message =~ "Bearer"
+    end
+
+    test "is capped, so one row cannot become a wall of text" do
+      giant = String.duplicate("boom ", 10_000)
+
+      stored = Evaluations.run_error_text(giant)
+
+      assert String.length(stored) <= 2_000
+      assert stored =~ "truncated"
+    end
+
+    test "redacts a secret that reaches it by any other route" do
+      stored =
+        Evaluations.run_error_text(
+          "upstream said Bearer sk-ant-oat01-OL_-HAMaTlcjYpI4LLsWfBOJXA7scSs6a1UXRuToGSU nope"
+        )
+
+      refute stored =~ "sk-ant-oat01"
+      assert stored =~ "upstream said"
+    end
+  end
+
+  describe "error text for a failed candidate call" do
+    test "keeps the provider's error type when the message alone says nothing" do
+      # Anthropic's rate-limit body literally carries the message "Error";
+      # the type is the only informative part, and dropping it left the run
+      # reading `Error`.
+      log = %DodoRouter.Logs.RequestLog{
+        http_status: 429,
+        response_body:
+          Jason.encode!(%{
+            "error" => %{"message" => "Error", "type" => "rate_limit_error"},
+            "type" => "error"
+          })
+      }
+
+      message = Evaluations.candidate_error_message(log)
+
+      assert message =~ "rate limit"
+      refute message == "Error"
+    end
+
+    test "does not blame the provider for our own timeout" do
+      log = %DodoRouter.Logs.RequestLog{
+        http_status: 502,
+        response_body: "Request timed out",
+        attempted_steps: [%{"status" => "error", "error" => "timeout", "provider" => "zai"}]
+      }
+
+      message = Evaluations.candidate_error_message(log)
+
+      assert message =~ "timed out"
+      refute message =~ "provider returned an error"
     end
   end
 

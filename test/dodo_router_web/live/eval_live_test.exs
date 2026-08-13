@@ -2,6 +2,7 @@ defmodule DodoRouterWeb.EvalLiveTest do
   use DodoRouterWeb.ConnCase, async: true
 
   import Phoenix.LiveViewTest
+  import Ecto.Query
 
   alias DodoRouter.LogsFixtures
   alias DodoRouter.Evaluations
@@ -381,8 +382,10 @@ defmodule DodoRouterWeb.EvalLiveTest do
 
     {:ok, live, _html} = live(conn, ~p"/evals/#{evaluation.id}")
 
-    # Errored runs are collapsed by default; reveal them first.
-    live |> element("#toggle-errored-legacy") |> render_click()
+    # Errored runs collapse behind a toggle only when there is something
+    # else to show. This batch is all errors, so they are the result and
+    # stand on their own.
+    refute has_element?(live, "#toggle-errored-legacy")
 
     assert has_element?(live, "#eval-runs a[href='/logs/#{candidate.id}']", "Candidate log")
     assert has_element?(live, "#eval-runs a[href='/logs/#{judge.id}']", "Judge log")
@@ -872,6 +875,119 @@ defmodule DodoRouterWeb.EvalLiveTest do
       assert html =~ "judged by Key 1"
       assert html =~ "deleted"
     end
+  end
+
+  describe "a batch that failed" do
+    setup %{user: user} do
+      {router, _api_key} = RoutersFixtures.router_fixture(user)
+      key = ProvidersFixtures.provider_key_fixture(user, %{"label" => "Key 1"})
+
+      log =
+        LogsFixtures.log_fixture(router, %{
+          request_body:
+            Jason.encode!(%{
+              "model" => "original-model",
+              "messages" => [%{"role" => "user", "content" => "Say hello"}]
+            })
+        })
+
+      {:ok, evaluation} =
+        Evaluations.create_evaluation(user, log, %{
+          name: "Failed batch",
+          criteria: "Be useful",
+          judge_model: "fail-model",
+          judge_provider_key_id: key.id,
+          candidate_targets: [
+            %{
+              "provider_key_id" => key.id,
+              "provider" => "test_provider",
+              "model" => "test-model"
+            }
+          ],
+          repetitions: 1
+        })
+
+      # The production path, so benchmark_status is written the way a real
+      # run writes it.
+      :ok = Evaluations.enqueue(user, evaluation)
+
+      %{evaluation: Evaluations.get_evaluation!(user, evaluation.id), key: key}
+    end
+
+    test "says the judge failed, not the model", %{conn: conn, evaluation: evaluation} do
+      {:ok, live, _html} = live(conn, ~p"/evals/#{evaluation.id}")
+
+      # Errored runs are hidden behind a toggle; when every run errored the
+      # page has nothing else to show, so the batch opens expanded.
+      html = render(live)
+
+      assert html =~ "Judge failed"
+      # The answer that was paid for is on the page, not one click away in
+      # the log viewer.
+      assert html =~ "Hello from test-model"
+    end
+
+    test "offers to retry only the failed runs, naming what it will redo", %{
+      conn: conn,
+      user: user,
+      evaluation: evaluation
+    } do
+      {:ok, live, _html} = live(conn, ~p"/evals/#{evaluation.id}")
+
+      assert has_element?(live, "#retry-failed-button")
+      assert render(live) =~ "re-judge"
+
+      # Give the evaluation a judge that can score, then retry.
+      evaluation
+      |> Ecto.Changeset.change(judge_model: "judge-model")
+      |> Repo.update!()
+
+      live |> element("#retry-failed-button") |> render_click()
+
+      run = Repo.one!(from(r in EvaluationRun, where: r.evaluation_id == ^evaluation.id))
+      assert run.status == "completed"
+      assert is_integer(run.score)
+
+      _ = user
+    end
+
+    test "shows the benchmark's own status when nothing completed", %{
+      conn: conn,
+      evaluation: evaluation
+    } do
+      {:ok, _live, html} = live(conn, ~p"/evals/#{evaluation.id}")
+
+      assert html =~ "eval-status"
+    end
+  end
+
+  test "warns when the judge and a candidate share one provider key", %{conn: conn, user: user} do
+    {router, _api_key} = RoutersFixtures.router_fixture(user)
+    key = ProvidersFixtures.provider_key_fixture(user, %{"label" => "Key 1"})
+    log = LogsFixtures.log_fixture(router)
+
+    {:ok, evaluation} =
+      Evaluations.create_evaluation(user, log, %{
+        name: "Shared key",
+        criteria: "Be useful",
+        judge_model: "test-model",
+        judge_provider_key_id: key.id,
+        candidate_targets: [
+          %{
+            "provider_key_id" => key.id,
+            "provider" => "test_provider",
+            "model" => "test-model"
+          }
+        ],
+        repetitions: 3
+      })
+
+    {:ok, live, _html} = live(conn, ~p"/evals/#{evaluation.id}")
+
+    # Judging and generating on one account is how a benchmark rate-limits
+    # itself, and it is knowable before the run rather than after.
+    assert has_element?(live, "#shared-key-warning")
+    assert render(live) =~ "Key 1"
   end
 
   test "hands the agent API to the user, per router", %{conn: conn, user: user} do
