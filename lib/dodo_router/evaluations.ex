@@ -428,13 +428,22 @@ defmodule DodoRouter.Evaluations do
   paid for and stored, so only the scoring call is repeated.
   """
   def retryable_counts(%Evaluation{} = evaluation) do
-    failed = evaluation |> latest_batch_runs() |> Enum.filter(&(&1.status == "failed"))
+    unfinished = evaluation |> latest_batch_runs() |> Enum.filter(&unfinished?/1)
 
     %{
-      judge: Enum.count(failed, &judge_retryable?/1),
-      candidate: Enum.count(failed, &(not judge_retryable?(&1)))
+      judge: Enum.count(unfinished, &judge_retryable?/1),
+      candidate: Enum.count(unfinished, &(not judge_retryable?(&1)))
     }
   end
+
+  # "pending" and "running" are what a benchmark that died mid-flight leaves
+  # behind: rows created but never resolved. Treating only "failed" as
+  # retryable stranded them — they were not offered for retry and sat
+  # claiming to be in progress forever. Safe to include, because both retry
+  # paths run only when nothing is actually executing.
+  @unfinished_statuses ~w(failed pending running)
+
+  defp unfinished?(run), do: run.status in @unfinished_statuses
 
   @doc """
   Re-runs only the failed runs of the latest batch, in place.
@@ -453,7 +462,7 @@ defmodule DodoRouter.Evaluations do
   """
   def retry_failed(%User{} = user, %Evaluation{} = evaluation) do
     evaluation = get_evaluation!(user, evaluation.id)
-    failed = evaluation |> latest_batch_runs() |> Enum.filter(&(&1.status == "failed"))
+    failed = evaluation |> latest_batch_runs() |> Enum.filter(&unfinished?/1)
 
     results =
       failed
@@ -581,8 +590,93 @@ defmodule DodoRouter.Evaluations do
         {:error, {:judge_key_unusable, blocker}}
 
       true ->
+        resolve_interrupted_runs(evaluation)
         do_enqueue(user, evaluation)
     end
+  end
+
+  @doc """
+  Resolves every benchmark orphaned by the VM stopping.
+
+  A benchmark lives in a task, not in the database: restart the node — a
+  deploy, a crash, a Ctrl-C'd `mix phx.server` — and every run it had in
+  flight is orphaned. The rows keep saying "running" and the evaluation
+  keeps saying "running", which also locks it out of ever running again on
+  the stored-status fallback in `benchmark_running?/1`.
+
+  Called from `DodoRouter.Application.start/2`, because boot is the one
+  moment we can be certain nothing is executing. Idempotent, so a node that
+  restarts twice in a row is not a problem.
+
+  Returns `{runs_resolved, evaluations_resolved}`.
+  """
+  def recover_interrupted do
+    {runs, _} =
+      from(r in EvaluationRun,
+        where: r.status in ["pending", "running"] and is_nil(r.superseded_at)
+      )
+      |> Repo.update_all(
+        set: [
+          status: "failed",
+          failure_stage: "candidate",
+          error: "The benchmark stopped before this run finished",
+          updated_at: DateTime.utc_now() |> DateTime.truncate(:second)
+        ]
+      )
+
+    evaluations =
+      from(e in Evaluation, where: e.benchmark_status == "running", select: e.id)
+      |> Repo.all()
+
+    for id <- evaluations do
+      evaluation =
+        from(e in Evaluation,
+          where: e.id == ^id,
+          preload: [runs: ^from(r in EvaluationRun, order_by: [asc: r.inserted_at])]
+        )
+        |> Repo.one!()
+
+      from(e in Evaluation, where: e.id == ^id)
+      |> Repo.update_all(set: [benchmark_status: status_of(evaluation)])
+    end
+
+    {runs, length(evaluations)}
+  end
+
+  # What the batch actually shows, now that nothing is going to change it.
+  defp status_of(%Evaluation{} = evaluation) do
+    runs = latest_batch_runs(evaluation)
+    completed = Enum.count(runs, &(&1.status == "completed"))
+
+    cond do
+      runs == [] -> "failed"
+      completed == length(runs) -> "completed"
+      completed == 0 -> "failed"
+      true -> "partial"
+    end
+  end
+
+  @doc """
+  Marks runs left mid-flight by a benchmark that stopped.
+
+  Called when we know nothing is executing, so a row still saying "pending"
+  or "running" is a leftover, not a live measurement. Left alone it claims
+  to be in progress forever — on the page, and to anything reading the API.
+  """
+  def resolve_interrupted_runs(%Evaluation{id: id}) do
+    from(r in EvaluationRun,
+      where:
+        r.evaluation_id == ^id and r.status in ["pending", "running"] and
+          is_nil(r.superseded_at)
+    )
+    |> Repo.update_all(
+      set: [
+        status: "failed",
+        failure_stage: "candidate",
+        error: "The benchmark stopped before this run finished",
+        updated_at: DateTime.utc_now() |> DateTime.truncate(:second)
+      ]
+    )
   end
 
   @doc """
@@ -603,6 +697,7 @@ defmodule DodoRouter.Evaluations do
     if benchmark_running?(evaluation) do
       {:error, :already_running}
     else
+      resolve_interrupted_runs(evaluation)
       evaluation |> Ecto.Changeset.change(benchmark_status: "running") |> Repo.update!()
 
       DodoRouter.BackgroundTask.start(available_task_supervisor(), fn ->

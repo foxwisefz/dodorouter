@@ -1367,6 +1367,75 @@ defmodule DodoRouter.EvaluationsTest do
                |> Enum.map(& &1.superseded_at)
     end
 
+    test "a run the benchmark never finished is retryable, not stranded", %{
+      user: user,
+      key: key,
+      log: log
+    } do
+      evaluation = eval_with(user, log, key, %{judge_model: "judge-model"})
+
+      batch = Ecto.UUID.generate()
+      evaluation = evaluation |> Ecto.Changeset.change(last_batch_id: batch) |> Repo.update!()
+
+      # What a benchmark that died mid-flight leaves behind: rows created but
+      # never resolved. They are not "failed", so nothing offered to retry
+      # them and they sat as "pending"/"running" forever.
+      for {status, repetition} <- [{"pending", 1}, {"running", 2}] do
+        %EvaluationRun{}
+        |> EvaluationRun.changeset(%{
+          evaluation_id: evaluation.id,
+          batch_id: batch,
+          status: status,
+          candidate_provider_key_id: key.id,
+          candidate_provider: "test_provider",
+          candidate_model: "test-model",
+          repetition: repetition
+        })
+        |> Repo.insert!()
+      end
+
+      evaluation = Evaluations.get_evaluation!(user, evaluation.id)
+      assert %{candidate: 2} = Evaluations.retryable_counts(evaluation)
+
+      assert {:ok, results} = Evaluations.retry_failed(user, evaluation)
+      assert length(results) == 2
+
+      runs = Repo.all(from(r in EvaluationRun, where: r.evaluation_id == ^evaluation.id))
+      live = Enum.reject(runs, & &1.superseded_at)
+
+      assert Enum.all?(live, &(&1.status == "completed"))
+    end
+
+    test "starting a run resolves what an interrupted one left behind", %{
+      user: user,
+      key: key,
+      log: log
+    } do
+      evaluation = eval_with(user, log, key, %{judge_model: "judge-model"})
+      batch = Ecto.UUID.generate()
+      evaluation = evaluation |> Ecto.Changeset.change(last_batch_id: batch) |> Repo.update!()
+
+      stranded =
+        %EvaluationRun{}
+        |> EvaluationRun.changeset(%{
+          evaluation_id: evaluation.id,
+          batch_id: batch,
+          status: "running",
+          candidate_provider: "test_provider",
+          candidate_model: "test-model",
+          repetition: 1
+        })
+        |> Repo.insert!()
+
+      evaluation = Evaluations.get_evaluation!(user, evaluation.id)
+      assert :ok = Evaluations.enqueue(user, evaluation)
+
+      # The row stops claiming to be in flight, and says why it isn't.
+      resolved = Repo.get!(EvaluationRun, stranded.id)
+      assert resolved.status == "failed"
+      assert resolved.error =~ "stopped before this run finished"
+    end
+
     test "reports how many runs are retryable, by stage", %{user: user, key: key, log: log} do
       evaluation = eval_with(user, log, key, %{judge_model: "fail-model"})
       assert {:ok, _} = Evaluations.run(user, evaluation)

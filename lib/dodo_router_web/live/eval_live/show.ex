@@ -1022,7 +1022,7 @@ defmodule DodoRouterWeb.EvalLive.Show do
                       <%!-- A subtitle, so it is bounded here too: what the
                       column holds is not this template's call to trust. --%>
                       <div class="text-sm text-base-content/60">
-                        {one_line(run.summary || run.error) || run_status_label(run)}
+                        {one_line(run.summary || run.error) || run_status_label(run, @running?)}
                       </div>
                       <div class="text-xs text-base-content/45">
                         {run.duration_ms || "—"} ms · prompt {run.judge_prompt_version}<span :if={
@@ -1058,7 +1058,7 @@ defmodule DodoRouterWeb.EvalLive.Show do
                       run.failure_stage == "judge" && "bg-warning/10 text-warning",
                       run.status != "completed" && run.failure_stage != "judge" && "bg-base-200"
                     ]}>
-                      {run_status_label(run)}
+                      {run_status_label(run, @running?)}
                     </span>
                   </div>
                 </div>
@@ -1230,6 +1230,12 @@ defmodule DodoRouterWeb.EvalLive.Show do
   defp run_status_label(%{status: "failed"}), do: "Errored"
   defp run_status_label(%{status: "completed"}), do: "Scored"
   defp run_status_label(run), do: String.capitalize(run.status)
+
+  # "Pending" and "Running" are only true while a benchmark is executing.
+  # After one stops, the same rows are leftovers, and a row that says
+  # "Running" forever is indistinguishable from one that is about to finish.
+  defp run_status_label(run, false) when run.status in ["pending", "running"], do: "Interrupted"
+  defp run_status_label(run, _running?), do: run_status_label(run)
   defp planned_runs(evaluation), do: length(evaluation.candidate_targets) * evaluation.repetitions
 
   # Quality tradeoff scatter: one point per ranked model that has both an
