@@ -184,7 +184,10 @@ defmodule DodoRouterWeb.EvalLive.Show do
     |> assign(:retryable, Evaluations.retryable_counts(evaluation))
     |> assign(:shared_key_label, shared_key_label(evaluation))
     |> assign(:preflight, Evaluations.preflight(socket.assigns.current_user, evaluation))
-    |> assign(:failure_digest, failure_digest(batch_runs))
+    |> assign(
+      :failure_digest,
+      failure_digest(evaluation, batch_runs, Evaluations.benchmark_running?(evaluation))
+    )
     |> assign(:candidate_keys, candidate_keys(socket.assigns.current_user))
     |> assign(:previous_attempts, previous_attempts_by_run(evaluation))
     |> assign(:running?, Evaluations.benchmark_running?(evaluation))
@@ -217,22 +220,74 @@ defmodule DodoRouterWeb.EvalLive.Show do
   # Eighteen failing rows are four facts wearing eighteen costumes. Group by
   # the provider and the reason, because that is the shape of the decision
   # they lead to: top up this account, wait out that rate limit.
-  defp failure_digest(runs) do
-    runs
-    |> Enum.filter(&(&1.status == "failed"))
-    |> Enum.group_by(fn run ->
-      {failing_provider(run), failure_kind(run.error), run.failure_stage}
-    end)
-    |> Enum.map(fn {{provider, kind, stage}, grouped} ->
-      %{
-        provider: provider,
-        kind: kind,
-        stage: stage,
-        count: length(grouped),
-        example: List.first(grouped).error
-      }
-    end)
+  defp failure_digest(evaluation, runs, running?) do
+    failed =
+      runs
+      |> Enum.filter(&(&1.status == "failed"))
+      |> Enum.group_by(fn run ->
+        {failing_provider(run), failure_kind(run.error), run.failure_stage}
+      end)
+      |> Enum.map(fn {{provider, kind, stage}, grouped} ->
+        %{label: provider, detail: kind, stage: stage, count: length(grouped)}
+      end)
+
+    (failed ++ interrupted_group(runs, running?) ++ never_started_group(evaluation, runs))
     |> Enum.sort_by(& &1.count, :desc)
+  end
+
+  # Rows the benchmark created but never resolved. Only leftovers once
+  # nothing is executing — while a benchmark runs they are simply in flight.
+  defp interrupted_group(runs, false) do
+    case Enum.count(runs, &(&1.status in ["pending", "running"])) do
+      0 ->
+        []
+
+      count ->
+        [
+          %{
+            label: "Interrupted",
+            detail: "the benchmark stopped before these finished",
+            stage: nil,
+            count: count
+          }
+        ]
+    end
+  end
+
+  defp interrupted_group(_runs, _running?), do: []
+
+  # The population with no rows at all. A candidate the benchmark never
+  # reached has nothing in the run list, nothing in the rankings and nothing
+  # in the failure counts — it is invisible unless the plan is compared with
+  # what was actually recorded.
+  defp never_started_group(evaluation, runs) do
+    recorded =
+      runs
+      |> Enum.group_by(&{&1.candidate_provider, &1.candidate_model})
+      |> Map.new(fn {key, rows} -> {key, length(rows)} end)
+
+    missing =
+      evaluation.candidate_targets
+      |> Enum.map(fn target ->
+        key = {target["provider"], target["model"]}
+        {target["model"], evaluation.repetitions - Map.get(recorded, key, 0)}
+      end)
+      |> Enum.filter(fn {_model, shortfall} -> shortfall > 0 end)
+
+    case missing do
+      [] ->
+        []
+
+      _ ->
+        [
+          %{
+            label: "Never started",
+            detail: Enum.map_join(missing, ", ", fn {model, _} -> model end),
+            stage: nil,
+            count: Enum.sum(Enum.map(missing, fn {_, shortfall} -> shortfall end))
+          }
+        ]
+    end
   end
 
   # A judge failure belongs to whoever served the judge, not to the model
@@ -564,15 +619,18 @@ defmodule DodoRouterWeb.EvalLive.Show do
           id="failure-digest"
           class="rounded-2xl border border-base-300/60 bg-base-100 p-5 shadow-sm"
         >
-          <h2 class="font-semibold">Why runs failed</h2>
+          <h2 class="font-semibold">What happened to these runs</h2>
+          <p class="text-sm text-base-content/45">
+            Every planned run, grouped by outcome — including the ones that never started.
+          </p>
           <ul class="mt-3 space-y-2 text-sm">
             <li :for={group <- @failure_digest} class="flex items-baseline gap-2">
               <span class="rounded-full bg-base-200 px-2 py-0.5 text-xs font-semibold">
                 {group.count}
               </span>
-              <span class="font-medium">{group.provider}</span>
+              <span class="font-medium">{group.label}</span>
               <span class="text-base-content/60">
-                {group.kind}{if group.stage == "judge", do: " (as the judge)", else: ""}
+                {group.detail}{if group.stage == "judge", do: " (as the judge)", else: ""}
               </span>
             </li>
           </ul>

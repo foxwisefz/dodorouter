@@ -1262,6 +1262,49 @@ defmodule DodoRouterWeb.EvalLiveTest do
       _ = user
     end
 
+    test "accounts for every planned run, including the ones that never started", %{
+      conn: conn,
+      user: user,
+      evaluation: evaluation
+    } do
+      # A benchmark that dies partway leaves three populations, and the
+      # digest used to describe only the first: runs that failed, runs stuck
+      # mid-flight, and runs that never started at all. The last is why a
+      # model can be configured as a candidate and appear nowhere on the
+      # page — the one question "why did nothing happen for glm-5?" asks.
+      evaluation
+      |> Ecto.Changeset.change(
+        repetitions: 3,
+        candidate_targets: [
+          %{"provider_key_id" => Ecto.UUID.generate(), "provider" => "zai", "model" => "glm-5"},
+          %{
+            "provider_key_id" => Ecto.UUID.generate(),
+            "provider" => "moonshot",
+            "model" => "kimi-k2.7-code"
+          }
+        ]
+      )
+      |> Repo.update!()
+
+      # One stuck row for glm-5; kimi never got a row at all.
+      %EvaluationRun{}
+      |> EvaluationRun.changeset(%{
+        evaluation_id: evaluation.id,
+        batch_id: evaluation.last_batch_id,
+        status: "running",
+        candidate_provider: "zai",
+        candidate_model: "glm-5",
+        repetition: 1
+      })
+      |> Repo.insert!()
+
+      {:ok, live, _html} = live(conn, ~p"/evals/#{evaluation.id}")
+
+      assert has_element?(live, "#failure-digest", "Interrupted")
+      assert has_element?(live, "#failure-digest", "Never started")
+      assert has_element?(live, "#failure-digest", "kimi-k2.7-code")
+    end
+
     test "a key the proxy already knows is exhausted is called out before running", %{
       conn: conn,
       user: user,
