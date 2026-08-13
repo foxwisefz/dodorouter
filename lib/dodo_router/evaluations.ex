@@ -892,10 +892,19 @@ defmodule DodoRouter.Evaluations do
   # Every attempt the chain made, named. This used to `inspect/1` the whole
   # attempts list into a user-facing column, which put Elixir map syntax —
   # and the *judge's* provider — in front of someone reading a candidate row.
+  # `:all_providers_failed` is the chain's own name for "nothing left to
+  # try", and for an evaluation the chain is one step long — the judge and
+  # each candidate are dispatched with an explicit `steps: [step]`, so the
+  # router's own fallbacks never apply and `should_fallback?/3` can't fire
+  # with nothing remaining. Reporting one failed attempt as "every provider
+  # failed" described a fallback that cannot happen, and reads as though the
+  # judge quietly moved to another provider — which would make the judge a
+  # variable and the scores incomparable.
   def proxy_error_message({:error, :all_providers_failed, attempts}) when is_list(attempts) do
     case Enum.map(attempts, &attempt_summary/1) do
-      [] -> "every provider failed"
-      summaries -> "every provider failed (" <> Enum.join(summaries, "; ") <> ")"
+      [] -> "the provider failed"
+      [only] -> only
+      summaries -> "all #{length(summaries)} providers failed (#{Enum.join(summaries, "; ")})"
     end
   end
 

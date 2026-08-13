@@ -334,6 +334,30 @@ defmodule DodoRouterWeb.MCPControllerTest do
       refute inspect(payload) =~ "secret"
     end
 
+    test "eval targets say how each key bills, and advise against a plan judge", %{
+      conn: conn,
+      user: user,
+      token: token
+    } do
+      DodoRouter.ProvidersFixtures.provider_key_fixture(user, %{"label" => "metered"})
+
+      DodoRouter.ProvidersFixtures.provider_key_fixture(user, %{
+        "provider_slug" => "test_provider_coding",
+        "label" => "plan key"
+      })
+
+      body = json_response(call_tool(conn, token, "list_eval_targets"), 200)
+      by_label = Map.new(tool_json(body)["targets"], &{&1["label"], &1})
+
+      assert by_label["metered"]["billing"] == "metered"
+      assert by_label["metered"]["judge_advice"] == nil
+
+      # An agent picking a judge has no other way to know a plan key can be
+      # refused for being outside its vendor's coding environment.
+      assert by_label["plan key"]["billing"] == "subscription"
+      assert by_label["plan key"]["judge_advice"] =~ "metered key for the judge"
+    end
+
     test "an unknown tool names the way to find the real ones", %{conn: conn, token: token} do
       body = json_response(call_tool(conn, token, "delete_everything"), 200)
 

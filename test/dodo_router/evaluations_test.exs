@@ -197,6 +197,22 @@ defmodule DodoRouter.EvaluationsTest do
     assert message =~ "rate limited"
   end
 
+  test "a one-provider chain is not described as a fallback chain" do
+    # Evaluations dispatch with an explicit single step, so there is no
+    # chain to fall back through. Saying "every provider failed" invented
+    # one, and reads as though the judge silently moved to another provider
+    # — which would make the judge a variable and the scores incomparable.
+    attempts = [%{provider: "anthropic", error: "rate_limited", http_status: 429}]
+
+    message = Evaluations.proxy_error_message({:error, :all_providers_failed, attempts})
+
+    refute message =~ "every provider"
+    refute message =~ "providers"
+    assert message =~ "anthropic"
+    assert message =~ "rate limited"
+    assert message =~ "HTTP 429"
+  end
+
   test "provider error logs are not valid candidate answers" do
     refute Evaluations.candidate_successful?(%DodoRouter.Logs.RequestLog{
              status: "error",

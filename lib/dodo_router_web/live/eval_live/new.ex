@@ -4,6 +4,7 @@ defmodule DodoRouterWeb.EvalLive.New do
   alias DodoRouter.Evaluations
   alias DodoRouter.Logs
   alias DodoRouter.Logs.Evaluation
+  alias DodoRouter.Providers
   alias DodoRouter.Replays
 
   @impl true
@@ -25,6 +26,7 @@ defmodule DodoRouterWeb.EvalLive.New do
       end
 
     provider_options = Enum.map(targets, &{key_label(&1), &1.provider_key.id})
+    provider_keys_by_id = Map.new(targets, &{&1.provider_key.id, &1.provider_key})
 
     models_by_provider =
       Map.new(targets, fn target -> {target.provider_key.id, model_options(target)} end)
@@ -56,6 +58,8 @@ defmodule DodoRouterWeb.EvalLive.New do
      |> assign(:target_lookup, target_lookup)
      |> assign(:target_labels, target_labels(targets))
      |> assign(:provider_options, provider_options)
+     |> assign(:provider_keys_by_id, provider_keys_by_id)
+     |> assign(:judge_on_subscription?, false)
      |> assign(:models_by_provider, models_by_provider)
      |> assign(:picker_models, [])
      |> assign(:picker_form, to_form(%{"provider" => "", "target" => ""}, as: :picker))
@@ -80,6 +84,7 @@ defmodule DodoRouterWeb.EvalLive.New do
 
   defp assign_judge_key(socket, key_id) do
     socket
+    |> assign(:judge_on_subscription?, subscription_judge?(socket, key_id))
     |> assign(:judge_key, key_id)
     |> assign(:judge_models, Map.get(socket.assigns.models_by_provider, key_id, []))
     |> assign(:judge_target_value, nil)
@@ -97,6 +102,14 @@ defmodule DodoRouterWeb.EvalLive.New do
       target && String.starts_with?(target, key <> "|") -> assign_judge(socket, target)
       true -> assign_judge_key(socket, key)
     end
+  end
+
+  # Reads the key off the already-loaded targets rather than re-querying: the
+  # picker only ever offers keys from that list.
+  defp subscription_judge?(_socket, nil), do: false
+
+  defp subscription_judge?(socket, key_id) do
+    socket.assigns.provider_keys_by_id |> Map.get(key_id) |> Providers.subscription_key?()
   end
 
   defp blank_to_nil(value) when value in [nil, ""], do: nil
@@ -462,6 +475,23 @@ defmodule DodoRouterWeb.EvalLive.New do
                     required
                   />
                 </div>
+
+                <p
+                  :if={@judge_on_subscription?}
+                  id="judge-billing-warning"
+                  class="mt-3 flex items-start gap-2 rounded-xl border border-warning/40 bg-warning/5 p-3 text-xs text-base-content/70"
+                >
+                  <.icon name="hero-exclamation-triangle" class="mt-0.5 size-4 shrink-0 text-warning" />
+                  <span>
+                    <span class="font-medium text-base-content">
+                      This key bills against a plan, not the API.
+                    </span>
+                    Subscription and coding-plan credentials are issued for a vendor's own coding
+                    environment and can refuse calls made from anywhere else. A candidate that gets
+                    refused costs you one data point; a judge that gets refused costs you every score
+                    in the batch. Prefer a metered API key here.
+                  </span>
+                </p>
               </div>
             </section>
 

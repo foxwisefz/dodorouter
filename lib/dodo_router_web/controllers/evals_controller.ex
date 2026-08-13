@@ -104,6 +104,10 @@ defmodule DodoRouterWeb.EvalsController do
           provider_slug: target.provider_key.provider_slug,
           provider_name: target.display_name,
           label: target.provider_key.label,
+          # A judge on a subscription key can be refused for being outside its
+          # vendor's coding environment, which costs the whole benchmark its
+          # scores rather than one data point.
+          billing: Providers.billing(target.provider_key),
           models: Enum.map(target.models, &model_entry/1)
         }
       end)

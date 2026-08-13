@@ -351,4 +351,40 @@ defmodule DodoRouter.Providers do
   """
   def compact_key_hint(nil), do: ""
   def compact_key_hint(hint), do: String.replace(hint, ~r/•{5,}/u, "••••")
+
+  # Keys that bill against a subscription or coding plan rather than metered
+  # API credit. Enumerated explicitly rather than inferred, because the obvious
+  # heuristics are both wrong: "slug contains coding" misses `anthropic_oauth`
+  # and `openai-codex`, while "key slug differs from the adapter slug" wrongly
+  # flags `zai_standard`, which is metered. A short honest list beats a rule
+  # that quietly misclassifies.
+  #
+  # `Replays.plan_type_for/1` still uses the "coding" substring for its own
+  # purpose — see dodo_router-9wp.
+  @subscription_key_slugs ~w(
+    anthropic_oauth
+    openai-codex
+    moonshot_coding
+    zai_coding
+    test_provider_coding
+  )
+
+  @doc """
+  Whether this key draws on a subscription/plan rather than metered API credit.
+
+  Matters beyond cost reporting: plan credentials are provisioned for a
+  vendor's own coding environment and can refuse or throttle traffic that did
+  not originate there. For a judge — which has to answer for a benchmark to
+  produce a score at all — that is a failed run, not a cheaper one.
+  """
+  def subscription_key?(%ProviderKey{provider_slug: slug}), do: slug in @subscription_key_slugs
+  def subscription_key?(%{provider_slug: slug}), do: slug in @subscription_key_slugs
+  def subscription_key?(slug) when is_binary(slug), do: slug in @subscription_key_slugs
+  def subscription_key?(_key), do: false
+
+  @doc "Billing model of a key, for display: `:subscription` or `:metered`."
+  def billing(key), do: if(subscription_key?(key), do: :subscription, else: :metered)
+
+  @doc "The subscription key slugs, for UI copy and tests."
+  def subscription_key_slugs, do: @subscription_key_slugs
 end

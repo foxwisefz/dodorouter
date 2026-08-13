@@ -168,6 +168,39 @@ defmodule DodoRouterWeb.EvalLiveTest do
            )
   end
 
+  test "warns when the judge would bill against a plan rather than the API", %{
+    conn: conn,
+    user: user
+  } do
+    {router, _api_key} = RoutersFixtures.router_fixture(user)
+    metered = ProvidersFixtures.provider_key_fixture(user, %{"label" => "metered"})
+
+    plan =
+      ProvidersFixtures.provider_key_fixture(user, %{
+        "provider_slug" => "test_provider_coding",
+        "label" => "plan key"
+      })
+
+    log = LogsFixtures.log_fixture(router)
+    {:ok, live, _html} = live(conn, ~p"/logs/#{log.id}/evals/new")
+
+    refute has_element?(live, "#judge-billing-warning")
+
+    live
+    |> form("#eval-form", %{"evaluation" => %{"judge_key" => plan.id}})
+    |> render_change()
+
+    # A judge that gets refused costs every score in the batch, not one run.
+    assert has_element?(live, "#judge-billing-warning")
+    assert render(live) =~ "Prefer a metered API key"
+
+    live
+    |> form("#eval-form", %{"evaluation" => %{"judge_key" => metered.id}})
+    |> render_change()
+
+    refute has_element?(live, "#judge-billing-warning")
+  end
+
   test "a recent judge whose key is gone is not offered", %{conn: conn, user: user} do
     {router, _api_key} = RoutersFixtures.router_fixture(user)
     provider_key = ProvidersFixtures.provider_key_fixture(user, %{"label" => "prod key"})

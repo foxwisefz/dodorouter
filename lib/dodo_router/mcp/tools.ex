@@ -89,6 +89,8 @@ defmodule DodoRouter.MCP.Tools do
       Replay one real request against several models and score the answers with a judge model.
 
       Include the model you use today as a candidate — a score only means something next to another score from the same rubric and judge. Write criteria that can fail: name the facts that must be right, the format, the length, and what must not appear. Set run=true to start it immediately.
+
+      Pick a judge on a metered API key, not a subscription/coding-plan key. Plan credentials are issued for a vendor's own coding environment and may refuse or throttle calls made from anywhere else — as a candidate that costs you one data point, but as the judge it means no scores at all. list_eval_targets reports `billing` per key.
       """,
       scopes: ["evals:write"],
       schema: %{
@@ -310,6 +312,12 @@ defmodule DodoRouter.MCP.Tools do
             provider: target.provider,
             provider_name: target.display_name,
             label: target.provider_key.label,
+            # Subscription keys are provisioned for a vendor's own coding
+            # environment and can refuse traffic from anywhere else. Fine for a
+            # candidate — a refusal there is one data point — but a judge that
+            # cannot answer produces no score at all.
+            billing: Providers.billing(target.provider_key),
+            judge_advice: judge_advice(target.provider_key),
             models:
               Enum.map(target.models, fn model ->
                 %{
@@ -399,6 +407,12 @@ defmodule DodoRouter.MCP.Tools do
          target_id: evaluation.id,
          returned_bodies: Principal.allows?(principal, "logs:read_bodies")
        }}
+    end
+  end
+
+  defp judge_advice(provider_key) do
+    if Providers.subscription_key?(provider_key) do
+      "Prefer a metered key for the judge: this one bills against a subscription/coding plan, which may refuse calls made outside its own coding environment."
     end
   end
 
