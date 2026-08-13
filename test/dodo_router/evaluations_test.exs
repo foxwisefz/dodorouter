@@ -728,4 +728,155 @@ defmodule DodoRouter.EvaluationsTest do
 
     assert %{candidate_targets: [_]} = errors_on(changeset)
   end
+
+  describe "a run names the judge key that actually ran" do
+    setup do
+      user = AccountsFixtures.user_fixture()
+      {router, _key} = RoutersFixtures.router_fixture(user)
+      log = LogsFixtures.log_fixture(router)
+      judge = ProvidersFixtures.provider_key_fixture(user, %{"label" => "Key 1"})
+
+      {:ok, evaluation} =
+        Evaluations.create_evaluation(user, log, %{
+          name: "Helpful answer",
+          criteria: "Answer directly",
+          judge_model: "test-model",
+          judge_provider_key_id: judge.id,
+          candidate_targets: [
+            %{
+              "provider_key_id" => judge.id,
+              "provider" => "test_provider",
+              "model" => "test-model"
+            }
+          ],
+          repetitions: 1
+        })
+
+      %{user: user, judge: judge, evaluation: evaluation}
+    end
+
+    test "survives the evaluation being repointed at another key", %{
+      user: user,
+      judge: judge,
+      evaluation: evaluation
+    } do
+      run = run_judged_by(evaluation, judge)
+
+      replacement = ProvidersFixtures.provider_key_fixture(user, %{"label" => "Key 2"})
+      assert :ok = Evaluations.reassign_judge(judge, replacement)
+
+      run = Repo.get!(EvaluationRun, run.id)
+      assert run.judge_provider_key_id == judge.id
+      assert run.judge_provider_key_label == "Key 1"
+
+      # the evaluation is forward-looking; the run is a record of what ran
+      assert Repo.get!(Evaluation, evaluation.id).judge_provider_key_id == replacement.id
+    end
+
+    test "still names the key after it is deleted", %{
+      user: user,
+      judge: judge,
+      evaluation: evaluation
+    } do
+      run = run_judged_by(evaluation, judge)
+
+      replacement = ProvidersFixtures.provider_key_fixture(user, %{"label" => "Key 2"})
+
+      assert {:ok, _} =
+               DodoRouter.Providers.delete_provider_key(judge, reassign_judge_to: replacement)
+
+      run = Repo.get!(EvaluationRun, run.id)
+
+      # the id goes with the key; the label is a snapshot and outlives it,
+      # which is what tells a reader the judge is gone rather than unknown
+      assert is_nil(run.judge_provider_key_id)
+      assert run.judge_provider_key_label == "Key 1"
+      assert Evaluations.judge_key_deleted?(run)
+    end
+
+    test "a run from before this was recorded reads as unknown, not deleted", %{
+      evaluation: evaluation
+    } do
+      {:ok, run} =
+        %EvaluationRun{}
+        |> EvaluationRun.changeset(%{
+          status: "completed",
+          evaluation_id: evaluation.id,
+          judge_prompt_version: "v4"
+        })
+        |> Repo.insert()
+
+      refute Evaluations.judge_key_deleted?(run)
+    end
+
+    defp run_judged_by(evaluation, judge) do
+      %EvaluationRun{}
+      |> EvaluationRun.changeset(%{
+        status: "completed",
+        evaluation_id: evaluation.id,
+        judge_prompt_version: "v4",
+        judge_provider_key_id: judge.id,
+        judge_provider_key_label: judge.label
+      })
+      |> Repo.insert!()
+    end
+  end
+
+  describe "reassign_judge/2" do
+    setup do
+      user = AccountsFixtures.user_fixture()
+      {router, _key} = RoutersFixtures.router_fixture(user)
+      log = LogsFixtures.log_fixture(router)
+
+      judge = ProvidersFixtures.provider_key_fixture(user, %{"label" => "Key 1"})
+
+      {:ok, evaluation} =
+        Evaluations.create_evaluation(user, log, %{
+          name: "Helpful answer",
+          criteria: "Answer directly",
+          judge_model: "test-model",
+          judge_provider_key_id: judge.id,
+          candidate_targets: [
+            %{
+              "provider_key_id" => judge.id,
+              "provider" => "test_provider",
+              "model" => "test-model"
+            }
+          ]
+        })
+
+      %{user: user, judge: judge, evaluation: evaluation}
+    end
+
+    test "moves every reference to a key of the same provider", %{
+      user: user,
+      judge: judge,
+      evaluation: evaluation
+    } do
+      replacement = ProvidersFixtures.provider_key_fixture(user, %{"label" => "Key 2"})
+
+      assert :ok = Evaluations.reassign_judge(judge, replacement)
+      assert Repo.get!(Evaluation, evaluation.id).judge_provider_key_id == replacement.id
+      assert Evaluations.count_judge_uses(judge) == 0
+      assert Evaluations.count_judge_uses(replacement) == 1
+    end
+
+    test "refuses a key from a different provider", %{user: user, judge: judge} do
+      # The evaluation keeps its judge_model. Pointing it at another
+      # provider's credential would claim a model judged it that cannot run
+      # there — the score would read as comparable when it is not.
+      other = ProvidersFixtures.provider_key_fixture(user, %{"provider_slug" => "zai_standard"})
+
+      assert {:error, :provider_mismatch} = Evaluations.reassign_judge(judge, other)
+      assert Evaluations.count_judge_uses(judge) == 1
+    end
+
+    test "refuses a key belonging to someone else", %{judge: judge} do
+      stranger = AccountsFixtures.user_fixture()
+      theirs = ProvidersFixtures.provider_key_fixture(stranger)
+
+      assert {:error, :not_owned} = Evaluations.reassign_judge(judge, theirs)
+      assert Evaluations.count_judge_uses(judge) == 1
+    end
+  end
 end

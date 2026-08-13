@@ -98,13 +98,73 @@ defmodule DodoRouter.Providers do
 
   @doc """
   Deletes a provider key and its stored secret.
-  """
-  def delete_provider_key(%ProviderKey{} = provider_key) do
-    # Delete from Infisical first
-    delete_api_key(provider_key.user_id, provider_key.key_ref)
 
-    # Then delete from database
-    Repo.delete(provider_key)
+  Returns `{:error, :in_use}` when a row still references the key under a
+  restricting foreign key — today only `evaluations.judge_provider_key_id`,
+  which restricts because an evaluation is re-runnable and a re-run needs a
+  working judge credential. Pass `reassign_judge_to: %ProviderKey{}` to move
+  those references to another key of the same provider first; the move and
+  the delete share a transaction, so a refused delete never leaves the
+  evaluations pointing at a judge the user did not choose.
+
+  The row goes first and the secret second. The other order destroys the
+  credential behind a key that is still there when the delete is refused —
+  the key stays listed, looks fine, and can never authenticate again.
+  """
+  def delete_provider_key(%ProviderKey{} = provider_key, opts \\ []) do
+    result =
+      Repo.transaction(fn ->
+        with :ok <- reassign_judges(provider_key, opts[:reassign_judge_to]),
+             {:ok, deleted} <- Repo.delete(delete_changeset(provider_key)) do
+          deleted
+        else
+          {:error, reason} -> Repo.rollback(reason)
+        end
+      end)
+
+    case result do
+      {:ok, deleted} ->
+        delete_api_key(provider_key.user_id, provider_key.key_ref)
+        {:ok, deleted}
+
+      {:error, %Ecto.Changeset{}} ->
+        {:error, :in_use}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp reassign_judges(_provider_key, nil), do: :ok
+
+  defp reassign_judges(%ProviderKey{} = provider_key, %ProviderKey{} = replacement) do
+    # Cross-context on purpose: the reference being moved belongs to
+    # Evaluations, and only that context knows what a judge is.
+    DodoRouter.Evaluations.reassign_judge(provider_key, replacement)
+  end
+
+  defp delete_changeset(%ProviderKey{} = provider_key) do
+    provider_key
+    |> Ecto.Changeset.change()
+    |> Ecto.Changeset.foreign_key_constraint(:id,
+      name: :evaluations_judge_provider_key_id_fkey,
+      message: "is the judge for existing evaluations"
+    )
+  end
+
+  @doc """
+  Keys of the same provider the user could move a judge reference to.
+
+  Same provider only: an evaluation records `judge_model` alongside the key,
+  so pointing it at another provider's credential would claim a model judged
+  it that never ran there.
+  """
+  def reassignment_candidates(%ProviderKey{} = provider_key) do
+    ProviderKey
+    |> where(user_id: ^provider_key.user_id, provider_slug: ^provider_key.provider_slug)
+    |> where([pk], pk.id != ^provider_key.id)
+    |> order_by([pk], pk.label)
+    |> Repo.all()
   end
 
   @doc """

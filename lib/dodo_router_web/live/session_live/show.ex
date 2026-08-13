@@ -65,149 +65,151 @@ defmodule DodoRouterWeb.SessionLive.Show do
   @impl true
   def render(assigns) do
     ~H"""
-    <div>
-      <div class="flex items-center gap-3 mb-6">
-        <a href={~p"/routers/#{@router.id}/sessions"} class="btn btn-ghost btn-sm btn-circle">←</a>
-        <div class="flex-1">
-          <%= if @editing_name do %>
-            <form phx-submit="save_name" class="flex items-center gap-2">
-              <input
-                type="text"
-                name="session_name"
-                value={@session_name || ""}
-                placeholder="Session name"
-                class="input input-sm input-bordered w-full max-w-xs"
-                phx-mounted={JS.focus()}
-              />
-              <button type="submit" class="btn btn-sm btn-primary">Save</button>
-              <button type="button" phx-click="cancel_edit" class="btn btn-sm btn-ghost">
-                Cancel
-              </button>
-            </form>
-          <% else %>
-            <div class="flex items-center gap-2">
-              <h1 class="text-xl font-bold">
-                {if @session_name, do: @session_name, else: "Session"}
-              </h1>
-              <button phx-click="edit_name" class="btn btn-ghost btn-xs" title="Edit name">
-                <.icon name="hero-pencil" class="size-3" />
-              </button>
-            </div>
-          <% end %>
-          <p class="text-sm font-mono text-base-content/50">{@session_id}</p>
-        </div>
-      </div>
-      
-    <!-- Stats -->
-      <div class="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
-        <div class="stat bg-base-100 border border-base-300 rounded-lg p-3">
-          <div class="stat-title text-xs">Requests</div>
-          <div class="stat-value text-lg">{@stats.request_count}</div>
-        </div>
-        <div class="stat bg-base-100 border border-base-300 rounded-lg p-3">
-          <div class="stat-title text-xs">Cost</div>
-          <div id="session-cost" class="stat-value text-lg">
-            {format_usd(@stats.total_cost_usd)}
-          </div>
-          <div
-            :if={would_be_cost(@stats)}
-            class="text-xs text-base-content/50 mt-0.5"
-            title="Traffic served through subscription/coding-plan keys has no marginal per-token cost. This is what the same tokens would cost at pay-as-you-go API list prices."
-          >
-            ~{format_usd(would_be_cost(@stats))} at API rates
-          </div>
-        </div>
-        <div class="stat bg-base-100 border border-base-300 rounded-lg p-3">
-          <div class="stat-title text-xs">Total Tokens</div>
-          <div class="stat-value text-lg">{@stats.total_tokens || 0}</div>
-        </div>
-        <div class="stat bg-base-100 border border-base-300 rounded-lg p-3">
-          <div class="stat-title text-xs">Avg Latency</div>
-          <div class="stat-value text-lg">{format_latency(@stats.avg_latency_ms)}ms</div>
-        </div>
-        <div class="stat bg-base-100 border border-base-300 rounded-lg p-3">
-          <div class="stat-title text-xs">Success Rate</div>
-          <div class="stat-value text-lg">
-            <%= if @stats.request_count > 0 do %>
-              {round((@stats.successful_requests || 0) / @stats.request_count * 100)}%
+    <Layouts.app flash={@flash} current_scope={@current_scope}>
+      <div>
+        <div class="flex items-center gap-3 mb-6">
+          <a href={~p"/routers/#{@router.id}/sessions"} class="btn btn-ghost btn-sm btn-circle">←</a>
+          <div class="flex-1">
+            <%= if @editing_name do %>
+              <form phx-submit="save_name" class="flex items-center gap-2">
+                <input
+                  type="text"
+                  name="session_name"
+                  value={@session_name || ""}
+                  placeholder="Session name"
+                  class="input input-sm input-bordered w-full max-w-xs"
+                  phx-mounted={JS.focus()}
+                />
+                <button type="submit" class="btn btn-sm btn-primary">Save</button>
+                <button type="button" phx-click="cancel_edit" class="btn btn-sm btn-ghost">
+                  Cancel
+                </button>
+              </form>
             <% else %>
-              —
+              <div class="flex items-center gap-2">
+                <h1 class="text-xl font-bold">
+                  {if @session_name, do: @session_name, else: "Session"}
+                </h1>
+                <button phx-click="edit_name" class="btn btn-ghost btn-xs" title="Edit name">
+                  <.icon name="hero-pencil" class="size-3" />
+                </button>
+              </div>
             <% end %>
+            <p class="text-sm font-mono text-base-content/50">{@session_id}</p>
           </div>
         </div>
-      </div>
-
-      <.cache_regression_notice :if={@cache_regression} finding={@cache_regression} />
-      
-    <!-- Request timeline -->
-      <h2 class="text-lg font-semibold mb-3">Requests</h2>
-      <div class="space-y-2">
-        <%= for log <- @logs do %>
-          <a
-            id={"turn-#{log.id}"}
-            href={~p"/logs/#{log.id}" <> "?return_to=" <> URI.encode_www_form("/routers/#{@router.id}/sessions/#{@session_id}")}
-            class={[
-              "block p-3 rounded-lg text-sm transition-colors",
-              log.status == "pending" && "bg-info/10 animate-pulse",
-              log.status == "success" && "bg-success/10 hover:bg-success/20",
-              log.status == "fallback" && "bg-warning/10 hover:bg-warning/20",
-              log.status == "error" && "bg-error/10 hover:bg-error/20",
-              diverging_turn?(@cache_regression, log) && "ring-2 ring-warning/60"
-            ]}
-          >
-            <div
-              :if={diverging_turn?(@cache_regression, log)}
-              class="flex items-center gap-1.5 text-xs font-medium text-warning mb-2"
-            >
-              <.icon name="hero-scissors" class="size-3.5" /> Cache stopped hitting here
+        
+    <!-- Stats -->
+        <div class="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
+          <div class="stat bg-base-100 border border-base-300 rounded-lg p-3">
+            <div class="stat-title text-xs">Requests</div>
+            <div class="stat-value text-lg">{@stats.request_count}</div>
+          </div>
+          <div class="stat bg-base-100 border border-base-300 rounded-lg p-3">
+            <div class="stat-title text-xs">Cost</div>
+            <div id="session-cost" class="stat-value text-lg">
+              {format_usd(@stats.total_cost_usd)}
             </div>
-            <div class="flex items-center justify-between">
-              <div class="flex items-center gap-3">
-                <span class={[
-                  "w-2 h-2 rounded-full shrink-0",
-                  log.status == "pending" && "bg-info",
-                  log.status == "success" && "bg-success",
-                  log.status == "fallback" && "bg-warning",
-                  log.status == "error" && "bg-error"
-                ]}>
-                </span>
-                <div class="flex items-center gap-2">
-                  <div class="w-4 h-4 rounded flex items-center justify-center shrink-0 bg-base-200">
-                    <.provider_logo slug={normalize_slug(log.final_provider)} class="w-3 h-3" />
+            <div
+              :if={would_be_cost(@stats)}
+              class="text-xs text-base-content/50 mt-0.5"
+              title="Traffic served through subscription/coding-plan keys has no marginal per-token cost. This is what the same tokens would cost at pay-as-you-go API list prices."
+            >
+              ~{format_usd(would_be_cost(@stats))} at API rates
+            </div>
+          </div>
+          <div class="stat bg-base-100 border border-base-300 rounded-lg p-3">
+            <div class="stat-title text-xs">Total Tokens</div>
+            <div class="stat-value text-lg">{@stats.total_tokens || 0}</div>
+          </div>
+          <div class="stat bg-base-100 border border-base-300 rounded-lg p-3">
+            <div class="stat-title text-xs">Avg Latency</div>
+            <div class="stat-value text-lg">{format_latency(@stats.avg_latency_ms)}ms</div>
+          </div>
+          <div class="stat bg-base-100 border border-base-300 rounded-lg p-3">
+            <div class="stat-title text-xs">Success Rate</div>
+            <div class="stat-value text-lg">
+              <%= if @stats.request_count > 0 do %>
+                {round((@stats.successful_requests || 0) / @stats.request_count * 100)}%
+              <% else %>
+                —
+              <% end %>
+            </div>
+          </div>
+        </div>
+
+        <.cache_regression_notice :if={@cache_regression} finding={@cache_regression} />
+        
+    <!-- Request timeline -->
+        <h2 class="text-lg font-semibold mb-3">Requests</h2>
+        <div class="space-y-2">
+          <%= for log <- @logs do %>
+            <a
+              id={"turn-#{log.id}"}
+              href={~p"/logs/#{log.id}" <> "?return_to=" <> URI.encode_www_form("/routers/#{@router.id}/sessions/#{@session_id}")}
+              class={[
+                "block p-3 rounded-lg text-sm transition-colors",
+                log.status == "pending" && "bg-info/10 animate-pulse",
+                log.status == "success" && "bg-success/10 hover:bg-success/20",
+                log.status == "fallback" && "bg-warning/10 hover:bg-warning/20",
+                log.status == "error" && "bg-error/10 hover:bg-error/20",
+                diverging_turn?(@cache_regression, log) && "ring-2 ring-warning/60"
+              ]}
+            >
+              <div
+                :if={diverging_turn?(@cache_regression, log)}
+                class="flex items-center gap-1.5 text-xs font-medium text-warning mb-2"
+              >
+                <.icon name="hero-scissors" class="size-3.5" /> Cache stopped hitting here
+              </div>
+              <div class="flex items-center justify-between">
+                <div class="flex items-center gap-3">
+                  <span class={[
+                    "w-2 h-2 rounded-full shrink-0",
+                    log.status == "pending" && "bg-info",
+                    log.status == "success" && "bg-success",
+                    log.status == "fallback" && "bg-warning",
+                    log.status == "error" && "bg-error"
+                  ]}>
+                  </span>
+                  <div class="flex items-center gap-2">
+                    <div class="w-4 h-4 rounded flex items-center justify-center shrink-0 bg-base-200">
+                      <.provider_logo slug={normalize_slug(log.final_provider)} class="w-3 h-3" />
+                    </div>
+                    <span class="font-mono text-base-content/80">
+                      {log.final_provider}/{log.final_model}
+                    </span>
                   </div>
-                  <span class="font-mono text-base-content/80">
-                    {log.final_provider}/{log.final_model}
+                  <span
+                    :if={log.call_type}
+                    class="px-1.5 py-0.5 rounded text-xs font-medium bg-base-300/50 text-base-content/70"
+                  >
+                    {call_type_name(log.call_type)}
+                  </span>
+                  <span class={[
+                    "px-1.5 py-0.5 rounded text-xs font-medium",
+                    status_badge_class(log.status)
+                  ]}>
+                    {log.status}
                   </span>
                 </div>
-                <span
-                  :if={log.call_type}
-                  class="px-1.5 py-0.5 rounded text-xs font-medium bg-base-300/50 text-base-content/70"
-                >
-                  {call_type_name(log.call_type)}
-                </span>
-                <span class={[
-                  "px-1.5 py-0.5 rounded text-xs font-medium",
-                  status_badge_class(log.status)
-                ]}>
-                  {log.status}
-                </span>
+                <div class="flex items-center gap-4 text-base-content/50 text-sm shrink-0">
+                  <.log_cost log={log} />
+                  <span :if={Map.get(log, :latency_ms)} class="font-mono">{log.latency_ms}ms</span>
+                  <span class="font-mono text-xs">{format_time(log.inserted_at)}</span>
+                </div>
               </div>
-              <div class="flex items-center gap-4 text-base-content/50 text-sm shrink-0">
-                <.log_cost log={log} />
-                <span :if={Map.get(log, :latency_ms)} class="font-mono">{log.latency_ms}ms</span>
-                <span class="font-mono text-xs">{format_time(log.inserted_at)}</span>
+              <div
+                :if={last_message_preview(log)}
+                class="mt-2 text-xs text-base-content/60 truncate pl-5"
+              >
+                {last_message_preview(log)}
               </div>
-            </div>
-            <div
-              :if={last_message_preview(log)}
-              class="mt-2 text-xs text-base-content/60 truncate pl-5"
-            >
-              {last_message_preview(log)}
-            </div>
-          </a>
-        <% end %>
+            </a>
+          <% end %>
+        </div>
       </div>
-    </div>
+    </Layouts.app>
     """
   end
 

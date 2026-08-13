@@ -38,10 +38,17 @@ defmodule DodoRouter.Logs.EvaluationRun do
     # so aggregates don't mix executions. Nil on rows from before batching.
     field :batch_id, :binary_id
 
+    # The judge key as it was when this run happened. The label is a
+    # snapshot, so it survives the key being deleted — a run must keep
+    # naming what judged it even after the evaluation is repointed at
+    # another key. See Evaluations.judge_key_deleted?/1.
+    field :judge_provider_key_label, :string
+
     belongs_to :evaluation, DodoRouter.Logs.Evaluation
     belongs_to :judge_log, DodoRouter.Logs.RequestLog
     belongs_to :candidate_log, DodoRouter.Logs.RequestLog
     belongs_to :candidate_provider_key, DodoRouter.Providers.ProviderKey
+    belongs_to :judge_provider_key, DodoRouter.Providers.ProviderKey
 
     timestamps(type: :utc_datetime)
   end
@@ -74,7 +81,9 @@ defmodule DodoRouter.Logs.EvaluationRun do
       :judge_list_cost_usd,
       :batch_id,
       :evaluation_id,
-      :judge_log_id
+      :judge_log_id,
+      :judge_provider_key_id,
+      :judge_provider_key_label
     ])
     |> validate_required([:status, :evaluation_id, :judge_prompt_version])
     |> validate_inclusion(:status, ~w(pending running completed failed))

@@ -107,6 +107,124 @@ defmodule DodoRouterWeb.ProvidersLiveTest do
     refute has_element?(live, "#return-to-router")
   end
 
+  describe "errors reach the user" do
+    # Every failure on this page was a put_flash that nothing rendered: the
+    # template never wrapped itself in <Layouts.app>, which is the only place
+    # flash_group lives. A save that failed at the secret store looked exactly
+    # like a button that did nothing.
+    test "a rejected save says why", %{conn: conn} do
+      {:ok, live, _html} = live(conn, ~p"/providers")
+
+      live
+      |> element("button[phx-click=\"start_add\"][phx-value-provider=\"zai_standard\"]")
+      |> render_click()
+
+      html =
+        live
+        |> form("form", provider_key: %{api_key: ""})
+        |> render_submit()
+
+      assert has_element?(live, "#flash-group")
+      assert html =~ "Please enter an API key"
+    end
+  end
+
+  describe "deleting a key that evaluations judge with" do
+    setup %{user: user} do
+      {router, _} = DodoRouter.RoutersFixtures.router_fixture(user)
+      log = DodoRouter.LogsFixtures.log_fixture(router)
+
+      key =
+        DodoRouter.ProvidersFixtures.provider_key_fixture(user, %{
+          "provider_slug" => "zai_standard",
+          "label" => "Key 1"
+        })
+
+      {:ok, evaluation} =
+        DodoRouter.Evaluations.create_evaluation(user, log, %{
+          name: "Helpful answer",
+          criteria: "Answer directly and accurately",
+          judge_model: "glm-4.6",
+          judge_provider_key_id: key.id,
+          candidate_targets: [
+            %{
+              "provider_key_id" => key.id,
+              "provider" => "zai_standard",
+              "model" => "glm-4.6"
+            }
+          ],
+          repetitions: 1
+        })
+
+      %{key: key, evaluation: evaluation}
+    end
+
+    test "says which evaluations hold the key", %{conn: conn, key: key} do
+      {:ok, live, _html} = live(conn, ~p"/providers")
+
+      html =
+        live
+        |> element("button[phx-click=\"delete\"][phx-value-id=\"#{key.id}\"]")
+        |> render_click()
+
+      # the row survives, and the page says what is holding it
+      assert has_element?(live, "#key-#{key.id}")
+      assert html =~ "1 evaluation"
+      assert Repo.get(ProviderKey, key.id)
+    end
+
+    test "reassigns the judge to another key of the same provider, then deletes",
+         %{conn: conn, user: user, key: key, evaluation: evaluation} do
+      replacement =
+        DodoRouter.ProvidersFixtures.provider_key_fixture(user, %{
+          "provider_slug" => "zai_standard",
+          "label" => "Key 2"
+        })
+
+      {:ok, live, _html} = live(conn, ~p"/providers")
+
+      live
+      |> element("button[phx-click=\"delete\"][phx-value-id=\"#{key.id}\"]")
+      |> render_click()
+
+      # the replacement is offered by label
+      assert has_element?(live, "#reassign-judge-#{key.id} option[value=\"#{replacement.id}\"]")
+
+      live
+      |> form("#reassign-judge-#{key.id}", %{"replacement_id" => replacement.id})
+      |> render_submit()
+
+      assert Repo.get(DodoRouter.Logs.Evaluation, evaluation.id).judge_provider_key_id ==
+               replacement.id
+
+      refute Repo.get(ProviderKey, key.id)
+    end
+
+    test "offers no reassignment when the provider has no other key", %{conn: conn, key: key} do
+      {:ok, live, _html} = live(conn, ~p"/providers")
+
+      html =
+        live
+        |> element("button[phx-click=\"delete\"][phx-value-id=\"#{key.id}\"]")
+        |> render_click()
+
+      refute has_element?(live, "#reassign-judge-#{key.id}")
+      assert html =~ "Add another z.ai Standard key"
+    end
+
+    test "keeps the stored secret when the delete is refused", %{conn: conn, key: key} do
+      {:ok, live, _html} = live(conn, ~p"/providers")
+
+      live
+      |> element("button[phx-click=\"delete\"][phx-value-id=\"#{key.id}\"]")
+      |> render_click()
+
+      # the row is still there, so the secret behind it must be too — deleting
+      # it first would leave a key that exists but can never authenticate
+      assert DodoRouter.Providers.resolve_api_key(Repo.get(ProviderKey, key.id)) == "test-api-key"
+    end
+  end
+
   describe "key verification" do
     test "saved keys verify asynchronously and show a status badge", %{conn: conn, user: user} do
       key =

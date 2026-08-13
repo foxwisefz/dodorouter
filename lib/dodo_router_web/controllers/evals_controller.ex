@@ -415,7 +415,13 @@ defmodule DodoRouterWeb.EvalsController do
       judge_cost_usd: money(run.judge_cost_usd),
       output_preview: body_or_marker(conn, truncate(run.candidate_output, @output_preview)),
       candidate_log_id: run.candidate_log_id,
-      judge_log_id: run.judge_log_id
+      judge_log_id: run.judge_log_id,
+      # The judge that produced THIS run. The evaluation-level `judge` is
+      # what a re-run would use, which is not the same thing once a key has
+      # been reassigned or deleted.
+      judge_provider_key_id: run.judge_provider_key_id,
+      judge_provider_key_label: run.judge_provider_key_label,
+      judge_provider_key_deleted: Evaluations.judge_key_deleted?(run)
     }
   end
 

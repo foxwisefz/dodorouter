@@ -812,6 +812,68 @@ defmodule DodoRouterWeb.EvalLiveTest do
     assert length(Enum.uniq(cx_values)) == 2
   end
 
+  describe "a run names its own judge key" do
+    setup %{user: user} do
+      {router, _api_key} = RoutersFixtures.router_fixture(user)
+      judge = ProvidersFixtures.provider_key_fixture(user, %{"label" => "Key 1"})
+      log = LogsFixtures.log_fixture(router)
+
+      {:ok, evaluation} =
+        Evaluations.create_evaluation(user, log, %{
+          name: "Judged history",
+          criteria: "Be useful",
+          judge_model: "test-model",
+          judge_provider_key_id: judge.id,
+          candidate_targets: [
+            %{
+              "provider_key_id" => judge.id,
+              "provider" => "test_provider",
+              "model" => "test-model"
+            }
+          ]
+        })
+
+      %EvaluationRun{}
+      |> EvaluationRun.changeset(%{
+        evaluation_id: evaluation.id,
+        status: "completed",
+        score: 90,
+        candidate_provider: "test_provider",
+        candidate_model: "test-model",
+        repetition: 1,
+        judge_provider_key_id: judge.id,
+        judge_provider_key_label: judge.label
+      })
+      |> Repo.insert!()
+
+      %{evaluation: evaluation, judge: judge}
+    end
+
+    test "shows the key it was judged by", %{conn: conn, evaluation: evaluation} do
+      {:ok, _live, html} = live(conn, ~p"/evals/#{evaluation.id}")
+
+      assert html =~ "judged by Key 1"
+      refute html =~ "deleted"
+    end
+
+    test "marks the key as deleted once it is gone", %{
+      conn: conn,
+      user: user,
+      evaluation: evaluation,
+      judge: judge
+    } do
+      replacement = ProvidersFixtures.provider_key_fixture(user, %{"label" => "Key 2"})
+
+      {:ok, _} = DodoRouter.Providers.delete_provider_key(judge, reassign_judge_to: replacement)
+
+      {:ok, _live, html} = live(conn, ~p"/evals/#{evaluation.id}")
+
+      # the run still names what judged it, and says the credential is gone
+      assert html =~ "judged by Key 1"
+      assert html =~ "deleted"
+    end
+  end
+
   test "hands the agent API to the user, per router", %{conn: conn, user: user} do
     {router, _api_key} = RoutersFixtures.router_fixture(user)
 

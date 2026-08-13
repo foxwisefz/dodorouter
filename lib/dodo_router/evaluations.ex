@@ -5,6 +5,7 @@ defmodule DodoRouter.Evaluations do
 
   alias DodoRouter.Accounts.User
   alias DodoRouter.Logs.{Evaluation, EvaluationRun}
+  alias DodoRouter.Providers.ProviderKey
   alias DodoRouter.{Providers, Proxy, Replays, Repo}
 
   # v2: dropped the pass/fail verdict — scores and their distributions
@@ -104,6 +105,53 @@ defmodule DodoRouter.Evaluations do
       }
     )
     |> Repo.all()
+  end
+
+  @doc """
+  How many evaluations name this provider key as their judge.
+
+  This is what makes `evaluations.judge_provider_key_id` a restricting
+  reference rather than a nulling one: an evaluation can be re-run, and a
+  re-run without a judge credential is not a degraded result, it is no
+  result at all.
+  """
+  def count_judge_uses(%ProviderKey{id: key_id}) do
+    Repo.aggregate(from(e in Evaluation, where: e.judge_provider_key_id == ^key_id), :count)
+  end
+
+  @doc """
+  True when the run names a judge key that no longer exists.
+
+  The label is a snapshot and the id nulls with the key, so the pair tells
+  three things apart: a live key (both), a deleted one (label only), and a
+  run recorded before either was stored (neither) — which is unknown, not
+  deleted, and must not be reported as though we knew.
+  """
+  def judge_key_deleted?(%EvaluationRun{} = run) do
+    is_nil(run.judge_provider_key_id) and not is_nil(run.judge_provider_key_label)
+  end
+
+  @doc """
+  Moves every judge reference from one provider key to another.
+
+  Refuses a replacement from a different provider: the evaluation keeps its
+  `judge_model`, and a key from another provider cannot serve that model —
+  the row would claim a judge that never ran.
+  """
+  def reassign_judge(%ProviderKey{} = from, %ProviderKey{} = to) do
+    cond do
+      from.user_id != to.user_id ->
+        {:error, :not_owned}
+
+      from.provider_slug != to.provider_slug ->
+        {:error, :provider_mismatch}
+
+      true ->
+        from(e in Evaluation, where: e.judge_provider_key_id == ^from.id)
+        |> Repo.update_all(set: [judge_provider_key_id: to.id])
+
+        :ok
+    end
   end
 
   def get_evaluation(%User{} = user, id) do
@@ -395,6 +443,15 @@ defmodule DodoRouter.Evaluations do
            evaluation.judge_model
          ) do
       {:ok, step} ->
+        # Stamped from the step, not the evaluation: this is the key the
+        # judge call is about to authenticate with, and it is the last
+        # moment the label is known to be current.
+        run =
+          update_run!(run, %{
+            judge_provider_key_id: step.provider_key.id,
+            judge_provider_key_label: step.provider_key.label
+          })
+
         request = judge_request(evaluation, candidate_content)
 
         case Proxy.dispatch(evaluation.request_log.router, request,

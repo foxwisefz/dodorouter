@@ -226,6 +226,13 @@ defmodule DodoRouterWeb.EvalsControllerTest do
       # The candidate really was replayed through the proxy: each run links
       # the log its answer came from.
       assert Enum.all?(evaluation.runs, & &1.candidate_log_id)
+
+      # Each run records the judge key that produced it, by id and by label.
+      # The label is a snapshot: the evaluation's own judge key can be
+      # repointed or deleted afterwards, and a run must still say what
+      # actually judged it.
+      assert Enum.all?(evaluation.runs, &(&1.judge_provider_key_id == provider_key.id))
+      assert Enum.all?(evaluation.runs, &(&1.judge_provider_key_label == provider_key.label))
     end
   end
 
@@ -262,6 +269,35 @@ defmodule DodoRouterWeb.EvalsControllerTest do
 
       # The answer itself is inlined far enough to read at a glance.
       assert Enum.any?(body["runs"], &(&1["output_preview"] == "A cheap answer"))
+    end
+
+    test "each run reports the judge key that produced it, deleted or not", %{
+      conn: conn,
+      user: user,
+      router: router,
+      api_key: api_key,
+      provider_key: provider_key,
+      log: log
+    } do
+      evaluation = completed_evaluation(user, log, provider_key)
+      replacement = ProvidersFixtures.provider_key_fixture(user, %{"label" => "Key 2"})
+
+      {:ok, _} =
+        DodoRouter.Providers.delete_provider_key(provider_key,
+          reassign_judge_to: replacement
+        )
+
+      conn = conn |> auth(api_key) |> get("/r/#{router.slug}/evals/#{evaluation.id}")
+      body = json_response(conn, 200)
+
+      # The evaluation now points at the key a re-run would use...
+      assert body["judge"]["provider_key_id"] == replacement.id
+
+      # ...while every run keeps naming the one that actually judged it, and
+      # says that credential is gone rather than leaving a bare null.
+      assert Enum.all?(body["runs"], &(&1["judge_provider_key_label"] == provider_key.label))
+      assert Enum.all?(body["runs"], &(&1["judge_provider_key_deleted"] == true))
+      assert Enum.all?(body["runs"], &is_nil(&1["judge_provider_key_id"]))
     end
 
     test "only counts the latest batch", %{
@@ -403,6 +439,8 @@ defmodule DodoRouterWeb.EvalsControllerTest do
       summary: "judged",
       rubric_gaps: gaps,
       batch_id: batch_id,
+      judge_provider_key_id: evaluation.judge_provider_key_id,
+      judge_provider_key_label: Keyword.get(opts, :judge_label, "prod key"),
       candidate_provider: "test_provider",
       candidate_model: model,
       candidate_latency_ms: 120,

@@ -166,230 +166,235 @@ defmodule DodoRouterWeb.LogLive.Index do
   @impl true
   def render(assigns) do
     ~H"""
-    <div>
-      <!-- Header -->
-      <div class="flex items-center justify-between mb-6">
-        <div>
-          <h1 class="text-lg font-semibold text-base-content">Request Logs</h1>
-          <p :if={@selected_router} class="text-sm text-base-content/50 mt-0.5">
-            {@selected_router.name}
-          </p>
-        </div>
+    <Layouts.app flash={@flash} current_scope={@current_scope}>
+      <div>
+        <!-- Header -->
+        <div class="flex items-center justify-between mb-6">
+          <div>
+            <h1 class="text-lg font-semibold text-base-content">Request Logs</h1>
+            <p :if={@selected_router} class="text-sm text-base-content/50 mt-0.5">
+              {@selected_router.name}
+            </p>
+          </div>
 
-        <div class="flex items-center gap-2">
-          <.link
-            patch={favorites_toggle_path(@selected_router_id, @favorites_only)}
-            class={[
-              "btn btn-sm gap-1.5",
-              @favorites_only && "btn-primary",
-              !@favorites_only && "btn-ghost"
-            ]}
-          >
-            <.icon
-              name={if @favorites_only, do: "hero-star-solid", else: "hero-star"}
-              class="w-4 h-4"
-            />
-            <span>Favorites</span>
-          </.link>
-          <form phx-change="select_router" class="contents">
-            <select
-              name="router_id"
-              class="py-2 px-3 bg-base-200 border border-base-300/50 rounded-lg text-sm w-full sm:w-48"
-            >
-              <option value="">All routers</option>
-              <option
-                :for={r <- @routers}
-                value={r.id}
-                selected={to_string(r.id) == @selected_router_id}
-              >
-                {r.name}
-              </option>
-            </select>
-          </form>
-        </div>
-      </div>
-      
-    <!-- Logs Table -->
-      <div class="rounded-lg border border-base-300/50 bg-base-100 overflow-hidden">
-        <table class="w-full text-left">
-          <thead>
-            <tr class="border-b border-base-300/50 bg-secondary/30">
-              <th class="px-2 py-2.5 text-xs font-medium text-base-content/50 w-10">
-                <span class="sr-only">Favorite</span>
-              </th>
-              <th class="px-4 py-2.5 text-xs font-medium text-base-content/50">Time</th>
-              <th :if={!@selected_router} class="px-4 py-2.5 text-xs font-medium text-base-content/50">
-                Router
-              </th>
-              <th class="px-4 py-2.5 text-xs font-medium text-base-content/50">Status</th>
-              <th class="px-4 py-2.5 text-xs font-medium text-base-content/50 hidden sm:table-cell">
-                Provider / Model
-              </th>
-              <th class="px-4 py-2.5 text-xs font-medium text-base-content/50 hidden md:table-cell">
-                Type
-              </th>
-              <th class="px-4 py-2.5 text-xs font-medium text-base-content/50 hidden md:table-cell">
-                Tokens
-              </th>
-              <th class="px-4 py-2.5 text-xs font-medium text-base-content/50">Latency</th>
-              <th class="px-4 py-2.5 text-xs font-medium text-base-content/50 hidden md:table-cell">
-                Message
-              </th>
-            </tr>
-          </thead>
-          <tbody id="logs" phx-update="stream" class="divide-y divide-base-300/30">
-            <tr id="logs-empty" class="hidden only:table-row">
-              <td colspan="9" class="px-4 py-16 text-center">
-                <div class="flex flex-col items-center gap-2">
-                  <.icon name="hero-clock" class="size-8 text-base-content/20" />
-                  <p class="text-sm font-medium text-base-content/60">
-                    {if @favorites_only, do: "No favorite requests yet", else: "No requests yet"}
-                  </p>
-                  <p :if={!@favorites_only} class="text-sm text-base-content/40">
-                    Send a request to a router and it will show up here in real time.
-                    <.link navigate={~p"/routers"} class="text-primary hover:underline">
-                      View your routers
-                    </.link>
-                  </p>
-                </div>
-              </td>
-            </tr>
-            <tr
-              :for={{dom_id, log} <- @streams.logs}
-              id={dom_id}
-              phx-click={log.status != "pending" && JS.navigate(~p"/logs/#{log}")}
+          <div class="flex items-center gap-2">
+            <.link
+              patch={favorites_toggle_path(@selected_router_id, @favorites_only)}
               class={[
-                "hover:bg-secondary/20 transition-colors",
-                log.status == "pending" && "animate-pulse",
-                log.status != "pending" && "cursor-pointer"
+                "btn btn-sm gap-1.5",
+                @favorites_only && "btn-primary",
+                !@favorites_only && "btn-ghost"
               ]}
             >
-              <td class="px-2 py-2.5">
-                <button
-                  :if={log.status != "pending"}
-                  type="button"
-                  phx-click="toggle_favorite"
-                  phx-value-id={log.id}
-                  class={[
-                    "btn btn-ghost btn-xs btn-square",
-                    Map.get(log, :favorite) && "text-warning"
-                  ]}
-                  title={if Map.get(log, :favorite), do: "Unfavorite", else: "Favorite"}
+              <.icon
+                name={if @favorites_only, do: "hero-star-solid", else: "hero-star"}
+                class="w-4 h-4"
+              />
+              <span>Favorites</span>
+            </.link>
+            <form phx-change="select_router" class="contents">
+              <select
+                name="router_id"
+                class="py-2 px-3 bg-base-200 border border-base-300/50 rounded-lg text-sm w-full sm:w-48"
+              >
+                <option value="">All routers</option>
+                <option
+                  :for={r <- @routers}
+                  value={r.id}
+                  selected={to_string(r.id) == @selected_router_id}
                 >
-                  <.icon
-                    name={if Map.get(log, :favorite), do: "hero-star-solid", else: "hero-star"}
-                    class="w-4 h-4"
-                  />
-                </button>
-              </td>
-              <td class="px-4 py-2.5 text-sm font-mono text-base-content/50">
-                {format_time(log.inserted_at)}
-              </td>
-              <td :if={!@selected_router} class="px-4 py-2.5 text-sm">
-                <.link
-                  :if={is_struct(Map.get(log, :router), DodoRouter.Routers.Router)}
-                  navigate={~p"/routers/#{log.router}"}
-                  class="text-primary hover:underline"
+                  {r.name}
+                </option>
+              </select>
+            </form>
+          </div>
+        </div>
+        
+    <!-- Logs Table -->
+        <div class="rounded-lg border border-base-300/50 bg-base-100 overflow-hidden">
+          <table class="w-full text-left">
+            <thead>
+              <tr class="border-b border-base-300/50 bg-secondary/30">
+                <th class="px-2 py-2.5 text-xs font-medium text-base-content/50 w-10">
+                  <span class="sr-only">Favorite</span>
+                </th>
+                <th class="px-4 py-2.5 text-xs font-medium text-base-content/50">Time</th>
+                <th
+                  :if={!@selected_router}
+                  class="px-4 py-2.5 text-xs font-medium text-base-content/50"
                 >
-                  {log.router.name}
-                </.link>
-              </td>
-              <td class="px-4 py-2.5">
-                <div class="flex items-center gap-1.5">
-                  <.status_badge status={log.status} />
-                  <span
-                    :if={Map.get(log, :replayed_from_id)}
-                    class="badge badge-ghost badge-xs gap-0.5"
-                    title={replay_badge_title(log)}
+                  Router
+                </th>
+                <th class="px-4 py-2.5 text-xs font-medium text-base-content/50">Status</th>
+                <th class="px-4 py-2.5 text-xs font-medium text-base-content/50 hidden sm:table-cell">
+                  Provider / Model
+                </th>
+                <th class="px-4 py-2.5 text-xs font-medium text-base-content/50 hidden md:table-cell">
+                  Type
+                </th>
+                <th class="px-4 py-2.5 text-xs font-medium text-base-content/50 hidden md:table-cell">
+                  Tokens
+                </th>
+                <th class="px-4 py-2.5 text-xs font-medium text-base-content/50">Latency</th>
+                <th class="px-4 py-2.5 text-xs font-medium text-base-content/50 hidden md:table-cell">
+                  Message
+                </th>
+              </tr>
+            </thead>
+            <tbody id="logs" phx-update="stream" class="divide-y divide-base-300/30">
+              <tr id="logs-empty" class="hidden only:table-row">
+                <td colspan="9" class="px-4 py-16 text-center">
+                  <div class="flex flex-col items-center gap-2">
+                    <.icon name="hero-clock" class="size-8 text-base-content/20" />
+                    <p class="text-sm font-medium text-base-content/60">
+                      {if @favorites_only, do: "No favorite requests yet", else: "No requests yet"}
+                    </p>
+                    <p :if={!@favorites_only} class="text-sm text-base-content/40">
+                      Send a request to a router and it will show up here in real time.
+                      <.link navigate={~p"/routers"} class="text-primary hover:underline">
+                        View your routers
+                      </.link>
+                    </p>
+                  </div>
+                </td>
+              </tr>
+              <tr
+                :for={{dom_id, log} <- @streams.logs}
+                id={dom_id}
+                phx-click={log.status != "pending" && JS.navigate(~p"/logs/#{log}")}
+                class={[
+                  "hover:bg-secondary/20 transition-colors",
+                  log.status == "pending" && "animate-pulse",
+                  log.status != "pending" && "cursor-pointer"
+                ]}
+              >
+                <td class="px-2 py-2.5">
+                  <button
+                    :if={log.status != "pending"}
+                    type="button"
+                    phx-click="toggle_favorite"
+                    phx-value-id={log.id}
+                    class={[
+                      "btn btn-ghost btn-xs btn-square",
+                      Map.get(log, :favorite) && "text-warning"
+                    ]}
+                    title={if Map.get(log, :favorite), do: "Unfavorite", else: "Favorite"}
                   >
-                    <.icon name="hero-arrow-path" class="w-2.5 h-2.5" />
-                    {replay_badge_label(log)}
-                  </span>
-                  <span
-                    :if={Map.get(@replay_counts, Map.get(log, :id))}
-                    class="badge badge-ghost badge-xs gap-0.5"
-                    title={"Has #{pluralize(Map.get(@replay_counts, Map.get(log, :id)), "replay")}"}
+                    <.icon
+                      name={if Map.get(log, :favorite), do: "hero-star-solid", else: "hero-star"}
+                      class="w-4 h-4"
+                    />
+                  </button>
+                </td>
+                <td class="px-4 py-2.5 text-sm font-mono text-base-content/50">
+                  {format_time(log.inserted_at)}
+                </td>
+                <td :if={!@selected_router} class="px-4 py-2.5 text-sm">
+                  <.link
+                    :if={is_struct(Map.get(log, :router), DodoRouter.Routers.Router)}
+                    navigate={~p"/routers/#{log.router}"}
+                    class="text-primary hover:underline"
                   >
-                    <.icon name="hero-arrow-path" class="w-2.5 h-2.5" />
-                    {Map.get(@replay_counts, Map.get(log, :id))}
-                  </span>
-                </div>
-              </td>
-              <td class="px-4 py-2.5 text-sm hidden sm:table-cell">
-                <%= if is_list(Map.get(log, :attempted_steps)) and length(log.attempted_steps) > 1 do %>
-                  <div class="flex items-center gap-1">
-                    <%= for {step, idx} <- Enum.with_index(log.attempted_steps) do %>
-                      <div class="flex items-center gap-1">
-                        <div class="w-3.5 h-3.5 rounded flex items-center justify-center shrink-0 bg-base-200">
-                          <.provider_logo
-                            slug={
-                              normalize_slug(
-                                Registry.to_key_slug(
-                                  step["provider"],
-                                  step["plan_type"] || "standard"
+                    {log.router.name}
+                  </.link>
+                </td>
+                <td class="px-4 py-2.5">
+                  <div class="flex items-center gap-1.5">
+                    <.status_badge status={log.status} />
+                    <span
+                      :if={Map.get(log, :replayed_from_id)}
+                      class="badge badge-ghost badge-xs gap-0.5"
+                      title={replay_badge_title(log)}
+                    >
+                      <.icon name="hero-arrow-path" class="w-2.5 h-2.5" />
+                      {replay_badge_label(log)}
+                    </span>
+                    <span
+                      :if={Map.get(@replay_counts, Map.get(log, :id))}
+                      class="badge badge-ghost badge-xs gap-0.5"
+                      title={"Has #{pluralize(Map.get(@replay_counts, Map.get(log, :id)), "replay")}"}
+                    >
+                      <.icon name="hero-arrow-path" class="w-2.5 h-2.5" />
+                      {Map.get(@replay_counts, Map.get(log, :id))}
+                    </span>
+                  </div>
+                </td>
+                <td class="px-4 py-2.5 text-sm hidden sm:table-cell">
+                  <%= if is_list(Map.get(log, :attempted_steps)) and length(log.attempted_steps) > 1 do %>
+                    <div class="flex items-center gap-1">
+                      <%= for {step, idx} <- Enum.with_index(log.attempted_steps) do %>
+                        <div class="flex items-center gap-1">
+                          <div class="w-3.5 h-3.5 rounded flex items-center justify-center shrink-0 bg-base-200">
+                            <.provider_logo
+                              slug={
+                                normalize_slug(
+                                  Registry.to_key_slug(
+                                    step["provider"],
+                                    step["plan_type"] || "standard"
+                                  )
                                 )
-                              )
-                            }
-                            class="w-2.5 h-2.5"
-                          />
+                              }
+                              class="w-2.5 h-2.5"
+                            />
+                          </div>
+                          <span class={[
+                            "text-xs px-1.5 py-0.5 rounded-full",
+                            step["status"] == "success" && "bg-green-50 text-success",
+                            step["status"] != "success" && "bg-red-50 text-error line-through"
+                          ]}>
+                            {step["provider"]}
+                          </span>
                         </div>
-                        <span class={[
-                          "text-xs px-1.5 py-0.5 rounded-full",
-                          step["status"] == "success" && "bg-green-50 text-success",
-                          step["status"] != "success" && "bg-red-50 text-error line-through"
-                        ]}>
-                          {step["provider"]}
-                        </span>
-                      </div>
-                      <%= if idx < length(log.attempted_steps) - 1 do %>
-                        <span class="text-base-content/30">→</span>
+                        <%= if idx < length(log.attempted_steps) - 1 do %>
+                          <span class="text-base-content/30">→</span>
+                        <% end %>
                       <% end %>
+                    </div>
+                    <div class="text-xs text-base-content/50 mt-0.5">{log.final_model}</div>
+                  <% else %>
+                    <div class="flex items-center gap-2">
+                      <div class="w-4 h-4 rounded flex items-center justify-center shrink-0 bg-base-200">
+                        <.provider_logo slug={normalize_slug(log.final_provider)} class="w-3 h-3" />
+                      </div>
+                      <span class="font-medium text-base-content">{log.final_provider}</span>
+                      <span class="text-base-content/40"> / </span>
+                      <span class="text-base-content/60">{log.final_model}</span>
+                    </div>
+                  <% end %>
+                </td>
+                <td class="px-4 py-2.5 hidden md:table-cell">
+                  <.call_type_badge type={Map.get(log, :call_type)} />
+                </td>
+                <td class="px-4 py-2.5 text-sm font-mono text-base-content/50 hidden md:table-cell">
+                  <div class="flex items-center gap-1.5">
+                    {Map.get(log, :total_tokens) || "-"}
+                    <%= if Map.get(log, :cache_read_tokens) && log.cache_read_tokens > 0 do %>
+                      <span class="inline-flex items-center gap-0.5 text-[10px] text-success bg-success/10 px-1 py-0.5 rounded">
+                        <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path
+                            stroke-linecap="round"
+                            stroke-linejoin="round"
+                            stroke-width="2"
+                            d="M13 10V3L4 14h7v7l9-11h-7z"
+                          />
+                        </svg>
+                        {cache_pct(log)}
+                      </span>
                     <% end %>
                   </div>
-                  <div class="text-xs text-base-content/50 mt-0.5">{log.final_model}</div>
-                <% else %>
-                  <div class="flex items-center gap-2">
-                    <div class="w-4 h-4 rounded flex items-center justify-center shrink-0 bg-base-200">
-                      <.provider_logo slug={normalize_slug(log.final_provider)} class="w-3 h-3" />
-                    </div>
-                    <span class="font-medium text-base-content">{log.final_provider}</span>
-                    <span class="text-base-content/40"> / </span>
-                    <span class="text-base-content/60">{log.final_model}</span>
-                  </div>
-                <% end %>
-              </td>
-              <td class="px-4 py-2.5 hidden md:table-cell">
-                <.call_type_badge type={Map.get(log, :call_type)} />
-              </td>
-              <td class="px-4 py-2.5 text-sm font-mono text-base-content/50 hidden md:table-cell">
-                <div class="flex items-center gap-1.5">
-                  {Map.get(log, :total_tokens) || "-"}
-                  <%= if Map.get(log, :cache_read_tokens) && log.cache_read_tokens > 0 do %>
-                    <span class="inline-flex items-center gap-0.5 text-[10px] text-success bg-success/10 px-1 py-0.5 rounded">
-                      <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path
-                          stroke-linecap="round"
-                          stroke-linejoin="round"
-                          stroke-width="2"
-                          d="M13 10V3L4 14h7v7l9-11h-7z"
-                        />
-                      </svg>
-                      {cache_pct(log)}
-                    </span>
-                  <% end %>
-                </div>
-              </td>
-              <td class="px-4 py-2.5 text-sm font-mono text-base-content/50">
-                {if Map.get(log, :latency_ms), do: "#{log.latency_ms}ms", else: "-"}
-              </td>
-              <td class="px-4 py-2.5 text-xs text-base-content/50 hidden md:table-cell max-w-xs truncate">
-                {message_preview(log)}
-              </td>
-            </tr>
-          </tbody>
-        </table>
+                </td>
+                <td class="px-4 py-2.5 text-sm font-mono text-base-content/50">
+                  {if Map.get(log, :latency_ms), do: "#{log.latency_ms}ms", else: "-"}
+                </td>
+                <td class="px-4 py-2.5 text-xs text-base-content/50 hidden md:table-cell max-w-xs truncate">
+                  {message_preview(log)}
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
       </div>
-    </div>
+    </Layouts.app>
     """
   end
 

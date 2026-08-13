@@ -651,7 +651,15 @@ defmodule DodoRouterWeb.EvalLive.Show do
                         {run.summary || run.error || run_status_label(run)}
                       </div>
                       <div class="text-xs text-base-content/45">
-                        {run.duration_ms || "—"} ms · prompt {run.judge_prompt_version}
+                        {run.duration_ms || "—"} ms · prompt {run.judge_prompt_version}<span :if={
+                          run.judge_provider_key_label
+                        }>
+                          · judged by {run.judge_provider_key_label}<span
+                            :if={Evaluations.judge_key_deleted?(run)}
+                            class="text-warning"
+                            title="That key has since been removed — this run still names what judged it"
+                          >(deleted)</span>
+                        </span>
                       </div>
                     </div>
                   </div>

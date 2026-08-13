@@ -306,563 +306,569 @@ defmodule DodoRouterWeb.LogLive.Replay do
   @impl true
   def render(assigns) do
     ~H"""
-    <div>
-      <!-- Header -->
-      <div class="flex items-center gap-4 mb-6">
-        <.link navigate={~p"/logs/#{@source.id}"} class="btn btn-ghost btn-sm btn-square">
-          <.icon name="hero-arrow-left" class="w-5 h-5" />
-        </.link>
-        <div class="flex-1">
-          <h1 class="text-2xl font-bold">Replay &amp; Compare</h1>
-          <code class="text-sm text-base-content/60">{@source.request_id}</code>
+    <Layouts.app flash={@flash} current_scope={@current_scope}>
+      <div>
+        <!-- Header -->
+        <div class="flex items-center gap-4 mb-6">
+          <.link navigate={~p"/logs/#{@source.id}"} class="btn btn-ghost btn-sm btn-square">
+            <.icon name="hero-arrow-left" class="w-5 h-5" />
+          </.link>
+          <div class="flex-1">
+            <h1 class="text-2xl font-bold">Replay &amp; Compare</h1>
+            <code class="text-sm text-base-content/60">{@source.request_id}</code>
+          </div>
+          <.link
+            :if={@source.replayed_from_id}
+            navigate={~p"/logs/#{@source.replayed_from_id}/replay?replay=#{@source.id}"}
+            class="btn btn-ghost btn-sm gap-2"
+            id="source-is-replay-link"
+            title="This log was produced by a replay — open its comparison against the log it came from"
+          >
+            <.icon name="hero-scale" class="w-4 h-4" /> Compare with original
+          </.link>
         </div>
-        <.link
-          :if={@source.replayed_from_id}
-          navigate={~p"/logs/#{@source.replayed_from_id}/replay?replay=#{@source.id}"}
-          class="btn btn-ghost btn-sm gap-2"
-          id="source-is-replay-link"
-          title="This log was produced by a replay — open its comparison against the log it came from"
-        >
-          <.icon name="hero-scale" class="w-4 h-4" /> Compare with original
-        </.link>
-      </div>
-      
+        
     <!-- Blocker -->
-      <div
-        :if={@effective_blocker}
-        id="replay-blocker"
-        class="card-bordered mb-6 flex items-start gap-3 border-warning/40 bg-warning/5"
-      >
-        <.icon name="hero-exclamation-triangle" class="w-5 h-5 text-warning shrink-0 mt-0.5" />
-        <div>
-          <p class="font-medium text-base-content">This request can't be replayed</p>
-          <p class="text-sm text-base-content/60">{blocker_message(@effective_blocker)}</p>
-          <p :if={@effective_blocker == :truncated} class="text-sm text-base-content/60 mt-1">
-            Truncation only affects the full thread —
-            <.link navigate={~p"/logs/#{@source.id}"} class="text-primary hover:underline">
-              open the log
-            </.link>
-            and use "replay from here" on a message before the truncated content.
-          </p>
-        </div>
-      </div>
-      
-    <!-- Target picker -->
-      <div :if={!@effective_blocker} class="card-bordered mb-6">
-        <div class="flex items-center justify-between mb-3">
+        <div
+          :if={@effective_blocker}
+          id="replay-blocker"
+          class="card-bordered mb-6 flex items-start gap-3 border-warning/40 bg-warning/5"
+        >
+          <.icon name="hero-exclamation-triangle" class="w-5 h-5 text-warning shrink-0 mt-0.5" />
           <div>
-            <h2 class="section-title">Run against another model</h2>
-            <p class="section-desc">
-              Originally answered by
-              <span class="font-medium text-base-content">
-                {@source.final_provider} / {@source.final_model}
-              </span>
+            <p class="font-medium text-base-content">This request can't be replayed</p>
+            <p class="text-sm text-base-content/60">{blocker_message(@effective_blocker)}</p>
+            <p :if={@effective_blocker == :truncated} class="text-sm text-base-content/60 mt-1">
+              Truncation only affects the full thread —
+              <.link navigate={~p"/logs/#{@source.id}"} class="text-primary hover:underline">
+                open the log
+              </.link>
+              and use "replay from here" on a message before the truncated content.
             </p>
           </div>
         </div>
+        
+    <!-- Target picker -->
+        <div :if={!@effective_blocker} class="card-bordered mb-6">
+          <div class="flex items-center justify-between mb-3">
+            <div>
+              <h2 class="section-title">Run against another model</h2>
+              <p class="section-desc">
+                Originally answered by
+                <span class="font-medium text-base-content">
+                  {@source.final_provider} / {@source.final_model}
+                </span>
+              </p>
+            </div>
+          </div>
 
-        <div
-          :if={@from_index}
-          id="replay-from-banner"
-          class="mb-3 flex items-start gap-2 rounded-lg border border-info/20 bg-info/5 px-3 py-2"
-        >
-          <.icon name="hero-scissors" class="w-4 h-4 text-info shrink-0 mt-0.5" />
-          <p class="text-sm flex-1">
-            Replaying from message {@from_index + 1}:
-            <span class="text-base-content/60 italic">
-              "{from_preview(@source_messages, @from_index)}"
-            </span>
-            — later turns will be dropped.
+          <div
+            :if={@from_index}
+            id="replay-from-banner"
+            class="mb-3 flex items-start gap-2 rounded-lg border border-info/20 bg-info/5 px-3 py-2"
+          >
+            <.icon name="hero-scissors" class="w-4 h-4 text-info shrink-0 mt-0.5" />
+            <p class="text-sm flex-1">
+              Replaying from message {@from_index + 1}:
+              <span class="text-base-content/60 italic">
+                "{from_preview(@source_messages, @from_index)}"
+              </span>
+              — later turns will be dropped.
+            </p>
+            <.link
+              patch={~p"/logs/#{@source.id}/replay"}
+              id="clear-from-link"
+              class="btn btn-ghost btn-xs btn-square"
+              title="Replay the full conversation instead"
+            >
+              <.icon name="hero-x-mark" class="w-3 h-3" />
+            </.link>
+          </div>
+
+          <.form
+            for={@target_form}
+            id="replay-form"
+            phx-change="validate_target"
+            phx-submit="run_replay"
+            class="flex flex-col sm:flex-row sm:items-end gap-3"
+          >
+            <div class="w-full sm:w-64">
+              <label class="text-xs font-medium text-base-content/50 block mb-1">Provider key</label>
+              <select
+                name={@target_form[:provider_key_id].name}
+                id="replay-provider-key"
+                class="select select-sm w-full"
+              >
+                {Phoenix.HTML.Form.options_for_select(
+                  target_options(@targets),
+                  @target_form[:provider_key_id].value
+                )}
+              </select>
+            </div>
+
+            <div class="w-full sm:flex-1">
+              <label class="text-xs font-medium text-base-content/50 block mb-1">Model</label>
+              <input
+                type="text"
+                name={@target_form[:model].name}
+                id="replay-model"
+                value={@target_form[:model].value}
+                list="replay-model-options"
+                placeholder="Pick a model or type any model id…"
+                autocomplete="off"
+                class="input input-sm w-full"
+              />
+              <datalist id="replay-model-options">
+                <option
+                  :for={
+                    model <- selected_target_models(@targets, @target_form[:provider_key_id].value)
+                  }
+                  value={model.id}
+                >
+                  {model_option_label(model)}
+                </option>
+              </datalist>
+            </div>
+
+            <div class="w-full sm:w-44">
+              <label class="text-xs font-medium text-base-content/50 block mb-1">Reasoning</label>
+              <select
+                name={@target_form[:reasoning_effort].name}
+                id="replay-effort"
+                class="select select-sm w-full"
+              >
+                {Phoenix.HTML.Form.options_for_select(
+                  effort_options(
+                    @targets,
+                    @target_form[:provider_key_id].value,
+                    @target_form[:model].value
+                  ),
+                  @target_form[:reasoning_effort].value
+                )}
+              </select>
+            </div>
+
+            <button
+              type="submit"
+              id="run-replay-button"
+              class="btn btn-primary btn-sm gap-2"
+              disabled={@running? or @target_form[:model].value in [nil, ""]}
+            >
+              <span :if={@running?} class="loading loading-spinner loading-xs"></span>
+              <.icon :if={!@running?} name="hero-arrow-path" class="w-4 h-4" />
+              {if @running?, do: "Running…", else: "Run replay"}
+            </button>
+          </.form>
+          <p
+            :if={
+              price_hint(@targets, @target_form[:provider_key_id].value, @target_form[:model].value) !=
+                ""
+            }
+            id="replay-price-hint"
+            class="text-xs text-base-content/40 mt-2"
+          >
+            {price_hint(@targets, @target_form[:provider_key_id].value, @target_form[:model].value)}
           </p>
+          <p :if={@running?} class="text-xs text-base-content/40 mt-2 animate-pulse">
+            Dispatching to the provider — long generations can take up to a minute.
+          </p>
+        </div>
+        
+    <!-- Replay switcher (compare state) -->
+        <div
+          :if={@replays != [] and @selected}
+          class="flex items-center gap-2 mb-4 flex-wrap"
+          id="replay-switcher"
+        >
           <.link
             patch={~p"/logs/#{@source.id}/replay"}
-            id="clear-from-link"
-            class="btn btn-ghost btn-xs btn-square"
-            title="Replay the full conversation instead"
+            class="badge badge-ghost gap-1 hover:badge-secondary"
+            id="all-replays-link"
           >
-            <.icon name="hero-x-mark" class="w-3 h-3" />
+            <.icon name="hero-squares-2x2" class="w-3 h-3" /> All replays
+          </.link>
+          <.link
+            :for={{r, idx} <- Enum.with_index(@replays, 1)}
+            patch={~p"/logs/#{@source.id}/replay?replay=#{r.id}"}
+            class={[
+              "badge gap-1.5 transition-colors",
+              @selected && @selected.id == r.id && "badge-primary",
+              !(@selected && @selected.id == r.id) && "badge-ghost hover:badge-secondary"
+            ]}
+            id={"replay-chip-#{idx}"}
+          >
+            <span class={["w-1.5 h-1.5 rounded-full", replay_dot(r.status)]}></span>
+            {r.final_model || "unknown"}
+            <span :if={step_effort(r)} class="opacity-70">· {step_effort(r)}</span>
           </.link>
         </div>
-
-        <.form
-          for={@target_form}
-          id="replay-form"
-          phx-change="validate_target"
-          phx-submit="run_replay"
-          class="flex flex-col sm:flex-row sm:items-end gap-3"
-        >
-          <div class="w-full sm:w-64">
-            <label class="text-xs font-medium text-base-content/50 block mb-1">Provider key</label>
-            <select
-              name={@target_form[:provider_key_id].name}
-              id="replay-provider-key"
-              class="select select-sm w-full"
-            >
-              {Phoenix.HTML.Form.options_for_select(
-                target_options(@targets),
-                @target_form[:provider_key_id].value
-              )}
-            </select>
-          </div>
-
-          <div class="w-full sm:flex-1">
-            <label class="text-xs font-medium text-base-content/50 block mb-1">Model</label>
-            <input
-              type="text"
-              name={@target_form[:model].name}
-              id="replay-model"
-              value={@target_form[:model].value}
-              list="replay-model-options"
-              placeholder="Pick a model or type any model id…"
-              autocomplete="off"
-              class="input input-sm w-full"
-            />
-            <datalist id="replay-model-options">
-              <option
-                :for={model <- selected_target_models(@targets, @target_form[:provider_key_id].value)}
-                value={model.id}
-              >
-                {model_option_label(model)}
-              </option>
-            </datalist>
-          </div>
-
-          <div class="w-full sm:w-44">
-            <label class="text-xs font-medium text-base-content/50 block mb-1">Reasoning</label>
-            <select
-              name={@target_form[:reasoning_effort].name}
-              id="replay-effort"
-              class="select select-sm w-full"
-            >
-              {Phoenix.HTML.Form.options_for_select(
-                effort_options(
-                  @targets,
-                  @target_form[:provider_key_id].value,
-                  @target_form[:model].value
-                ),
-                @target_form[:reasoning_effort].value
-              )}
-            </select>
-          </div>
-
-          <button
-            type="submit"
-            id="run-replay-button"
-            class="btn btn-primary btn-sm gap-2"
-            disabled={@running? or @target_form[:model].value in [nil, ""]}
-          >
-            <span :if={@running?} class="loading loading-spinner loading-xs"></span>
-            <.icon :if={!@running?} name="hero-arrow-path" class="w-4 h-4" />
-            {if @running?, do: "Running…", else: "Run replay"}
-          </button>
-        </.form>
-        <p
-          :if={
-            price_hint(@targets, @target_form[:provider_key_id].value, @target_form[:model].value) !=
-              ""
-          }
-          id="replay-price-hint"
-          class="text-xs text-base-content/40 mt-2"
-        >
-          {price_hint(@targets, @target_form[:provider_key_id].value, @target_form[:model].value)}
-        </p>
-        <p :if={@running?} class="text-xs text-base-content/40 mt-2 animate-pulse">
-          Dispatching to the provider — long generations can take up to a minute.
-        </p>
-      </div>
-      
-    <!-- Replay switcher (compare state) -->
-      <div
-        :if={@replays != [] and @selected}
-        class="flex items-center gap-2 mb-4 flex-wrap"
-        id="replay-switcher"
-      >
-        <.link
-          patch={~p"/logs/#{@source.id}/replay"}
-          class="badge badge-ghost gap-1 hover:badge-secondary"
-          id="all-replays-link"
-        >
-          <.icon name="hero-squares-2x2" class="w-3 h-3" /> All replays
-        </.link>
-        <.link
-          :for={{r, idx} <- Enum.with_index(@replays, 1)}
-          patch={~p"/logs/#{@source.id}/replay?replay=#{r.id}"}
-          class={[
-            "badge gap-1.5 transition-colors",
-            @selected && @selected.id == r.id && "badge-primary",
-            !(@selected && @selected.id == r.id) && "badge-ghost hover:badge-secondary"
-          ]}
-          id={"replay-chip-#{idx}"}
-        >
-          <span class={["w-1.5 h-1.5 rounded-full", replay_dot(r.status)]}></span>
-          {r.final_model || "unknown"}
-          <span :if={step_effort(r)} class="opacity-70">· {step_effort(r)}</span>
-        </.link>
-      </div>
-      
+        
     <!-- Candidates overview -->
-      <div
-        :if={@selected == nil and @replays != []}
-        class="rounded-lg border border-base-300/50 bg-base-100 overflow-hidden"
-        id="candidates-table"
-      >
-        <table class="w-full text-left">
-          <thead>
-            <tr class="border-b border-base-300/50 bg-secondary/30">
-              <th class="px-4 py-2.5 text-xs font-medium text-base-content/50">Candidate</th>
-              <th class="px-4 py-2.5 text-xs font-medium text-base-content/50">Status</th>
-              <th class="px-4 py-2.5 text-xs font-medium text-base-content/50">Latency</th>
-              <th class="px-4 py-2.5 text-xs font-medium text-base-content/50 hidden sm:table-cell">
-                Tokens
-              </th>
-              <th class="px-4 py-2.5 text-xs font-medium text-base-content/50">Cost</th>
-              <th class="px-4 py-2.5 text-xs font-medium text-base-content/50 hidden md:table-cell">
-                When
-              </th>
-              <th class="w-8"><span class="sr-only">Compare</span></th>
-            </tr>
-          </thead>
-          <tbody class="divide-y divide-base-300/30">
-            <tr id="candidate-row-original" class="bg-base-200/40">
-              <td class="px-4 py-2.5">
-                <div class="flex items-center gap-2">
-                  <.provider_logo
-                    slug={normalize_slug(@source.final_provider || "unknown")}
-                    class="w-4 h-4"
-                  />
-                  <span class="font-semibold text-sm">{@source.final_model || "unknown"}</span>
-                  <span :if={step_effort(@source)} class="badge badge-ghost badge-xs">
-                    {step_effort(@source)}
-                  </span>
-                  <span class="badge badge-primary badge-xs">original</span>
-                </div>
-              </td>
-              <td class="px-4 py-2.5"><.status_badge status={@source.status} /></td>
-              <td class="px-4 py-2.5 text-sm font-mono">
-                {format_metric(:latency_ms, @source.latency_ms)}
-              </td>
-              <td class="px-4 py-2.5 text-sm font-mono hidden sm:table-cell">
-                {format_metric(:total_tokens, @source.total_tokens)}
-              </td>
-              <td class="px-4 py-2.5 text-sm font-mono">
-                {format_metric(:estimated_cost_usd, @source.estimated_cost_usd)}
-              </td>
-              <td class="px-4 py-2.5 text-xs text-base-content/40 hidden md:table-cell">
-                {format_when(@source.inserted_at)}
-              </td>
-              <td></td>
-            </tr>
-            <tr
-              :for={{candidate, idx} <- Enum.with_index(@candidates, 1)}
-              id={"candidate-row-#{idx}"}
-              phx-click={JS.patch(~p"/logs/#{@source.id}/replay?replay=#{candidate.log.id}")}
-              class="hover:bg-secondary/20 transition-colors cursor-pointer"
-            >
-              <td class="px-4 py-2.5">
-                <div class="flex items-center gap-2">
-                  <.provider_logo
-                    slug={normalize_slug(candidate.log.final_provider || "unknown")}
-                    class="w-4 h-4"
-                  />
-                  <span class="font-medium text-sm">{candidate.log.final_model || "unknown"}</span>
-                  <span :if={candidate.effort} class="badge badge-ghost badge-xs">
-                    {candidate.effort}
-                  </span>
-                  <span
-                    :if={candidate.anchor != nil}
-                    class="badge badge-ghost badge-xs gap-0.5"
-                    title={"Replayed from message #{candidate.anchor + 1}: \"#{candidate.anchor_preview}\""}
-                  >
-                    <.icon name="hero-scissors" class="w-2.5 h-2.5" /> from #{candidate.anchor + 1}
-                  </span>
-                </div>
-              </td>
-              <td class="px-4 py-2.5"><.status_badge status={candidate.log.status} /></td>
-              <td class="px-4 py-2.5"><.metric_cell metric={candidate.deltas[:latency_ms]} /></td>
-              <td class="px-4 py-2.5 hidden sm:table-cell">
-                <.metric_cell metric={candidate.deltas[:total_tokens]} />
-              </td>
-              <td class="px-4 py-2.5">
-                <.metric_cell metric={candidate.deltas[:estimated_cost_usd]} />
-              </td>
-              <td class="px-4 py-2.5 text-xs text-base-content/40 hidden md:table-cell">
-                {format_when(candidate.log.inserted_at)}
-              </td>
-              <td class="px-2 py-2.5 text-base-content/30">
-                <.icon name="hero-chevron-right" class="w-4 h-4" />
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-      
+        <div
+          :if={@selected == nil and @replays != []}
+          class="rounded-lg border border-base-300/50 bg-base-100 overflow-hidden"
+          id="candidates-table"
+        >
+          <table class="w-full text-left">
+            <thead>
+              <tr class="border-b border-base-300/50 bg-secondary/30">
+                <th class="px-4 py-2.5 text-xs font-medium text-base-content/50">Candidate</th>
+                <th class="px-4 py-2.5 text-xs font-medium text-base-content/50">Status</th>
+                <th class="px-4 py-2.5 text-xs font-medium text-base-content/50">Latency</th>
+                <th class="px-4 py-2.5 text-xs font-medium text-base-content/50 hidden sm:table-cell">
+                  Tokens
+                </th>
+                <th class="px-4 py-2.5 text-xs font-medium text-base-content/50">Cost</th>
+                <th class="px-4 py-2.5 text-xs font-medium text-base-content/50 hidden md:table-cell">
+                  When
+                </th>
+                <th class="w-8"><span class="sr-only">Compare</span></th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-base-300/30">
+              <tr id="candidate-row-original" class="bg-base-200/40">
+                <td class="px-4 py-2.5">
+                  <div class="flex items-center gap-2">
+                    <.provider_logo
+                      slug={normalize_slug(@source.final_provider || "unknown")}
+                      class="w-4 h-4"
+                    />
+                    <span class="font-semibold text-sm">{@source.final_model || "unknown"}</span>
+                    <span :if={step_effort(@source)} class="badge badge-ghost badge-xs">
+                      {step_effort(@source)}
+                    </span>
+                    <span class="badge badge-primary badge-xs">original</span>
+                  </div>
+                </td>
+                <td class="px-4 py-2.5"><.status_badge status={@source.status} /></td>
+                <td class="px-4 py-2.5 text-sm font-mono">
+                  {format_metric(:latency_ms, @source.latency_ms)}
+                </td>
+                <td class="px-4 py-2.5 text-sm font-mono hidden sm:table-cell">
+                  {format_metric(:total_tokens, @source.total_tokens)}
+                </td>
+                <td class="px-4 py-2.5 text-sm font-mono">
+                  {format_metric(:estimated_cost_usd, @source.estimated_cost_usd)}
+                </td>
+                <td class="px-4 py-2.5 text-xs text-base-content/40 hidden md:table-cell">
+                  {format_when(@source.inserted_at)}
+                </td>
+                <td></td>
+              </tr>
+              <tr
+                :for={{candidate, idx} <- Enum.with_index(@candidates, 1)}
+                id={"candidate-row-#{idx}"}
+                phx-click={JS.patch(~p"/logs/#{@source.id}/replay?replay=#{candidate.log.id}")}
+                class="hover:bg-secondary/20 transition-colors cursor-pointer"
+              >
+                <td class="px-4 py-2.5">
+                  <div class="flex items-center gap-2">
+                    <.provider_logo
+                      slug={normalize_slug(candidate.log.final_provider || "unknown")}
+                      class="w-4 h-4"
+                    />
+                    <span class="font-medium text-sm">{candidate.log.final_model || "unknown"}</span>
+                    <span :if={candidate.effort} class="badge badge-ghost badge-xs">
+                      {candidate.effort}
+                    </span>
+                    <span
+                      :if={candidate.anchor != nil}
+                      class="badge badge-ghost badge-xs gap-0.5"
+                      title={"Replayed from message #{candidate.anchor + 1}: \"#{candidate.anchor_preview}\""}
+                    >
+                      <.icon name="hero-scissors" class="w-2.5 h-2.5" /> from #{candidate.anchor + 1}
+                    </span>
+                  </div>
+                </td>
+                <td class="px-4 py-2.5"><.status_badge status={candidate.log.status} /></td>
+                <td class="px-4 py-2.5"><.metric_cell metric={candidate.deltas[:latency_ms]} /></td>
+                <td class="px-4 py-2.5 hidden sm:table-cell">
+                  <.metric_cell metric={candidate.deltas[:total_tokens]} />
+                </td>
+                <td class="px-4 py-2.5">
+                  <.metric_cell metric={candidate.deltas[:estimated_cost_usd]} />
+                </td>
+                <td class="px-4 py-2.5 text-xs text-base-content/40 hidden md:table-cell">
+                  {format_when(candidate.log.inserted_at)}
+                </td>
+                <td class="px-2 py-2.5 text-base-content/30">
+                  <.icon name="hero-chevron-right" class="w-4 h-4" />
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        
     <!-- Empty state -->
-      <div
-        :if={@replays == [] and !@running? and !@blocker}
-        class="empty-state card-bordered py-16 text-center"
-        id="replay-empty-state"
-      >
-        <.icon name="hero-scale" class="w-8 h-8 mx-auto text-base-content/20 mb-3" />
-        <p class="font-medium text-base-content/70">No replays yet</p>
-        <p class="text-sm text-base-content/40 mt-1">
-          Pick a model above and run a replay — the two responses will be compared side by side here.
-        </p>
-      </div>
-      
+        <div
+          :if={@replays == [] and !@running? and !@blocker}
+          class="empty-state card-bordered py-16 text-center"
+          id="replay-empty-state"
+        >
+          <.icon name="hero-scale" class="w-8 h-8 mx-auto text-base-content/20 mb-3" />
+          <p class="font-medium text-base-content/70">No replays yet</p>
+          <p class="text-sm text-base-content/40 mt-1">
+            Pick a model above and run a replay — the two responses will be compared side by side here.
+          </p>
+        </div>
+        
     <!-- Running skeleton (first run) -->
-      <div
-        :if={@replays == [] and @running?}
-        class="card-bordered py-12"
-        id="replay-running-skeleton"
-      >
-        <div class="max-w-md mx-auto space-y-3 animate-pulse">
-          <div class="h-3 bg-base-300/60 rounded w-3/4"></div>
-          <div class="h-3 bg-base-300/60 rounded w-full"></div>
-          <div class="h-3 bg-base-300/60 rounded w-5/6"></div>
-        </div>
-      </div>
-
-      <%= if @selected do %>
-        <!-- Anchor: which message this replay started from -->
-        <p
-          :if={@anchor_index != nil}
-          id="replay-anchor-banner"
-          class="mb-3 flex items-start gap-1.5 text-xs text-base-content/50"
+        <div
+          :if={@replays == [] and @running?}
+          class="card-bordered py-12"
+          id="replay-running-skeleton"
         >
-          <.icon name="hero-scissors" class="w-3.5 h-3.5 text-info shrink-0 mt-0.5" />
-          <span>
-            Replayed from message {@anchor_index + 1} of {length(@source_messages)}:
-            <.link
-              id="anchor-message-link"
-              navigate={~p"/logs/#{@source.id}?#{[message: @anchor_index]}"}
-              class="italic underline decoration-dotted hover:text-primary"
-              title="Open the original log at this exact message"
-            >
-              "{from_preview(@source_messages, @anchor_index)}"
-            </.link>
-            <span :if={@partial?}>
-              — diffed against the original answer at that exchange; metric deltas hidden
-              (contexts differ in length).
+          <div class="max-w-md mx-auto space-y-3 animate-pulse">
+            <div class="h-3 bg-base-300/60 rounded w-3/4"></div>
+            <div class="h-3 bg-base-300/60 rounded w-full"></div>
+            <div class="h-3 bg-base-300/60 rounded w-5/6"></div>
+          </div>
+        </div>
+
+        <%= if @selected do %>
+          <!-- Anchor: which message this replay started from -->
+          <p
+            :if={@anchor_index != nil}
+            id="replay-anchor-banner"
+            class="mb-3 flex items-start gap-1.5 text-xs text-base-content/50"
+          >
+            <.icon name="hero-scissors" class="w-3.5 h-3.5 text-info shrink-0 mt-0.5" />
+            <span>
+              Replayed from message {@anchor_index + 1} of {length(@source_messages)}:
+              <.link
+                id="anchor-message-link"
+                navigate={~p"/logs/#{@source.id}?#{[message: @anchor_index]}"}
+                class="italic underline decoration-dotted hover:text-primary"
+                title="Open the original log at this exact message"
+              >
+                "{from_preview(@source_messages, @anchor_index)}"
+              </.link>
+              <span :if={@partial?}>
+                — diffed against the original answer at that exchange; metric deltas hidden
+                (contexts differ in length).
+              </span>
             </span>
-          </span>
-        </p>
-        
+          </p>
+          
     <!-- Identity band -->
-        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4" id="compare-identity">
-          <.identity_card
-            id="compare-original"
-            label={if @partial?, do: "Original · at message #{@cut}", else: "Original"}
-            log={@source}
-          />
-          <.identity_card id="compare-replay" label="Replay" log={@selected} />
-        </div>
-        
-    <!-- Delta strip -->
-        <div
-          :if={@deltas != []}
-          class="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3 mb-6"
-          id="delta-strip"
-        >
-          <div
-            :for={delta <- @deltas}
-            class="rounded-lg border border-base-300/50 bg-base-100 p-3"
-            id={"delta-#{delta.key}"}
-          >
-            <div class="text-xs font-medium text-base-content/50">{delta.label}</div>
-            <div class="text-sm font-semibold text-base-content mt-1 truncate">
-              {format_metric(delta.key, delta.original)}
-              <span class="text-base-content/30 font-normal">→</span>
-              {format_metric(delta.key, delta.replay)}
-            </div>
-            <div class={["text-xs mt-1 font-medium", delta_color(delta.direction)]}>
-              {delta_chip(delta)}
-            </div>
-          </div>
-        </div>
-        
-    <!-- View tabs -->
-        <div class="flex items-center gap-1 mb-3" id="diff-view-tabs">
-          <button
-            :for={{view, label} <- [{"diff", "Diff"}, {"side", "Side by side"}, {"raw", "Raw JSON"}]}
-            type="button"
-            phx-click="set_diff_view"
-            phx-value-view={view}
-            id={"diff-view-#{view}"}
-            class={[
-              "btn btn-xs",
-              @diff_view == view && "btn-primary",
-              @diff_view != view && "btn-ghost"
-            ]}
-          >
-            {label}
-          </button>
-          <span
-            :if={@diff && @diff.content.granularity != :none}
-            class="text-xs text-base-content/40 ml-2"
-          >
-            {diff_stats_caption(@diff.content)}
-          </span>
-        </div>
-        
-    <!-- Failed replay -->
-        <div
-          :if={@selected.status == "error"}
-          class="card-bordered border-error/30"
-          id="replay-error-panel"
-        >
-          <div class="flex items-center gap-2 mb-2">
-            <.icon name="hero-x-circle" class="w-5 h-5 text-error" />
-            <span class="font-medium">The replay failed — nothing to compare</span>
-          </div>
-          <.json_panel
-            id="replay-error-body"
-            content={format_json(@selected.response_body)}
-            copy_id="replay-error-body-copy"
-            max_height="max-h-96"
-          />
-        </div>
-
-        <%= if @selected.status != "error" do %>
-          <!-- Diff view -->
-          <div :if={@diff_view == "diff"} id="compare-diff-pane">
-            <div :if={@diff == nil} class="card-bordered py-10" id="diff-loading">
-              <div class="max-w-lg mx-auto space-y-3 animate-pulse">
-                <div class="h-3 bg-base-300/60 rounded w-full"></div>
-                <div class="h-3 bg-base-300/60 rounded w-4/5"></div>
-              </div>
-            </div>
-
-            <%= if @diff do %>
-              <div
-                :if={@diff.content.granularity == :none and @diff.content.reason == :too_large}
-                class="card-bordered mb-3 text-sm text-base-content/60"
-                id="diff-too-large"
-              >
-                Responses are too large to diff inline — showing them side by side instead.
-              </div>
-
-              <div
-                :if={@diff.content.granularity != :none}
-                class="card-bordered max-h-[70vh] overflow-y-auto"
-                id="content-diff"
-              >
-                <p
-                  :if={TextDiff.similarity(@diff.content) < 0.5}
-                  id="low-similarity-note"
-                  class="text-xs text-base-content/40 mb-3"
-                >
-                  Only {round(TextDiff.similarity(@diff.content) * 100)}% shared — "Side by side"
-                  may read better for answers this different.
-                </p>
-                <.diff_block segments={@diff.content.segments} />
-              </div>
-
-              <div :if={
-                @diff.content.granularity == :none and
-                  (@diff.content.reason == :too_large or
-                     (@diff.content.reason == :empty and tool_calls(@baseline_msg) == [] and
-                        tool_calls(@replay_msg) == []))
-              }>
-                <.side_by_side
-                  source_msg={@baseline_msg}
-                  replay_msg={@replay_msg}
-                  source={@source}
-                  selected={@selected}
-                />
-              </div>
-
-              <div
-                :if={@diff.content.granularity == :none and @diff.content.reason == :one_sided}
-                class="card-bordered"
-                id="content-diff-one-sided"
-              >
-                <.diff_block segments={@diff.content.segments} />
-              </div>
-
-              <details :if={@diff.reasoning} class="card-bordered mt-3" id="reasoning-diff">
-                <summary class="cursor-pointer text-sm font-medium text-base-content/70">
-                  Reasoning diff
-                </summary>
-                <div class="mt-3">
-                  <p
-                    :if={
-                      @diff.reasoning.granularity == :none and @diff.reasoning.reason == :one_sided
-                    }
-                    class="text-xs text-base-content/40 mb-2"
-                  >
-                    Only one side produced reasoning content:
-                  </p>
-                  <.diff_block
-                    :if={@diff.reasoning.segments != []}
-                    segments={@diff.reasoning.segments}
-                  />
-                </div>
-              </details>
-
-              <.tool_calls_section
-                source_msg={@baseline_msg}
-                replay_msg={@replay_msg}
-                tool_args_diff={@diff.tool_args}
-              />
-            <% end %>
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4" id="compare-identity">
+            <.identity_card
+              id="compare-original"
+              label={if @partial?, do: "Original · at message #{@cut}", else: "Original"}
+              log={@source}
+            />
+            <.identity_card id="compare-replay" label="Replay" log={@selected} />
           </div>
           
-    <!-- Side by side view -->
-          <div :if={@diff_view == "side"} id="compare-side-pane">
-            <.side_by_side
-              source_msg={@baseline_msg}
-              replay_msg={@replay_msg}
-              source={@source}
-              selected={@selected}
-            />
+    <!-- Delta strip -->
+          <div
+            :if={@deltas != []}
+            class="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3 mb-6"
+            id="delta-strip"
+          >
+            <div
+              :for={delta <- @deltas}
+              class="rounded-lg border border-base-300/50 bg-base-100 p-3"
+              id={"delta-#{delta.key}"}
+            >
+              <div class="text-xs font-medium text-base-content/50">{delta.label}</div>
+              <div class="text-sm font-semibold text-base-content mt-1 truncate">
+                {format_metric(delta.key, delta.original)}
+                <span class="text-base-content/30 font-normal">→</span>
+                {format_metric(delta.key, delta.replay)}
+              </div>
+              <div class={["text-xs mt-1 font-medium", delta_color(delta.direction)]}>
+                {delta_chip(delta)}
+              </div>
+            </div>
           </div>
-        <% end %>
-        
-    <!-- Raw JSON view -->
-        <div
-          :if={@diff_view == "raw"}
-          class="grid grid-cols-1 lg:grid-cols-2 gap-3"
-          id="compare-raw-pane"
-        >
-          <div>
-            <div class="text-xs font-medium text-base-content/50 mb-1">
-              {if @partial?,
-                do: "Original · answer at message #{@anchor_index + 1} (from history)",
-                else: "Original response"}
+          
+    <!-- View tabs -->
+          <div class="flex items-center gap-1 mb-3" id="diff-view-tabs">
+            <button
+              :for={
+                {view, label} <- [{"diff", "Diff"}, {"side", "Side by side"}, {"raw", "Raw JSON"}]
+              }
+              type="button"
+              phx-click="set_diff_view"
+              phx-value-view={view}
+              id={"diff-view-#{view}"}
+              class={[
+                "btn btn-xs",
+                @diff_view == view && "btn-primary",
+                @diff_view != view && "btn-ghost"
+              ]}
+            >
+              {label}
+            </button>
+            <span
+              :if={@diff && @diff.content.granularity != :none}
+              class="text-xs text-base-content/40 ml-2"
+            >
+              {diff_stats_caption(@diff.content)}
+            </span>
+          </div>
+          
+    <!-- Failed replay -->
+          <div
+            :if={@selected.status == "error"}
+            class="card-bordered border-error/30"
+            id="replay-error-panel"
+          >
+            <div class="flex items-center gap-2 mb-2">
+              <.icon name="hero-x-circle" class="w-5 h-5 text-error" />
+              <span class="font-medium">The replay failed — nothing to compare</span>
             </div>
             <.json_panel
-              id="compare-raw-source"
-              content={
-                if @partial?,
-                  do: baseline_raw_json(@baseline_msg),
-                  else: format_json(@source.response_body)
-              }
-              copy_id="compare-raw-source-copy"
-              max_height="max-h-[70vh]"
-            />
-          </div>
-          <div>
-            <div class="text-xs font-medium text-base-content/50 mb-1">Replay response</div>
-            <.json_panel
-              id="compare-raw-selected"
+              id="replay-error-body"
               content={format_json(@selected.response_body)}
-              copy_id="compare-raw-selected-copy"
-              max_height="max-h-[70vh]"
+              copy_id="replay-error-body-copy"
+              max_height="max-h-96"
             />
           </div>
-        </div>
-        
+
+          <%= if @selected.status != "error" do %>
+            <!-- Diff view -->
+            <div :if={@diff_view == "diff"} id="compare-diff-pane">
+              <div :if={@diff == nil} class="card-bordered py-10" id="diff-loading">
+                <div class="max-w-lg mx-auto space-y-3 animate-pulse">
+                  <div class="h-3 bg-base-300/60 rounded w-full"></div>
+                  <div class="h-3 bg-base-300/60 rounded w-4/5"></div>
+                </div>
+              </div>
+
+              <%= if @diff do %>
+                <div
+                  :if={@diff.content.granularity == :none and @diff.content.reason == :too_large}
+                  class="card-bordered mb-3 text-sm text-base-content/60"
+                  id="diff-too-large"
+                >
+                  Responses are too large to diff inline — showing them side by side instead.
+                </div>
+
+                <div
+                  :if={@diff.content.granularity != :none}
+                  class="card-bordered max-h-[70vh] overflow-y-auto"
+                  id="content-diff"
+                >
+                  <p
+                    :if={TextDiff.similarity(@diff.content) < 0.5}
+                    id="low-similarity-note"
+                    class="text-xs text-base-content/40 mb-3"
+                  >
+                    Only {round(TextDiff.similarity(@diff.content) * 100)}% shared — "Side by side"
+                    may read better for answers this different.
+                  </p>
+                  <.diff_block segments={@diff.content.segments} />
+                </div>
+
+                <div :if={
+                  @diff.content.granularity == :none and
+                    (@diff.content.reason == :too_large or
+                       (@diff.content.reason == :empty and tool_calls(@baseline_msg) == [] and
+                          tool_calls(@replay_msg) == []))
+                }>
+                  <.side_by_side
+                    source_msg={@baseline_msg}
+                    replay_msg={@replay_msg}
+                    source={@source}
+                    selected={@selected}
+                  />
+                </div>
+
+                <div
+                  :if={@diff.content.granularity == :none and @diff.content.reason == :one_sided}
+                  class="card-bordered"
+                  id="content-diff-one-sided"
+                >
+                  <.diff_block segments={@diff.content.segments} />
+                </div>
+
+                <details :if={@diff.reasoning} class="card-bordered mt-3" id="reasoning-diff">
+                  <summary class="cursor-pointer text-sm font-medium text-base-content/70">
+                    Reasoning diff
+                  </summary>
+                  <div class="mt-3">
+                    <p
+                      :if={
+                        @diff.reasoning.granularity == :none and @diff.reasoning.reason == :one_sided
+                      }
+                      class="text-xs text-base-content/40 mb-2"
+                    >
+                      Only one side produced reasoning content:
+                    </p>
+                    <.diff_block
+                      :if={@diff.reasoning.segments != []}
+                      segments={@diff.reasoning.segments}
+                    />
+                  </div>
+                </details>
+
+                <.tool_calls_section
+                  source_msg={@baseline_msg}
+                  replay_msg={@replay_msg}
+                  tool_args_diff={@diff.tool_args}
+                />
+              <% end %>
+            </div>
+            
+    <!-- Side by side view -->
+            <div :if={@diff_view == "side"} id="compare-side-pane">
+              <.side_by_side
+                source_msg={@baseline_msg}
+                replay_msg={@replay_msg}
+                source={@source}
+                selected={@selected}
+              />
+            </div>
+          <% end %>
+          
+    <!-- Raw JSON view -->
+          <div
+            :if={@diff_view == "raw"}
+            class="grid grid-cols-1 lg:grid-cols-2 gap-3"
+            id="compare-raw-pane"
+          >
+            <div>
+              <div class="text-xs font-medium text-base-content/50 mb-1">
+                {if @partial?,
+                  do: "Original · answer at message #{@anchor_index + 1} (from history)",
+                  else: "Original response"}
+              </div>
+              <.json_panel
+                id="compare-raw-source"
+                content={
+                  if @partial?,
+                    do: baseline_raw_json(@baseline_msg),
+                    else: format_json(@source.response_body)
+                }
+                copy_id="compare-raw-source-copy"
+                max_height="max-h-[70vh]"
+              />
+            </div>
+            <div>
+              <div class="text-xs font-medium text-base-content/50 mb-1">Replay response</div>
+              <.json_panel
+                id="compare-raw-selected"
+                content={format_json(@selected.response_body)}
+                copy_id="compare-raw-selected-copy"
+                max_height="max-h-[70vh]"
+              />
+            </div>
+          </div>
+          
     <!-- Footer links -->
-        <div class="flex items-center gap-4 mt-6 mb-12 text-sm" id="compare-footer">
-          <.link navigate={~p"/logs/#{@source.id}"} class="text-primary hover:underline">
-            Original log ↗
-          </.link>
-          <.link navigate={~p"/logs/#{@selected.id}"} class="text-primary hover:underline">
-            Replay log ↗
-          </.link>
-        </div>
-      <% end %>
-    </div>
+          <div class="flex items-center gap-4 mt-6 mb-12 text-sm" id="compare-footer">
+            <.link navigate={~p"/logs/#{@source.id}"} class="text-primary hover:underline">
+              Original log ↗
+            </.link>
+            <.link navigate={~p"/logs/#{@selected.id}"} class="text-primary hover:underline">
+              Replay log ↗
+            </.link>
+          </div>
+        <% end %>
+      </div>
+    </Layouts.app>
     """
   end
 
