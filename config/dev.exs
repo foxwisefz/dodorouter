@@ -32,6 +32,22 @@ config :dodo_router, DodoRouterWeb.Endpoint,
   # Binding to loopback ipv4 address prevents access from other machines.
   # Change to `ip: {0, 0, 0, 0}` to allow access from other machines.
   http: [ip: {127, 0, 0, 1}, port: String.to_integer(System.get_env("PORT") || "4000")],
+  # attesto requires an https issuer (RFC 8414 §2), so the OAuth/MCP flow needs
+  # TLS even locally. Generated once by `mix attesto_phoenix.gen.dev_https`,
+  # which shells out to mkcert so the cert is trusted with no tunnel.
+  #
+  # Inlined rather than `AttestoPhoenix.DevTLS.https_opts(port: 4443)`: config
+  # files are evaluated before dependencies are loaded, so calling into one
+  # raises UndefinedFunctionError. This is that function's output verbatim.
+  https: [
+    port: 4443,
+    cipher_suite: :strong,
+    certfile: Path.expand("priv/cert/localhost.pem", File.cwd!()),
+    keyfile: Path.expand("priv/cert/localhost-key.pem", File.cwd!()),
+    # Bandit caps a single header near 10KB; a JWT access token plus a DPoP
+    # proof goes past that and 431s underfoot.
+    http_1_options: [max_header_length: 65_536]
+  ],
   check_origin: false,
   code_reloader: true,
   debug_errors: true,
