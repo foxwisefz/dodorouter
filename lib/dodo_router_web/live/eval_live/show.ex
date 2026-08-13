@@ -470,7 +470,7 @@ defmodule DodoRouterWeb.EvalLive.Show do
           <div class="flex items-start gap-3">
             <.icon
               name="hero-exclamation-triangle"
-              class={["size-5 shrink-0", (@preflight.judge && "text-error") || "text-warning"]}
+              class={"size-5 shrink-0 " <> if(@preflight.judge, do: "text-error", else: "text-warning")}
             />
             <div class="space-y-1">
               <p :if={@preflight.judge} class="font-medium text-error">

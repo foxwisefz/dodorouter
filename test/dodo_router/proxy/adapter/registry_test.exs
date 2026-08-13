@@ -95,7 +95,10 @@ defmodule DodoRouter.Proxy.Adapter.RegistryTest do
 
     test "returns info for zai key slugs" do
       info = Registry.display_info("zai_coding")
-      assert info.name == "z.ai"
+      # The key slug's own name, not the adapter's: the coding plan and the
+      # standard API are different credentials, and a picker that calls both
+      # "z.ai" cannot tell you which one you are choosing.
+      assert info.name == "z.ai Coding"
       assert info.provider == "zai"
     end
 

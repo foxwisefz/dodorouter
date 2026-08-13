@@ -809,11 +809,10 @@ defmodule DodoRouterWeb.RouterLive.Show do
                           style="background-image: url('data:image/svg+xml;charset=UTF-8,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 20 20%22 fill=%22%236b7280%22%3E%3Cpath fill-rule=%22evenodd%22 d=%22M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z%22 clip-rule=%22evenodd%22/%3E%3C/svg%3E');"
                         >
                           <option value="">-- Select API Key --</option>
+                          <%!-- Same label as every other provider-key picker. --%>
                           <%= for key <- matching_keys(@provider_keys, step) do %>
                             <option value={key.id} selected={step.provider_key_id == key.id}>
-                              {key.label} ({Providers.compact_key_hint(key.key_hint)}){key_status_suffix(
-                                key
-                              )}
+                              {DodoRouterWeb.ProviderComponents.provider_key_option_label(key)}
                             </option>
                           <% end %>
                         </select>
@@ -1614,10 +1613,6 @@ defmodule DodoRouterWeb.RouterLive.Show do
 
   defp normalize_models_provider("openai-codex"), do: "openai"
   defp normalize_models_provider(slug), do: slug
-
-  defp key_status_suffix(%{status: "invalid"}), do: " — invalid"
-  defp key_status_suffix(%{status: "quota_exceeded"}), do: " — out of credits"
-  defp key_status_suffix(_), do: ""
 
   defp selected_key_problem(provider_keys, step) do
     case Enum.find(provider_keys, &(&1.id == step.provider_key_id)) do

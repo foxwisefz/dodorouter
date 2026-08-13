@@ -133,11 +133,12 @@ defmodule DodoRouterWeb.EvalLive.New do
     end
   end
 
+  # One label for a provider key, shared with every other picker. This used
+  # to build its own from the *adapter's* display name, so a metered
+  # Moonshot key and a Moonshot coding-plan key both read "Moonshot · Key 1"
+  # in the same dropdown.
   defp key_label(target) do
-    case target.provider_key.label do
-      label when label in [nil, ""] -> "#{target.display_name} · Key"
-      label -> "#{target.display_name} · #{label}"
-    end
+    DodoRouterWeb.ProviderComponents.provider_key_option_label(target.provider_key)
   end
 
   defp model_options(target) do

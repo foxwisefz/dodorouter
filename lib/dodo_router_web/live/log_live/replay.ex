@@ -1044,16 +1044,13 @@ defmodule DodoRouterWeb.LogLive.Replay do
   defp default_key_id([%{provider_key: key} | _rest]), do: key.id
   defp default_key_id([]), do: nil
 
+  # The one provider-key label, shared with the evaluation form and the
+  # routing-step picker. Building its own is how the same key came to read
+  # three different ways on three pages.
   defp target_options(targets) do
     Enum.map(targets, fn target ->
-      label =
-        case target.provider_key.label do
-          nil -> target.display_name
-          "" -> target.display_name
-          key_label -> "#{target.display_name} · #{key_label}"
-        end
-
-      {label, target.provider_key.id}
+      {DodoRouterWeb.ProviderComponents.provider_key_option_label(target.provider_key),
+       target.provider_key.id}
     end)
   end
 

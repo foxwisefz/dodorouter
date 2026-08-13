@@ -134,7 +134,9 @@ defmodule DodoRouterWeb.RouterShowLiveTest do
       {:ok, _live, html} = live(conn, ~p"/routers/#{router.id}")
 
       assert html =~ "failing authentication"
-      assert html =~ "— invalid"
+      # The key picker now labels health the same way everywhere it offers
+      # a provider key, rather than with wording unique to this page.
+      assert html =~ "not authenticating"
     end
 
     test "chain key selects offer subscription keys of the same adapter", %{
