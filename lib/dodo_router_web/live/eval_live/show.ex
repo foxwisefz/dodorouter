@@ -21,6 +21,7 @@ defmodule DodoRouterWeb.EvalLive.Show do
          socket
          |> assign(:show_errored, MapSet.new())
          |> assign(:criteria_expanded, false)
+         |> assign(:retrying?, false)
          |> assign(:selected_series, nil)
          |> assign(:tradeoff_axis, :speed)
          |> load(evaluation)}
@@ -35,16 +36,22 @@ defmodule DodoRouterWeb.EvalLive.Show do
   def handle_event("retry_failed", _params, socket) do
     user = socket.assigns.current_user
     evaluation = socket.assigns.evaluation
+    retrying = retry_description(socket.assigns.retryable)
 
-    if Evaluations.benchmark_running?(evaluation) do
-      {:noreply, put_flash(socket, :error, "A benchmark is already running")}
-    else
-      {:ok, _results} = Evaluations.retry_failed(user, evaluation)
+    # Returns as soon as the work is handed to a task. Running it inline
+    # meant no render happened until every retried run finished, so the
+    # button sat there looking broken for the length of the whole retry.
+    case Evaluations.enqueue_retry(user, evaluation) do
+      :ok ->
+        {:noreply,
+         socket
+         |> assign(:running?, true)
+         |> assign(:retrying?, true)
+         |> put_flash(:info, "Retrying: #{retrying}")}
 
-      {:noreply,
-       socket
-       |> load(Evaluations.get_evaluation!(user, evaluation.id))
-       |> put_flash(:info, "Retried the failed runs")}
+      {:error, :already_running} ->
+        {:noreply,
+         socket |> assign(:running?, true) |> put_flash(:error, "A benchmark is already running")}
     end
   end
 
@@ -77,7 +84,10 @@ defmodule DodoRouterWeb.EvalLive.Show do
     evaluation =
       Evaluations.get_evaluation!(socket.assigns.current_user, socket.assigns.evaluation.id)
 
-    {:noreply, socket |> load(evaluation) |> put_flash(:info, "Benchmark completed")}
+    message = if socket.assigns[:retrying?], do: "Retry finished", else: "Benchmark completed"
+
+    {:noreply,
+     socket |> assign(:retrying?, false) |> load(evaluation) |> put_flash(:info, message)}
   end
 
   def handle_info({:benchmark_progress, _result}, socket) do
@@ -404,8 +414,11 @@ defmodule DodoRouterWeb.EvalLive.Show do
               class="btn btn-outline gap-2"
               title="Repeats only what failed, reusing answers already paid for"
             >
-              <.icon name="hero-arrow-uturn-left" class="size-4" />
-              Retry failed ({retry_description(@retryable)})
+              <.icon
+                name={if @running?, do: "hero-arrow-path", else: "hero-arrow-uturn-left"}
+                class={"size-4 " <> if(@running?, do: "animate-spin", else: "")}
+              />
+              {if @running?, do: "Retrying…", else: "Retry failed (#{retry_description(@retryable)})"}
             </button>
             <button
               id="run-eval-button"
@@ -428,18 +441,27 @@ defmodule DodoRouterWeb.EvalLive.Show do
           <div class="flex items-center gap-3">
             <.icon name="hero-arrow-path" class="size-5 animate-spin text-primary" />
             <div>
-              <div class="font-semibold">Live benchmark</div>
+              <div class="font-semibold">
+                {if @retrying?, do: "Retrying failed runs", else: "Live benchmark"}
+              </div>
+              <%!-- A retry re-runs rows that already exist, so counting runs
+              against the plan would read "18 of 18" from the first second. --%>
               <div class="text-sm text-base-content/50">
-                {min(@summary.runs, planned_runs(@evaluation))} of {planned_runs(@evaluation)} candidate runs finished. Scores and rankings update as each result lands.
+                {if @retrying?,
+                  do: "Repeating only what failed. Scores and rankings update as each result lands.",
+                  else:
+                    "#{min(@summary.runs, planned_runs(@evaluation))} of #{planned_runs(@evaluation)} candidate runs finished. Scores and rankings update as each result lands."}
               </div>
             </div>
           </div>
           <progress
+            :if={not @retrying?}
             class="progress progress-primary mt-4 w-full"
             value={min(@summary.runs, planned_runs(@evaluation))}
             max={planned_runs(@evaluation)}
           >
           </progress>
+          <progress :if={@retrying?} class="progress progress-primary mt-4 w-full"></progress>
         </div>
 
         <div

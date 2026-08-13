@@ -541,6 +541,75 @@ defmodule DodoRouter.Evaluations do
     end
   end
 
+  @doc """
+  Starts `retry_failed/2` in the background, like `enqueue/2`.
+
+  Retrying inline froze the caller for the length of the whole retry — a
+  LiveView that calls it renders nothing until every run finishes, so the
+  button appears to do nothing for minutes. Same task, same registry entry
+  and same broadcasts as a fresh run, so the progress UI works for both.
+
+  No preflight on the judge here: re-judging a stored answer is precisely
+  how a user recovers after swapping the judge key, and refusing on the
+  old key's health would block the fix.
+  """
+  def enqueue_retry(%User{} = user, %Evaluation{} = evaluation) do
+    evaluation = get_evaluation!(user, evaluation.id)
+
+    if benchmark_running?(evaluation) do
+      {:error, :already_running}
+    else
+      evaluation |> Ecto.Changeset.change(benchmark_status: "running") |> Repo.update!()
+
+      DodoRouter.BackgroundTask.start(available_task_supervisor(), fn ->
+        case register_benchmark(evaluation.id) do
+          :ok ->
+            result = retry_failed(user, evaluation)
+
+            write_status!(evaluation, batch_status(user, evaluation))
+
+            Phoenix.PubSub.broadcast(
+              DodoRouter.PubSub,
+              "evaluation:#{evaluation.id}",
+              {:benchmark_finished, result}
+            )
+
+          :already_running ->
+            :ok
+        end
+      end)
+
+      :ok
+    end
+  end
+
+  # force_change, not change: the struct in hand was loaded before the status
+  # was set to "running", so `change/2` compares the new value against the
+  # *stale* one. When they match — a "partial" batch re-run to "partial" —
+  # Ecto sees no change, writes nothing, and the row stays "running"
+  # forever, which also locks the evaluation out of ever running again.
+  defp write_status!(%Evaluation{} = evaluation, status) do
+    evaluation
+    |> Ecto.Changeset.change()
+    |> Ecto.Changeset.force_change(:benchmark_status, status)
+    |> Repo.update!()
+  end
+
+  # After a retry the batch is what matters, not the retried subset: a
+  # status computed from the retry alone would report "failed" for a batch
+  # that is still half scored, erasing results nobody re-ran.
+  defp batch_status(user, evaluation) do
+    runs = user |> get_evaluation!(evaluation.id) |> latest_batch_runs()
+    completed = Enum.count(runs, &(&1.status == "completed"))
+
+    cond do
+      runs == [] -> "failed"
+      completed == length(runs) -> "completed"
+      completed == 0 -> "failed"
+      true -> "partial"
+    end
+  end
+
   defp do_enqueue(%User{} = user, %Evaluation{} = evaluation) do
     batch_id = Ecto.UUID.generate()
 
@@ -552,8 +621,7 @@ defmodule DodoRouter.Evaluations do
       case register_benchmark(evaluation.id) do
         :ok ->
           result = run(user, evaluation, batch_id: batch_id)
-          status = benchmark_status(result)
-          evaluation |> Ecto.Changeset.change(benchmark_status: status) |> Repo.update!()
+          write_status!(evaluation, benchmark_status(result))
 
           Phoenix.PubSub.broadcast(
             DodoRouter.PubSub,

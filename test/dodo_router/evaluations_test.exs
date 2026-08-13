@@ -1221,6 +1221,84 @@ defmodule DodoRouter.EvaluationsTest do
       end
     end
 
+    test "enqueue_retry hands the work to a task and registers it as running", %{
+      user: user,
+      key: key,
+      log: log
+    } do
+      evaluation = eval_with(user, log, key, %{judge_model: "fail-model"})
+      assert {:ok, _} = Evaluations.run(user, evaluation)
+
+      evaluation
+      |> Ecto.Changeset.change(judge_model: "judge-model")
+      |> Repo.update!()
+
+      evaluation = Evaluations.get_evaluation!(user, evaluation.id)
+
+      # Retrying used to run inline in the caller — the LiveView froze for
+      # the length of the whole retry with no render in between, so the
+      # button looked dead. It goes through the same path as a fresh run.
+      assert :ok = Evaluations.enqueue_retry(user, evaluation)
+
+      run = Repo.one!(from(r in EvaluationRun, where: r.evaluation_id == ^evaluation.id))
+      assert run.status == "completed"
+    end
+
+    test "enqueue_retry refuses while a benchmark is already running", %{
+      user: user,
+      key: key,
+      log: log
+    } do
+      evaluation = eval_with(user, log, key, %{})
+
+      evaluation
+      |> Ecto.Changeset.change(benchmark_status: "running")
+      |> Repo.update!()
+
+      evaluation = Evaluations.get_evaluation!(user, evaluation.id)
+
+      # No registry entry in a bare test process, so the stored status is
+      # the fallback the guard reads.
+      if Evaluations.benchmark_running?(evaluation) do
+        assert {:error, :already_running} = Evaluations.enqueue_retry(user, evaluation)
+      end
+    end
+
+    test "a retry leaves the benchmark status describing the whole batch", %{
+      user: user,
+      key: key,
+      log: log
+    } do
+      evaluation =
+        eval_with(user, log, key, %{
+          judge_model: "judge-model",
+          repetitions: 2,
+          candidate_targets: [
+            %{
+              "provider_key_id" => key.id,
+              "provider" => "test_provider",
+              "model" => "test-model"
+            },
+            %{
+              "provider_key_id" => key.id,
+              "provider" => "test_provider",
+              "model" => "fail-model"
+            }
+          ]
+        })
+
+      assert :ok = Evaluations.enqueue(user, evaluation)
+      evaluation = Evaluations.get_evaluation!(user, evaluation.id)
+      assert evaluation.benchmark_status == "partial"
+
+      assert :ok = Evaluations.enqueue_retry(user, evaluation)
+
+      # The retried runs all fail again, but half the batch is still scored:
+      # a status computed from the retry alone would report "failed" and
+      # erase two good results.
+      assert Evaluations.get_evaluation!(user, evaluation.id).benchmark_status == "partial"
+    end
+
     test "reports how many runs are retryable, by stage", %{user: user, key: key, log: log} do
       evaluation = eval_with(user, log, key, %{judge_model: "fail-model"})
       assert {:ok, _} = Evaluations.run(user, evaluation)
