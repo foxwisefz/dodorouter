@@ -990,6 +990,120 @@ defmodule DodoRouterWeb.EvalLiveTest do
     assert render(live) =~ "Key 1"
   end
 
+  describe "a long rubric" do
+    setup %{user: user} do
+      {router, _api_key} = RoutersFixtures.router_fixture(user)
+      key = ProvidersFixtures.provider_key_fixture(user)
+      log = LogsFixtures.log_fixture(router)
+
+      criteria =
+        Enum.map_join(1..40, "\n", fn n ->
+          "#{n}. A hard rule the reply must obey, stated at length so the rubric is genuinely long."
+        end)
+
+      {:ok, evaluation} =
+        Evaluations.create_evaluation(user, log, %{
+          name: "Long rubric",
+          criteria: criteria,
+          judge_model: "test-model",
+          judge_provider_key_id: key.id,
+          candidate_targets: [
+            %{
+              "provider_key_id" => key.id,
+              "provider" => "test_provider",
+              "model" => "test-model"
+            }
+          ]
+        })
+
+      %{evaluation: evaluation}
+    end
+
+    test "is clamped until asked for, so it cannot set the row's height", %{
+      conn: conn,
+      evaluation: evaluation
+    } do
+      {:ok, live, _html} = live(conn, ~p"/evals/#{evaluation.id}")
+
+      assert has_element?(live, "#criteria-body.line-clamp-6")
+      assert has_element?(live, "#toggle-criteria")
+
+      html = live |> element("#toggle-criteria") |> render_click()
+
+      refute has_element?(live, "#criteria-body.line-clamp-6")
+      assert html =~ "Show less"
+    end
+
+    test "a short rubric gets no toggle at all", %{conn: conn, user: user} do
+      {router, _api_key} = RoutersFixtures.router_fixture(user)
+      key = ProvidersFixtures.provider_key_fixture(user, %{"label" => "Short rubric key"})
+      log = LogsFixtures.log_fixture(router)
+
+      {:ok, short} =
+        Evaluations.create_evaluation(user, log, %{
+          name: "Short rubric",
+          criteria: "Answer directly.",
+          judge_model: "test-model",
+          judge_provider_key_id: key.id,
+          candidate_targets: []
+        })
+
+      {:ok, live, _html} = live(conn, ~p"/evals/#{short.id}")
+
+      refute has_element?(live, "#toggle-criteria")
+      refute has_element?(live, "#criteria-body.line-clamp-6")
+    end
+
+    test "the two panels are not stretched to a common height", %{
+      conn: conn,
+      evaluation: evaluation
+    } do
+      {:ok, live, _html} = live(conn, ~p"/evals/#{evaluation.id}")
+
+      # Grid items stretch by default, so the rubric's height became the
+      # chart's height and left the plot floating in whitespace.
+      assert has_element?(live, "#eval-panels.items-start")
+    end
+  end
+
+  test "the score chart says why it is empty rather than drawing bare axes", %{
+    conn: conn,
+    user: user
+  } do
+    {router, _api_key} = RoutersFixtures.router_fixture(user)
+    key = ProvidersFixtures.provider_key_fixture(user)
+    log = LogsFixtures.log_fixture(router)
+
+    {:ok, evaluation} =
+      Evaluations.create_evaluation(user, log, %{
+        name: "Nothing scored",
+        criteria: "Be useful",
+        judge_model: "test-model",
+        judge_provider_key_id: key.id,
+        candidate_targets: [
+          %{"provider_key_id" => key.id, "provider" => "test_provider", "model" => "test-model"}
+        ]
+      })
+
+    # A ranked target with no scored run: rankings exist, the chart has
+    # nothing to plot.
+    %EvaluationRun{}
+    |> EvaluationRun.changeset(%{
+      evaluation_id: evaluation.id,
+      status: "failed",
+      failure_stage: "candidate",
+      candidate_provider: "test_provider",
+      candidate_model: "test-model",
+      repetition: 1
+    })
+    |> Repo.insert!()
+
+    {:ok, live, _html} = live(conn, ~p"/evals/#{evaluation.id}")
+
+    refute has_element?(live, "#quality-consistency-chart svg")
+    assert has_element?(live, "#score-trend", "No run has been scored")
+  end
+
   test "hands the agent API to the user, per router", %{conn: conn, user: user} do
     {router, _api_key} = RoutersFixtures.router_fixture(user)
 

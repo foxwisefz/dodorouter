@@ -20,6 +20,7 @@ defmodule DodoRouterWeb.EvalLive.Show do
         {:ok,
          socket
          |> assign(:show_errored, MapSet.new())
+         |> assign(:criteria_expanded, false)
          |> assign(:selected_series, nil)
          |> assign(:tradeoff_axis, :speed)
          |> load(evaluation)}
@@ -56,6 +57,10 @@ defmodule DodoRouterWeb.EvalLive.Show do
         else: MapSet.put(shown, batch_dom_id)
 
     {:noreply, assign(socket, :show_errored, shown)}
+  end
+
+  def handle_event("toggle_criteria", _params, socket) do
+    {:noreply, assign(socket, :criteria_expanded, not socket.assigns.criteria_expanded)}
   end
 
   def handle_event("select_series", %{"series" => key}, socket) do
@@ -133,6 +138,22 @@ defmodule DodoRouterWeb.EvalLive.Show do
       end)
 
     if shared? and evaluation.judge_provider_key, do: evaluation.judge_provider_key.label
+  end
+
+  # Six lines is roughly where the rubric stops being a caption and starts
+  # being a document. Measured in lines, not characters, because that is
+  # what actually drives the panel's height.
+  @criteria_clamp_chars 400
+
+  defp long_criteria?(%{criteria: criteria}) when is_binary(criteria) do
+    String.length(criteria) > @criteria_clamp_chars or
+      length(String.split(criteria, "\n")) > 6
+  end
+
+  defp long_criteria?(_evaluation), do: false
+
+  defp any_scored?(chart_series) do
+    Enum.any?(chart_series, fn series -> scored_points(series) != [] end)
   end
 
   defp retry_description(%{judge: judge, candidate: candidate}) do
@@ -379,7 +400,9 @@ defmodule DodoRouterWeb.EvalLive.Show do
           />
         </div>
 
-        <div class="grid gap-6 lg:grid-cols-[1.4fr_1fr]">
+        <%!-- items-start: grid items stretch by default, so a long rubric
+        set the chart's height and left the plot floating in whitespace. --%>
+        <div id="eval-panels" class="grid items-start gap-6 lg:grid-cols-[1.4fr_1fr]">
           <section
             id="score-trend"
             class="rounded-2xl border border-base-300/60 bg-base-100 p-6 shadow-sm"
@@ -391,9 +414,24 @@ defmodule DodoRouterWeb.EvalLive.Show do
                   Judge scores per repetition, latest batch
                 </p>
               </div>
-              <span class="text-xs text-base-content/40">0–100</span>
+              <span :if={any_scored?(@chart_series)} class="text-xs text-base-content/40">0–100</span>
             </div>
-            <div id="quality-consistency-chart" class="overflow-x-auto">
+            <%!-- Axes with no data are a chart pretending to be one. When
+            nothing scored, say so — that IS the finding. --%>
+            <div
+              :if={not any_scored?(@chart_series)}
+              class="rounded-xl border border-dashed border-base-300 px-6 py-10 text-center text-sm text-base-content/45"
+            >
+              No run has been scored in this batch, so there is nothing to plot yet.
+              <span :if={@retryable.judge > 0} class="mt-1 block text-base-content/60">
+                {@retryable.judge} of them already have an answer — retry to score it.
+              </span>
+            </div>
+            <div
+              :if={any_scored?(@chart_series)}
+              id="quality-consistency-chart"
+              class="overflow-x-auto"
+            >
               <svg
                 viewBox="0 0 900 280"
                 class="min-w-[760px] w-full"
@@ -474,9 +512,25 @@ defmodule DodoRouterWeb.EvalLive.Show do
 
           <section class="rounded-2xl border border-base-300/60 bg-base-100 p-6 shadow-sm">
             <h2 class="font-semibold">Success criteria</h2>
-            <p class="mt-3 whitespace-pre-wrap text-sm leading-6 text-base-content/70">
+            <p
+              id="criteria-body"
+              class={[
+                "mt-3 whitespace-pre-wrap text-sm leading-6 text-base-content/70",
+                @criteria_expanded && "max-h-[32rem] overflow-y-auto",
+                not @criteria_expanded && long_criteria?(@evaluation) && "line-clamp-6"
+              ]}
+            >
               {@evaluation.criteria}
             </p>
+            <button
+              :if={long_criteria?(@evaluation)}
+              id="toggle-criteria"
+              type="button"
+              phx-click="toggle_criteria"
+              class="mt-2 text-sm font-medium text-primary hover:underline"
+            >
+              {if @criteria_expanded, do: "Show less", else: "Show full rubric"}
+            </button>
             <div
               :if={@rubric_feedback.flagged > 0}
               id="rubric-feedback"
