@@ -80,22 +80,91 @@ defmodule DodoRouterWeb.MCPControllerTest do
       end
     end
 
-    test "rejects a missing protocol version header", %{conn: conn, token: token} do
+    test "a missing protocol version header means a legacy client, not an error", %{
+      conn: conn,
+      token: token
+    } do
+      # Claude Code opens with exactly this: `initialize`, no MCP-Protocol-Version
+      # header, no mirrored headers. Refusing it is a 400 the client cannot act
+      # on, and a modern-only endpoint it cannot connect to is not an interface.
       conn =
         conn
         |> put_req_header("authorization", "Bearer #{token}")
-        |> put_req_header("mcp-method", "tools/list")
-        |> post("/mcp", %{"jsonrpc" => "2.0", "id" => 1, "method" => "tools/list"})
+        |> post("/mcp", %{
+          "jsonrpc" => "2.0",
+          "id" => 1,
+          "method" => "initialize",
+          "params" => %{"protocolVersion" => "2025-06-18", "capabilities" => %{}}
+        })
 
-      assert json_response(conn, 400)["error"]["code"] == -32_020
+      result = json_response(conn, 200)["result"]
+      # Its own version echoed back: the tool surface is identical across these
+      # revisions, so there is nothing to downgrade.
+      assert result["protocolVersion"] == "2025-06-18"
+      assert result["capabilities"]["tools"]
+      assert result["serverInfo"]["name"] == "dodo-router"
     end
 
-    test "reports its supported versions when asked for another", %{conn: conn, token: token} do
+    test "a legacy client can call tools without the mirrored headers", %{
+      conn: conn,
+      token: token,
+      router: router
+    } do
+      conn =
+        conn
+        |> put_req_header("authorization", "Bearer #{token}")
+        |> post("/mcp", %{
+          "jsonrpc" => "2.0",
+          "id" => 2,
+          "method" => "tools/call",
+          "params" => %{"name" => "list_routers", "arguments" => %{}}
+        })
+
+      body = json_response(conn, 200)
+      assert body["result"]["isError"] == false
+
+      assert body["result"]["structuredContent"]["routers"] |> hd() |> Map.get("slug") ==
+               router.slug
+    end
+
+    test "an unknown protocol version negotiates down rather than failing", %{
+      conn: conn,
+      token: token
+    } do
+      conn =
+        conn
+        |> put_req_header("authorization", "Bearer #{token}")
+        |> post("/mcp", %{
+          "jsonrpc" => "2.0",
+          "id" => 1,
+          "method" => "initialize",
+          "params" => %{"protocolVersion" => "1999-01-01"}
+        })
+
+      # Naming the modern revision here would hand back something the client
+      # cannot parse.
+      assert json_response(conn, 200)["result"]["protocolVersion"] == "2025-06-18"
+    end
+
+    test "a negotiated legacy version is served, not refused", %{conn: conn, token: token} do
+      # Claude Code sends this header on every request after the handshake,
+      # naming the version it negotiated. Reading presence as "must be modern"
+      # rejected it one request after a successful initialize.
       conn = rpc(conn, token, "tools/list", nil, protocol_header: "2025-11-25")
 
+      assert json_response(conn, 200)["result"]["tools"]
+    end
+
+    test "reports every version it serves when asked for one it does not", %{
+      conn: conn,
+      token: token
+    } do
+      conn = rpc(conn, token, "tools/list", nil, protocol_header: "1999-01-01")
+
       error = json_response(conn, 400)["error"]
-      assert error["data"]["supported"] == [@version]
-      assert error["data"]["requested"] == "2025-11-25"
+      assert @version in error["data"]["supported"]
+      assert "2025-11-25" in error["data"]["supported"]
+      assert error["data"]["requested"] == "1999-01-01"
     end
 
     test "rejects a protocol version header that disagrees with the body", %{

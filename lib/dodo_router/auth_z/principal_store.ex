@@ -29,7 +29,7 @@ defmodule DodoRouter.AuthZ.PrincipalStore do
   def load_principal(_subject), do: {:error, :not_found}
 
   @impl true
-  def build_principal(_client, subject_id, _scope) do
+  def build_principal(_client, subject_id, scope) do
     user_id = String.replace_prefix(subject_id, @prefix, "")
 
     case load_principal(@prefix <> user_id) do
@@ -40,6 +40,12 @@ defmodule DodoRouter.AuthZ.PrincipalStore do
           # :unknown_principal_kind when it is absent. It must match the kind
           # declared in DodoRouter.AuthZ.principal_kinds/0.
           kind: "user",
+          # Like `kind`, `scopes` is required rather than optional: the mint
+          # reads it off this map (Attesto.Token.normalize_scopes/1) and fails
+          # the whole exchange with :invalid_scopes when it is missing. The
+          # granted scope arrives as the third argument — this callback's job is
+          # to carry it through, not to decide it. ScopePolicy already did that.
+          scopes: normalize_scope(scope),
           sub: @prefix <> user.id,
           email: user.email,
           # Not a claim a client should read as authorization — the scopes on
@@ -49,9 +55,16 @@ defmodule DodoRouter.AuthZ.PrincipalStore do
         }
 
       {:error, :not_found} ->
-        %{kind: "user", sub: @prefix <> user_id}
+        %{kind: "user", scopes: normalize_scope(scope), sub: @prefix <> user_id}
     end
   end
+
+  # Accepts either shape: attesto documents "the granted scope" without fixing
+  # whether it arrives as a list or a space-delimited string, and guessing wrong
+  # is a failed token exchange rather than a soft error.
+  defp normalize_scope(scope) when is_list(scope), do: scope
+  defp normalize_scope(scope) when is_binary(scope), do: String.split(scope, " ", trim: true)
+  defp normalize_scope(_scope), do: []
 
   @doc "The subject identifier for a user, for whoever needs to mint one."
   def subject_for(%User{id: id}), do: @prefix <> id

@@ -28,12 +28,26 @@ defmodule DodoRouterWeb.MCPController do
 
   use DodoRouterWeb, :controller
 
+  require Logger
+
   alias DodoRouter.MCP.Tools
   alias DodoRouterWeb.AgentApi
   alias DodoRouterWeb.Plugs.AgentAudit
 
   @protocol_version "2026-07-28"
   @supported_versions [@protocol_version]
+
+  # Revisions that predate the per-request metadata model: they open with an
+  # `initialize` handshake and send no `MCP-Protocol-Version` header. The spec
+  # lets a server treat a header-less request as `2025-03-26` and fall back.
+  #
+  # Serving them is cheap *here* precisely because that handshake exists to
+  # establish session state and this server holds none — every tool takes its
+  # router as an argument. So the handshake is a formality we can answer, rather
+  # than a mode we have to implement. Claude Code speaks this era today, and a
+  # modern-only endpoint it cannot connect to is not an interface.
+  @legacy_versions ~w(2024-11-05 2025-03-26 2025-06-18 2025-11-25)
+  @legacy_default "2025-06-18"
 
   @server_info %{name: "dodo-router", title: "DodoRouter", version: "1"}
 
@@ -47,11 +61,40 @@ defmodule DodoRouterWeb.MCPController do
   def create(conn, _params) do
     with :ok <- check_origin(conn),
          {:ok, message} <- body(conn),
-         :ok <- check_protocol_version(conn, message),
-         :ok <- check_mirrored_headers(conn, message) do
+         :ok <- check_era(conn, message) do
       dispatch(conn, message)
     else
       {:error, status, code, message, data} -> rpc_error(conn, status, nil, code, message, data)
+    end
+  end
+
+  # The header's *value* is the era marker, not its presence.
+  #
+  # Every revision from 2025-06-18 sends `MCP-Protocol-Version`, so a legacy
+  # client sends it too once a version has been negotiated — it just names a
+  # legacy revision. Reading presence alone as "modern" rejected Claude Code's
+  # `notifications/initialized` immediately after a successful handshake, which
+  # is a confusing place to fail.
+  #
+  # Only the stateless revisions carry the mirrored `Mcp-Method`/`Mcp-Name`
+  # headers, so only they are validated against the body.
+  defp check_era(conn, message) do
+    case header(conn, "mcp-protocol-version") do
+      # Pre-2025-06-18: the header did not exist yet.
+      nil ->
+        :ok
+
+      version when version in @legacy_versions ->
+        :ok
+
+      version when version in @supported_versions ->
+        with :ok <- check_protocol_version(conn, message) do
+          check_mirrored_headers(conn, message)
+        end
+
+      version ->
+        {:error, 400, @invalid_request, "Unsupported protocol version #{version}.",
+         %{supported: @supported_versions ++ @legacy_versions, requested: version}}
     end
   end
 
@@ -110,6 +153,20 @@ defmodule DodoRouterWeb.MCPController do
     end
   end
 
+  # The legacy handshake. Answered rather than implemented: there is no session
+  # to create, so this reports capabilities and agrees a version.
+  defp dispatch(conn, %{"method" => "initialize", "id" => id} = message) do
+    requested = get_in(message, ["params", "protocolVersion"])
+
+    conn
+    |> AgentAudit.annotate(operation: "initialize")
+    |> rpc_result(id, %{
+      protocolVersion: negotiate(requested),
+      capabilities: %{tools: %{listChanged: false}},
+      serverInfo: @server_info
+    })
+  end
+
   defp dispatch(conn, %{"method" => "ping", "id" => id}), do: rpc_result(conn, id, %{})
 
   defp dispatch(conn, %{"method" => method, "id" => id}) do
@@ -131,6 +188,13 @@ defmodule DodoRouterWeb.MCPController do
     # accepted rather than answered.
     conn |> AgentAudit.annotate(operation: "notification") |> send_resp(202, "")
   end
+
+  # Echo the client's own version when it is one we can serve unchanged — the
+  # tool surface is identical across these revisions — otherwise name the newest
+  # legacy revision rather than the modern one, which it could not parse.
+  defp negotiate(requested) when requested in @legacy_versions, do: requested
+  defp negotiate(requested) when requested in @supported_versions, do: requested
+  defp negotiate(_requested), do: @legacy_default
 
   ## Validation
 
@@ -190,10 +254,6 @@ defmodule DodoRouterWeb.MCPController do
       not is_nil(in_body) and in_body != header ->
         {:error, 400, @header_mismatch,
          "MCP-Protocol-Version header (#{header}) does not match params._meta (#{in_body}).", nil}
-
-      header not in @supported_versions ->
-        {:error, 400, @invalid_request, "Unsupported protocol version #{header}.",
-         %{supported: @supported_versions, requested: header}}
 
       true ->
         :ok
@@ -272,7 +332,19 @@ defmodule DodoRouterWeb.MCPController do
     error = %{code: code, message: message}
     error = if data, do: Map.put(error, :data, data), else: error
 
+    # A rejected MCP request is nearly opaque from the client side — an SDK
+    # surfaces "HTTP 400" and nothing else — so the reason and the headers that
+    # produced it are logged and recorded here, where they can still be read.
+    Logger.warning("""
+    MCP request rejected: #{message}
+      code=#{code} status=#{status}
+      MCP-Protocol-Version=#{inspect(header(conn, "mcp-protocol-version"))}
+      Mcp-Method=#{inspect(header(conn, "mcp-method"))} Mcp-Name=#{inspect(header(conn, "mcp-name"))}
+      body method=#{inspect(conn.body_params["method"])}
+    """)
+
     conn
+    |> AgentAudit.annotate(operation: "mcp:rejected", error: message)
     |> put_resp_header("mcp-protocol-version", @protocol_version)
     |> put_status(status)
     |> json(%{jsonrpc: "2.0", id: id, error: error})
