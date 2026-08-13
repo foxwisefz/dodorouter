@@ -33,6 +33,19 @@ defmodule DodoRouterWeb.Router do
   # Same credential and the same audit trail as the REST surface — recorded
   # under a different `interface` so "which door did this agent come through"
   # is answerable.
+  # The authorization endpoint runs OUR login and consent UI, so it needs a
+  # session — but deliberately not the generic :browser pipeline. attesto warns
+  # about exactly this: CSRF protection would reject the externally-submitted
+  # OAuth POSTs that are supposed to arrive without our token.
+  pipeline :oauth_interactive do
+    plug :accepts, ["html"]
+    plug :fetch_session
+    plug :fetch_live_flash
+    plug :put_root_layout, html: {DodoRouterWeb.Layouts, :root}
+    plug :put_secure_browser_headers
+    plug :fetch_current_scope_for_user
+  end
+
   pipeline :mcp_api do
     plug :accepts, ["json"]
     plug DodoRouterWeb.Plugs.AgentAudit, interface: "mcp"
@@ -219,6 +232,18 @@ defmodule DodoRouterWeb.Router do
   # registration: true mounts RFC 7591 dynamic client registration, which is
   # what lets an assistant connect without being pre-registered by hand.
   scope "/" do
-    attesto_routes(registration: true)
+    attesto_routes(
+      registration: true,
+      route_pipelines: [interactive: [:oauth_interactive]]
+    )
+  end
+
+  # Our own consent screen, which the :consent callback halts into and which
+  # re-enters /oauth/authorize carrying a single-use grant.
+  scope "/oauth", DodoRouterWeb do
+    pipe_through :oauth_interactive
+
+    get "/consent", OAuthConsentController, :show
+    post "/consent", OAuthConsentController, :create
   end
 end

@@ -99,3 +99,17 @@ config :phoenix_live_view,
 
 # Disable swoosh api client as it is only required for production adapters.
 config :swoosh, :api_client, false
+
+# The authorization server in development.
+#
+# `require_https` gates incoming requests only (AttestoPhoenix.RequestContext
+# returns :insecure_transport) — it does not weaken the tokens issued, so
+# turning it off locally costs nothing and saves needing a trusted cert.
+# The issuer must match what is actually served, or the discovery document
+# advertises URLs the client cannot reach.
+#
+# If a client refuses an http issuer, generate a locally-trusted cert with
+# `mix attesto_phoenix.gen.dev_https` and move both values to https.
+config :dodo_router, AttestoPhoenix.Config,
+  require_https: false,
+  issuer: "http://localhost:#{System.get_env("PORT") || "4000"}"
