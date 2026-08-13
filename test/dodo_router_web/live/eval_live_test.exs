@@ -1288,6 +1288,34 @@ defmodule DodoRouterWeb.EvalLiveTest do
     end
   end
 
+  test "a benchmark that died mid-run stops claiming to be running", %{conn: conn, user: user} do
+    {router, _api_key} = RoutersFixtures.router_fixture(user)
+    key = ProvidersFixtures.provider_key_fixture(user)
+    log = LogsFixtures.log_fixture(router)
+
+    {:ok, evaluation} =
+      Evaluations.create_evaluation(user, log, %{
+        name: "Interrupted",
+        criteria: "Be useful",
+        judge_model: "test-model",
+        judge_provider_key_id: key.id,
+        candidate_targets: [
+          %{"provider_key_id" => key.id, "provider" => "test_provider", "model" => "test-model"}
+        ]
+      })
+
+    # A restart, a crash, or a status write that never landed leaves this
+    # behind. No process is running, so the page must not show a spinner
+    # and a progress bar forever.
+    evaluation |> Ecto.Changeset.change(benchmark_status: "running") |> Repo.update!()
+
+    {:ok, live, _html} = live(conn, ~p"/evals/#{evaluation.id}")
+
+    refute has_element?(live, "#eval-progress")
+    assert has_element?(live, "#eval-status", "interrupted")
+    refute has_element?(live, "#run-eval-button[disabled]")
+  end
+
   test "hands the agent API to the user, per router", %{conn: conn, user: user} do
     {router, _api_key} = RoutersFixtures.router_fixture(user)
 

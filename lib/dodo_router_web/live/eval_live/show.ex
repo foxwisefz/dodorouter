@@ -113,7 +113,11 @@ defmodule DodoRouterWeb.EvalLive.Show do
         assign(socket, :running?, true)
 
       {:error, :already_running} ->
-        assign(socket, :running?, true)
+        # Silently flipping to "running" made a refused click look like an
+        # accepted one — the button changed and nothing ever happened.
+        socket
+        |> assign(:running?, true)
+        |> put_flash(:info, "A benchmark for this evaluation is already running")
 
       {:error, {:judge_key_unusable, blocker}} ->
         put_flash(
@@ -128,6 +132,13 @@ defmodule DodoRouterWeb.EvalLive.Show do
         put_flash(socket, :error, "Could not start benchmark: #{inspect(reason)}")
     end
   end
+
+  # A stored "running" is only true while a process is actually running. A
+  # crash, a restart, or a status write that never landed leaves the row
+  # saying running forever — and a page that spins forever is worse than one
+  # that admits the benchmark stopped without finishing.
+  defp display_status(%{benchmark_status: "running"}, false), do: "interrupted"
+  defp display_status(%{benchmark_status: status}, _running?), do: status
 
   defp humanize_status("quota_exceeded"), do: "out of quota"
   defp humanize_status("invalid"), do: "not authenticating"
@@ -387,17 +398,22 @@ defmodule DodoRouterWeb.EvalLive.Show do
                   id="eval-status"
                   class={[
                     "rounded-full px-2.5 py-1",
-                    @evaluation.benchmark_status == "failed" && "bg-error/10 text-error",
-                    @evaluation.benchmark_status == "partial" && "bg-warning/10 text-warning",
-                    @evaluation.benchmark_status == "running" && "bg-primary/10 text-primary"
+                    display_status(@evaluation, @running?) in ["failed", "interrupted"] &&
+                      "bg-error/10 text-error",
+                    display_status(@evaluation, @running?) == "partial" &&
+                      "bg-warning/10 text-warning",
+                    display_status(@evaluation, @running?) == "running" &&
+                      "bg-primary/10 text-primary"
                   ]}
                 >
-                  Last run: {@evaluation.benchmark_status}
+                  Last run: {display_status(@evaluation, @running?)}
                 </span>
               </div>
             </div>
           </div>
-          <div class="flex items-center gap-2">
+          <%!-- Wraps and never shrinks: a long "Retry failed (re-judge 4,
+          re-run 12)" pushed "Run again" off the right edge of the page. --%>
+          <div class="flex shrink-0 flex-wrap items-center justify-end gap-2">
             <.link
               id="duplicate-eval-button"
               navigate={~p"/logs/#{@evaluation.request_log_id}/evals/new?from=#{@evaluation.id}"}
@@ -412,13 +428,15 @@ defmodule DodoRouterWeb.EvalLive.Show do
               phx-click="retry_failed"
               disabled={@running?}
               class="btn btn-outline gap-2"
-              title="Repeats only what failed, reusing answers already paid for"
+              title={"Repeats only what failed — #{retry_description(@retryable)}. Answers already paid for are reused."}
             >
               <.icon
                 name={if @running?, do: "hero-arrow-path", else: "hero-arrow-uturn-left"}
                 class={"size-4 " <> if(@running?, do: "animate-spin", else: "")}
               />
-              {if @running?, do: "Retrying…", else: "Retry failed (#{retry_description(@retryable)})"}
+              {if @running?,
+                do: "Retrying…",
+                else: "Retry #{@retryable.judge + @retryable.candidate} failed"}
             </button>
             <button
               id="run-eval-button"
