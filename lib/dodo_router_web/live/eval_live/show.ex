@@ -152,6 +152,24 @@ defmodule DodoRouterWeb.EvalLive.Show do
 
   defp long_criteria?(_evaluation), do: false
 
+  defp run_has_detail?(run) do
+    map_size(run.criterion_scores) > 0 or run.issues != [] or
+      run.candidate_output not in [nil, ""] or not is_nil(run.reasoning)
+  end
+
+  # Name what is inside, so expanding is a decision rather than a gamble.
+  defp run_detail_label(run) do
+    [
+      run.issues != [] &&
+        "#{length(run.issues)} #{if length(run.issues) == 1, do: "issue", else: "issues"}",
+      map_size(run.criterion_scores) > 0 && "criterion scores",
+      run.candidate_output not in [nil, ""] && "the answer",
+      run.reasoning && "judge reasoning"
+    ]
+    |> Enum.filter(&is_binary/1)
+    |> Enum.join(" · ")
+  end
+
   defp any_scored?(chart_series) do
     Enum.any?(chart_series, fn series -> scored_points(series) != [] end)
   end
@@ -260,15 +278,14 @@ defmodule DodoRouterWeb.EvalLive.Show do
     latest ++ Enum.sort_by(earlier, & &1.started_at, {:desc, DateTime})
   end
 
-  defp visible_runs(batch, show_errored) do
-    cond do
-      MapSet.member?(show_errored, batch.dom_id) -> batch.runs
-      # Hiding every row and offering a toggle is not a summary, it is an
-      # empty page with homework. When nothing succeeded, the errors are
-      # the result.
-      not any_succeeded?(batch) -> batch.runs
-      true -> Enum.reject(batch.runs, &(&1.status == "failed"))
-    end
+  # Errors show by default. They were hidden behind a toggle on the theory
+  # that a batch is mostly successes with a few duds; a batch where 16 of 18
+  # failed is the opposite, and the page opened on two scored runs with no
+  # sign of what happened to the rest.
+  defp visible_runs(batch, hidden_errors) do
+    if MapSet.member?(hidden_errors, batch.dom_id),
+      do: Enum.reject(batch.runs, &(&1.status == "failed")),
+      else: batch.runs
   end
 
   defp any_succeeded?(batch), do: Enum.any?(batch.runs, &(&1.status != "failed"))
@@ -758,15 +775,15 @@ defmodule DodoRouterWeb.EvalLive.Show do
                 >
                   <.icon name="hero-exclamation-triangle" class="size-3.5" />
                   {if MapSet.member?(@show_errored, batch.dom_id),
-                    do: "Hide",
-                    else: "Show"} {batch.errored} errored
+                    do: "Show",
+                    else: "Hide"} {batch.errored} errored
                 </button>
               </div>
               <p
                 :if={visible_runs(batch, @show_errored) == []}
                 class="rounded-2xl border border-dashed border-base-300 p-6 text-center text-sm text-base-content/45"
               >
-                Every run in this batch errored — use the toggle above to inspect them.
+                Errored runs are hidden — use the toggle above to bring them back.
               </p>
               <article
                 :for={run <- visible_runs(batch, @show_errored)}
@@ -833,52 +850,68 @@ defmodule DodoRouterWeb.EvalLive.Show do
                     </span>
                   </div>
                 </div>
-                <div
-                  :if={map_size(run.criterion_scores) > 0}
-                  class="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4"
+                <%!-- Everything below the identity line is collapsed. The
+                criterion bars, the issue list, the answer and the judge's
+                reasoning are each screens tall, and eighteen runs of them is
+                not a page anyone reads. --%>
+                <details
+                  :if={run_has_detail?(run)}
+                  id={"run-detail-#{run.id}"}
+                  class="group mt-4 border-t border-base-300/40 pt-3"
                 >
-                  <div :for={{criterion, value} <- run.criterion_scores}>
-                    <div class="mb-1 flex justify-between text-xs">
-                      <span>{humanize(criterion)}</span><span>{value}</span>
-                    </div>
-                    <div class="h-2 overflow-hidden rounded-full bg-base-200">
-                      <div class="h-full rounded-full bg-primary" style={"width: #{value}%"}></div>
-                    </div>
-                  </div>
-                </div>
-                <ul
-                  :if={run.issues != []}
-                  class="mt-4 list-disc space-y-1 pl-5 text-sm text-base-content/60"
-                >
-                  <li :for={issue <- run.issues}>{issue}</li>
-                </ul>
-                <details :if={run.candidate_output not in [nil, ""]} class="group mt-4">
                   <summary class="cursor-pointer text-sm font-medium text-base-content/60 hover:text-base-content">
                     <.icon
                       name="hero-chevron-right"
                       class="size-3.5 transition-transform group-open:rotate-90"
-                    />
-                    The answer{if run.failure_stage == "judge",
-                      do: " — generated and paid for, never scored",
-                      else: ""}
+                    /> {run_detail_label(run)}
                   </summary>
-                  <div class="mt-2 max-h-96 overflow-auto rounded-xl bg-base-200/50 p-4 text-sm leading-6 text-base-content/70 whitespace-pre-wrap">
-                    {run.candidate_output}
-                  </div>
-                </details>
-                <details :if={run.reasoning} class="group mt-4">
-                  <summary class="cursor-pointer text-sm font-medium text-base-content/60 hover:text-base-content">
-                    <.icon
-                      name="hero-chevron-right"
-                      class="size-3.5 transition-transform group-open:rotate-90"
-                    /> Judge reasoning
-                  </summary>
-                  <div class="mt-2 rounded-xl bg-base-200/50 p-4 text-sm leading-6 text-base-content/70 whitespace-pre-wrap">
-                    {run.reasoning}
-                    <div :if={run.rubric_gaps != []} class="mt-3 text-warning">
-                      Rubric gaps: {Enum.join(run.rubric_gaps, " · ")}
+                  <div
+                    :if={map_size(run.criterion_scores) > 0}
+                    class="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4"
+                  >
+                    <div :for={{criterion, value} <- run.criterion_scores}>
+                      <div class="mb-1 flex justify-between text-xs">
+                        <span>{humanize(criterion)}</span><span>{value}</span>
+                      </div>
+                      <div class="h-2 overflow-hidden rounded-full bg-base-200">
+                        <div class="h-full rounded-full bg-primary" style={"width: #{value}%"}></div>
+                      </div>
                     </div>
                   </div>
+                  <ul
+                    :if={run.issues != []}
+                    class="mt-4 list-disc space-y-1 pl-5 text-sm text-base-content/60"
+                  >
+                    <li :for={issue <- run.issues}>{issue}</li>
+                  </ul>
+                  <details :if={run.candidate_output not in [nil, ""]} class="group mt-4">
+                    <summary class="cursor-pointer text-sm font-medium text-base-content/60 hover:text-base-content">
+                      <.icon
+                        name="hero-chevron-right"
+                        class="size-3.5 transition-transform group-open:rotate-90"
+                      />
+                      The answer{if run.failure_stage == "judge",
+                        do: " — generated and paid for, never scored",
+                        else: ""}
+                    </summary>
+                    <div class="mt-2 max-h-96 overflow-auto rounded-xl bg-base-200/50 p-4 text-sm leading-6 text-base-content/70 whitespace-pre-wrap">
+                      {run.candidate_output}
+                    </div>
+                  </details>
+                  <details :if={run.reasoning} class="group mt-4">
+                    <summary class="cursor-pointer text-sm font-medium text-base-content/60 hover:text-base-content">
+                      <.icon
+                        name="hero-chevron-right"
+                        class="size-3.5 transition-transform group-open:rotate-90"
+                      /> Judge reasoning
+                    </summary>
+                    <div class="mt-2 rounded-xl bg-base-200/50 p-4 text-sm leading-6 text-base-content/70 whitespace-pre-wrap">
+                      {run.reasoning}
+                      <div :if={run.rubric_gaps != []} class="mt-3 text-warning">
+                        Rubric gaps: {Enum.join(run.rubric_gaps, " · ")}
+                      </div>
+                    </div>
+                  </details>
                 </details>
               </article>
             </div>

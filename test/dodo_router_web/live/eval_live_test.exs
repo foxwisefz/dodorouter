@@ -479,16 +479,17 @@ defmodule DodoRouterWeb.EvalLiveTest do
     assert has_element?(live, "#batch-#{new_batch}", "Latest batch")
     assert has_element?(live, "#batch-#{old_batch}")
 
-    # Errored runs stay collapsed until toggled, scored runs show right away.
+    # Every run shows by default — an errored run is a result, not an
+    # advanced option. The toggle exists to *hide* them.
     assert has_element?(live, "#run-#{scored.id}")
-    refute has_element?(live, "#run-#{errored.id}")
+    assert has_element?(live, "#run-#{errored.id}")
     assert has_element?(live, "#toggle-errored-#{new_batch}", "1 errored")
 
     live |> element("#toggle-errored-#{new_batch}") |> render_click()
-    assert has_element?(live, "#run-#{errored.id}")
+    refute has_element?(live, "#run-#{errored.id}")
 
     live |> element("#toggle-errored-#{new_batch}") |> render_click()
-    refute has_element?(live, "#run-#{errored.id}")
+    assert has_element?(live, "#run-#{errored.id}")
   end
 
   test "chart draws lines, marks errored runs, and pins a series on click",
@@ -1135,6 +1136,109 @@ defmodule DodoRouterWeb.EvalLiveTest do
 
     refute has_element?(live, "#quality-consistency-chart svg")
     assert has_element?(live, "#score-trend", "No run has been scored")
+  end
+
+  describe "a batch where most runs errored" do
+    setup %{user: user} do
+      {router, _api_key} = RoutersFixtures.router_fixture(user)
+      key = ProvidersFixtures.provider_key_fixture(user, %{"label" => "Mixed key"})
+      log = LogsFixtures.log_fixture(router)
+
+      {:ok, evaluation} =
+        Evaluations.create_evaluation(user, log, %{
+          name: "Mostly errors",
+          criteria: "Be useful",
+          judge_model: "test-model",
+          judge_provider_key_id: key.id,
+          candidate_targets: [
+            %{"provider_key_id" => key.id, "provider" => "test_provider", "model" => "test-model"}
+          ]
+        })
+
+      batch = Ecto.UUID.generate()
+      evaluation = evaluation |> Ecto.Changeset.change(last_batch_id: batch) |> Repo.update!()
+
+      insert = fn attrs ->
+        %EvaluationRun{}
+        |> EvaluationRun.changeset(
+          Map.merge(
+            %{
+              evaluation_id: evaluation.id,
+              batch_id: batch,
+              candidate_provider: "test_provider",
+              candidate_model: "test-model"
+            },
+            attrs
+          )
+        )
+        |> Repo.insert!()
+      end
+
+      scored =
+        insert.(%{
+          status: "completed",
+          score: 2,
+          repetition: 1,
+          summary: "Missing markers",
+          issues: ["No TITLE marker", "Prose before HTML"],
+          criterion_scores: %{"accuracy" => 35, "completeness" => 30},
+          candidate_output: "the answer text",
+          reasoning: "Checked each rule."
+        })
+
+      errored =
+        insert.(%{
+          status: "failed",
+          failure_stage: "candidate",
+          repetition: 2,
+          error: "Candidate call rate limited"
+        })
+
+      %{evaluation: evaluation, scored: scored, errored: errored}
+    end
+
+    test "the errors are on the page without hunting for a toggle", %{
+      conn: conn,
+      evaluation: evaluation,
+      errored: errored
+    } do
+      {:ok, live, _html} = live(conn, ~p"/evals/#{evaluation.id}")
+
+      # 16 of 18 failing is the batch's headline, not a footnote behind a
+      # control that reads like an advanced option.
+      assert has_element?(live, "#run-#{errored.id}")
+      assert render(live) =~ "Candidate call rate limited"
+    end
+
+    test "a scored run's detail is collapsed, so a long batch stays scannable", %{
+      conn: conn,
+      evaluation: evaluation,
+      scored: scored
+    } do
+      {:ok, live, _html} = live(conn, ~p"/evals/#{evaluation.id}")
+
+      # Criterion bars, issue lists, the answer and the judge's reasoning are
+      # each screens tall; eighteen runs of them is not a page anyone reads.
+      assert has_element?(live, "#run-#{scored.id} details#run-detail-#{scored.id}")
+      assert has_element?(live, "#run-detail-#{scored.id} li", "No TITLE marker")
+
+      # The one-line identity stays visible without expanding anything.
+      assert has_element?(live, "#run-#{scored.id}", "Missing markers")
+    end
+
+    test "errored runs can still be hidden when only the scores matter", %{
+      conn: conn,
+      evaluation: evaluation,
+      errored: errored,
+      scored: scored
+    } do
+      {:ok, live, _html} = live(conn, ~p"/evals/#{evaluation.id}")
+
+      live |> element("button[phx-click='toggle_errored']") |> render_click()
+
+      refute has_element?(live, "#run-#{errored.id}")
+      assert has_element?(live, "#run-#{scored.id}")
+    end
   end
 
   test "hands the agent API to the user, per router", %{conn: conn, user: user} do
