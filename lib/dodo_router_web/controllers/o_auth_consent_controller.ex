@@ -32,19 +32,32 @@ defmodule DodoRouterWeb.OAuthConsentController do
   def create(conn, %{"decision" => "approve"} = params) do
     user = conn.assigns.current_scope.user
     subject = PrincipalStore.subject_for(user)
-    authorize_params = Map.drop(params, ~w(decision _csrf_token))
+    granted = params |> Map.get("granted_scopes", []) |> List.wrap()
 
-    binding = ConsentGrant.binding_from_params(authorize_params, subject)
+    # The granted set is what was ticked, not what was asked for. It replaces
+    # `scope` before the binding is computed, so the single-use grant is bound
+    # to the narrowed request — approving cannot later be redeemed for the
+    # wider scope the client originally sent.
+    authorize_params =
+      params
+      |> Map.drop(~w(decision _csrf_token granted_scopes))
+      |> Map.put("scope", Enum.join(granted, " "))
 
-    case consent_grant_store().mint(binding, @grant_ttl_seconds) do
-      {:ok, token} ->
-        query = authorize_params |> Map.put("consent_token", token) |> URI.encode_query()
-        redirect(conn, to: "/oauth/authorize?" <> query)
+    cond do
+      granted == [] ->
+        render_consent(conn, params, "Pick at least one permission, or refuse.")
 
-      {:error, _reason} ->
-        conn
-        |> put_flash(:error, "Could not record that approval. Try again.")
-        |> render_consent(authorize_params)
+      true ->
+        binding = ConsentGrant.binding_from_params(authorize_params, subject)
+
+        case consent_grant_store().mint(binding, @grant_ttl_seconds) do
+          {:ok, token} ->
+            query = authorize_params |> Map.put("consent_token", token) |> URI.encode_query()
+            redirect(conn, to: "/oauth/authorize?" <> query)
+
+          {:error, _reason} ->
+            render_consent(conn, params, "Could not record that approval. Try again.")
+        end
     end
   end
 
@@ -52,11 +65,11 @@ defmodule DodoRouterWeb.OAuthConsentController do
     # A refusal has to go back to the client as access_denied rather than
     # leaving it waiting — re-entering without a grant lets attesto produce the
     # RFC 6749 §4.1.2.1 error on the redirect URI it already validated.
-    query = params |> Map.drop(~w(decision _csrf_token)) |> URI.encode_query()
+    query = params |> Map.drop(~w(decision _csrf_token granted_scopes)) |> URI.encode_query()
     redirect(conn, to: "/oauth/authorize?" <> query <> "&prompt=none")
   end
 
-  defp render_consent(conn, params) do
+  defp render_consent(conn, params, error \\ nil) do
     client = load_client(params["client_id"])
     scopes = params |> Map.get("scope", "") |> String.split(" ", trim: true)
 
@@ -72,7 +85,8 @@ defmodule DodoRouterWeb.OAuthConsentController do
       client_id: params["client_id"],
       scopes: Enum.map(scopes, &scope_detail/1),
       user: conn.assigns.current_scope.user,
-      authorize_params: Map.drop(params, ~w(decision))
+      error: error,
+      authorize_params: Map.drop(params, ~w(decision granted_scopes))
     )
   end
 

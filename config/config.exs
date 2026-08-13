@@ -11,7 +11,11 @@ import Config
 # `AttestoPhoenix.Config.resolve!/0`, which reads this key — without it the
 # config below is never found and /oauth/authorize 500s building an empty
 # struct. The installer wires the config but not this pointer.
-config :attesto_phoenix, otp_app: :dodo_router
+# attesto reads two things from its OWN app env rather than ours: `otp_app`
+# tells its controllers where the config lives, and `repo` is read directly by
+# the Ecto-backed stores (which never see the config struct). Both are global
+# pointers the installer does not write.
+config :attesto_phoenix, otp_app: :dodo_router, repo: DodoRouter.Repo
 
 config :dodo_router, AttestoPhoenix.Config,
   issuer: System.get_env("ATTESTO_ISSUER") || "https://localhost",

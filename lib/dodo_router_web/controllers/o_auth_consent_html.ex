@@ -48,25 +48,41 @@ defmodule DodoRouterWeb.OAuthConsentHTML do
             </p>
 
             <div class="mt-6 space-y-2">
-              <div
+              <label
                 :for={scope <- @scopes}
                 class={[
-                  "rounded-xl border p-3",
-                  scope.sensitive? && "border-warning/40 bg-warning/5",
-                  !scope.sensitive? && "border-base-300/60"
+                  "flex cursor-pointer items-start gap-3 rounded-xl border p-3 transition-colors",
+                  scope.sensitive? && "border-warning/40 bg-warning/5 hover:border-warning/60",
+                  !scope.sensitive? && "border-base-300/60 hover:border-primary/40"
                 ]}
               >
-                <div class="flex items-center gap-2 text-sm font-medium">
-                  {scope.label}
-                  <span
-                    :if={scope.sensitive?}
-                    class="rounded-full bg-warning/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-warning"
-                  >
-                    Sensitive
+                <%!-- Offered ticked, because the client asked for it and silently
+                      dropping a scope would break the agent — but declinable. A
+                      screen that only lists permissions is a notice, not consent. --%>
+                <input
+                  type="checkbox"
+                  name="granted_scopes[]"
+                  value={scope.name}
+                  checked
+                  form="consent-approve"
+                  class="mt-0.5 size-4 rounded border-base-300"
+                />
+                <span class="min-w-0">
+                  <span class="flex items-center gap-2 text-sm font-medium">
+                    {scope.label}
+                    <span
+                      :if={scope.sensitive?}
+                      class="rounded-full bg-warning/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-warning"
+                    >
+                      Sensitive
+                    </span>
                   </span>
-                </div>
-                <p class="mt-0.5 text-xs text-base-content/55">{scope.description}</p>
-              </div>
+                  <span class="mt-0.5 block text-xs text-base-content/55">{scope.description}</span>
+                  <code class="mt-1 block font-mono text-[11px] text-base-content/35">
+                    {scope.name}
+                  </code>
+                </span>
+              </label>
 
               <p :if={@scopes == []} class="text-sm text-base-content/55">
                 No permissions requested.
@@ -74,8 +90,21 @@ defmodule DodoRouterWeb.OAuthConsentHTML do
             </div>
 
             <div class="mt-7 flex items-center gap-3">
-              <.form for={%{}} action={~p"/oauth/consent"} method="post" class="flex-1">
-                <input :for={{k, v} <- @authorize_params} type="hidden" name={k} value={v} />
+              <.form
+                for={%{}}
+                action={~p"/oauth/consent"}
+                method="post"
+                id="consent-approve"
+                class="flex-1"
+              >
+                <%!-- `scope` is excluded on purpose: the checkboxes carry it, so
+                      what is granted is exactly what was ticked. --%>
+                <input
+                  :for={{k, v} <- Enum.reject(@authorize_params, &(elem(&1, 0) == "scope"))}
+                  type="hidden"
+                  name={k}
+                  value={v}
+                />
                 <input type="hidden" name="decision" value="approve" />
                 <button
                   id="approve-consent"
@@ -98,6 +127,8 @@ defmodule DodoRouterWeb.OAuthConsentHTML do
                 </button>
               </.form>
             </div>
+
+            <p :if={@error} class="mt-4 text-sm text-error">{@error}</p>
 
             <p class="mt-5 text-xs text-base-content/45">
               You can revoke this at any time from Agent tokens. Every call it makes is recorded.

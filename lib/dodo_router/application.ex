@@ -10,6 +10,11 @@ defmodule DodoRouter.Application do
     # Attach Finch telemetry handlers for request timing
     DodoRouter.Proxy.FinchTelemetry.attach()
 
+    # attesto's Ecto stores resolve config from their own app env and fall back
+    # to an EMPTY config when it is absent — which fails late and vaguely rather
+    # than at boot. Publishing the resolved struct once removes that whole class.
+    Application.put_env(:attesto_phoenix, :config, DodoRouter.AuthZ.server_config())
+
     # Own the secrets cache table from a process that lives as long as the
     # app — created lazily it belongs to the first process that touches it
     # and vanishes (with all cached secrets) when that process exits.
