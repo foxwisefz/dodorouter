@@ -78,8 +78,16 @@ defmodule DodoRouterWeb.OAuthConsentController do
 
   defp scope_detail(name) do
     case Scopes.get(name) do
-      nil -> %{name: name, label: name, description: identity_scope_description(name), sensitive?: false}
-      scope -> scope
+      nil ->
+        %{
+          name: name,
+          label: name,
+          description: identity_scope_description(name),
+          sensitive?: false
+        }
+
+      scope ->
+        scope
     end
   end
 

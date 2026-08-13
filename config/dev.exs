@@ -102,14 +102,17 @@ config :swoosh, :api_client, false
 
 # The authorization server in development.
 #
-# `require_https` gates incoming requests only (AttestoPhoenix.RequestContext
-# returns :insecure_transport) — it does not weaken the tokens issued, so
-# turning it off locally costs nothing and saves needing a trusted cert.
-# The issuer must match what is actually served, or the discovery document
-# advertises URLs the client cannot reach.
+# Both `issuer` and `audience` must be https — attesto rejects http outright,
+# with no localhost exemption — so local development needs a trusted cert even
+# though `require_https: false` means incoming requests themselves may be plain.
 #
-# If a client refuses an http issuer, generate a locally-trusted cert with
-# `mix attesto_phoenix.gen.dev_https` and move both values to https.
+# One-time setup:
+#     brew install mkcert && mkcert -install
+#     mix attesto_phoenix.gen.dev_https
+#
+# then run the server with the https endpoint on 4443. Until then the OAuth
+# endpoints will not boot, but the rest of the app is unaffected.
 config :dodo_router, AttestoPhoenix.Config,
   require_https: false,
-  issuer: "http://localhost:#{System.get_env("PORT") || "4000"}"
+  issuer: System.get_env("ATTESTO_ISSUER") || "https://localhost:4443",
+  audience: (System.get_env("ATTESTO_ISSUER") || "https://localhost:4443") <> "/mcp"

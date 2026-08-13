@@ -230,7 +230,7 @@ defmodule DodoRouter.MCP.Tools do
   # the first case and required in the second, rather than defaulting to
   # "whichever came first".
   defp resolve_router(principal, args) do
-    routers = Agents.routers_for(principal.user, principal.token)
+    routers = Agents.routers_for(principal.user, principal)
 
     case {args["router"], routers} do
       {nil, [only]} ->
@@ -258,7 +258,7 @@ defmodule DodoRouter.MCP.Tools do
   ## Tools
 
   defp run("list_routers", principal, _args) do
-    routers = Agents.routers_for(principal.user, principal.token)
+    routers = Agents.routers_for(principal.user, principal)
 
     {:ok,
      %{

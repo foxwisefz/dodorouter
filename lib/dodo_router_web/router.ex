@@ -46,10 +46,23 @@ defmodule DodoRouterWeb.Router do
     plug :fetch_current_scope_for_user
   end
 
+  # OAuth only. Agent tokens were the interim credential while this decision was
+  # open (dodo_router-5m5.5); they stay on the REST surface until this flow is
+  # verified end to end, then get removed rather than kept as a second way in.
+  #
+  # `Authenticate` rather than `ProtectResource`: the latter also enforces a
+  # route-level scope, and ours are per-tool — one scope guarding the whole
+  # endpoint would be too strict for tools/list and meaningless for tools/call.
+  # Tools.call/3 stays the single place scope is enforced.
   pipeline :mcp_api do
     plug :accepts, ["json"]
     plug DodoRouterWeb.Plugs.AgentAudit, interface: "mcp"
-    plug DodoRouterWeb.Plugs.AgentAuth
+
+    plug AttestoMCP.Plug.Authenticate,
+      config: &DodoRouter.AuthZ.resource_config/0,
+      resource_path: "/mcp"
+
+    plug DodoRouterWeb.Plugs.OAuthPrincipal
   end
 
   # LLM Proxy API - Router-specific endpoint

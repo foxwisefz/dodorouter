@@ -54,3 +54,6 @@ dodo_router-*.tar.gz
 
 # Dev-only OAuth signing key, generated on first boot.
 /priv/dev/
+
+# Locally-trusted mkcert dev certificate (mix attesto_phoenix.gen.dev_https).
+/priv/cert/

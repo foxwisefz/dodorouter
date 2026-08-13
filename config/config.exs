@@ -9,8 +9,14 @@ import Config
 
 config :dodo_router, AttestoPhoenix.Config,
   issuer: System.get_env("ATTESTO_ISSUER") || "https://localhost",
+  # RFC 8707 resource identifier: the canonical URI of the MCP endpoint. Tokens
+  # are minted with this as `aud` and the resource server refuses any token
+  # minted for something else, so a token stolen from another service of ours
+  # cannot be replayed here.
+  audience: System.get_env("ATTESTO_AUDIENCE") || "https://localhost/mcp",
   keystore: DodoRouter.AuthZ.Keystore,
   repo: DodoRouter.Repo,
+  principal_kinds: {DodoRouter.AuthZ, :principal_kinds},
   load_client: {DodoRouter.AuthZ.ClientStore, :load_client},
   verify_client_secret: {DodoRouter.AuthZ.ClientStore, :verify_client_secret},
   load_principal: {DodoRouter.AuthZ.PrincipalStore, :load_principal},

@@ -40,11 +40,18 @@ defmodule DodoRouter.Agents do
   whole point of the flag, and a UI that showed a snapshot would under-report
   what the credential can actually reach today.
   """
-  def routers_for(%User{} = user, %AgentToken{all_routers: true}), do: Routers.list_routers(user)
+  # Takes a principal, not a credential. Written against `%AgentToken{}` first,
+  # which broke the moment an OAuth principal arrived carrying `token: nil` —
+  # reach is a property of who is calling, not of how they authenticated, and
+  # matching on the credential is exactly the leak `Principal` exists to stop.
+  def routers_for(%User{} = user, %Principal{all_routers: true}), do: Routers.list_routers(user)
 
-  def routers_for(%User{} = user, %AgentToken{router_ids: ids}) do
+  def routers_for(%User{} = user, %Principal{router_ids: ids}) do
     user |> Routers.list_routers() |> Enum.filter(&(&1.id in ids))
   end
+
+  def routers_for(%User{} = user, %AgentToken{} = token),
+    do: routers_for(user, Principal.from_token(token, user))
 
   def get_token(%User{} = user, id) do
     case Ecto.UUID.cast(id) do

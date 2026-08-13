@@ -10,7 +10,7 @@ defmodule DodoRouterWeb.MCPControllerTest do
 
   alias DodoRouter.Agents
   alias DodoRouter.AccountsFixtures
-  alias DodoRouter.AgentsFixtures
+  alias DodoRouter.AuthZFixtures
   alias DodoRouter.LogsFixtures
   alias DodoRouter.RoutersFixtures
 
@@ -19,9 +19,8 @@ defmodule DodoRouterWeb.MCPControllerTest do
   setup do
     user = AccountsFixtures.user_fixture()
     {router, _proxy_key} = RoutersFixtures.router_fixture(user)
-    {_token, raw} = AgentsFixtures.token_for_routers_fixture(user, [router])
 
-    %{user: user, router: router, token: raw}
+    %{user: user, router: router, token: AuthZFixtures.access_token(user)}
   end
 
   # Builds a spec-shaped request: the mirrored headers are derived from the
@@ -66,7 +65,7 @@ defmodule DodoRouterWeb.MCPControllerTest do
         |> put_req_header("mcp-method", "tools/list")
         |> post("/mcp", %{"jsonrpc" => "2.0", "id" => 1, "method" => "tools/list"})
 
-      assert json_response(conn, 401)["error"]["type"] == "unauthorized"
+      assert json_response(conn, 401)["error"] == "invalid_token"
     end
 
     test "GET and DELETE are 405 — those were the removed session verbs", %{
@@ -170,8 +169,7 @@ defmodule DodoRouterWeb.MCPControllerTest do
       user: user,
       router: router
     } do
-      {_t, limited} =
-        AgentsFixtures.token_for_routers_fixture(user, [router], %{"scopes" => ["logs:read"]})
+      limited = AuthZFixtures.access_token(user, scopes: ["logs:read"])
 
       tools = json_response(rpc(conn, limited, "tools/list"), 200)["result"]["tools"]
       by_name = Map.new(tools, &{&1["name"], &1})
@@ -212,18 +210,21 @@ defmodule DodoRouterWeb.MCPControllerTest do
       user: user,
       router: router
     } do
-      {second, _key} = RoutersFixtures.router_fixture(user)
       LogsFixtures.log_fixture(router)
 
-      {_t, one} = AgentsFixtures.token_for_routers_fixture(user, [router])
+      # An OAuth token carries scopes but no router list, so reach is every
+      # router its owner has — one here.
+      one = AuthZFixtures.access_token(user)
       body = json_response(call_tool(conn, one, "list_logs"), 200)
       assert body["result"]["isError"] == false
       assert tool_json(body)["router"] == router.slug
 
-      {_t, many} = AgentsFixtures.token_for_routers_fixture(user, [router, second])
+      # A second router makes the argument ambiguous, and ambiguous is refused
+      # rather than guessed — picking one silently would attribute results to a
+      # router the caller never named.
+      {_second, _key} = RoutersFixtures.router_fixture(user)
+      many = AuthZFixtures.access_token(user)
       body = json_response(call_tool(conn, many, "list_logs"), 200)
-      # Ambiguous rather than guessed: picking one silently would attribute
-      # results to a router the caller never named.
       assert body["result"]["isError"]
       assert hd(body["result"]["content"])["text"] =~ "`router` is required"
     end
@@ -233,8 +234,7 @@ defmodule DodoRouterWeb.MCPControllerTest do
       user: user,
       router: router
     } do
-      {_t, limited} =
-        AgentsFixtures.token_for_routers_fixture(user, [router], %{"scopes" => ["logs:read"]})
+      limited = AuthZFixtures.access_token(user, scopes: ["logs:read"])
 
       body = json_response(call_tool(conn, limited, "list_evals"), 200)
 
@@ -255,8 +255,7 @@ defmodule DodoRouterWeb.MCPControllerTest do
             Jason.encode!(%{"messages" => [%{"role" => "user", "content" => "secret"}]})
         })
 
-      {_t, limited} =
-        AgentsFixtures.token_for_routers_fixture(user, [router], %{"scopes" => ["logs:read"]})
+      limited = AuthZFixtures.access_token(user, scopes: ["logs:read"])
 
       body = json_response(call_tool(conn, limited, "get_log", %{"id" => log.id}), 200)
       payload = tool_json(body)

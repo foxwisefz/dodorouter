@@ -46,6 +46,30 @@ defmodule DodoRouter.Agents.Principal do
     }
   end
 
+  @doc """
+  Builds a principal from an attesto-verified access token.
+
+  The other half of the seam: everything downstream reads this struct and never
+  the credential, so an OAuth token and an agent token are indistinguishable to
+  the tools, the scope checks and the audit trail.
+
+  Reach is currently every router the owner has. An OAuth token carries scopes
+  but no router list, so the per-router narrowing an agent token can express has
+  no equivalent yet — see dodo_router-5m5.9.
+  """
+  def from_oauth(%{} = context, user) do
+    %__MODULE__{
+      kind: "oauth",
+      id: nil,
+      name: context[:client_id] || context["client_id"],
+      user: user,
+      scopes: context[:scope] || context["scope"] || [],
+      token: nil,
+      router_ids: [],
+      all_routers: true
+    }
+  end
+
   def allows?(%__MODULE__{scopes: scopes}, required), do: Scopes.satisfied?(scopes, required)
 
   @doc """
