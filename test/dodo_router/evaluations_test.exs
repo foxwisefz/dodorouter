@@ -1240,7 +1240,13 @@ defmodule DodoRouter.EvaluationsTest do
       # button looked dead. It goes through the same path as a fresh run.
       assert :ok = Evaluations.enqueue_retry(user, evaluation)
 
-      run = Repo.one!(from(r in EvaluationRun, where: r.evaluation_id == ^evaluation.id))
+      run =
+        Repo.one!(
+          from(r in EvaluationRun,
+            where: r.evaluation_id == ^evaluation.id and is_nil(r.superseded_at)
+          )
+        )
+
       assert run.status == "completed"
     end
 
@@ -1297,6 +1303,68 @@ defmodule DodoRouter.EvaluationsTest do
       # a status computed from the retry alone would report "failed" and
       # erase two good results.
       assert Evaluations.get_evaluation!(user, evaluation.id).benchmark_status == "partial"
+    end
+
+    test "keeps the attempt it replaced, without inflating the batch", %{
+      user: user,
+      key: key,
+      log: log
+    } do
+      evaluation = eval_with(user, log, key, %{judge_model: "fail-model"})
+      assert {:ok, _} = Evaluations.run(user, evaluation)
+
+      [original] = Repo.all(from(r in EvaluationRun, where: r.evaluation_id == ^evaluation.id))
+      assert original.status == "failed"
+      first_error = original.error
+
+      evaluation
+      |> Ecto.Changeset.change(judge_model: "judge-model")
+      |> Repo.update!()
+
+      evaluation = Evaluations.get_evaluation!(user, evaluation.id)
+      assert {:ok, [_]} = Evaluations.retry_failed(user, evaluation)
+
+      # The row keeps its identity, so the batch is still one run and its
+      # averages still describe one measurement per repetition.
+      evaluation = Evaluations.get_evaluation!(user, evaluation.id)
+      assert length(Evaluations.latest_batch_runs(evaluation)) == 1
+      assert Evaluations.summary(evaluation).runs == 1
+
+      live = Repo.get!(EvaluationRun, original.id)
+      assert live.status == "completed"
+      assert is_nil(live.superseded_at)
+
+      # And the failure it replaced is still on record rather than erased.
+      assert [previous] = Evaluations.previous_attempts(live)
+      assert previous.status == "failed"
+      assert previous.error == first_error
+      assert previous.superseded_at
+      assert previous.superseded_by_id == live.id
+    end
+
+    test "a second retry stacks attempts newest first", %{user: user, key: key, log: log} do
+      evaluation = eval_with(user, log, key, %{judge_model: "fail-model"})
+      assert {:ok, _} = Evaluations.run(user, evaluation)
+
+      evaluation = Evaluations.get_evaluation!(user, evaluation.id)
+      assert {:ok, _} = Evaluations.retry_failed(user, evaluation)
+
+      evaluation = Evaluations.get_evaluation!(user, evaluation.id)
+      assert {:ok, _} = Evaluations.retry_failed(user, evaluation)
+
+      [live] =
+        Repo.all(
+          from(r in EvaluationRun,
+            where: r.evaluation_id == ^evaluation.id and is_nil(r.superseded_at)
+          )
+        )
+
+      attempts = Evaluations.previous_attempts(live)
+      assert length(attempts) == 2
+
+      assert Enum.map(attempts, & &1.superseded_at) ==
+               Enum.sort_by(attempts, & &1.superseded_at, {:desc, DateTime})
+               |> Enum.map(& &1.superseded_at)
     end
 
     test "reports how many runs are retryable, by stage", %{user: user, key: key, log: log} do

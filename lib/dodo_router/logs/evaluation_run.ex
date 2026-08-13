@@ -25,6 +25,10 @@ defmodule DodoRouter.Logs.EvaluationRun do
     # keeps candidate_output, so it can be re-judged without paying for the
     # answer twice. Nil unless status is "failed".
     field :failure_stage, :string
+    # Set on the *copy* of an attempt that a retry replaced. A row with this
+    # set is history: it is excluded from every aggregate, and reachable
+    # only through the run that superseded it.
+    field :superseded_at, :utc_datetime_usec
     field :duration_ms, :integer
     field :judge_prompt_version, :string, default: "v1"
     field :candidate_provider, :string
@@ -56,6 +60,7 @@ defmodule DodoRouter.Logs.EvaluationRun do
     belongs_to :candidate_log, DodoRouter.Logs.RequestLog
     belongs_to :candidate_provider_key, DodoRouter.Providers.ProviderKey
     belongs_to :judge_provider_key, DodoRouter.Providers.ProviderKey
+    belongs_to :superseded_by, __MODULE__
 
     timestamps(type: :utc_datetime)
   end
@@ -74,6 +79,8 @@ defmodule DodoRouter.Logs.EvaluationRun do
       :raw_judge_response,
       :error,
       :failure_stage,
+      :superseded_at,
+      :superseded_by_id,
       :duration_ms,
       :judge_prompt_version,
       :candidate_provider_key_id,

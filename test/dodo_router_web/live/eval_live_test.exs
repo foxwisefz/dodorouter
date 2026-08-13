@@ -978,7 +978,13 @@ defmodule DodoRouterWeb.EvalLiveTest do
 
       live |> element("#retry-failed-button") |> render_click()
 
-      run = Repo.one!(from(r in EvaluationRun, where: r.evaluation_id == ^evaluation.id))
+      run =
+        Repo.one!(
+          from(r in EvaluationRun,
+            where: r.evaluation_id == ^evaluation.id and is_nil(r.superseded_at)
+          )
+        )
+
       assert run.status == "completed"
       assert is_integer(run.score)
 
@@ -1286,6 +1292,95 @@ defmodule DodoRouterWeb.EvalLiveTest do
       refute has_element?(live, "#run-#{errored.id}")
       assert has_element?(live, "#run-#{scored.id}")
     end
+  end
+
+  test "says which models it is set up to run, even before any of them have", %{
+    conn: conn,
+    user: user
+  } do
+    {router, _api_key} = RoutersFixtures.router_fixture(user)
+    key = ProvidersFixtures.provider_key_fixture(user, %{"label" => "Key 1"})
+    log = LogsFixtures.log_fixture(router)
+
+    {:ok, evaluation} =
+      Evaluations.create_evaluation(user, log, %{
+        name: "Configured but unrun",
+        criteria: "Be useful",
+        judge_model: "test-model",
+        judge_provider_key_id: key.id,
+        repetitions: 3,
+        candidate_targets: [
+          %{"provider_key_id" => key.id, "provider" => "test_provider", "model" => "model-a"},
+          %{"provider_key_id" => key.id, "provider" => "test_provider", "model" => "model-b"}
+        ]
+      })
+
+    {:ok, live, _html} = live(conn, ~p"/evals/#{evaluation.id}")
+
+    # The rankings table only lists models that produced runs, so an
+    # evaluation that never ran — or died halfway — showed nothing at all
+    # about what it was set up to measure.
+    assert has_element?(live, "#eval-candidates", "model-a")
+    assert has_element?(live, "#eval-candidates", "model-b")
+    assert has_element?(live, "#eval-candidates", "Key 1")
+    assert render(live) =~ "6 runs"
+  end
+
+  test "an earlier attempt stays reachable under the run that replaced it", %{
+    conn: conn,
+    user: user
+  } do
+    {router, _api_key} = RoutersFixtures.router_fixture(user)
+    key = ProvidersFixtures.provider_key_fixture(user)
+    log = LogsFixtures.log_fixture(router)
+
+    {:ok, evaluation} =
+      Evaluations.create_evaluation(user, log, %{
+        name: "Retried",
+        criteria: "Be useful",
+        judge_model: "test-model",
+        judge_provider_key_id: key.id,
+        candidate_targets: [
+          %{"provider_key_id" => key.id, "provider" => "test_provider", "model" => "test-model"}
+        ]
+      })
+
+    batch = Ecto.UUID.generate()
+    evaluation = evaluation |> Ecto.Changeset.change(last_batch_id: batch) |> Repo.update!()
+
+    live_run =
+      %EvaluationRun{}
+      |> EvaluationRun.changeset(%{
+        evaluation_id: evaluation.id,
+        batch_id: batch,
+        status: "completed",
+        score: 80,
+        candidate_provider: "test_provider",
+        candidate_model: "test-model",
+        repetition: 1
+      })
+      |> Repo.insert!()
+
+    %EvaluationRun{}
+    |> EvaluationRun.changeset(%{
+      evaluation_id: evaluation.id,
+      status: "failed",
+      failure_stage: "judge",
+      candidate_provider: "test_provider",
+      candidate_model: "test-model",
+      repetition: 1,
+      error: "Judge call failed — anthropic rate limited",
+      superseded_at: DateTime.utc_now(),
+      superseded_by_id: live_run.id
+    })
+    |> Repo.insert!()
+
+    {:ok, live, _html} = live(conn, ~p"/evals/#{evaluation.id}")
+
+    # One row in the batch, not two — but the failure it replaced is still
+    # on the page rather than overwritten.
+    assert render(live) =~ "1 runs"
+    assert has_element?(live, "#run-attempts-#{live_run.id}", "rate limited")
   end
 
   test "a benchmark that died mid-run stops claiming to be running", %{conn: conn, user: user} do

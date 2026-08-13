@@ -140,6 +140,30 @@ defmodule DodoRouterWeb.EvalLive.Show do
   defp display_status(%{benchmark_status: "running"}, false), do: "interrupted"
   defp display_status(%{benchmark_status: status}, _running?), do: status
 
+  defp candidate_keys(user) do
+    user |> DodoRouter.Providers.list_provider_keys() |> Map.new(&{&1.id, &1})
+  end
+
+  # Superseded attempts, grouped under the run that replaced them. Loaded
+  # once per render rather than per run, since a batch can hold dozens.
+  defp previous_attempts_by_run(evaluation) do
+    evaluation.runs
+    |> Enum.filter(& &1.superseded_at)
+    |> Enum.group_by(& &1.superseded_by_id)
+    |> Map.new(fn {run_id, attempts} ->
+      {run_id, Enum.sort_by(attempts, & &1.superseded_at, {:desc, DateTime})}
+    end)
+  end
+
+  # The target stores the key by id, so the panel resolves it and labels it
+  # the one shared way rather than inventing a fourth format.
+  defp candidate_key_label(target, keys) do
+    case Map.get(keys, target["provider_key_id"]) do
+      nil -> target["provider_name"] || target["provider"] || "key no longer configured"
+      key -> DodoRouterWeb.ProviderComponents.provider_key_option_label(key)
+    end
+  end
+
   defp humanize_status("quota_exceeded"), do: "out of quota"
   defp humanize_status("invalid"), do: "not authenticating"
   defp humanize_status(other), do: String.replace(other, "_", " ")
@@ -161,6 +185,8 @@ defmodule DodoRouterWeb.EvalLive.Show do
     |> assign(:shared_key_label, shared_key_label(evaluation))
     |> assign(:preflight, Evaluations.preflight(socket.assigns.current_user, evaluation))
     |> assign(:failure_digest, failure_digest(batch_runs))
+    |> assign(:candidate_keys, candidate_keys(socket.assigns.current_user))
+    |> assign(:previous_attempts, previous_attempts_by_run(evaluation))
     |> assign(:running?, Evaluations.benchmark_running?(evaluation))
   end
 
@@ -547,6 +573,34 @@ defmodule DodoRouterWeb.EvalLive.Show do
               <span class="font-medium">{group.provider}</span>
               <span class="text-base-content/60">
                 {group.kind}{if group.stage == "judge", do: " (as the judge)", else: ""}
+              </span>
+            </li>
+          </ul>
+        </div>
+
+        <%!-- What this evaluation is set up to measure. The rankings table
+        only lists models that produced runs, so an evaluation that never
+        ran — or died halfway — said nothing about its own configuration. --%>
+        <div
+          id="eval-candidates"
+          class="rounded-2xl border border-base-300/60 bg-base-100 p-5 shadow-sm"
+        >
+          <div class="flex flex-wrap items-baseline justify-between gap-2">
+            <h2 class="font-semibold">Candidates</h2>
+            <span class="text-sm text-base-content/45">
+              {length(@evaluation.candidate_targets)} × {@evaluation.repetitions} repetitions = {planned_runs(
+                @evaluation
+              )} runs
+            </span>
+          </div>
+          <ul class="mt-3 grid gap-2 sm:grid-cols-2">
+            <li
+              :for={target <- @evaluation.candidate_targets}
+              class="flex items-baseline justify-between gap-3 rounded-xl bg-base-200/40 px-3 py-2 text-sm"
+            >
+              <span class="font-mono text-xs">{target["model"]}</span>
+              <span class="text-xs text-base-content/50">
+                {candidate_key_label(target, @candidate_keys)}
               </span>
             </li>
           </ul>
@@ -1070,6 +1124,46 @@ defmodule DodoRouterWeb.EvalLive.Show do
                       </div>
                     </div>
                   </details>
+                </details>
+                <details
+                  :if={Map.has_key?(@previous_attempts, run.id)}
+                  id={"run-attempts-#{run.id}"}
+                  class="group mt-3 border-t border-base-300/40 pt-3"
+                >
+                  <summary class="cursor-pointer text-sm font-medium text-base-content/50 hover:text-base-content">
+                    <.icon
+                      name="hero-chevron-right"
+                      class="size-3.5 transition-transform group-open:rotate-90"
+                    />
+                    {length(Map.fetch!(@previous_attempts, run.id))} earlier {if length(
+                                                                                   Map.fetch!(
+                                                                                     @previous_attempts,
+                                                                                     run.id
+                                                                                   )
+                                                                                 ) == 1,
+                                                                                 do: "attempt",
+                                                                                 else: "attempts"} — replaced by this run
+                  </summary>
+                  <ul class="mt-2 space-y-2">
+                    <li
+                      :for={attempt <- Map.fetch!(@previous_attempts, run.id)}
+                      class="rounded-xl bg-base-200/40 px-3 py-2 text-sm"
+                    >
+                      <div class="flex flex-wrap items-baseline justify-between gap-2">
+                        <span class="font-medium">
+                          {run_status_label(attempt)}{if attempt.score,
+                            do: " · #{attempt.score}",
+                            else: ""}
+                        </span>
+                        <span class="text-xs text-base-content/45">
+                          {Calendar.strftime(attempt.superseded_at, "%b %-d, %H:%M UTC")}
+                        </span>
+                      </div>
+                      <div :if={attempt.error} class="mt-1 text-base-content/60">
+                        {one_line(attempt.error)}
+                      </div>
+                    </li>
+                  </ul>
                 </details>
               </article>
             </div>

@@ -497,6 +497,7 @@ defmodule DodoRouter.Evaluations do
     output = run.candidate_output
     judge_only? = judge_retryable?(run)
 
+    archive_attempt!(run)
     run = update_run!(run, %{status: "running", error: nil, failure_stage: nil})
 
     if judge_only? do
@@ -510,6 +511,49 @@ defmodule DodoRouter.Evaluations do
 
       generate_and_judge(user, evaluation, run, target, started_at)
     end
+  end
+
+  # A copy of the attempt as it stands, stamped with when it was replaced and
+  # by which run. The copy carries no batch_id: it is not part of any batch's
+  # count, and giving it one would put it back into every aggregate that
+  # filters by batch.
+  defp archive_attempt!(%EvaluationRun{} = run) do
+    run
+    |> Map.take([
+      :evaluation_id,
+      :status,
+      :score,
+      :max_score,
+      :summary,
+      :criterion_scores,
+      :issues,
+      :reasoning,
+      :rubric_gaps,
+      :raw_judge_response,
+      :error,
+      :failure_stage,
+      :duration_ms,
+      :judge_prompt_version,
+      :candidate_provider_key_id,
+      :candidate_provider_key_label,
+      :candidate_provider,
+      :candidate_model,
+      :repetition,
+      :candidate_log_id,
+      :candidate_latency_ms,
+      :candidate_cost_usd,
+      :candidate_output,
+      :candidate_list_cost_usd,
+      :judge_cost_usd,
+      :judge_list_cost_usd,
+      :judge_log_id,
+      :judge_provider_key_id,
+      :judge_provider_key_label
+    ])
+    |> Map.put(:superseded_at, DateTime.utc_now())
+    |> Map.put(:superseded_by_id, run.id)
+    |> then(&EvaluationRun.changeset(%EvaluationRun{}, &1))
+    |> Repo.insert!()
   end
 
   defp safe_run_candidate(user, evaluation, target, repetition, batch_id) do
@@ -894,10 +938,31 @@ defmodule DodoRouter.Evaluations do
   one misleading average. Runs from before batching (nil `last_batch_id`)
   are treated as one legacy batch.
   """
-  def latest_batch_runs(%Evaluation{runs: runs, last_batch_id: nil}), do: runs
+  # Superseded rows are history, never data: a retried attempt would
+  # otherwise be counted twice — once as the failure it was and once as the
+  # result it became — and drag every average with it.
+  def latest_batch_runs(%Evaluation{runs: runs, last_batch_id: nil}), do: live_runs(runs)
 
   def latest_batch_runs(%Evaluation{runs: runs, last_batch_id: batch_id}),
-    do: Enum.filter(runs, &(&1.batch_id == batch_id))
+    do: runs |> live_runs() |> Enum.filter(&(&1.batch_id == batch_id))
+
+  @doc "Every run of this evaluation that has not been superseded."
+  def live_runs(runs) when is_list(runs), do: Enum.reject(runs, & &1.superseded_at)
+
+  @doc """
+  The attempts a run replaced, most recently superseded first.
+
+  Retrying keeps the row's identity so the batch stays one row per
+  measurement; the attempt it replaced is copied aside rather than
+  overwritten, so "why did it fail the first time" survives the fix.
+  """
+  def previous_attempts(%EvaluationRun{id: id}) do
+    from(r in EvaluationRun,
+      where: r.superseded_by_id == ^id,
+      order_by: [desc: r.superseded_at]
+    )
+    |> Repo.all()
+  end
 
   def summary(%Evaluation{} = evaluation) do
     runs = latest_batch_runs(evaluation)
