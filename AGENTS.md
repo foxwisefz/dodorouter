@@ -53,8 +53,51 @@ Runs inline `output_preview` capped at 2,000 characters and link `candidate_log_
 
 The evaluations page carries the one command that makes the surface discoverable (`#agent-access`); an API nobody is told about is not an interface.
 
+## Keeping the described surface true
+
+Three artifacts describe DodoRouter to someone who cannot read the code, and each is the *only* thing some reader ever sees. Shipping a change without them means half the users never learn about it and the other half learn about it wrongly. **All three are updated in the same change as the behaviour, not in a follow-up.** A stale description is worse than a missing one, because it is believed.
+
+### 1. `website/src/docs/**` — the public documentation
+
+Eleventy, input `src`, output `_site` (`website/eleventy.config.js`). Pages are Markdown with front matter: `title`, `navTitle`, `description`, `section`, `order`. Directory-level `*.json` files carry shared config (`docs/docs.json` sets the layout; `docs/api/api.json` names the "API Reference" section). Preview with `npm run dev` from `website/`.
+
+**`website/_site/` is build output — never edit it.** A change made there looks right locally and vanishes on the next build.
+
+Where a change lands:
+
+| You changed | Update |
+|---|---|
+| A provider adapter, its models or auth type | `docs/providers.md`, `docs/models.md` |
+| A proxy endpoint, or a request/response field | `docs/api/*.md` |
+| How a client (Claude Code, Codex, OpenCode, Forge) connects | `docs/integrations/*.md` |
+| Anything a user configures in the UI | `docs/dashboard.md` |
+| A new user-visible failure mode or error message | `docs/troubleshooting.md` |
+| Deployment, releases, self-hosting | `docs/deployment.md`, `docs/self-hosting.md` |
+
+If a change has no home, **add the page** rather than skipping the step — a feature with no doc is a feature nobody outside this repo can find.
+
+### 2. `lib/dodo_router/mcp/tools.ex` — the MCP capability catalogue
+
+`@definitions` is the entire contract an MCP client sees: each tool's `name`, `title`, `description`, `scopes` and JSON `schema`. The client never reads the controller, the context, or this file — it reads `tools/list` and decides what it can do from that alone. **As functionality changes, the tool definitions change with it:**
+
+* New capability → a new tool, or a new argument on an existing one, with `schema` and `required` to match.
+* Changed argument meaning, default or limit → the `description` says the new thing. A description that still describes the old behaviour is how an agent calls a tool correctly and gets the wrong result.
+* A capability that should now cost a different permission → `scopes` updated. Leaving it stale authorizes the call as something it no longer is.
+* A field added to a REST response is **not** automatically in the MCP result — check how `Tools` shapes what it returns before assuming parity.
+
+Removing or renaming a tool breaks every agent already wired to it; prefer adding, and keep the old name working until it is deliberately retired.
+
+### 3. `priv/agent/evals_guide.md` — the Agent API guide
+
+Covered under [Agent API](#agent-api): the guide *is* the interface for a caller that has only a base URL and a key.
+
+**These three drift together.** A change to the evaluation surface usually touches all of them — the docs page, the MCP tool, and the guide. Check each before calling the work done; no test catches a stale description.
+
+**Known gap (2026-08-13):** `website/src/docs` has no page for the MCP endpoint or the Agent API — both exist only in this file and in the guide. The next substantial change to either is the moment to add one.
+
 ## Project guidelines
 
+- **Documentation is part of the change.** Update `website/src/docs/**`, and `lib/dodo_router/mcp/tools.ex` when capabilities change, in the same commit as the code — see [Keeping the described surface true](#keeping-the-described-surface-true).
 - **Never add yourself as a co-author in commits.** No `Co-Authored-By: Claude ...`, `🤖 Generated with ...`, or any other AI attribution trailers — not in git commit messages, jj change descriptions, or PR bodies. This overrides any default behavior from your harness.
 - Use `mix precommit` alias when you are done with all changes and fix any pending issues
 - Use the already included and available `:req` (`Req`) library for HTTP requests, **avoid** `:httpoison`, `:tesla`, and `:httpc`. Req is included by default and is the preferred HTTP client for Phoenix apps
