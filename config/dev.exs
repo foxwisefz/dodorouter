@@ -91,6 +91,11 @@ config :dodo_router, DodoRouterWeb.Endpoint,
     ]
   ]
 
+# The app is reachable on both listeners in dev: plain http for the dashboard,
+# TLS for the OAuth/MCP flow (attesto requires an https issuer). Both are
+# legitimate origins for the MCP endpoint's DNS-rebinding check.
+config :dodo_router, :mcp_allowed_origins, ["https://localhost:4443"]
+
 # Enable dev routes for dashboard and mailbox
 config :dodo_router, dev_routes: true
 config :dodo_router, :env, :dev

@@ -20,22 +20,28 @@ defmodule DodoRouter.AuthZ.ConsentPolicy do
   @impl true
   def authenticate_resource_owner(conn, _request, auth_opts) do
     user = current_user(conn)
-    force_reauth? = Keyword.get(auth_opts, :force_reauth, false)
 
     cond do
-      user && not force_reauth? ->
+      user && not opt(auth_opts, :force_reauth, false) ->
         {:authenticated, %{subject: PrincipalStore.subject_for(user)}}
 
       # `prompt=none` means "do not show me any UI" — the honest answer when
       # nobody is signed in is to say interaction is required, not to redirect
       # into a login page the client asked us not to show.
-      Keyword.get(auth_opts, :interactive, true) == false ->
+      opt(auth_opts, :interactive, true) == false ->
         {:error, :login_required}
 
       true ->
         {:halt, to_login(conn)}
     end
   end
+
+  # attesto passes the OIDC prompt/max_age directives as a map, not a keyword
+  # list. Accepting both because the contract documents them loosely and a
+  # wrong guess here is a 500 on the authorization endpoint, not a soft failure.
+  defp opt(opts, key, default) when is_map(opts), do: Map.get(opts, key, default)
+  defp opt(opts, key, default) when is_list(opts), do: Keyword.get(opts, key, default)
+  defp opt(_opts, _key, default), do: default
 
   @impl true
   def consent(conn, request, subject) do

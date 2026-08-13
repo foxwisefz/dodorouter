@@ -61,6 +61,11 @@ defmodule DodoRouterWeb.OAuthConsentController do
     scopes = params |> Map.get("scope", "") |> String.split(" ", trim: true)
 
     conn
+    # No app shell: the root layout boots app.js, which opens a LiveView socket
+    # on a page that has no LiveView. An OAuth consent screen is a standalone
+    # form — it should not depend on the application's JS at all, and letting it
+    # do so produced a page-reload loop.
+    |> put_root_layout(false)
     |> put_layout(false)
     |> render(:show,
       client: client,

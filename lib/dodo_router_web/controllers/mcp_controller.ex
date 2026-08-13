@@ -136,18 +136,30 @@ defmodule DodoRouterWeb.MCPController do
 
   # The endpoint is browser-reachable, so an absent Origin (a normal API client)
   # is fine while a present, foreign one is not.
+  #
+  # Checked against a configured list, not `Endpoint.url()` alone: the app is
+  # reachable on more than one origin (plain http for the dashboard, TLS on
+  # another port for OAuth, since attesto requires an https issuer), and
+  # comparing against a single canonical URL rejects the very origin the OAuth
+  # flow runs on.
   defp check_origin(conn) do
     case get_req_header(conn, "origin") do
       [] ->
         :ok
 
       [origin] ->
-        if origin == DodoRouterWeb.Endpoint.url(),
-          do: :ok,
-          else:
-            {:error, 403, @invalid_request, "Origin #{origin} is not allowed for this endpoint.",
-             nil}
+        if origin in allowed_origins() do
+          :ok
+        else
+          {:error, 403, @invalid_request, "Origin #{origin} is not allowed for this endpoint.",
+           nil}
+        end
     end
+  end
+
+  defp allowed_origins do
+    configured = Application.get_env(:dodo_router, :mcp_allowed_origins, [])
+    Enum.uniq([DodoRouterWeb.Endpoint.url() | configured])
   end
 
   defp body(conn) do
