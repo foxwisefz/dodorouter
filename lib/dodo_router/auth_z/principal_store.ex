@@ -35,6 +35,11 @@ defmodule DodoRouter.AuthZ.PrincipalStore do
     case load_principal(@prefix <> user_id) do
       {:ok, %User{} = user} ->
         %{
+          # `kind` is required, not decorative: Attesto.Token.fetch_kind/2 looks
+          # the principal kind up by this value and fails the whole mint with
+          # :unknown_principal_kind when it is absent. It must match the kind
+          # declared in DodoRouter.AuthZ.principal_kinds/0.
+          kind: "user",
           sub: @prefix <> user.id,
           email: user.email,
           # Not a claim a client should read as authorization — the scopes on
@@ -44,7 +49,7 @@ defmodule DodoRouter.AuthZ.PrincipalStore do
         }
 
       {:error, :not_found} ->
-        %{sub: @prefix <> user_id}
+        %{kind: "user", sub: @prefix <> user_id}
     end
   end
 

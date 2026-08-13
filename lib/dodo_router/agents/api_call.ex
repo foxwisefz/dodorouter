@@ -78,6 +78,12 @@ defmodule DodoRouter.Agents.ApiCall do
     # reason a call goes unrecorded.
     |> update_change(:error, &truncate(&1, 2_000))
     |> update_change(:user_agent, &truncate(&1, 500))
+    # These are varchar(255). Losing the whole record because a caller passed
+    # something long is the worst possible failure for an audit table — the row
+    # exists to say a call happened, and a truncated field still says that.
+    |> update_change(:operation, &truncate(&1, 250))
+    |> update_change(:principal_name, &truncate(&1, 250))
+    |> update_change(:tool, &truncate(&1, 250))
   end
 
   def outcomes, do: @outcomes

@@ -32,6 +32,10 @@ defmodule DodoRouter.AuthZ.EventSink do
     :ok
   end
 
+  # AttestoPhoenix.Event carries `:name`. Matching the wrong key fell through to
+  # inspect/1, which stuffed the entire struct into a varchar(255) column and
+  # lost the audit row to a truncation error.
+  defp event_name(%{name: name}) when is_atom(name) or is_binary(name), do: to_string(name)
   defp event_name(%{event: name}), do: to_string(name)
   defp event_name(%{"event" => name}), do: to_string(name)
   defp event_name(event) when is_atom(event), do: to_string(event)
@@ -52,6 +56,7 @@ defmodule DodoRouter.AuthZ.EventSink do
   defp client_name(_event), do: nil
 
   defp scopes(%{scope: scope}) when is_binary(scope), do: String.split(scope, " ", trim: true)
+  defp scopes(%{scope: scopes}) when is_list(scopes), do: scopes
   defp scopes(%{scopes: scopes}) when is_list(scopes), do: scopes
   defp scopes(_event), do: []
 end

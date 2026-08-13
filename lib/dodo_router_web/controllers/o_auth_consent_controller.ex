@@ -71,7 +71,15 @@ defmodule DodoRouterWeb.OAuthConsentController do
 
   defp render_consent(conn, params, error \\ nil) do
     client = load_client(params["client_id"])
-    scopes = params |> Map.get("scope", "") |> String.split(" ", trim: true)
+
+    scopes =
+      params |> Map.get("scope", "") |> String.split(" ", trim: true) |> Enum.map(&scope_detail/1)
+
+    # Protocol scopes are not data access and must not sit at the same visual
+    # weight as one. `openid` only asks for an identity assertion this API never
+    # reads; `offline_access` decides whether the agent keeps working after the
+    # token expires. Neither is a decision about your customers' prompts.
+    {permissions, session} = Enum.split_with(scopes, &(&1.name not in ~w(openid offline_access)))
 
     conn
     # No app shell: the root layout boots app.js, which opens a LiveView socket
@@ -83,7 +91,8 @@ defmodule DodoRouterWeb.OAuthConsentController do
     |> render(:show,
       client: client,
       client_id: params["client_id"],
-      scopes: Enum.map(scopes, &scope_detail/1),
+      scopes: permissions,
+      session_scopes: session,
       user: conn.assigns.current_scope.user,
       error: error,
       authorize_params: Map.drop(params, ~w(decision granted_scopes))

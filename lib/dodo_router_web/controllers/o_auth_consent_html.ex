@@ -47,7 +47,10 @@ defmodule DodoRouterWeb.OAuthConsentHTML do
               just started it yourself.
             </p>
 
-            <div class="mt-6 space-y-2">
+            <p class="mt-6 text-[11px] font-semibold uppercase tracking-wider text-base-content/40">
+              Access to your data
+            </p>
+            <div class="mt-1.5 space-y-2">
               <label
                 :for={scope <- @scopes}
                 class={[
@@ -85,8 +88,28 @@ defmodule DodoRouterWeb.OAuthConsentHTML do
               </label>
 
               <p :if={@scopes == []} class="text-sm text-base-content/55">
-                No permissions requested.
+                No access to your data requested.
               </p>
+            </div>
+
+            <div :if={@session_scopes != []} class="mt-4 border-t border-base-300/60 pt-3">
+              <p class="text-[11px] font-semibold uppercase tracking-wider text-base-content/40">
+                Sign-in
+              </p>
+              <label
+                :for={scope <- @session_scopes}
+                class="mt-1.5 flex cursor-pointer items-center gap-2.5 text-xs text-base-content/55"
+              >
+                <input
+                  type="checkbox"
+                  name="granted_scopes[]"
+                  value={scope.name}
+                  checked
+                  form="consent-approve"
+                  class="size-3.5 rounded border-base-300"
+                />
+                <span>{scope.description}</span>
+              </label>
             </div>
 
             <div class="mt-7 flex items-center gap-3">
