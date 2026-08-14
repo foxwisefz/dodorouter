@@ -425,7 +425,7 @@ defmodule DodoRouterWeb.EvalLiveTest do
     assert has_element?(live, "#eval-runs", "Errored")
   end
 
-  test "groups run history by batch and hides errored runs behind a toggle",
+  test "one results view: a batch selector switches every section at once",
        %{conn: conn, user: user} do
     {router, _api_key} = RoutersFixtures.router_fixture(user)
     provider_key = ProvidersFixtures.provider_key_fixture(user)
@@ -465,7 +465,7 @@ defmodule DodoRouterWeb.EvalLiveTest do
       |> Repo.insert!()
     end
 
-    _old_run = insert_run.(%{status: "completed", score: 60, batch_id: old_batch})
+    old_run = insert_run.(%{status: "completed", score: 60, batch_id: old_batch})
     scored = insert_run.(%{status: "completed", score: 90, batch_id: new_batch})
     errored = insert_run.(%{status: "failed", error: "boom", batch_id: new_batch, repetition: 2})
 
@@ -475,13 +475,35 @@ defmodule DodoRouterWeb.EvalLiveTest do
 
     {:ok, live, _html} = live(conn, ~p"/evals/#{evaluation.id}")
 
-    # One section per batch, latest first with its own label.
-    assert has_element?(live, "#batch-#{new_batch}", "Latest batch")
+    # Both batches are listed in the selector; the latest is the default
+    # view and the only one whose runs are on the page.
+    assert has_element?(live, "#batch-#{new_batch}", "Latest")
     assert has_element?(live, "#batch-#{old_batch}")
+
+    assert has_element?(live, "#run-#{scored.id}")
+    assert has_element?(live, "#run-#{errored.id}")
+    refute has_element?(live, "#run-#{old_run.id}")
+
+    # The aggregates follow the selection: the latest batch scored 90, the
+    # old one 60. Switching rewrites stats, rankings and the run list
+    # together — that is the entire point of the selector.
+    assert has_element?(live, "#eval-summary", "90/100")
+    refute has_element?(live, "#eval-summary", "60/100")
+
+    live |> element("#batch-#{old_batch}") |> render_click()
+
+    assert has_element?(live, "#run-#{old_run.id}")
+    refute has_element?(live, "#run-#{scored.id}")
+    assert has_element?(live, "#eval-summary", "60/100")
+    refute has_element?(live, "#eval-summary", "90/100")
+
+    live |> element("#batch-#{new_batch}") |> render_click()
+
+    assert has_element?(live, "#run-#{scored.id}")
+    refute has_element?(live, "#run-#{old_run.id}")
 
     # Every run shows by default — an errored run is a result, not an
     # advanced option. The toggle exists to *hide* them.
-    assert has_element?(live, "#run-#{scored.id}")
     assert has_element?(live, "#run-#{errored.id}")
     assert has_element?(live, "#toggle-errored-#{new_batch}", "1 errored")
 

@@ -1071,8 +1071,9 @@ defmodule DodoRouter.Evaluations do
     |> Repo.all()
   end
 
-  def summary(%Evaluation{} = evaluation) do
-    runs = latest_batch_runs(evaluation)
+  def summary(%Evaluation{} = evaluation), do: evaluation |> latest_batch_runs() |> summary()
+
+  def summary(runs) when is_list(runs) do
     completed = Enum.filter(runs, &(&1.status == "completed" and is_integer(&1.score)))
     scores = Enum.map(completed, & &1.score)
 
@@ -1121,9 +1122,10 @@ defmodule DodoRouter.Evaluations do
     end
   end
 
-  def rankings(%Evaluation{} = evaluation) do
-    evaluation
-    |> latest_batch_runs()
+  def rankings(%Evaluation{} = evaluation), do: evaluation |> latest_batch_runs() |> rankings()
+
+  def rankings(runs) when is_list(runs) do
+    runs
     |> Enum.group_by(&{&1.candidate_provider, &1.candidate_model})
     |> Enum.map(fn {{provider, model}, target_runs} ->
       completed = Enum.filter(target_runs, &(&1.status == "completed" and is_integer(&1.score)))

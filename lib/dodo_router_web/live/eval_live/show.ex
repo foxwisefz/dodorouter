@@ -20,6 +20,7 @@ defmodule DodoRouterWeb.EvalLive.Show do
         {:ok,
          socket
          |> assign(:show_errored, MapSet.new())
+         |> assign(:selected_batch, nil)
          |> assign(:criteria_expanded, false)
          |> assign(:retrying?, false)
          |> assign(:retry_progress, nil)
@@ -68,6 +69,13 @@ defmodule DodoRouterWeb.EvalLive.Show do
         else: MapSet.put(shown, batch_dom_id)
 
     {:noreply, assign(socket, :show_errored, shown)}
+  end
+
+  def handle_event("select_batch", %{"batch" => dom_id}, socket) do
+    {:noreply,
+     socket
+     |> assign(:selected_batch, dom_id)
+     |> load(socket.assigns.evaluation)}
   end
 
   def handle_event("toggle_criteria", _params, socket) do
@@ -218,15 +226,19 @@ defmodule DodoRouterWeb.EvalLive.Show do
   defp humanize_status(other), do: String.replace(other, "_", " ")
 
   defp load(socket, evaluation) do
-    batch_runs = Evaluations.latest_batch_runs(evaluation)
-    rankings = Evaluations.rankings(evaluation)
+    batches = group_batches(evaluation)
+    selected = selected_batch(socket.assigns[:selected_batch], batches)
+    group = Enum.find(batches, &(&1.dom_id == selected))
+    batch_runs = if group, do: Evaluations.live_runs(group.runs), else: []
+    rankings = Evaluations.rankings(batch_runs)
 
     socket
     |> assign(:page_title, evaluation.name)
     |> assign(:evaluation, evaluation)
-    |> assign(:batch_runs, batch_runs)
-    |> assign(:batches, group_batches(evaluation))
-    |> assign(:summary, Evaluations.summary(evaluation))
+    |> assign(:batches, batches)
+    |> assign(:selected_batch, selected)
+    |> assign(:selected_group, group)
+    |> assign(:summary, Evaluations.summary(batch_runs))
     |> assign(:rankings, rankings)
     |> assign(:chart_series, chart_series(batch_runs, rankings))
     |> assign(:rubric_feedback, Evaluations.rubric_feedback(batch_runs))
@@ -240,6 +252,17 @@ defmodule DodoRouterWeb.EvalLive.Show do
     |> assign(:candidate_keys, candidate_keys(socket.assigns.current_user))
     |> assign(:previous_attempts, previous_attempts_by_run(evaluation))
     |> assign(:running?, Evaluations.benchmark_running?(evaluation))
+  end
+
+  # A nil pick means "follow the latest": a reload mid-benchmark keeps
+  # showing the batch that is filling up. An explicit pick survives reloads
+  # and is dropped only when the batch itself no longer exists.
+  defp selected_batch(picked, batches) do
+    cond do
+      batches == [] -> nil
+      picked && Enum.any?(batches, &(&1.dom_id == picked)) -> picked
+      true -> hd(batches).dom_id
+    end
   end
 
   # Judging and generating through one account is how a benchmark rate
@@ -719,9 +742,52 @@ defmodule DodoRouterWeb.EvalLive.Show do
           </ul>
         </div>
 
+        <%!-- The page has one results view, scoped by the batch picked here.
+        "Latest batch" used to appear twice — once as silent scope for the
+        stats and charts, once as a run-history group — and read as two
+        sections showing the same runs. --%>
+        <div :if={@batches != []} id="batch-selector" class="space-y-2">
+          <div class="flex flex-wrap items-baseline justify-between gap-2">
+            <h2 class="font-semibold">Results by batch</h2>
+            <p class="text-sm text-base-content/45">
+              Stats, charts, rankings and runs below all reflect the selected batch.
+            </p>
+          </div>
+          <div class="flex flex-wrap gap-2">
+            <button
+              :for={batch <- @batches}
+              id={"batch-#{batch.dom_id}"}
+              type="button"
+              phx-click="select_batch"
+              phx-value-batch={batch.dom_id}
+              class={[
+                "flex items-baseline gap-2 rounded-xl border px-3.5 py-2 text-sm transition",
+                batch.dom_id == assigns[:selected_batch] &&
+                  "border-primary/40 bg-primary/10 font-semibold",
+                batch.dom_id != assigns[:selected_batch] &&
+                  "border-base-300/60 text-base-content/60 hover:bg-base-200"
+              ]}
+            >
+              <span
+                :if={batch.latest?}
+                class="rounded-full bg-primary/15 px-2 py-0.5 text-xs font-semibold text-primary"
+              >
+                Latest
+              </span>
+              <span>{Calendar.strftime(batch.started_at, "%b %-d, %H:%M UTC")}</span>
+              <span class="text-xs text-base-content/45">
+                {length(batch.runs)} runs
+              </span>
+              <span :if={batch.errored > 0} class="text-xs text-error/70">
+                · {batch.errored} errored
+              </span>
+            </button>
+          </div>
+        </div>
+
         <div id="eval-summary" class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <.stat
-            label="Latest batch runs"
+            label="Batch runs"
             value={to_string(@summary.runs)}
             detail={"#{@summary.completed} successful"}
           />
@@ -753,7 +819,7 @@ defmodule DodoRouterWeb.EvalLive.Show do
               <div>
                 <h2 class="font-semibold">Score consistency</h2>
                 <p class="text-sm text-base-content/45">
-                  Judge scores per repetition, latest batch
+                  Judge scores per repetition in the selected batch
                 </p>
               </div>
               <span :if={any_scored?(@chart_series)} class="text-xs text-base-content/40">0–100</span>
@@ -909,7 +975,7 @@ defmodule DodoRouterWeb.EvalLive.Show do
                 Quality vs. {if @tradeoff_axis == :cost, do: "cost", else: "speed"}
               </h2>
               <p class="text-sm text-base-content/45">
-                Latest batch averages — up and left wins. Ringed models are the efficient
+                Selected batch averages — up and left wins. Ringed models are the efficient
                 frontier: {if @tradeoff_axis == :cost,
                   do: "no cheaper option scores higher.",
                   else: "no faster option scores higher."}
@@ -1062,12 +1128,30 @@ defmodule DodoRouterWeb.EvalLive.Show do
           </div>
         </section>
 
-        <section class="space-y-3">
-          <div>
-            <h2 class="text-lg font-semibold">Run history</h2>
-            <p class="text-sm text-base-content/45">
-              All benchmark executions; stats above cover only the latest.
-            </p>
+        <section :if={@batches == [] or assigns[:selected_group]} class="space-y-3">
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h2 class="text-lg font-semibold">Runs</h2>
+              <p class="text-sm text-base-content/45">
+                Every run in the selected batch.
+              </p>
+            </div>
+            <button
+              :if={
+                assigns[:selected_group] && @selected_group.errored > 0 &&
+                  any_succeeded?(@selected_group)
+              }
+              id={"toggle-errored-#{@selected_batch}"}
+              type="button"
+              phx-click="toggle_errored"
+              phx-value-batch={@selected_batch}
+              class="btn btn-ghost btn-xs gap-1 text-base-content/60"
+            >
+              <.icon name="hero-exclamation-triangle" class="size-3.5" />
+              {if MapSet.member?(@show_errored, @selected_batch),
+                do: "Show",
+                else: "Hide"} {@selected_group.errored} errored
+            </button>
           </div>
           <div id="eval-runs" class="space-y-6">
             <div
@@ -1077,41 +1161,15 @@ defmodule DodoRouterWeb.EvalLive.Show do
             >
               No judge runs yet.
             </div>
-            <div :for={batch <- @batches} id={"batch-#{batch.dom_id}"} class="space-y-3">
-              <div class="flex flex-wrap items-center justify-between gap-2">
-                <div class="flex items-center gap-2 text-sm">
-                  <span class="font-semibold">
-                    {if batch.latest?, do: "Latest batch", else: "Batch"}
-                  </span>
-                  <span class="text-base-content/45">
-                    {Calendar.strftime(batch.started_at, "%b %-d, %H:%M UTC")}
-                  </span>
-                  <span class="rounded-full bg-base-200 px-2 py-0.5 text-xs">
-                    {length(batch.runs)} runs
-                  </span>
-                </div>
-                <button
-                  :if={batch.errored > 0 and any_succeeded?(batch)}
-                  id={"toggle-errored-#{batch.dom_id}"}
-                  type="button"
-                  phx-click="toggle_errored"
-                  phx-value-batch={batch.dom_id}
-                  class="btn btn-ghost btn-xs gap-1 text-base-content/60"
-                >
-                  <.icon name="hero-exclamation-triangle" class="size-3.5" />
-                  {if MapSet.member?(@show_errored, batch.dom_id),
-                    do: "Show",
-                    else: "Hide"} {batch.errored} errored
-                </button>
-              </div>
+            <div :if={assigns[:selected_group]} class="space-y-3">
               <p
-                :if={visible_runs(batch, @show_errored) == []}
+                :if={visible_runs(@selected_group, @show_errored) == []}
                 class="rounded-2xl border border-dashed border-base-300 p-6 text-center text-sm text-base-content/45"
               >
                 Errored runs are hidden — use the toggle above to bring them back.
               </p>
               <article
-                :for={run <- visible_runs(batch, @show_errored)}
+                :for={run <- visible_runs(@selected_group, @show_errored)}
                 id={"run-#{run.id}"}
                 class="rounded-2xl border border-base-300/60 bg-base-100 p-5 shadow-sm"
               >
