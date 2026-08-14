@@ -991,6 +991,26 @@ defmodule DodoRouterWeb.EvalLiveTest do
       _ = user
     end
 
+    test "a retry counts against the runs being retried, not the whole batch", %{
+      conn: conn,
+      evaluation: evaluation
+    } do
+      {:ok, live, _html} = live(conn, ~p"/evals/#{evaluation.id}")
+
+      # A retry re-runs rows that already exist, so counting against the
+      # plan reads "1 of 1" from the first second and the bar never moves.
+      # The denominator is what is actually being retried.
+      send(live.pid, {:retry_started, 4})
+      assert render(live) =~ "0 of 4"
+
+      send(live.pid, {:benchmark_progress, {:ok, :whatever}})
+      send(live.pid, {:benchmark_progress, {:ok, :whatever}})
+
+      html = render(live)
+      assert html =~ "2 of 4"
+      assert has_element?(live, "#eval-progress progress[value='2'][max='4']")
+    end
+
     test "shows the benchmark's own status when nothing completed", %{
       conn: conn,
       evaluation: evaluation

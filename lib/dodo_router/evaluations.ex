@@ -700,6 +700,18 @@ defmodule DodoRouter.Evaluations do
       resolve_interrupted_runs(evaluation)
       evaluation |> Ecto.Changeset.change(benchmark_status: "running") |> Repo.update!()
 
+      # Reloaded after the reconcile, so the total includes runs the sweep
+      # just turned from stranded into retryable. Broadcast rather than
+      # returned: every viewer of this evaluation needs the denominator,
+      # not only the one who pressed the button.
+      counts = user |> get_evaluation!(evaluation.id) |> retryable_counts()
+
+      Phoenix.PubSub.broadcast(
+        DodoRouter.PubSub,
+        "evaluation:#{evaluation.id}",
+        {:retry_started, counts.judge + counts.candidate}
+      )
+
       DodoRouter.BackgroundTask.start(available_task_supervisor(), fn ->
         case register_benchmark(evaluation.id) do
           :ok ->

@@ -22,6 +22,7 @@ defmodule DodoRouterWeb.EvalLive.Show do
          |> assign(:show_errored, MapSet.new())
          |> assign(:criteria_expanded, false)
          |> assign(:retrying?, false)
+         |> assign(:retry_progress, nil)
          |> assign(:selected_series, nil)
          |> assign(:tradeoff_axis, :speed)
          |> load(evaluation)}
@@ -43,10 +44,13 @@ defmodule DodoRouterWeb.EvalLive.Show do
     # button sat there looking broken for the length of the whole retry.
     case Evaluations.enqueue_retry(user, evaluation) do
       :ok ->
+        total = socket.assigns.retryable.judge + socket.assigns.retryable.candidate
+
         {:noreply,
          socket
          |> assign(:running?, true)
          |> assign(:retrying?, true)
+         |> assign(:retry_progress, %{done: 0, total: total})
          |> put_flash(:info, "Retrying: #{retrying}")}
 
       {:error, :already_running} ->
@@ -87,14 +91,28 @@ defmodule DodoRouterWeb.EvalLive.Show do
     message = if socket.assigns[:retrying?], do: "Retry finished", else: "Benchmark completed"
 
     {:noreply,
-     socket |> assign(:retrying?, false) |> load(evaluation) |> put_flash(:info, message)}
+     socket
+     |> assign(:retrying?, false)
+     |> assign(:retry_progress, nil)
+     |> load(evaluation)
+     |> put_flash(:info, message)}
+  end
+
+  # Lets a retry report progress the only way it can be counted: one
+  # broadcast per run finished, against the number being retried.
+  def handle_info({:retry_started, total}, socket) do
+    {:noreply,
+     socket
+     |> assign(:retrying?, true)
+     |> assign(:running?, true)
+     |> assign(:retry_progress, %{done: 0, total: total})}
   end
 
   def handle_info({:benchmark_progress, _result}, socket) do
     evaluation =
       Evaluations.get_evaluation!(socket.assigns.current_user, socket.assigns.evaluation.id)
 
-    {:noreply, load(socket, evaluation)}
+    {:noreply, socket |> advance_retry() |> load(evaluation)}
   end
 
   def handle_info({:benchmark_finished, {:error, reason}}, socket) do
@@ -132,6 +150,37 @@ defmodule DodoRouterWeb.EvalLive.Show do
         put_flash(socket, :error, "Could not start benchmark: #{inspect(reason)}")
     end
   end
+
+  # {done, total} for the bar, or nil when there is nothing honest to count.
+  defp progress_counts(true, %{total: total} = progress, _summary, _evaluation) when total > 0,
+    do: {progress.done, total}
+
+  defp progress_counts(true, _progress, _summary, _evaluation), do: nil
+
+  defp progress_counts(_retrying?, _progress, summary, evaluation),
+    do: {min(summary.runs, planned_runs(evaluation)), planned_runs(evaluation)}
+
+  # A retry re-runs rows that already exist, so counting against the plan
+  # reads "18 of 18" from the first second. The denominator is the set being
+  # retried, counted one broadcast per finished run.
+  defp progress_line(true, %{total: total} = progress, _summary, _evaluation) when total > 0 do
+    "#{progress.done} of #{total} retried. Scores and rankings update as each result lands."
+  end
+
+  defp progress_line(true, _progress, _summary, _evaluation) do
+    "Repeating only what failed. Scores and rankings update as each result lands."
+  end
+
+  defp progress_line(_retrying?, _progress, summary, evaluation) do
+    "#{min(summary.runs, planned_runs(evaluation))} of #{planned_runs(evaluation)} candidate runs finished. " <>
+      "Scores and rankings update as each result lands."
+  end
+
+  defp advance_retry(%{assigns: %{retry_progress: %{done: done, total: total}}} = socket) do
+    assign(socket, :retry_progress, %{done: min(done + 1, total), total: total})
+  end
+
+  defp advance_retry(socket), do: socket
 
   # A stored "running" is only true while a process is actually running. A
   # crash, a restart, or a status write that never landed leaves the row
@@ -532,8 +581,11 @@ defmodule DodoRouterWeb.EvalLive.Show do
           </div>
         </div>
 
+        <%!-- Stays up for the whole retry: every progress broadcast reloads
+        and recomputes `running?`, and a panel that blinks out between runs
+        is worse than no panel. --%>
         <div
-          :if={@running?}
+          :if={@running? or @retrying?}
           id="eval-progress"
           class="rounded-2xl border border-primary/20 bg-primary/5 p-5"
         >
@@ -546,21 +598,24 @@ defmodule DodoRouterWeb.EvalLive.Show do
               <%!-- A retry re-runs rows that already exist, so counting runs
               against the plan would read "18 of 18" from the first second. --%>
               <div class="text-sm text-base-content/50">
-                {if @retrying?,
-                  do: "Repeating only what failed. Scores and rankings update as each result lands.",
-                  else:
-                    "#{min(@summary.runs, planned_runs(@evaluation))} of #{planned_runs(@evaluation)} candidate runs finished. Scores and rankings update as each result lands."}
+                {progress_line(@retrying?, @retry_progress, @summary, @evaluation)}
               </div>
             </div>
           </div>
           <progress
-            :if={not @retrying?}
+            :if={progress_counts(@retrying?, @retry_progress, @summary, @evaluation)}
             class="progress progress-primary mt-4 w-full"
-            value={min(@summary.runs, planned_runs(@evaluation))}
-            max={planned_runs(@evaluation)}
+            value={elem(progress_counts(@retrying?, @retry_progress, @summary, @evaluation), 0)}
+            max={elem(progress_counts(@retrying?, @retry_progress, @summary, @evaluation), 1)}
           >
           </progress>
-          <progress :if={@retrying?} class="progress progress-primary mt-4 w-full"></progress>
+          <%!-- Indeterminate only when there is genuinely nothing to count:
+          a page reloaded mid-retry has no broadcast history to add up. --%>
+          <progress
+            :if={is_nil(progress_counts(@retrying?, @retry_progress, @summary, @evaluation))}
+            class="progress progress-primary mt-4 w-full"
+          >
+          </progress>
         </div>
 
         <div
