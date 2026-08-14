@@ -8,7 +8,14 @@ defmodule DodoRouterWeb.AnthropicProxyController do
   alias DodoRouter.Proxy.Adapters.Anthropic, as: AnthropicAdapter
   alias DodoRouterWeb.AnthropicFormat
 
-  def create(conn, params) do
+  def create(conn, merged_params) do
+    # The BODY, not Phoenix's merged params. An action's `params` is path +
+    # query + body, so `POST /v1/messages?beta=true` arrives indistinguishable
+    # from a body field named "beta" — and the conversion then forwards it to
+    # Anthropic, which rejects unknown top-level body fields. `router_slug` is
+    # already listed in AnthropicFormat's @ignored_fields for this same reason;
+    # reading the body directly fixes the class instead of naming its members.
+    params = request_body(conn, merged_params)
     router = conn.assigns.current_router
     request_id = Ecto.UUID.generate()
     session = extract_session(conn)
@@ -88,6 +95,16 @@ defmodule DodoRouterWeb.AnthropicProxyController do
   # reports them as lost (see `FallbackChain.apply_passthrough/3`). That is
   # also why the record lands per-step instead of "before routing" — whether
   # anything was actually lost depends on which provider answered.
+  # Plug.Parsers populates body_params for JSON; anything else (an unparsed or
+  # empty body) falls back to the merged params rather than losing the request.
+  defp request_body(%{body_params: %{} = body}, _merged) when not is_struct(body), do: body
+  defp request_body(_conn, merged), do: merged
+
+  # Plug.Parsers populates body_params for JSON; anything else (an unparsed or
+  # empty body) falls back to the merged params rather than losing the request.
+  defp request_body(%{body_params: %{} = body}, _merged) when not is_struct(body), do: body
+  defp request_body(_conn, merged), do: merged
+
   defp fidelity_opts(untranslated) when map_size(untranslated) == 0, do: []
 
   defp fidelity_opts(untranslated) do
