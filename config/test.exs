@@ -54,3 +54,7 @@ config :phoenix_live_view,
 
 config :dodo_router, :env, :test
 config :dodo_router, :eval_rate_limit_backoff_ms, [0, 0]
+
+# The scheduler is off under the sandbox anyway; explicit here so a change to
+# that guard can't quietly start a timer that writes during the suite.
+config :dodo_router, :models_sync_enabled, false

@@ -1376,7 +1376,7 @@ defmodule DodoRouter.Evaluations do
   # When the chain fails, the log's own body is the proxy's synthesized
   # error; what the provider actually said is on the attempt. Reading only
   # the body is how a rate limit came out as a bare HTTP 502.
-  defp attempt_error_detail(candidate_log, requested_model \\ nil) do
+  defp attempt_error_detail(candidate_log, requested_model) do
     steps = Map.get(candidate_log, :attempted_steps) || []
 
     with step when not is_nil(step) <- List.last(steps),

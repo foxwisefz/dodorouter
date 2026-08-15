@@ -32,6 +32,10 @@ defmodule DodoRouter.Application do
       # what lets evaluations recover from a restart mid-benchmark.
       {Registry, keys: :unique, name: DodoRouter.EvaluationRegistry},
       DodoRouter.Activity,
+      # Keeps the model catalog current. Prices from this table are what
+      # list_cost_usd is computed from, so a stale catalog is wrong money
+      # rather than a cosmetic problem.
+      {DodoRouter.Models.SyncScheduler, []},
       # Start to serve requests, typically the last entry
       DodoRouterWeb.Endpoint
     ]

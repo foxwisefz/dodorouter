@@ -38,6 +38,10 @@ defmodule DodoRouter.Models.Model do
 
     # Metadata
     field :deprecation_date, :date
+    # When the model was last present in a models.dev sync. models.dev has no
+    # deprecation field — a retired model is simply absent — so this is the
+    # only retirement signal available.
+    field :last_seen_at, :utc_datetime_usec
     field :metadata, :map, default: %{}
 
     timestamps()
@@ -45,6 +49,7 @@ defmodule DodoRouter.Models.Model do
 
   @required_fields [:provider_slug, :model_id, :display_name]
   @optional_fields [
+    :last_seen_at,
     :max_input_tokens,
     :max_output_tokens,
     :input_price_per_million,

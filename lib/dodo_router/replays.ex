@@ -353,9 +353,11 @@ defmodule DodoRouter.Replays do
     plan_catalog =
       if key.provider_slug == catalog_provider,
         do: [],
-        else: Models.list_models_by_provider(key.provider_slug)
+        else: Models.offerable_models(key.provider_slug)
 
-    catalog = plan_catalog ++ Models.list_models_by_provider(catalog_provider)
+    # Offerable, not every row we hold: a model models.dev stopped listing is
+    # retired at the provider, and offering it spends a run to discover that.
+    catalog = plan_catalog ++ Models.offerable_models(catalog_provider)
 
     catalog_entries =
       Enum.map(catalog, fn model ->

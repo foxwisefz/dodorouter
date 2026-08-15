@@ -16,6 +16,54 @@ defmodule DodoRouter.Models do
     Repo.all(from m in Model, where: m.provider_slug == ^provider_slug, order_by: m.model_id)
   end
 
+  @doc """
+  Models of a provider that may be offered for selection.
+
+  models.dev publishes no deprecation field — a retired model is simply
+  absent from `api.json` — so "seen in the most recent sync" is the only
+  retirement signal there is. Anything the newest sync did not touch is
+  assumed gone.
+
+  Two deliberate escapes. A catalog whose freshest entry is older than
+  `@catalog_trust_window` tells us nothing about what is retired, so
+  everything is offered rather than nothing: a sync that stopped running
+  must not empty every picker. And a row never stamped at all — written
+  before this column, or upserted by us rather than synced — is kept, since
+  absence of evidence is not retirement.
+
+  Pricing lookups do not go through here: a model can be retired upstream
+  while requests naming it are still in flight, and their cost still has to
+  be computed from something.
+  """
+  @catalog_trust_window_days 7
+
+  def offerable_models(provider_slug) do
+    case latest_sync_at(provider_slug) do
+      nil ->
+        list_models_by_provider(provider_slug)
+
+      latest ->
+        if DateTime.diff(DateTime.utc_now(), latest, :day) > @catalog_trust_window_days do
+          list_models_by_provider(provider_slug)
+        else
+          from(m in Model,
+            where:
+              m.provider_slug == ^provider_slug and
+                (is_nil(m.last_seen_at) or m.last_seen_at >= ^latest),
+            order_by: m.model_id
+          )
+          |> Repo.all()
+        end
+    end
+  end
+
+  @doc "When this provider's catalog was last refreshed, or nil if never."
+  def latest_sync_at(provider_slug) do
+    Repo.one(
+      from(m in Model, where: m.provider_slug == ^provider_slug, select: max(m.last_seen_at))
+    )
+  end
+
   def get_model(id), do: Repo.get(Model, id)
 
   def get_model_by_id(provider_slug, model_id) do

@@ -1605,7 +1605,7 @@ defmodule DodoRouterWeb.RouterLive.Show do
     synced =
       provider
       |> normalize_models_provider()
-      |> Models.list_models_by_provider()
+      |> Models.offerable_models()
       |> Enum.map(& &1.model_id)
 
     Enum.uniq(synced ++ Registry.available_models(provider))

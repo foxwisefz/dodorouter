@@ -7,6 +7,7 @@ defmodule DodoRouter.Models.Sync do
   """
 
   require Logger
+  import Ecto.Query
 
   alias DodoRouter.Models
 
@@ -65,10 +66,15 @@ defmodule DodoRouter.Models.Sync do
             )
         end
 
+        # One timestamp for the whole run, so "seen in the latest sync" is a
+        # single comparable value rather than a spread of write times.
+        seen_at = DateTime.utc_now()
+
         count =
           providers
           |> Enum.flat_map(&parse_provider_models/1)
           |> Enum.filter(&(&1 != nil))
+          |> Enum.map(&Map.put(&1, :last_seen_at, seen_at))
           |> Enum.count(fn attrs ->
             case Models.upsert_model(attrs) do
               {:ok, _} ->
@@ -85,11 +91,38 @@ defmodule DodoRouter.Models.Sync do
 
         {:ok, mirrored} = mirror_subscription_catalogs()
 
+        log_vanished(seen_at)
+
         {:ok, count + mirrored}
 
       {:error, reason} ->
         Logger.error("Failed to fetch models from models.dev: #{inspect(reason)}")
         {:error, reason}
+    end
+  end
+
+  # Models we hold that this run did not see. Not deleted — their prices are
+  # still needed by anything in flight, and an upstream hiccup must not
+  # destroy a catalog — but named in the log, because a model disappearing
+  # upstream is the only retirement notice we ever get.
+  defp log_vanished(seen_at) do
+    vanished =
+      DodoRouter.Repo.all(
+        from(m in DodoRouter.Models.Model,
+          where: is_nil(m.last_seen_at) or m.last_seen_at < ^seen_at,
+          select: {m.provider_slug, m.model_id}
+        )
+      )
+
+    case vanished do
+      [] ->
+        :ok
+
+      list ->
+        Logger.info(
+          "models.dev no longer lists #{length(list)} model(s) we hold; they will not be " <>
+            "offered: #{Enum.map_join(Enum.take(list, 20), ", ", fn {p, m} -> "#{p}/#{m}" end)}"
+        )
     end
   end
 
