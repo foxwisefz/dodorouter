@@ -1563,6 +1563,56 @@ defmodule DodoRouter.EvaluationsTest do
     end
   end
 
+  describe "a model the provider no longer has" do
+    test "is named in the run, and logged with the status the provider gave" do
+      user = AccountsFixtures.user_fixture()
+      {router, _key} = RoutersFixtures.router_fixture(user)
+      key = ProvidersFixtures.provider_key_fixture(user, %{"label" => "Key 1"})
+
+      log =
+        LogsFixtures.log_fixture(router, %{
+          request_body:
+            Jason.encode!(%{
+              "model" => "original-model",
+              "messages" => [%{"role" => "user", "content" => "Say hello"}]
+            })
+        })
+
+      evaluation =
+        eval_with(user, log, key, %{
+          judge_model: "judge-model",
+          candidate_targets: [
+            %{
+              "provider_key_id" => key.id,
+              "provider" => "test_provider",
+              "model" => "retired-model"
+            }
+          ]
+        })
+
+      assert {:ok, _} = Evaluations.run(user, evaluation)
+
+      [run] =
+        Repo.all(
+          from(r in EvaluationRun,
+            where: r.evaluation_id == ^evaluation.id and is_nil(r.superseded_at)
+          )
+        )
+
+      # "Candidate call unknown" told the reader nothing. The model name is
+      # the whole diagnosis: it is retired, and no retry will bring it back.
+      assert run.status == "failed"
+      assert run.error =~ "retired-model"
+      assert run.error =~ "no longer"
+      refute run.error =~ "unknown"
+
+      # And the log records the 404 the provider actually sent, not a 502
+      # that blames a gateway for a request the provider understood.
+      candidate_log = Repo.get!(DodoRouter.Logs.RequestLog, run.candidate_log_id)
+      assert candidate_log.http_status == 404
+    end
+  end
+
   describe "error text for a failed candidate call" do
     test "keeps the provider's error type when the message alone says nothing" do
       # Anthropic's rate-limit body literally carries the message "Error";

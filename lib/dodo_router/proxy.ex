@@ -119,6 +119,20 @@ defmodule DodoRouter.Proxy do
     dispatch(router, request, Keyword.merge(opts, stream: true, send_chunk: send_chunk))
   end
 
+  # What the provider actually answered, not a blanket 502. A retired model
+  # answered 404 and the attempt recorded it faithfully, while the log said
+  # 502 — so the row claimed a gateway problem for a request the provider
+  # had understood perfectly and refused. 502 remains the fallback for a
+  # failure with no HTTP status at all (a timeout, a dropped connection).
+  defp logged_status(%{status: :error}, last_step) do
+    case last_step[:http_status] || last_step["http_status"] do
+      status when is_integer(status) -> status
+      _ -> 502
+    end
+  end
+
+  defp logged_status(_result, _last_step), do: 200
+
   defp log_request(router, request, result, request_id, start_time, opts) do
     session = Keyword.get(opts, :session, %{})
     recording_id = Keyword.get(opts, :recording_id)
@@ -158,7 +172,7 @@ defmodule DodoRouter.Proxy do
       router_id: router.id,
       request_id: request_id,
       status: to_string(result.status),
-      http_status: if(result.status == :error, do: 502, else: 200),
+      http_status: logged_status(result, last_step),
       attempted_steps: stringify_keys(truncate_step_responses(result.attempted_steps)),
       final_provider: last_step[:provider],
       final_model: last_step[:model],

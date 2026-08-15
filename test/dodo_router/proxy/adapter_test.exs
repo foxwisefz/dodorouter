@@ -87,6 +87,34 @@ defmodule DodoRouter.Proxy.AdapterTest do
     end
   end
 
+  describe "categorize_error/2 for a retired model" do
+    test "a 404 naming a model is model_not_found, not unknown" do
+      # Anthropic answers a retired snapshot with 404 and a body naming the
+      # model. Classified as `unknown` it read as a mystery server problem,
+      # and the log recorded a blanket 502 — nothing said "that model no
+      # longer exists", which is the one actionable fact.
+      body = %{
+        "error" => %{
+          "message" => "model: claude-3-5-sonnet-20240620",
+          "type" => "not_found_error"
+        },
+        "type" => "error"
+      }
+
+      assert Adapter.categorize_error(404, body) == :model_not_found
+    end
+
+    test "a 404 that names no model is still a not_found" do
+      assert Adapter.categorize_error(404, %{"error" => %{"message" => "No such endpoint"}}) ==
+               :not_found
+    end
+
+    test "another provider may still have the model, so the chain moves on" do
+      assert Adapter.should_fallback?(:model_not_found)
+      assert Adapter.should_fallback?(:not_found)
+    end
+  end
+
   describe "categorize_error/2" do
     test "categorizes context_overflow from finish_reason" do
       body = %{

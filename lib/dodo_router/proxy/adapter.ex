@@ -52,6 +52,21 @@ defmodule DodoRouter.Proxy.Adapter do
     end
   end
 
+  # A retired model snapshot: permanent for this provider, but another
+  # provider in the chain may still serve the same name, so it falls back
+  # like any other step failure. Distinguished from a plain 404 because
+  # "that model no longer exists" is the one fact worth telling the user.
+  def categorize_error(404, body) do
+    message = get_error_message(body)
+    type = get_in(body, ["error", "type"]) || ""
+
+    if String.contains?(message, "model") or String.contains?(to_string(type), "not_found") do
+      if String.contains?(message, "model"), do: :model_not_found, else: :not_found
+    else
+      :not_found
+    end
+  end
+
   def categorize_error(413, _body) do
     :context_overflow
   end
@@ -74,6 +89,8 @@ defmodule DodoRouter.Proxy.Adapter do
   def should_fallback?(:bad_request), do: true
   def should_fallback?(:content_policy), do: true
   def should_fallback?(:context_overflow), do: true
+  def should_fallback?(:model_not_found), do: true
+  def should_fallback?(:not_found), do: true
   def should_fallback?(_), do: false
 
   @doc """

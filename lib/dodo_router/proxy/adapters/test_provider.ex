@@ -64,6 +64,10 @@ defmodule DodoRouter.Proxy.Adapters.TestProvider do
   # 402 or 429. Waiting does not fix it, so a caller must stop rather than
   # retry — the opposite response to @rate_limited_model.
   @quota_exhausted_model "quota-exhausted-model"
+  # A retired snapshot: the provider understood the request perfectly and
+  # refused it, which is not a gateway failure however much a blanket 502
+  # made it look like one.
+  @retired_model "retired-model"
   @call_table :dodo_test_provider_calls
 
   @impl Adapter
@@ -87,6 +91,16 @@ defmodule DodoRouter.Proxy.Adapters.TestProvider do
       @quota_exhausted_model ->
         record_call(@quota_exhausted_model)
         quota_exhausted_failure()
+
+      @retired_model ->
+        # Categorized the way a real adapter categorizes, so the double
+        # exercises the classifier rather than dictating its own answer.
+        {:error, Adapter.categorize_error(404, retired_body()),
+         %{
+           status: 404,
+           body: Jason.encode!(retired_body()),
+           latency_ms: 1
+         }}
 
       _ ->
         ok_response(step)
@@ -131,6 +145,13 @@ defmodule DodoRouter.Proxy.Adapters.TestProvider do
       _ ->
         :ok
     end
+  end
+
+  defp retired_body do
+    %{
+      "error" => %{"message" => "model: #{@retired_model}", "type" => "not_found_error"},
+      "type" => "error"
+    }
   end
 
   defp quota_exhausted_failure do

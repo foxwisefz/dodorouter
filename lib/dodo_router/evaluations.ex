@@ -887,7 +887,7 @@ defmodule DodoRouter.Evaluations do
              update_run!(run, %{
                status: "failed",
                failure_stage: "candidate",
-               error: candidate_error_message(candidate_log),
+               error: candidate_error_message(candidate_log, target["model"]),
                candidate_log_id: candidate_log.id,
                candidate_latency_ms: candidate_log.latency_ms,
                candidate_cost_usd: candidate_log.estimated_cost_usd,
@@ -1364,11 +1364,11 @@ defmodule DodoRouter.Evaluations do
   def candidate_successful?(%{status: status}), do: status in ["success", "fallback"]
 
   @doc false
-  def candidate_error_message(candidate_log) do
+  def candidate_error_message(candidate_log, requested_model \\ nil) do
     cond do
       reason = timeout_reason(candidate_log) -> reason
+      detail = attempt_error_detail(candidate_log, requested_model) -> detail
       detail = provider_error_detail(candidate_log) -> detail
-      detail = attempt_error_detail(candidate_log) -> detail
       true -> "Candidate call failed (HTTP #{candidate_log.http_status || "unknown"})"
     end
   end
@@ -1376,7 +1376,7 @@ defmodule DodoRouter.Evaluations do
   # When the chain fails, the log's own body is the proxy's synthesized
   # error; what the provider actually said is on the attempt. Reading only
   # the body is how a rate limit came out as a bare HTTP 502.
-  defp attempt_error_detail(candidate_log) do
+  defp attempt_error_detail(candidate_log, requested_model \\ nil) do
     steps = Map.get(candidate_log, :attempted_steps) || []
 
     with step when not is_nil(step) <- List.last(steps),
@@ -1396,9 +1396,20 @@ defmodule DodoRouter.Evaluations do
       humanized = humanize_reason(reason)
 
       cond do
-        is_nil(body_detail) -> "Candidate call #{humanized}"
-        String.contains?(String.downcase(body_detail), humanized) -> body_detail
-        true -> "#{humanized}: #{body_detail}"
+        # The one actionable sentence: the model is gone and no retry will
+        # bring it back. Everything else about a 404 is noise beside that.
+        reason in [:model_not_found, "model_not_found"] ->
+          "The model #{requested_model || model_from(body_detail)} no longer exists at this " <>
+            "provider — pick another."
+
+        is_nil(body_detail) ->
+          "Candidate call #{humanized}"
+
+        String.contains?(String.downcase(body_detail), humanized) ->
+          body_detail
+
+        true ->
+          "#{humanized}: #{body_detail}"
       end
     else
       _ -> nil
@@ -1430,6 +1441,16 @@ defmodule DodoRouter.Evaluations do
       _ -> nil
     end
   end
+
+  # Providers name the model in the message ("model: claude-3-5-sonnet-…").
+  defp model_from(detail) when is_binary(detail) do
+    case Regex.run(~r/model:?\s*([A-Za-z0-9._\-]+)/, detail) do
+      [_, model] -> model
+      _ -> detail
+    end
+  end
+
+  defp model_from(_detail), do: "requested"
 
   defp join_error_detail(nil, nil), do: nil
   defp join_error_detail(message, nil), do: message
