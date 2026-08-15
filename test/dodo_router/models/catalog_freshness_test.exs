@@ -30,6 +30,33 @@ defmodule DodoRouter.Models.CatalogFreshnessTest do
     |> Repo.update!()
   end
 
+  describe "retired?/2" do
+    test "true only when a model we hold was left out of the latest sync" do
+      now = DateTime.utc_now()
+
+      model!(%{model_id: "current"}) |> seen_at(now)
+      model!(%{model_id: "gone"}) |> seen_at(DateTime.add(now, -40, :day))
+
+      assert Models.retired?("test_provider", "gone")
+      refute Models.retired?("test_provider", "current")
+    end
+
+    test "a model we never had is unknown, not retired" do
+      # A custom or unlisted model id is not evidence of retirement, and
+      # warning about one would cry wolf on every hand-typed model.
+      model!(%{model_id: "current"}) |> seen_at(DateTime.utc_now())
+
+      refute Models.retired?("test_provider", "never-heard-of-it")
+    end
+
+    test "nothing is retired while the catalog is too stale to trust" do
+      old = DateTime.add(DateTime.utc_now(), -40, :day)
+      model!(%{model_id: "a"}) |> seen_at(old)
+
+      refute Models.retired?("test_provider", "a")
+    end
+  end
+
   describe "offerable_models/1" do
     test "hides a model the latest sync did not see" do
       now = DateTime.utc_now()

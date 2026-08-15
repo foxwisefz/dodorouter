@@ -1347,6 +1347,29 @@ defmodule DodoRouterWeb.EvalLiveTest do
       assert has_element?(live, "#failure-digest", "kimi-k2.7-code")
     end
 
+    test "marks the affected candidate in the list, not only in the banner", %{
+      conn: conn,
+      user: user,
+      evaluation: evaluation
+    } do
+      key = DodoRouter.Providers.get_provider_key!(user, evaluation.judge_provider_key_id)
+      DodoRouter.Providers.apply_health(key.id, :quota, "usage limit reached")
+
+      evaluation
+      |> Ecto.Changeset.change(
+        candidate_targets: [
+          %{"provider_key_id" => key.id, "provider" => "test_provider", "model" => "model-a"}
+        ]
+      )
+      |> Repo.update!()
+
+      {:ok, live, _html} = live(conn, ~p"/evals/#{evaluation.id}")
+
+      # The banner says it once; the list is where the eye goes to answer
+      # "which of these six is the problem".
+      assert has_element?(live, "#eval-candidates", "out of quota")
+    end
+
     test "a key the proxy already knows is exhausted is called out before running", %{
       conn: conn,
       user: user,

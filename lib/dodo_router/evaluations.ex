@@ -353,17 +353,52 @@ defmodule DodoRouter.Evaluations do
       judge: blocker_for(user, evaluation.judge_provider_key_id),
       candidates:
         evaluation.candidate_targets
-        |> Enum.map(fn target ->
-          case blocker_for(user, target["provider_key_id"]) do
-            nil -> nil
-            blocker -> Map.put(blocker, :model, target["model"])
-          end
-        end)
+        |> Enum.map(&candidate_blocker(user, &1))
         |> Enum.reject(&is_nil/1)
     }
   end
 
-  # "invalid" and "quota_exceeded" are settled facts about the credential.
+  # A candidate is unusable for two independent reasons: the key cannot pay,
+  # or the model is gone. The second only became knowable once the catalog
+  # started recording what the latest sync saw.
+  defp candidate_blocker(user, target) do
+    cond do
+      blocker = blocker_for(user, target["provider_key_id"]) ->
+        Map.put(blocker, :model, target["model"])
+
+      Providers.get_provider_key(user, target["provider_key_id"]) &&
+          retired_model?(user, target) ->
+        %{
+          key_id: target["provider_key_id"],
+          label: target["provider_name"] || target["provider"],
+          status: "retired",
+          detail: nil,
+          model: target["model"]
+        }
+
+      true ->
+        nil
+    end
+  end
+
+  # Checked against both the adapter's catalog and the key's own slug: a
+  # subscription key carries a mirrored catalog under its own slug, and a
+  # model is only gone when neither still lists it.
+  defp retired_model?(user, target) do
+    key = Providers.get_provider_key(user, target["provider_key_id"])
+    model = target["model"]
+
+    slugs = Enum.uniq([target["provider"], key && key.provider_slug]) |> Enum.reject(&is_nil/1)
+
+    Enum.any?(slugs, &DodoRouter.Models.retired?(&1, model)) and
+      not Enum.any?(slugs, &offered?(&1, model))
+  end
+
+  defp offered?(slug, model) do
+    slug |> DodoRouter.Models.offerable_models() |> Enum.any?(&(&1.model_id == model))
+  end
+
+  # "invalid" and "quota_exceeded" are settled facts about the credential.  # "invalid" and "quota_exceeded" are settled facts about the credential.
   # A rate limit is not — it clears, and the backoff handles it.
   @unusable_statuses ~w(invalid quota_exceeded)
 

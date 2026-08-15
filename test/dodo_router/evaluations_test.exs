@@ -1010,6 +1010,50 @@ defmodule DodoRouter.EvaluationsTest do
       assert blocker.status == "quota_exceeded"
     end
 
+    test "a candidate whose model the provider retired is named", %{
+      user: user,
+      candidate: candidate,
+      evaluation: evaluation
+    } do
+      # The evaluation was configured when the model existed. Nothing about
+      # the stored row changes when a provider retires it, so the only
+      # warning available is the catalog's — and without it the run spends a
+      # candidate discovering a 404.
+      {:ok, model} =
+        DodoRouter.Models.upsert_model(%{
+          provider_slug: "test_provider",
+          model_id: "retired-snapshot",
+          display_name: "Retired",
+          last_seen_at: DateTime.add(DateTime.utc_now(), -40, :day)
+        })
+
+      {:ok, _current} =
+        DodoRouter.Models.upsert_model(%{
+          provider_slug: "test_provider",
+          model_id: "current-model",
+          display_name: "Current",
+          last_seen_at: DateTime.utc_now()
+        })
+
+      evaluation
+      |> Ecto.Changeset.change(
+        candidate_targets: [
+          %{
+            "provider_key_id" => candidate.id,
+            "provider" => "test_provider",
+            "model" => model.model_id
+          }
+        ]
+      )
+      |> Repo.update!()
+
+      evaluation = Evaluations.get_evaluation!(user, evaluation.id)
+
+      assert %{candidates: [blocked]} = Evaluations.preflight(user, evaluation)
+      assert blocked.model == "retired-snapshot"
+      assert blocked.status == "retired"
+    end
+
     test "an exhausted candidate key is named but does not block", %{
       user: user,
       candidate: candidate,

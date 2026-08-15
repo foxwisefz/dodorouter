@@ -57,6 +57,34 @@ defmodule DodoRouter.Models do
     end
   end
 
+  @doc """
+  Whether a model we hold was left out of the most recent sync.
+
+  Deliberately narrow. A model absent from our catalog entirely is
+  *unknown*, not retired — providers serve ids models.dev never lists, and
+  warning about those would cry wolf on every hand-typed model. Retirement
+  is the specific case of a row we have that upstream stopped listing.
+  """
+  def retired?(provider_slug, model_id) do
+    case latest_sync_at(provider_slug) do
+      nil ->
+        false
+
+      latest ->
+        if DateTime.diff(DateTime.utc_now(), latest, :day) > @catalog_trust_window_days do
+          false
+        else
+          Repo.exists?(
+            from(m in Model,
+              where:
+                m.provider_slug == ^provider_slug and m.model_id == ^model_id and
+                  not is_nil(m.last_seen_at) and m.last_seen_at < ^latest
+            )
+          )
+        end
+    end
+  end
+
   @doc "When this provider's catalog was last refreshed, or nil if never."
   def latest_sync_at(provider_slug) do
     Repo.one(

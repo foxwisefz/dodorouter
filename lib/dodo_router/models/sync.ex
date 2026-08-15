@@ -136,6 +136,10 @@ defmodule DodoRouter.Models.Sync do
   ]
 
   @mirrored_fields [
+    # Carried from the source model, so a platform model that upstream
+    # stopped listing is stale in its subscription mirror too. Without it
+    # every mirrored row is unstamped, and unstamped means "always offer".
+    :last_seen_at,
     :display_name,
     :max_input_tokens,
     :max_output_tokens,

@@ -197,6 +197,16 @@ defmodule DodoRouterWeb.EvalLive.Show do
   defp display_status(%{benchmark_status: "running"}, false), do: "interrupted"
   defp display_status(%{benchmark_status: status}, _running?), do: status
 
+  # Keyed by the pair, not the model: the same model can appear twice under
+  # different keys, and only one of them may be the problem.
+  defp candidate_issues(%{candidates: blocked}) do
+    Map.new(blocked, fn issue -> {{issue.key_id, issue.model}, issue.status} end)
+  end
+
+  defp candidate_issue(issues, target) do
+    Map.get(issues, {target["provider_key_id"], target["model"]})
+  end
+
   defp candidate_keys(user) do
     user |> DodoRouter.Providers.list_provider_keys() |> Map.new(&{&1.id, &1})
   end
@@ -221,6 +231,20 @@ defmodule DodoRouterWeb.EvalLive.Show do
     end
   end
 
+  # A retired model is not a key problem, so it does not borrow the key's
+  # wording: the key is fine, the model is gone, and duplicating the
+  # evaluation to pick a current one is the way out.
+  defp candidate_blocker_line(%{status: "retired"} = blocked) do
+    "Candidate #{blocked.model} is no longer offered by #{blocked.label} — the provider " <>
+      "retired it. Duplicate this evaluation and pick a current model."
+  end
+
+  defp candidate_blocker_line(blocked) do
+    "Candidate #{blocked.model} uses #{blocked.label}, which is " <>
+      "#{humanize_status(blocked.status)} — those runs will fail."
+  end
+
+  defp humanize_status("retired"), do: "retired"
   defp humanize_status("quota_exceeded"), do: "out of quota"
   defp humanize_status("invalid"), do: "not authenticating"
   defp humanize_status(other), do: String.replace(other, "_", " ")
@@ -250,6 +274,10 @@ defmodule DodoRouterWeb.EvalLive.Show do
       failure_digest(evaluation, batch_runs, Evaluations.benchmark_running?(evaluation))
     )
     |> assign(:candidate_keys, candidate_keys(socket.assigns.current_user))
+    |> assign(
+      :candidate_issues,
+      candidate_issues(Evaluations.preflight(socket.assigns.current_user, evaluation))
+    )
     |> assign(:previous_attempts, previous_attempts_by_run(evaluation))
     |> assign(:running?, Evaluations.benchmark_running?(evaluation))
   end
@@ -676,9 +704,7 @@ defmodule DodoRouterWeb.EvalLive.Show do
                 The judge's key {@preflight.judge.label} is {humanize_status(@preflight.judge.status)} — this benchmark will not start.
               </p>
               <p :for={blocked <- @preflight.candidates} class="text-base-content/70">
-                Candidate {blocked.model} uses {blocked.label}, which is {humanize_status(
-                  blocked.status
-                )} — those runs will fail.
+                {candidate_blocker_line(blocked)}
               </p>
               <p class="text-xs text-base-content/50">
                 Recorded from earlier traffic. Fix the key, or
@@ -734,7 +760,17 @@ defmodule DodoRouterWeb.EvalLive.Show do
               :for={target <- @evaluation.candidate_targets}
               class="flex items-baseline justify-between gap-3 rounded-xl bg-base-200/40 px-3 py-2 text-sm"
             >
-              <span class="font-mono text-xs">{target["model"]}</span>
+              <span class="flex items-baseline gap-2">
+                <span class="font-mono text-xs">{target["model"]}</span>
+                <%!-- The banner states the problem once; the list is where
+                the eye goes to answer "which of these six is it". --%>
+                <span
+                  :if={issue = candidate_issue(@candidate_issues, target)}
+                  class="rounded-full bg-warning/15 px-2 py-0.5 text-[11px] font-medium text-warning"
+                >
+                  {humanize_status(issue)}
+                </span>
+              </span>
               <span class="text-xs text-base-content/50">
                 {candidate_key_label(target, @candidate_keys)}
               </span>
