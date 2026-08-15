@@ -109,10 +109,16 @@ defmodule DodoRouter.Proxy.Adapter.RegistryTest do
   end
 
   describe "available_models/1" do
-    test "returns models for known provider" do
-      models = Registry.available_models("openai")
-      assert "gpt-4o" in models
-      assert "o3" in models
+    test "is empty for a provider whose catalog is synced" do
+      # The hardcoded list was a mid-2025 snapshot appended to every picker,
+      # which is how a retired model outlived the catalog that dropped it.
+      # models.dev is the source now; this field remains only for providers
+      # with nothing upstream.
+      assert Registry.available_models("openai") == []
+    end
+
+    test "still returns models for a provider that cannot be synced" do
+      assert Registry.available_models("test_provider") == ["test-model"]
     end
 
     test "returns empty list for unknown provider" do

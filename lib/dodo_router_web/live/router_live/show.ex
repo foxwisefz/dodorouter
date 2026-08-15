@@ -73,7 +73,10 @@ defmodule DodoRouterWeb.RouterLive.Show do
 
   defp apply_action(socket, :edit_step, %{"step_id" => step_id}) do
     step = Routers.get_routing_step!(socket.assigns.router, step_id)
-    custom? = step.model not in Registry.available_models(step.provider)
+    # Asked of the catalog, not the adapter's hardcoded list: that list was
+    # written mid-2025, so a step on a current model was classified "custom"
+    # and got a free-text box, while a retired one counted as known.
+    custom? = step.model not in model_options(step.provider)
 
     socket
     |> assign(:page_title, "Edit Step - #{socket.assigns.router.name}")
@@ -1602,13 +1605,12 @@ defmodule DodoRouterWeb.RouterLive.Show do
 
   # Synced model catalog first, adapter's built-in list as fallback/extras.
   defp model_options(provider) do
-    synced =
-      provider
-      |> normalize_models_provider()
-      |> Models.offerable_models()
-      |> Enum.map(& &1.model_id)
-
-    Enum.uniq(synced ++ Registry.available_models(provider))
+    # The adapter's hardcoded list is a fallback for a provider with no
+    # catalog, not an addition to one that has been synced.
+    provider
+    |> normalize_models_provider()
+    |> Models.offerable_model_ids(Registry.available_models(provider))
+    |> Enum.uniq()
   end
 
   defp normalize_models_provider("openai-codex"), do: "openai"

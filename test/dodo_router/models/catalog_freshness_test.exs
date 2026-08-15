@@ -30,6 +30,26 @@ defmodule DodoRouter.Models.CatalogFreshnessTest do
     |> Repo.update!()
   end
 
+  describe "a provider's hardcoded adapter list" do
+    test "is a fallback for an empty catalog, never an addendum to a real one" do
+      # `claude-3-5-haiku-20241022` was offered by a picker and answered 404.
+      # It is in no catalog row at all — it comes from the adapter's own
+      # `models:` list, written mid-2025 and never revisited. Appending that
+      # list to a synced catalog reintroduces every model it has outlived,
+      # and no catalog filtering can see them because they are not rows.
+      now = DateTime.utc_now()
+      model!(%{model_id: "from-catalog"}) |> seen_at(now)
+
+      assert Models.offerable_model_ids("test_provider", ["hardcoded-old-model"]) ==
+               ["from-catalog"]
+    end
+
+    test "is used when we have no catalog for that provider" do
+      # Providers we cannot sync, and every provider before the first sync.
+      assert Models.offerable_model_ids("provider-we-never-synced", ["a", "b"]) == ["a", "b"]
+    end
+  end
+
   describe "retired?/2" do
     test "true only when a model we hold was left out of the latest sync" do
       now = DateTime.utc_now()

@@ -13,10 +13,11 @@ defmodule DodoRouter.Proxy.Adapters.OpenAICodexTest do
       assert "openai-codex" in Registry.provider_slugs()
     end
 
-    test "has codex models" do
-      models = Registry.available_models("openai-codex")
-      assert "gpt-5.5" in models
-      assert "gpt-5.2" in models
+    test "declares no models of its own; the catalog supplies them" do
+      # Codex models were hardcoded here and went stale like every other
+      # such list. They now come from the synced catalog, mirrored under the
+      # subscription slug.
+      assert Registry.available_models("openai-codex") == []
     end
   end
 

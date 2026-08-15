@@ -58,6 +58,25 @@ defmodule DodoRouter.Models do
   end
 
   @doc """
+  Model ids to offer for a provider: the catalog when we have one, the
+  caller's fallback when we do not.
+
+  The fallback is each adapter's hardcoded `models:` list. It exists for
+  providers we cannot sync and for the window before the first sync — it is
+  *not* an addendum to a real catalog. Appended to one, it reintroduces
+  every model the adapter has outlived: `claude-3-5-haiku-20241022` was
+  offered by a picker and answered 404 despite the catalog being current,
+  because it is not a catalog row at all and nothing filtering rows could
+  ever see it.
+  """
+  def offerable_model_ids(provider_slug, fallback_ids) do
+    case offerable_models(provider_slug) do
+      [] -> fallback_ids
+      models -> Enum.map(models, & &1.model_id)
+    end
+  end
+
+  @doc """
   Whether a model we hold was left out of the most recent sync.
 
   Deliberately narrow. A model absent from our catalog entirely is

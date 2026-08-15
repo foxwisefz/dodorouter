@@ -80,7 +80,9 @@ defmodule DodoRouter.Proxy.Adapter.Registry do
           # that happens to correlate today, and a provider moving its route
           # must not silently change what we forward.
           request_format: unquote(opts[:request_format] || :openai),
-          models: unquote(opts[:models]),
+          # Only for providers with nothing upstream to sync; models.dev is
+          # the source for everyone else.
+          models: unquote(opts[:models] || []),
           color: unquote(opts[:color]),
           short_description: unquote(opts[:short_description]),
           # Optional per-key-slug descriptions; falls back to short_description
@@ -188,8 +190,8 @@ defmodule DodoRouter.Proxy.Adapter.Registry do
   @spec available_models(String.t()) :: [String.t()]
   def available_models(provider_slug) do
     case Map.get(all_adapters(), provider_slug) do
-      %{models: models} -> models
-      nil -> []
+      %{models: models} when is_list(models) -> models
+      _ -> []
     end
   end
 

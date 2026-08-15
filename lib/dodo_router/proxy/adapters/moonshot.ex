@@ -17,7 +17,6 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
       "moonshot" => "https://api.moonshot.ai/v1",
       "moonshot_coding" => "https://api.kimi.com/coding/v1"
     },
-    models: ~w(kimi-k2.5 kimi-k2 moonshot-v1-8k moonshot-v1-32k moonshot-v1-128k),
     color: "amber",
     short_description: "Kimi K2 models",
     key_short_descriptions: %{

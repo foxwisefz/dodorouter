@@ -36,6 +36,22 @@ defmodule DodoRouter.Proxy.Adapter.RegistryDisplayTest do
       assert Registry.display_info("zai_coding").provider == "zai"
     end
 
+    test "a synced provider carries no hardcoded model list" do
+      # These lists were written mid-2025 and never revisited: anthropic's
+      # five entries are all retired, and until they stopped being appended
+      # to the catalog a picker offered claude-3-5-haiku-20241022 alongside
+      # claude-opus-5. The catalog is the source; the field survives only for
+      # providers with nothing upstream to sync.
+      for slug <- ~w(anthropic openai google moonshot zai groq mistral xai deepseek cohere) do
+        assert Registry.available_models(slug) == [],
+               "#{slug} still hardcodes a model list; the catalog is the source"
+      end
+    end
+
+    test "a provider with no upstream still declares its own models" do
+      assert Registry.available_models("test_provider") == ["test-model"]
+    end
+
     test "an unknown slug is not a crash" do
       assert Registry.display_info("nope") == %{name: "Unknown", provider: nil}
     end

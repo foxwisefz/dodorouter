@@ -19,8 +19,6 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
     },
     endpoint_path: "/messages",
     request_format: :anthropic,
-    models:
-      ~w(claude-sonnet-4-20250514 claude-opus-4-20250514 claude-3-5-sonnet-20241022 claude-3-5-haiku-20241022 claude-3-opus-20240229),
     color: "orange",
     short_description: "Claude Sonnet, Opus, Haiku"
 

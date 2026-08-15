@@ -10,6 +10,17 @@ defmodule DodoRouterWeb.RouterShowLiveTest do
 
   setup %{user: user} do
     {router, api_key} = RoutersFixtures.router_fixture(user)
+
+    # The step form offers what the catalog holds — the adapters no longer
+    # carry hardcoded model lists, so a model has to exist to be selectable.
+    {:ok, _} =
+      DodoRouter.Models.upsert_model(%{
+        provider_slug: "zai",
+        model_id: "glm-5",
+        display_name: "GLM-5",
+        last_seen_at: DateTime.utc_now()
+      })
+
     %{router: router, api_key: api_key}
   end
 
@@ -297,12 +308,15 @@ defmodule DodoRouterWeb.RouterShowLiveTest do
       conn: conn,
       router: router
     } do
+      # Upsert: the shared setup already seeds this model so the step form
+      # has something to offer at all.
       {:ok, _} =
-        DodoRouter.Models.create_model(%{
+        DodoRouter.Models.upsert_model(%{
           provider_slug: "zai",
           model_id: "glm-5",
           display_name: "GLM 5",
-          reasoning_efforts: ["high", "max"]
+          reasoning_efforts: ["high", "max"],
+          last_seen_at: DateTime.utc_now()
         })
 
       {:ok, live, _html} = live(conn, ~p"/routers/#{router.id}/routing")

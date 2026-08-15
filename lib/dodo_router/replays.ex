@@ -370,12 +370,19 @@ defmodule DodoRouter.Replays do
         }
       end)
 
+    # The adapter's own list stands in only when we have no catalog for this
+    # provider. Appended to a real one it reintroduces models the adapter has
+    # outlived — they are not rows, so no catalog filter can see them.
     registry_entries =
-      provider
-      |> Registry.available_models()
-      |> Enum.map(
-        &%{id: &1, display_name: &1, input_price: nil, output_price: nil, max_input_tokens: nil}
-      )
+      if catalog_entries == [] do
+        provider
+        |> Registry.available_models()
+        |> Enum.map(
+          &%{id: &1, display_name: &1, input_price: nil, output_price: nil, max_input_tokens: nil}
+        )
+      else
+        []
+      end
 
     (catalog_entries ++ registry_entries)
     |> Enum.uniq_by(& &1.id)

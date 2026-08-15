@@ -13,7 +13,6 @@ defmodule DodoRouter.Proxy.Adapters.OpenAI do
     endpoints: %{
       "openai" => "https://api.openai.com/v1"
     },
-    models: ~w(gpt-4o gpt-4o-mini gpt-4-turbo gpt-4.1 gpt-4.1-mini o1 o1-mini o3 o3-mini),
     color: "green",
     short_description: "GPT-4o, o1, o3 models"
 

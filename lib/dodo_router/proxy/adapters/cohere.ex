@@ -16,7 +16,6 @@ defmodule DodoRouter.Proxy.Adapters.Cohere do
     endpoints: %{
       "cohere" => "https://api.cohere.com/v2"
     },
-    models: ~w(command-r-plus command-r),
     color: "coral",
     short_description: "Command R, R+ models"
 

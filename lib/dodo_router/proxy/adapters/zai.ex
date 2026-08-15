@@ -19,7 +19,6 @@ defmodule DodoRouter.Proxy.Adapters.Zai do
       "zai_standard" => "https://api.z.ai/api/paas/v4",
       "zai_coding" => "https://api.z.ai/api/coding/paas/v4"
     },
-    models: ~w(glm-5.1 glm-5 glm-5-turbo glm-4.7 glm-4.6 glm-4.5),
     color: "emerald",
     short_description: "GLM models for general use",
     key_short_descriptions: %{
