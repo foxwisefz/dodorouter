@@ -301,6 +301,9 @@ defmodule DodoRouter.Proxy.HeaderForwardingTest do
       # question about a request we are not going to send.
       client = [{"anthropic-beta", "context-1m-2025-08-07"}, {"user-agent", "claude-cli/1.0"}]
 
+      # ensure_loaded first: function_exported/3 does not load the module, so
+      # this assertion is order-dependent without it.
+      assert Code.ensure_loaded?(Anthropic)
       assert :erlang.function_exported(Anthropic, :count_tokens, 4)
 
       assert Anthropic.request_headers("sk-ant-oat01-abc", client) |> value("anthropic-beta") ==

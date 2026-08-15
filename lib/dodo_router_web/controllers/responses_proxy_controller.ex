@@ -49,7 +49,10 @@ defmodule DodoRouterWeb.ResponsesProxyController do
 
   # See AnthropicProxyController: ingress conversion drops travel to the
   # request log alongside the header and egress-allowlist drops.
-  defp fidelity_opts(fields) when map_size(fields) == 0, do: []
+  # Always declared, not only when dropped fields exist — the response
+  # passthrough (real `resp_…` ids and untranslated response fields) keys off
+  # `client_format` on every request. See AnthropicProxyController.
+  defp fidelity_opts(fields) when map_size(fields) == 0, do: [client_format: :responses]
 
   defp fidelity_opts(fields) do
     [

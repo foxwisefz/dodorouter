@@ -500,11 +500,21 @@ defmodule DodoRouter.Proxy.Adapter do
   # response, so it never reaches a client, a log row, or the UI as a field.
   @response_passthrough_key "__provider_passthrough__"
 
+  # Streaming twin of the two above: `FallbackChain` sets it on the request
+  # when the step speaks the client's format and nothing has been streamed
+  # yet, telling the adapter to relay the provider's native SSE events
+  # verbatim instead of reframing them through the OpenAI chunk shape. The
+  # adapter pops it before building its body, so it cannot leak upstream.
+  @stream_passthrough_key "__stream_passthrough__"
+
   @doc false
   def passthrough_key, do: @passthrough_key
 
   @doc false
   def response_passthrough_key, do: @response_passthrough_key
+
+  @doc false
+  def stream_passthrough_key, do: @stream_passthrough_key
 
   # ── Streaming response headers ────────────────────────────────────────────
   #

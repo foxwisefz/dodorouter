@@ -335,8 +335,8 @@ defmodule DodoRouter.Replays do
     end
   end
 
-  defp plan_type_for(%{provider_slug: slug}) do
-    if String.contains?(slug, "coding"), do: "coding", else: "standard"
+  defp plan_type_for(provider_key) do
+    if Providers.subscription_key?(provider_key), do: "coding", else: "standard"
   end
 
   defp offerable_key?(%{provider_slug: "test_provider"}) do

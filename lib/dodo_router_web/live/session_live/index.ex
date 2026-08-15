@@ -32,13 +32,9 @@ defmodule DodoRouterWeb.SessionLive.Index do
 
   @impl true
   def handle_info({:log_created, _log}, socket) do
-    # Refresh sessions list when new logs come in
-    sessions = Logs.list_sessions(socket.assigns.router, limit: 50)
-
-    {:noreply,
-     socket
-     |> assign(:sessions, sessions)
-     |> assign_cache_verdicts(sessions)}
+    # Refresh the current page when new logs come in, keeping the reader on
+    # whatever page they're on rather than snapping them back to page 1.
+    {:noreply, refetch_sessions(socket)}
   end
 
   def handle_info(_msg, socket), do: {:noreply, socket}
@@ -62,7 +58,13 @@ defmodule DodoRouterWeb.SessionLive.Index do
               <p class="text-sm text-base-content/50">{@router.name}</p>
             </div>
           </div>
-          <span class="text-sm text-base-content/60">{pluralize(length(@sessions), "session")}</span>
+          <span class="text-sm text-base-content/60">
+            <%= if @session_count > length(@sessions) do %>
+              showing {length(@sessions)} of {pluralize(@session_count, "session")}
+            <% else %>
+              {pluralize(@session_count, "session")}
+            <% end %>
+          </span>
         </div>
 
         <div class="space-y-3">
@@ -107,21 +109,27 @@ defmodule DodoRouterWeb.SessionLive.Index do
           <% end %>
         </div>
 
-        <%= if @page > 1 do %>
+        <%= if @page > 1 or length(@sessions) == @per_page do %>
           <div class="flex justify-center mt-6 gap-2">
-            <a
-              href={~p"/routers/#{@router.id}/sessions?page=#{@page - 1}"}
-              class="btn btn-sm btn-ghost"
-            >
-              ← Prev
-            </a>
+            <%= if @page > 1 do %>
+              <a
+                id="sessions-prev-page"
+                href={~p"/routers/#{@router.id}/sessions?page=#{@page - 1}"}
+                class="btn btn-sm btn-ghost"
+              >
+                ← Prev
+              </a>
+            <% end %>
             <span class="btn btn-sm btn-disabled">Page {@page}</span>
-            <a
-              href={~p"/routers/#{@router.id}/sessions?page=#{@page + 1}"}
-              class="btn btn-sm btn-ghost"
-            >
-              Next →
-            </a>
+            <%= if length(@sessions) == @per_page do %>
+              <a
+                id="sessions-next-page"
+                href={~p"/routers/#{@router.id}/sessions?page=#{@page + 1}"}
+                class="btn btn-sm btn-ghost"
+              >
+                Next →
+              </a>
+            <% end %>
           </div>
         <% end %>
       </div>
@@ -166,16 +174,27 @@ defmodule DodoRouterWeb.SessionLive.Index do
     page = String.to_integer(params["page"] || "1")
     per_page = 20
 
+    socket
+    |> assign(:page, page)
+    |> assign(:per_page, per_page)
+    |> refetch_sessions()
+  end
+
+  # Refetches the current page of sessions using the page/per_page already on
+  # the socket, so a mid-session refresh (e.g. from :log_created) doesn't
+  # bounce the reader back to page 1 or hand them every session in the router.
+  defp refetch_sessions(socket) do
+    %{page: page, per_page: per_page, router: router} = socket.assigns
+
     sessions =
-      Logs.list_sessions(socket.assigns.router,
+      Logs.list_sessions(router,
         limit: per_page,
         offset: (page - 1) * per_page
       )
 
     socket
     |> assign(:sessions, sessions)
-    |> assign(:page, page)
-    |> assign(:per_page, per_page)
+    |> assign(:session_count, Logs.count_sessions(router))
     |> assign_cache_verdicts(sessions)
   end
 

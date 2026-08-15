@@ -614,6 +614,18 @@ defmodule DodoRouter.Logs do
     |> Repo.all()
   end
 
+  @doc """
+  Counts distinct sessions for a router — the total behind `list_sessions/2`'s
+  pagination, not the number of underlying request log rows.
+  """
+  def count_sessions(%Router{} = router) do
+    from(l in RequestLog,
+      where: l.router_id == ^router.id and not is_nil(l.session_id),
+      distinct: l.session_id
+    )
+    |> Repo.aggregate(:count)
+  end
+
   defp maybe_filter_since_hours(query, nil), do: query
 
   defp maybe_filter_since_hours(query, hours) do

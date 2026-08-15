@@ -796,4 +796,166 @@ defmodule DodoRouter.Proxy.Adapters.AnthropicTest do
       assert msg["content"] == [native]
     end
   end
+
+  describe "streaming passthrough (Anthropic client on an Anthropic step)" do
+    # The native stream a thinking-enabled Claude model actually sends:
+    # thinking block first (with its signature), then text. Reframing loses
+    # both the thinking block and its position; passthrough must preserve
+    # them byte-for-byte or the client cannot echo them back to continue.
+    @native_events [
+      %{
+        "type" => "message_start",
+        "message" => %{
+          "id" => "msg_01real",
+          "type" => "message",
+          "role" => "assistant",
+          "model" => "claude-fable-5",
+          "content" => [],
+          "usage" => %{"input_tokens" => 12, "cache_read_input_tokens" => 4}
+        }
+      },
+      %{
+        "type" => "content_block_start",
+        "index" => 0,
+        "content_block" => %{"type" => "thinking", "thinking" => ""}
+      },
+      %{
+        "type" => "content_block_delta",
+        "index" => 0,
+        "delta" => %{"type" => "thinking_delta", "thinking" => "pondering"}
+      },
+      %{
+        "type" => "content_block_delta",
+        "index" => 0,
+        "delta" => %{"type" => "signature_delta", "signature" => "sig_abc123"}
+      },
+      %{"type" => "content_block_stop", "index" => 0},
+      %{
+        "type" => "content_block_start",
+        "index" => 1,
+        "content_block" => %{"type" => "text", "text" => ""}
+      },
+      %{
+        "type" => "content_block_delta",
+        "index" => 1,
+        "delta" => %{"type" => "text_delta", "text" => "Hello"}
+      },
+      %{"type" => "content_block_stop", "index" => 1},
+      %{
+        "type" => "message_delta",
+        "delta" => %{"stop_reason" => "end_turn", "stop_sequence" => nil},
+        "usage" => %{"output_tokens" => 9}
+      },
+      %{"type" => "message_stop"}
+    ]
+
+    defp decode_wire(wire_chunks) do
+      Enum.map(wire_chunks, fn chunk ->
+        assert [_, type, json] = Regex.run(~r/\Aevent: (\S+)\ndata: (.*)\n\n\z/s, chunk)
+        {type, Jason.decode!(json)}
+      end)
+    end
+
+    test "every native event is relayed verbatim, in order" do
+      {_acc, wire} =
+        Anthropic.passthrough_anthropic_events(Anthropic.initial_stream_acc(), @native_events)
+
+      decoded = decode_wire(wire)
+
+      assert Enum.map(decoded, &elem(&1, 0)) == Enum.map(@native_events, & &1["type"])
+      assert Enum.map(decoded, &elem(&1, 1)) == @native_events
+    end
+
+    test "the thinking block and its signature survive intact, before the text block" do
+      {_acc, wire} =
+        Anthropic.passthrough_anthropic_events(Anthropic.initial_stream_acc(), @native_events)
+
+      decoded = decode_wire(wire)
+
+      thinking_start =
+        Enum.find_index(decoded, fn {_t, e} ->
+          e["type"] == "content_block_start" and e["content_block"]["type"] == "thinking"
+        end)
+
+      text_start =
+        Enum.find_index(decoded, fn {_t, e} ->
+          e["type"] == "content_block_start" and e["content_block"]["type"] == "text"
+        end)
+
+      assert thinking_start < text_start
+
+      assert {_, %{"delta" => %{"signature" => "sig_abc123"}}} =
+               Enum.find(decoded, fn {_t, e} -> e["delta"]["type"] == "signature_delta" end)
+    end
+
+    test "no [DONE] sentinel — message_stop is the native terminator" do
+      {_acc, wire} =
+        Anthropic.passthrough_anthropic_events(Anthropic.initial_stream_acc(), @native_events)
+
+      refute Enum.any?(wire, &String.contains?(&1, "[DONE]"))
+      assert List.last(wire) =~ "message_stop"
+    end
+
+    test "accumulation for logging still happens: id, text, usage" do
+      {acc, _wire} =
+        Anthropic.passthrough_anthropic_events(Anthropic.initial_stream_acc(), @native_events)
+
+      assert acc.message_id == "msg_01real"
+      assert acc.content == "Hello"
+      assert acc.stop_reason == "end_turn"
+      assert acc.usage["completion_tokens"] == 9
+      # input tokens arrive on message_start, not message_delta — losing them
+      # is how a streamed row ends up with null prompt tokens.
+      assert acc.usage["prompt_tokens"] == 12
+      assert acc.usage["cache_read_tokens"] == 4
+    end
+
+    test "redacted_thinking and server-tool blocks are relayed too" do
+      events = [
+        %{
+          "type" => "content_block_start",
+          "index" => 0,
+          "content_block" => %{"type" => "redacted_thinking", "data" => "opaque"}
+        },
+        %{
+          "type" => "content_block_start",
+          "index" => 1,
+          "content_block" => %{
+            "type" => "server_tool_use",
+            "id" => "srvtoolu_01",
+            "name" => "web_search"
+          }
+        }
+      ]
+
+      {_acc, wire} =
+        Anthropic.passthrough_anthropic_events(Anthropic.initial_stream_acc(), events)
+
+      decoded = decode_wire(wire)
+      assert Enum.map(decoded, &elem(&1, 1)) == events
+    end
+  end
+
+  describe "parse_anthropic_sse/2" do
+    test "a message_delta sharing a frame with message_stop is not discarded" do
+      data =
+        "data: " <>
+          Jason.encode!(%{
+            "type" => "message_delta",
+            "delta" => %{"stop_reason" => "end_turn"},
+            "usage" => %{"output_tokens" => 7}
+          }) <>
+          "\n\ndata: " <> Jason.encode!(%{"type" => "message_stop"}) <> "\n\n"
+
+      assert {{:events_then_done, events}, ""} = Anthropic.parse_anthropic_sse(data, "")
+      assert Enum.map(events, & &1["type"]) == ["message_delta", "message_stop"]
+    end
+
+    test "message_stop alone still terminates" do
+      data = "data: " <> Jason.encode!(%{"type" => "message_stop"}) <> "\n\n"
+
+      assert {{:events_then_done, [%{"type" => "message_stop"}]}, ""} =
+               Anthropic.parse_anthropic_sse(data, "")
+    end
+  end
 end

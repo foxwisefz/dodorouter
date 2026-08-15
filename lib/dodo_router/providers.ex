@@ -359,8 +359,8 @@ defmodule DodoRouter.Providers do
   # flags `zai_standard`, which is metered. A short honest list beats a rule
   # that quietly misclassifies.
   #
-  # `Replays.plan_type_for/1` still uses the "coding" substring for its own
-  # purpose — see dodo_router-9wp.
+  # `Replays.plan_type_for/1` delegates to `subscription_key?/1` (rather than
+  # keeping its own "coding" substring check) — see dodo_router-uuh.
   @subscription_key_slugs ~w(
     anthropic_oauth
     openai-codex

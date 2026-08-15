@@ -80,6 +80,8 @@ Verified: `GET /health` returns `{"status":"ok"}` once the DB connection is heal
 | `STRIPE_WEBHOOK_SECRET` | No | Required only alongside `STRIPE_SECRET_KEY` |
 | `ECTO_IPV6` | No | Set to `true` to enable IPv6 for the DB socket |
 | `POOL_SIZE` | No | Ecto pool size, defaults to 10 |
+| `ATTESTO_ISSUER` | No | OAuth issuer URL for the [agent surface](/docs/agent-access/#self-hosting). Defaults to `https://` + `PHX_HOST`. Read at boot, so changing it just needs a restart |
+| `ATTESTO_AUDIENCE` | No | OAuth resource identifier. Defaults to `<issuer>/mcp` |
 
 For deploy specifics (hot code upgrades, systemd, Castle release management), see the project's own `AGENTS.md` in the repo — those are maintainer-facing operational details rather than user-facing setup, so we won't duplicate them here. See also [Deployment](/docs/deployment/) for a minimal production boot sequence.
 

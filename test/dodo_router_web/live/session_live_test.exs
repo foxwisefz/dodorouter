@@ -87,6 +87,65 @@ defmodule DodoRouterWeb.SessionLiveTest do
         live(conn, ~p"/routers/#{other_router.id}/sessions")
       end
     end
+
+    test "page 1 shows a working Next link and no Prev link when more pages exist", %{
+      conn: conn,
+      router: router
+    } do
+      for i <- 1..21 do
+        LogsFixtures.log_with_session(router, "session-#{i}")
+      end
+
+      {:ok, live, _html} = live(conn, ~p"/routers/#{router.id}/sessions")
+
+      refute has_element?(live, "#sessions-prev-page")
+      assert has_element?(live, "#sessions-next-page")
+    end
+
+    test "page 2 shows a Prev link", %{conn: conn, router: router} do
+      for i <- 1..21 do
+        LogsFixtures.log_with_session(router, "session-#{i}")
+      end
+
+      {:ok, live, _html} = live(conn, ~p"/routers/#{router.id}/sessions?page=2")
+
+      assert has_element?(live, "#sessions-prev-page")
+    end
+
+    test "receiving a log_created event on page 2 keeps the user on page 2", %{
+      conn: conn,
+      router: router
+    } do
+      for i <- 1..21 do
+        LogsFixtures.log_with_session(router, "session-#{i}")
+      end
+
+      {:ok, live, _html} = live(conn, ~p"/routers/#{router.id}/sessions?page=2")
+
+      assert live |> element("span", "Page 2") |> has_element?()
+
+      send(live.pid, {:log_created, %{}})
+
+      html = render(live)
+      assert html =~ "Page 2"
+      # Page 2 should still show only per_page (20) worth of sessions, not
+      # every session in the router.
+      session_rows = Regex.scan(~r/session-\d+/, html) |> List.flatten() |> Enum.uniq()
+      assert length(session_rows) <= 20
+    end
+
+    test "header shows total session count, not just the current page size", %{
+      conn: conn,
+      router: router
+    } do
+      for i <- 1..21 do
+        LogsFixtures.log_with_session(router, "session-#{i}")
+      end
+
+      {:ok, _live, html} = live(conn, ~p"/routers/#{router.id}/sessions")
+
+      assert html =~ "21 sessions"
+    end
   end
 
   describe "Show" do

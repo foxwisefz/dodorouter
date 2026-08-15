@@ -729,4 +729,82 @@ defmodule DodoRouter.Proxy.Adapters.MoonshotTest do
       assert result["error"]["message"] == "quota exceeded"
     end
   end
+
+  describe "stream usage accumulation" do
+    # Probed live 2026-08-16: without stream_options (which the coding endpoint
+    # rejects, see 46a95cf), Moonshot delivers usage INSIDE the final chunk's
+    # choice, not as a top-level usage frame.
+    @choice_level_final_chunk %{
+      "choices" => [
+        %{
+          "index" => 0,
+          "delta" => %{},
+          "finish_reason" => "stop",
+          "usage" => %{
+            "prompt_tokens" => 8,
+            "completion_tokens" => 5,
+            "total_tokens" => 13,
+            "prompt_tokens_details" => %{"cached_tokens" => 8}
+          }
+        }
+      ]
+    }
+
+    @timing_meta %{payload_size_bytes: 100, upload_ms: 1, provider_processing_ms: nil}
+
+    defp fresh_acc do
+      %{
+        content: "",
+        tool_calls: %{},
+        usage: nil,
+        finish_reason: nil,
+        first_chunk_time: 5,
+        sse_buffer: ""
+      }
+    end
+
+    test "usage nested in the final chunk's choice reaches extract_usage/1" do
+      acc = Moonshot.accumulate_chunk(fresh_acc(), @choice_level_final_chunk)
+      response = Moonshot.build_final_response(acc, @timing_meta)
+      usage = DodoRouter.Proxy.Adapter.extract_usage(response)
+
+      assert usage.prompt_tokens == 8
+      assert usage.completion_tokens == 5
+      assert usage.total_tokens == 13
+      assert usage.cache_read_tokens == 8
+    end
+
+    test "a top-level usage frame wins over an earlier choice-level one" do
+      top_level_frame = %{
+        "choices" => [],
+        "usage" => %{"prompt_tokens" => 9, "completion_tokens" => 6, "total_tokens" => 15}
+      }
+
+      acc =
+        fresh_acc()
+        |> Moonshot.accumulate_chunk(@choice_level_final_chunk)
+        |> Moonshot.accumulate_chunk(top_level_frame)
+
+      usage =
+        DodoRouter.Proxy.Adapter.extract_usage(Moonshot.build_final_response(acc, @timing_meta))
+
+      assert usage.prompt_tokens == 9
+    end
+
+    test "content chunks without usage keep the accumulated value" do
+      content_chunk = %{
+        "choices" => [%{"index" => 0, "delta" => %{"content" => "!"}, "finish_reason" => nil}]
+      }
+
+      acc =
+        fresh_acc()
+        |> Moonshot.accumulate_chunk(@choice_level_final_chunk)
+        |> Moonshot.accumulate_chunk(content_chunk)
+
+      usage =
+        DodoRouter.Proxy.Adapter.extract_usage(Moonshot.build_final_response(acc, @timing_meta))
+
+      assert usage.prompt_tokens == 8
+    end
+  end
 end

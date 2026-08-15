@@ -325,6 +325,48 @@ defmodule DodoRouterWeb.MCPControllerTest do
                )
     end
 
+    test "get_eval runs carry candidate_log_id, judge_log_id and criterion_scores", %{
+      conn: conn,
+      token: token,
+      user: user,
+      router: router
+    } do
+      # The guide (priv/agent/evals_guide.md) promises these ids so an agent
+      # can pass them to get_log for the full answer or judge reasoning.
+      key = DodoRouter.ProvidersFixtures.provider_key_fixture(user, %{"label" => "Key 1"})
+
+      log =
+        DodoRouter.LogsFixtures.log_fixture(router, %{
+          request_body:
+            Jason.encode!(%{
+              "model" => "m",
+              "messages" => [%{"role" => "user", "content" => "hi"}]
+            })
+        })
+
+      {:ok, evaluation} =
+        DodoRouter.Evaluations.create_evaluation(user, log, %{
+          name: "Scored run",
+          criteria: "Be useful",
+          judge_model: "judge-model",
+          judge_provider_key_id: key.id,
+          candidate_targets: [
+            %{"provider_key_id" => key.id, "provider" => "test_provider", "model" => "test-model"}
+          ],
+          repetitions: 1
+        })
+
+      {:ok, _} = DodoRouter.Evaluations.run(user, evaluation)
+
+      body = json_response(call_tool(conn, token, "get_eval", %{"id" => evaluation.id}), 200)
+      payload = tool_json(body)
+
+      assert [run] = payload["runs"]
+      assert run["candidate_log_id"]
+      assert run["judge_log_id"]
+      assert is_map(run["criterion_scores"])
+    end
+
     test "run_eval refuses a judge key already known to be unusable", %{
       conn: conn,
       token: token,

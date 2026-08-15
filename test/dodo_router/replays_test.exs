@@ -37,6 +37,37 @@ defmodule DodoRouter.ReplaysTest do
     %{provider_key_id: ctx.provider_key.id, model: model}
   end
 
+  describe "build_step/5 plan_type" do
+    test "subscription and metered slugs classify as coding/standard to match subscription_key?/1",
+         ctx do
+      cases = [
+        {"anthropic_oauth", "coding"},
+        {"openai-codex", "coding"},
+        {"moonshot_coding", "coding"},
+        {"zai_coding", "coding"},
+        {"zai_standard", "standard"},
+        {"anthropic", "standard"},
+        {"openai", "standard"}
+      ]
+
+      for {slug, expected_plan_type} <- cases do
+        provider_key = ProvidersFixtures.provider_key_fixture(ctx.user, %{provider_slug: slug})
+
+        assert {:ok, step} =
+                 Replays.build_step(ctx.user, ctx.router.id, provider_key.id, "some-model")
+
+        assert step.plan_type == expected_plan_type,
+               "expected #{slug} to classify as #{expected_plan_type}, got #{step.plan_type}"
+
+        assert step.plan_type ==
+                 if(DodoRouter.Providers.subscription_key?(provider_key),
+                   do: "coding",
+                   else: "standard"
+                 )
+      end
+    end
+  end
+
   describe "reasoning controls on a cross-model replay" do
     @thinking_source %RequestLog{
       request_body:

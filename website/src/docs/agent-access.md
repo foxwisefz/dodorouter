@@ -98,14 +98,16 @@ An agent connected here cannot send requests through your router. If you want it
 
 ## Self-hosting
 
-The OAuth server needs **HTTPS**. Both the issuer and the audience must be `https://` URLs — there is no localhost exemption — so set these before building your release:
+The OAuth server needs **HTTPS**. Both the issuer and the audience must be `https://` URLs — there is no localhost exemption.
+
+`ATTESTO_ISSUER` and `ATTESTO_AUDIENCE` are read at **boot**, not baked into the release — set them wherever you set the app's other runtime environment variables (e.g. `~/dodorouter/.env` on the server) and restart:
 
 ```bash
 ATTESTO_ISSUER=https://router.example.com
 ATTESTO_AUDIENCE=https://router.example.com/mcp
 ```
 
-They are read from `config/config.exs`, which is evaluated **at build time**, so a release built without them falls back to `https://localhost` and every agent connection will fail at discovery.
+If unset, the issuer defaults to `https://` plus the endpoint's own public host (`PHX_HOST`), and the audience defaults to `<issuer>/mcp` — so a correctly configured `PHX_HOST` alone is often enough, and no release needs to be rebuilt just to change these.
 
 For local development, `mix attesto_phoenix.gen.dev_https` (with [mkcert](https://github.com/FiloSottile/mkcert) installed) generates a locally-trusted certificate and the app serves TLS on port 4443 alongside the plain HTTP dashboard on 4000.
 

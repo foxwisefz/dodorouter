@@ -186,6 +186,14 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
   @impl true
   def stream(request, %RoutingStep{} = step, api_key, send_chunk, client_headers \\ []) do
     url = @base_url <> "/messages"
+
+    # FallbackChain sets this when the client speaks Anthropic too and nothing
+    # has been streamed yet: relay the provider's native events verbatim
+    # instead of reframing through the OpenAI chunk shape, which has no
+    # representation for thinking or server-tool blocks. Popped here so it can
+    # never ride into the request body.
+    {passthrough?, request} = Map.pop(request, Adapter.stream_passthrough_key(), false)
+
     body = build_anthropic_request(request, step) |> Map.put("stream", true)
     headers = request_headers(api_key, client_headers)
 
@@ -212,22 +220,33 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
 
         acc = resp.private.stream_acc
 
+        process_events = fn events ->
+          if passthrough?,
+            do: passthrough_anthropic_events(acc, events),
+            else: process_anthropic_events(acc, events)
+        end
+
         case parse_anthropic_sse(data, acc.sse_buffer) do
           {{:events, events}, buffer} ->
-            # Convert and forward as OpenAI format
-            {acc, openai_chunks} = process_anthropic_events(acc, events)
+            {acc, wire_chunks} = process_events.(events)
             acc = %{acc | sse_buffer: buffer}
             # Park before forwarding, not after: the egress reads the real
             # message id from here while handling the very first chunk, and a
             # frame carrying `message_start` and a delta together would
             # otherwise hand it a stale accumulator.
             Process.put(:__anthropic_stream_acc__, acc)
-            Enum.each(openai_chunks, &send_chunk.(&1))
+            Enum.each(wire_chunks, &send_chunk.(&1))
             {:cont, {req, Req.Response.put_private(resp, :stream_acc, acc)}}
 
-          {:done, _buffer} ->
-            send_chunk.("data: [DONE]\n\n")
-            {:halt, {req, resp}}
+          {{:events_then_done, events}, _buffer} ->
+            {acc, wire_chunks} = process_events.(events)
+            acc = %{acc | sse_buffer: ""}
+            Process.put(:__anthropic_stream_acc__, acc)
+            Enum.each(wire_chunks, &send_chunk.(&1))
+            # [DONE] is an OpenAI-wire sentinel; the native stream already
+            # ended with its own message_stop event.
+            unless passthrough?, do: send_chunk.("data: [DONE]\n\n")
+            {:halt, {req, Req.Response.put_private(resp, :stream_acc, acc)}}
 
           {:skip, buffer} ->
             acc = %{acc | sse_buffer: buffer}
@@ -775,7 +794,8 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
   defp put_if(map, nil, _key, _value), do: map
   defp put_if(map, _present, key, value), do: Map.put(map, key, value)
 
-  defp parse_anthropic_sse(data, buffer) do
+  @doc false
+  def parse_anthropic_sse(data, buffer) do
     combined = buffer <> data
     lines = String.split(combined, "\n")
 
@@ -799,7 +819,10 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
       |> Enum.reject(&is_nil/1)
 
     cond do
-      Enum.any?(events, &(&1["type"] == "message_stop")) -> {:done, ""}
+      # The terminating frame still carries its events: a `message_delta`
+      # sharing a TCP frame with `message_stop` holds the final usage, and
+      # discarding it logged that stream with null token counts.
+      Enum.any?(events, &(&1["type"] == "message_stop")) -> {{:events_then_done, events}, ""}
       events == [] -> {:skip, buffer}
       true -> {{:events, events}, buffer}
     end
@@ -843,6 +866,28 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
     end
   end
 
+  @doc """
+  The passthrough twin of `process_anthropic_events/2`: same accumulation for
+  logging, but the wire output is each native event re-serialized verbatim
+  instead of an OpenAI reframing.
+
+  This is what carries thinking blocks (with their signatures), redacted
+  thinking and server-tool blocks to a streaming Anthropic client in their
+  original order — the reframed stream has no representation for any of them,
+  and Anthropic rejects a continued turn whose thinking blocks were dropped
+  or reordered.
+  """
+  def passthrough_anthropic_events(acc, events) do
+    {acc, _openai_chunks} = process_anthropic_events(acc, events)
+
+    wire =
+      Enum.map(events, fn event ->
+        "event: #{event["type"]}\ndata: #{Jason.encode!(event)}\n\n"
+      end)
+
+    {acc, wire}
+  end
+
   @doc false
   def process_anthropic_events(acc, events) do
     Enum.reduce(events, {acc, []}, fn event, {acc, chunks} ->
@@ -852,8 +897,11 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
         # enough to use it rather than synthesise one. It names a message in
         # Anthropic's store, which is what `previous_message_id` cache
         # diagnostics refer to; a synthesised id cannot be used for that.
+        # Its usage carries the input-side figures (`input_tokens`, cache
+        # read/write) that `message_delta` may never repeat.
         "message_start" ->
-          {%{acc | message_id: get_in(event, ["message", "id"])}, chunks}
+          acc = %{acc | message_id: get_in(event, ["message", "id"])}
+          {seed_usage_from_message_start(acc, get_in(event, ["message", "usage"])), chunks}
 
         "content_block_start" ->
           case event["content_block"] do
@@ -980,6 +1028,28 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
       end
     end)
   end
+
+  defp seed_usage_from_message_start(acc, usage) when is_map(usage) do
+    base = %{
+      "prompt_tokens" => usage["input_tokens"],
+      "completion_tokens" => usage["output_tokens"],
+      "total_tokens" => (usage["input_tokens"] || 0) + (usage["output_tokens"] || 0)
+    }
+
+    base =
+      if usage["cache_read_input_tokens"],
+        do: Map.put(base, "cache_read_tokens", usage["cache_read_input_tokens"]),
+        else: base
+
+    base =
+      if usage["cache_creation_input_tokens"],
+        do: Map.put(base, "cache_write_tokens", usage["cache_creation_input_tokens"]),
+        else: base
+
+    %{acc | usage: base}
+  end
+
+  defp seed_usage_from_message_start(acc, _), do: acc
 
   # `type`, `delta.stop_reason` and `usage` are translated into the OpenAI
   # chunk shape; everything else on the tail event is not. `delta` is unwrapped

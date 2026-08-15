@@ -133,6 +133,10 @@ and evaluate that new log with the same criteria and the same judge.
 - **`cost_usd` can be $0** on a plan/subscription key, because nothing was
   metered. `list_cost_usd` is what the same tokens would have cost at API list
   price, and is the comparable number when mixing key types.
+- **A `null` cost means unknown, not free.** When a request's token counts were
+  never reported (both cost fields and the token counts are `null`), there is
+  nothing to price — exclude the row from cost comparisons rather than
+  treating it as $0.
 - **Latency here includes the proxy's own hop** and one cold call per run; it
   ranks models against each other rather than predicting production latency.
 

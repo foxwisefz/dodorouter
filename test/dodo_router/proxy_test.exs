@@ -230,6 +230,46 @@ defmodule DodoRouter.ProxyTest do
       assert Decimal.compare(log.list_cost_usd, Decimal.new(0)) == :gt
     end
 
+    test "unknown usage prices as nil, not zero", ctx do
+      # A pricing row exists, so the only reason for a nil cost is the
+      # absent token counts — zero would mean "free", not "unknown".
+      {:ok, _} =
+        DodoRouter.Models.create_model(%{
+          provider_slug: "test_provider",
+          model_id: "no-usage-model",
+          display_name: "No Usage Model",
+          input_price_per_million: Decimal.new("1.0"),
+          output_price_per_million: Decimal.new("2.0")
+        })
+
+      step = %{ctx.step | model: "no-usage-model"}
+
+      assert {:ok, _resp, %{log: log}} =
+               Proxy.dispatch(ctx.router, ctx.request, steps: [step], log_mode: :sync)
+
+      assert log.prompt_tokens == nil
+      assert log.estimated_cost_usd == nil
+      assert log.list_cost_usd == nil
+    end
+
+    test "unknown usage on a subscription key also prices as nil", ctx do
+      oauth_key =
+        ProvidersFixtures.provider_key_fixture(ctx.user, %{provider_slug: "anthropic_oauth"})
+
+      step = %{
+        ctx.step
+        | model: "no-usage-model",
+          provider_key: oauth_key,
+          provider_key_id: oauth_key.id
+      }
+
+      assert {:ok, _resp, %{log: log}} =
+               Proxy.dispatch(ctx.router, ctx.request, steps: [step], log_mode: :sync)
+
+      assert log.estimated_cost_usd == nil
+      assert log.list_cost_usd == nil
+    end
+
     test "list cost is nil when the model has no metered catalog row", ctx do
       DodoRouter.Repo.delete_all(DodoRouter.Models.Model)
 

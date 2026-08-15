@@ -531,6 +531,7 @@ defmodule DodoRouter.MCP.Tools do
             status: run.status,
             model: run.candidate_model,
             score: run.score,
+            criterion_scores: run.criterion_scores,
             summary: run.summary,
             issues: run.issues,
             error: run.error,
@@ -545,8 +546,10 @@ defmodule DodoRouter.MCP.Tools do
             # necessarily the ones the evaluation names now.
             judged_by: run.judge_provider_key_label,
             judge_key_deleted: Evaluations.judge_key_deleted?(run),
+            judge_log_id: run.judge_log_id,
             answered_by: run.candidate_provider_key_label,
             candidate_key_deleted: Evaluations.candidate_key_deleted?(run),
+            candidate_log_id: run.candidate_log_id,
             output_preview: body_or_marker(bodies?, truncate(run.candidate_output))
           }
         end)

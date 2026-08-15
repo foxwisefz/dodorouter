@@ -68,6 +68,9 @@ defmodule DodoRouter.Proxy.Adapters.TestProvider do
   # refused it, which is not a gateway failure however much a blanket 502
   # made it look like one.
   @retired_model "retired-model"
+  # A response that never reports usage, like a stream whose final usage
+  # frame was missed — the cost columns must read unknown, not $0.
+  @no_usage_model "no-usage-model"
   @call_table :dodo_test_provider_calls
 
   @impl Adapter
@@ -216,6 +219,8 @@ defmodule DodoRouter.Proxy.Adapters.TestProvider do
         "provider_processing_ms" => 50
       }
     }
+
+    response = if step.model == @no_usage_model, do: Map.delete(response, "usage"), else: response
 
     {:ok, response, %{headers: [{"content-type", "application/json"} | @ratelimit_headers]}}
   end

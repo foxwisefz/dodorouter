@@ -588,6 +588,17 @@ defmodule DodoRouter.Proxy do
   # the marginal cost is zero but the comparison number is not.
   defp calculate_costs(nil, _usage), do: %{estimated: nil, list: nil}
 
+  # No token counts at all means unknown, and unknown must not price as
+  # $0 — a log that silently claims it was free wins every cost
+  # comparison it appears in (dodo_router-4pi).
+  defp calculate_costs(_last_step, %{
+         prompt_tokens: nil,
+         completion_tokens: nil,
+         cache_read_tokens: nil,
+         cache_write_tokens: nil
+       }),
+       do: %{estimated: nil, list: nil}
+
   defp calculate_costs(last_step, usage) do
     key_slug = last_step[:provider_key_slug]
     provider = last_step[:provider]

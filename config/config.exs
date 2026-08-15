@@ -17,13 +17,17 @@ import Config
 # pointers the installer does not write.
 config :attesto_phoenix, otp_app: :dodo_router, repo: DodoRouter.Repo
 
+# issuer/audience default to https://localhost here for dev/test; prod
+# overrides both at boot in config/runtime.exs (ATTESTO_ISSUER/ATTESTO_AUDIENCE
+# env vars, or derived from PHX_HOST) since they must be read at runtime, not
+# baked into the release at compile time.
 config :dodo_router, AttestoPhoenix.Config,
-  issuer: System.get_env("ATTESTO_ISSUER") || "https://localhost",
+  issuer: "https://localhost",
   # RFC 8707 resource identifier: the canonical URI of the MCP endpoint. Tokens
   # are minted with this as `aud` and the resource server refuses any token
   # minted for something else, so a token stolen from another service of ours
   # cannot be replayed here.
-  audience: System.get_env("ATTESTO_AUDIENCE") || "https://localhost/mcp",
+  audience: "https://localhost/mcp",
   keystore: DodoRouter.AuthZ.Keystore,
   repo: DodoRouter.Repo,
   principal_kinds: {DodoRouter.AuthZ, :principal_kinds},

@@ -105,7 +105,13 @@ defmodule DodoRouterWeb.AnthropicProxyController do
   defp request_body(%{body_params: %{} = body}, _merged) when not is_struct(body), do: body
   defp request_body(_conn, merged), do: merged
 
-  defp fidelity_opts(untranslated) when map_size(untranslated) == 0, do: []
+  # `client_format` is always declared, not only when untranslated fields
+  # exist: the response-direction passthrough (native content blocks, real
+  # message ids, streaming passthrough) keys off it for every request, and
+  # tying it to the request-side leftovers silently disabled all of that for
+  # any request the converter translated completely.
+  defp fidelity_opts(untranslated) when map_size(untranslated) == 0,
+    do: [client_format: :anthropic]
 
   defp fidelity_opts(untranslated) do
     [
@@ -303,22 +309,12 @@ defmodule DodoRouterWeb.AnthropicProxyController do
     Process.put(:__anthropic_serving_model__, openai_params["model"] || "unknown")
     # Keep-alive means the next request may land in this same process.
     Process.delete(:__stream_opened__)
+    Process.delete(:__anthropic_passthrough_active__)
     Adapter.reset_stream_response_headers()
 
     send_chunk = &raw_send_chunk/1
 
-    anthropic_send_chunk = fn openai_sse_data ->
-      state = Process.get(:anthropic_sse_state) || AnthropicFormat.new_sse_state()
-      {anthropic_events, state} = AnthropicFormat.convert_sse_chunk(openai_sse_data, state)
-      Process.put(:anthropic_sse_state, state)
-
-      if anthropic_events != [] do
-        open_stream(request_id)
-        Enum.each(anthropic_events, send_chunk)
-      end
-
-      :ok
-    end
+    anthropic_send_chunk = fn data -> handle_stream_data(data, request_id) end
 
     result =
       Proxy.dispatch_streaming(
@@ -351,13 +347,62 @@ defmodule DodoRouterWeb.AnthropicProxyController do
     conn = finish_stream(result, sse_state, request_id, send_chunk)
     Process.delete(:__stream_conn__)
     Process.delete(:__stream_opened__)
+    Process.delete(:__anthropic_passthrough_active__)
     conn
+  end
+
+  # Routes one chunk of adapter output onto the client's wire. Public (doc
+  # false) so the passthrough/reframe split is testable without a live
+  # Anthropic upstream.
+  @doc false
+  def handle_stream_data("event: " <> _ = native_sse_data, _request_id) do
+    # Native events relayed verbatim by a passthrough step — the provider's
+    # own message lifecycle is already on the wire, so no synthetic
+    # message_start/content_block_start and no reframing.
+    Process.put(:__anthropic_passthrough_active__, true)
+    ensure_stream_head()
+    raw_send_chunk(native_sse_data)
+    :ok
+  end
+
+  def handle_stream_data(openai_sse_data, request_id) do
+    state = Process.get(:anthropic_sse_state) || AnthropicFormat.new_sse_state()
+    {anthropic_events, state} = AnthropicFormat.convert_sse_chunk(openai_sse_data, state)
+    Process.put(:anthropic_sse_state, state)
+
+    if anthropic_events != [] do
+      open_stream(request_id)
+      Enum.each(anthropic_events, &raw_send_chunk/1)
+    end
+
+    :ok
   end
 
   # Anthropic's stream lifecycle requires message_start and content_block_start
   # before any delta, so both are emitted lazily at the moment the first delta
   # is ready — which is also the moment the HTTP status stops being revisable.
+  # A passthrough stream calls `ensure_stream_head/0` instead: the provider's
+  # real message_start is about to be relayed, and a synthetic one on top of
+  # it would open a second message.
   defp open_stream(request_id) do
+    if Process.get(:__stream_opened__) != true do
+      ensure_stream_head()
+
+      model = Process.get(:__anthropic_serving_model__) || "unknown"
+      # Anthropic's own id when Anthropic is serving: it names a message in
+      # their store, which is what `previous_message_id` cache diagnostics
+      # refer to. Any other provider has none, so we synthesise one.
+      message_id = AnthropicAdapter.stream_message_id() || "msg_#{request_id}"
+      raw_send_chunk(anthropic_message_start_event(model, message_id))
+      raw_send_chunk(anthropic_content_block_start_event())
+    end
+
+    :ok
+  end
+
+  # The housekeeping half of opening the stream: commit the response head with
+  # the provider's parked rate-limit headers, exactly once.
+  defp ensure_stream_head do
     if Process.get(:__stream_opened__) != true do
       Process.put(:__stream_opened__, true)
 
@@ -372,14 +417,6 @@ defmodule DodoRouterWeb.AnthropicProxyController do
           Adapter.stream_response_headers()
         )
       )
-
-      model = Process.get(:__anthropic_serving_model__) || "unknown"
-      # Anthropic's own id when Anthropic is serving: it names a message in
-      # their store, which is what `previous_message_id` cache diagnostics
-      # refer to. Any other provider has none, so we synthesise one.
-      message_id = AnthropicAdapter.stream_message_id() || "msg_#{request_id}"
-      raw_send_chunk(anthropic_message_start_event(model, message_id))
-      raw_send_chunk(anthropic_content_block_start_event())
     end
 
     :ok
@@ -399,27 +436,18 @@ defmodule DodoRouterWeb.AnthropicProxyController do
     :ok
   end
 
-  defp finish_stream({:ok, openai_response, timing}, sse_state, request_id, send_chunk) do
-    choice = get_in(openai_response, ["choices", Access.at(0)]) || %{}
-    stop_reason = convert_stop_reason(choice["finish_reason"])
-    usage = openai_response["usage"] || %{}
-
-    # A successful request that produced no content still owes the client a
-    # well-formed, empty message rather than a bare 200 with no body.
-    open_stream(request_id)
-
-    :ok = send_chunk.(anthropic_content_block_stop_event(sse_state.open_block))
-
-    :ok =
-      send_chunk.(
-        anthropic_message_delta_event(stop_reason, usage, timing[:response_passthrough] || %{})
-      )
-
-    :ok = send_chunk.(anthropic_message_stop_event())
-    Process.get(:__stream_conn__)
+  def finish_stream({:ok, openai_response, timing}, sse_state, request_id, send_chunk) do
+    if Process.get(:__anthropic_passthrough_active__) == true do
+      # The provider's own content_block_stop / message_delta / message_stop
+      # were already relayed verbatim; a synthetic tail here would append a
+      # second terminator to a finished message.
+      Process.get(:__stream_conn__)
+    else
+      finish_reframed_stream(openai_response, timing, sse_state, request_id, send_chunk)
+    end
   end
 
-  defp finish_stream({:error, :no_routing_configured}, _sse_state, _request_id, send_chunk) do
+  def finish_stream({:error, :no_routing_configured}, _sse_state, _request_id, send_chunk) do
     stream_or_status(
       400,
       %{
@@ -430,12 +458,12 @@ defmodule DodoRouterWeb.AnthropicProxyController do
     )
   end
 
-  defp finish_stream(
-         {:error, :all_providers_failed, attempts},
-         _sse_state,
-         _request_id,
-         send_chunk
-       ) do
+  def finish_stream(
+        {:error, :all_providers_failed, attempts},
+        _sse_state,
+        _request_id,
+        send_chunk
+      ) do
     last_attempt = List.last(attempts)
 
     {status, payload} =
@@ -462,6 +490,26 @@ defmodule DodoRouterWeb.AnthropicProxyController do
   # Nothing has been sent yet -> a real HTTP status the client's SDK can act
   # on. Content is already on the wire -> the status is spent, so the error can
   # only be an SSE event.
+  defp finish_reframed_stream(openai_response, timing, sse_state, request_id, send_chunk) do
+    choice = get_in(openai_response, ["choices", Access.at(0)]) || %{}
+    stop_reason = convert_stop_reason(choice["finish_reason"])
+    usage = openai_response["usage"] || %{}
+
+    # A successful request that produced no content still owes the client a
+    # well-formed, empty message rather than a bare 200 with no body.
+    open_stream(request_id)
+
+    :ok = send_chunk.(anthropic_content_block_stop_event(sse_state.open_block))
+
+    :ok =
+      send_chunk.(
+        anthropic_message_delta_event(stop_reason, usage, timing[:response_passthrough] || %{})
+      )
+
+    :ok = send_chunk.(anthropic_message_stop_event())
+    Process.get(:__stream_conn__)
+  end
+
   defp stream_or_status(status, payload, send_chunk) do
     conn = Process.get(:__stream_conn__)
 
