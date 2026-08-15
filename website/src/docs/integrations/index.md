@@ -9,6 +9,8 @@ order: 12
 
 Every configuration in this section was actually run against a live DodoRouter instance — not copied from each tool's generic docs. Replace `sk-dodo-YOUR_KEY` and the router slug with your own in each example.
 
+This section routes an agent's LLM calls *through* DodoRouter. For the other direction — letting an agent read that traffic back and benchmark cheaper models on it — see [Agent access](/docs/agent-access/).
+
 <div class="grid sm:grid-cols-2 gap-3 my-2">
   <a href="/docs/integrations/claude-code/" class="docs-card block rounded-xl border border-border p-4 hover:border-accent transition-colors">
     <p class="text-sm font-semibold text-foreground mb-1">Claude Code →</p>

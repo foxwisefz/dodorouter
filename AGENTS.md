@@ -75,6 +75,7 @@ Where a change lands:
 | A provider adapter, its models or auth type | `docs/providers.md`, `docs/models.md` |
 | A proxy endpoint, or a request/response field | `docs/api/*.md` |
 | How a client (Claude Code, Codex, OpenCode, Forge) connects | `docs/integrations/*.md` |
+| An MCP tool, a scope, or the OAuth connect flow | `docs/agent-access.md` |
 | Anything a user configures in the UI | `docs/dashboard.md` |
 | A new user-visible failure mode or error message | `docs/troubleshooting.md` |
 | Deployment, releases, self-hosting | `docs/deployment.md`, `docs/self-hosting.md` |
@@ -98,7 +99,9 @@ Covered under [Agent surface](#agent-surface): the guide *is* the interface for 
 
 **These three drift together.** A change to the evaluation surface usually touches all of them — the docs page, the MCP tool, and the guide. Check each before calling the work done; no test catches a stale description.
 
-**Known gap (2026-08-15):** `website/src/docs` has no page for the MCP endpoint or the agent surface — both exist only in this file and in the guide, and the OAuth flow a user has to complete to connect an agent is documented nowhere a user can read. That gap got worse when REST was removed: `claude mcp add` is now the *only* way in, so a user who cannot find it has no fallback.
+**A fourth artifact, for the human half:** `website/src/docs/agent-access.md` documents the connect command, the four scopes, the tool list and the activity page. It closed a gap that had been open since 2026-08-13 and got worse when REST was removed — `claude mcp add` is now the *only* way in, so a user who cannot find it has no fallback.
+
+**Adding a docs section requires two edits, not one.** Section order is a hardcoded list in `website/src/_data/docsSectionOrder.js`; a page whose `section:` is missing from it builds and renders at its own URL but appears in no sidebar, no `llms.txt` and no `llms-full.txt`. It looks shipped and is unreachable. Build with `npm run build` and confirm the section appears in `_site/llms.txt` before calling it done.
 
 ## Project guidelines
 

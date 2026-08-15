@@ -3,7 +3,7 @@ title: Troubleshooting & FAQ
 navTitle: Troubleshooting & FAQ
 description: Common errors and questions, and what actually causes each one.
 section: Operations
-order: 18
+order: 19
 ---
 
 # Troubleshooting & FAQ
@@ -19,6 +19,10 @@ Self-hosted only: `INFISICAL_TOKEN` / `INFISICAL_PROJECT_ID` aren't set or are i
 ### 401 Invalid API key
 
 You're using a provider key (from the Providers page) where a router API key is expected, or vice versa — see [Provider keys vs. router API keys](/docs/concepts/#provider-keys-vs-router-api-keys). Also check you didn't regenerate the router's key since your client last read it.
+
+### 401 on `/mcp`, even with a valid router key
+
+The MCP endpoint doesn't take a router API key at all — that key sends traffic, and reading traffic back is a separate grant. Connect the agent over OAuth instead: `claude mcp add --transport http dodorouter {base_url}/mcp`, then approve it in the browser. See [Agent access](/docs/agent-access/).
 
 ### 402 Payment Required
 

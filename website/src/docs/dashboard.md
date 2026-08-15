@@ -25,6 +25,10 @@ Add/rename/delete provider API keys, grouped by provider. Each key shows a live 
 
 One card per router showing its endpoint URL and masked key prefix, with a one-click **Regenerate** (old key stops working immediately; new one is shown once).
 
+## Agent Activity
+
+What coding agents connected over [MCP](/docs/agent-access/) have been doing with your traffic. There is nothing to create here — agents connect over OAuth and you approve them in the browser — so the page is the record: which agents are connected, how many calls each made, which of them actually read prompt and response text, and every individual call filterable by allowed / denied / errored. Refused calls are recorded too, which is what makes the page worth reading.
+
 ## Logs
 
 Every request, live-streamed in as it happens. Filter by router or favorites. Each log opens into full detail: conversation view, raw request/response JSON, per-attempt fallback trace, timing, cost, and a **Replay** action that reruns the same conversation against a different model and diffs the two results (inline diff, side-by-side, or raw JSON).
