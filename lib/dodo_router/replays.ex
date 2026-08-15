@@ -127,7 +127,7 @@ defmodule DodoRouter.Replays do
       request =
         decoded
         |> Map.drop(@strip_fields)
-        |> drop_reasoning_params(reasoning_effort)
+        |> drop_reasoning_params(reasoning_effort, decoded["model"], target_model)
         |> Map.put("model", target_model)
 
       {:ok, request}
@@ -262,10 +262,37 @@ defmodule DodoRouter.Replays do
   defp validate_effort(effort) when is_binary(effort) and byte_size(effort) <= 32, do: :ok
   defp validate_effort(_effort), do: {:error, :invalid_reasoning_effort}
 
-  defp drop_reasoning_params(request, nil), do: request
+  # Reasoning controls belong to the model that was asked, not to the
+  # conversation. `thinking: {"type": "adaptive"}` is a 400 on a Claude model
+  # that predates adaptive thinking, so carrying the source's block to a
+  # different model means the candidate never answers at all — the request
+  # is refused before it is read.
+  #
+  # Kept when the model is unchanged: that is a genuine re-run, and there
+  # fidelity is the whole point.
+  @reasoning_params ~w(reasoning_effort thinking reasoning)
 
-  defp drop_reasoning_params(request, _effort),
-    do: Map.drop(request, ["reasoning_effort", "thinking"])
+  defp drop_reasoning_params(request, effort, source_model, target_model) do
+    cond do
+      effort not in [nil, ""] -> drop_reasoning(request)
+      target_model != source_model -> drop_reasoning(request)
+      true -> request
+    end
+  end
+
+  # `output_config` also carries structured outputs, so only its effort key
+  # goes — dropping the object would lose the schema the caller asked for.
+  defp drop_reasoning(request) do
+    request
+    |> Map.drop(@reasoning_params)
+    |> case do
+      %{"output_config" => config} = dropped when is_map(config) ->
+        Map.put(dropped, "output_config", Map.delete(config, "effort"))
+
+      dropped ->
+        dropped
+    end
+  end
 
   defp decode_body(body) when is_binary(body) do
     case Jason.decode(body) do
