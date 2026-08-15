@@ -8,6 +8,8 @@ defmodule DodoRouterWeb.MCPControllerTest do
 
   use DodoRouterWeb.ConnCase, async: true
 
+  import Ecto.Query
+
   alias DodoRouter.Agents
   alias DodoRouter.AccountsFixtures
   alias DodoRouter.AuthZFixtures
@@ -257,6 +259,95 @@ defmodule DodoRouterWeb.MCPControllerTest do
   describe "tools/call" do
     defp call_tool(conn, token, name, args \\ %{}) do
       rpc(conn, token, "tools/call", %{"name" => name, "arguments" => args})
+    end
+
+    test "an agent can retry only what failed, without re-running everything", %{
+      conn: conn,
+      token: token,
+      user: user,
+      router: router
+    } do
+      # The product gained cheap recovery — re-score a stored answer whose
+      # judge call failed — and MCP had no way to reach it. run_eval is the
+      # only other option and it re-generates every answer already paid for.
+      key = DodoRouter.ProvidersFixtures.provider_key_fixture(user, %{"label" => "Key 1"})
+
+      log =
+        DodoRouter.LogsFixtures.log_fixture(router, %{
+          request_body:
+            Jason.encode!(%{
+              "model" => "m",
+              "messages" => [%{"role" => "user", "content" => "hi"}]
+            })
+        })
+
+      {:ok, evaluation} =
+        DodoRouter.Evaluations.create_evaluation(user, log, %{
+          name: "Judge failed",
+          criteria: "Be useful",
+          judge_model: "fail-model",
+          judge_provider_key_id: key.id,
+          candidate_targets: [
+            %{"provider_key_id" => key.id, "provider" => "test_provider", "model" => "test-model"}
+          ],
+          repetitions: 1
+        })
+
+      {:ok, _} = DodoRouter.Evaluations.run(user, evaluation)
+
+      body = json_response(call_tool(conn, token, "get_eval", %{"id" => evaluation.id}), 200)
+      payload = tool_json(body)
+
+      # The stage is what tells an agent this is recoverable at all.
+      assert [run] = payload["runs"]
+      assert run["failure_stage"] == "judge"
+      assert run["judged_by"] == "Key 1"
+      assert payload["retryable"]["judge"] == 1
+
+      evaluation
+      |> Ecto.Changeset.change(judge_model: "judge-model")
+      |> DodoRouter.Repo.update!()
+
+      retried = json_response(call_tool(conn, token, "retry_eval", %{"id" => evaluation.id}), 200)
+      assert retried["result"]["isError"] == false
+
+      assert [%{"status" => "completed"}] =
+               DodoRouter.Repo.all(
+                 from(r in DodoRouter.Logs.EvaluationRun,
+                   where: r.evaluation_id == ^evaluation.id and is_nil(r.superseded_at),
+                   select: %{"status" => r.status}
+                 )
+               )
+    end
+
+    test "run_eval refuses a judge key already known to be unusable", %{
+      conn: conn,
+      token: token,
+      user: user,
+      router: router
+    } do
+      key = DodoRouter.ProvidersFixtures.provider_key_fixture(user, %{"label" => "Spent"})
+      DodoRouter.Providers.apply_health(key.id, :quota, "usage limit reached")
+
+      log = DodoRouter.LogsFixtures.log_fixture(router)
+
+      {:ok, evaluation} =
+        DodoRouter.Evaluations.create_evaluation(user, log, %{
+          name: "Doomed",
+          criteria: "Be useful",
+          judge_model: "judge-model",
+          judge_provider_key_id: key.id,
+          candidate_targets: []
+        })
+
+      body = json_response(call_tool(conn, token, "run_eval", %{"id" => evaluation.id}), 200)
+
+      # An error the agent can act on, rather than a batch of answers
+      # generated and discarded unscored.
+      assert body["result"]["isError"] == true
+      assert [%{"text" => text}] = body["result"]["content"]
+      assert text =~ "Spent"
+      assert text =~ "quota"
     end
 
     test "list_routers returns what the token reaches", %{

@@ -68,7 +68,10 @@ defmodule DodoRouter.MCP.Tools do
       name: "list_eval_targets",
       title: "List candidate models",
       description:
-        "Provider keys and the models each can serve, with list prices per million tokens. A candidate is a provider_key_id plus a model.",
+        "Provider keys and the models each can serve, with list prices per million tokens. A " <>
+          "candidate is a provider_key_id plus a model. Models come from the synced catalog, so " <>
+          "anything a provider has retired is already absent — a model missing here is not " <>
+          "available to name. `billing` says whether a key is metered or a subscription plan.",
       scopes: ["evals:read"],
       schema: %{
         "type" => "object",
@@ -143,7 +146,28 @@ defmodule DodoRouter.MCP.Tools do
       name: "run_eval",
       title: "Run an evaluation",
       description:
-        "Start or re-start the benchmark. Returns immediately; poll get_eval until running is false. This calls providers and spends money.",
+        "Start or re-start the whole benchmark: every candidate, every repetition. Returns " <>
+          "immediately; poll get_eval until running is false. This calls providers and spends " <>
+          "money — after a partial failure prefer retry_eval, which repeats only what failed and " <>
+          "re-scores stored answers for free. Refused when the judge's key is already known to be " <>
+          "out of quota or failing auth, since that loses every score in the batch.",
+      scopes: ["evals:write"],
+      schema: %{
+        "type" => "object",
+        "required" => ["id"],
+        "properties" => %{"router" => @router_arg, "id" => %{"type" => "string"}}
+      }
+    },
+    %{
+      name: "retry_eval",
+      title: "Retry only the failed runs",
+      description:
+        "Repeats just the failed runs of the latest batch, in place. A run whose failure_stage is " <>
+          "\"judge\" is re-scored from the answer already stored — no candidate call, no second " <>
+          "generation cost. A \"candidate\" failure calls that provider again for the same model. " <>
+          "Prefer this over run_eval after a rate limit or an interrupted benchmark: run_eval " <>
+          "re-runs everything and pays for answers you already have. Returns immediately; poll " <>
+          "get_eval until running is false.",
       scopes: ["evals:write"],
       schema: %{
         "type" => "object",
@@ -158,6 +182,8 @@ defmodule DodoRouter.MCP.Tools do
       Status, per-model rankings (score, latency, cost) and the judge's feedback on your own rubric.
 
       Read rubric_feedback before trusting the scores: if the judge often said the criteria were too thin to decide, the numbers are noise dressed up as data. A gap between two models smaller than their score_stddev is not a result.
+
+      A failed run is not always a failed model. `failure_stage` says which half broke: "judge" means the answer was generated and paid for and only the scoring call failed — retry_eval re-scores it for free — while "candidate" means the model never answered. `retryable` counts both. `blockers` reports what is already known to be broken before spending anything: a key seen refusing, or a candidate model the provider has retired.
       """,
       scopes: ["evals:read"],
       schema: %{
@@ -394,6 +420,28 @@ defmodule DodoRouter.MCP.Tools do
 
         {:error, :already_running} ->
           {:error, "That evaluation is already running. Poll get_eval instead of starting again."}
+
+        {:error, {:judge_key_unusable, blocker}} ->
+          # Refused rather than started: every candidate would be generated
+          # and paid for, then thrown away for want of a judge.
+          {:error,
+           "Not started: the judge's key #{blocker.label} is #{blocker.status}. Every answer " <>
+             "would be generated and paid for, then discarded unscored. Pick another judge key " <>
+             "(list_eval_targets reports key health) and create a new evaluation."}
+      end
+    end
+  end
+
+  defp run("retry_eval", principal, args) do
+    with {:ok, router} <- resolve_router(principal, args),
+         {:ok, evaluation} <- fetch_eval(principal, router, args["id"]) do
+      case Evaluations.enqueue_retry(principal.user, evaluation) do
+        :ok ->
+          {:ok, eval_payload(principal, evaluation.id),
+           %{target_type: "evaluation", target_id: evaluation.id}}
+
+        {:error, :already_running} ->
+          {:error, "That evaluation is already running. Poll get_eval instead of retrying now."}
       end
     end
   end
@@ -450,6 +498,13 @@ defmodule DodoRouter.MCP.Tools do
           }
         end),
       rubric_feedback: Evaluations.rubric_feedback(runs),
+      # Failed runs worth repeating, split by what has to be redone. A judge
+      # retry reuses the stored answer; a candidate retry calls the provider
+      # again. Feed these to retry_eval rather than re-running everything.
+      retryable: Evaluations.retryable_counts(evaluation),
+      # Problems knowable before spending anything: a key the proxy has seen
+      # refuse, or a model the provider retired.
+      blockers: blockers_payload(Evaluations.preflight(principal.user, evaluation)),
       runs:
         Enum.map(runs, fn run ->
           %{
@@ -459,11 +514,29 @@ defmodule DodoRouter.MCP.Tools do
             summary: run.summary,
             issues: run.issues,
             error: run.error,
+            # Which half failed. "judge" means the answer exists and was paid
+            # for and only the scoring call failed, so retry_eval re-scores it
+            # without generating anything; "candidate" means there is no
+            # answer to score.
+            failure_stage: run.failure_stage,
             latency_ms: run.candidate_latency_ms,
             cost_usd: money(run.candidate_cost_usd),
+            # The credentials that actually produced this run, which are not
+            # necessarily the ones the evaluation names now.
+            judged_by: run.judge_provider_key_label,
+            judge_key_deleted: Evaluations.judge_key_deleted?(run),
+            answered_by: run.candidate_provider_key_label,
+            candidate_key_deleted: Evaluations.candidate_key_deleted?(run),
             output_preview: body_or_marker(bodies?, truncate(run.candidate_output))
           }
         end)
+    }
+  end
+
+  defp blockers_payload(%{judge: judge, candidates: candidates}) do
+    %{
+      judge: judge && Map.take(judge, [:label, :status, :detail]),
+      candidates: Enum.map(candidates, &Map.take(&1, [:model, :label, :status]))
     }
   end
 
