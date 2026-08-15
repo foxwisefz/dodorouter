@@ -31,7 +31,6 @@ defmodule DodoRouterWeb.MCPController do
   require Logger
 
   alias DodoRouter.MCP.Tools
-  alias DodoRouterWeb.AgentApi
   alias DodoRouterWeb.Plugs.AgentAudit
 
   @protocol_version "2026-07-28"
@@ -121,7 +120,7 @@ defmodule DodoRouterWeb.MCPController do
     do: dispatch_notification(conn, method, message)
 
   defp dispatch(conn, %{"method" => "tools/list", "id" => id}) do
-    principal = AgentApi.principal(conn)
+    principal = principal(conn)
 
     conn
     |> AgentAudit.annotate(operation: "tools/list")
@@ -129,7 +128,7 @@ defmodule DodoRouterWeb.MCPController do
   end
 
   defp dispatch(conn, %{"method" => "tools/call", "id" => id} = message) do
-    principal = AgentApi.principal(conn)
+    principal = principal(conn)
     params = message["params"] || %{}
     name = params["name"]
     args = params["arguments"] || %{}
@@ -195,6 +194,10 @@ defmodule DodoRouterWeb.MCPController do
   defp negotiate(requested) when requested in @legacy_versions, do: requested
   defp negotiate(requested) when requested in @supported_versions, do: requested
   defp negotiate(_requested), do: @legacy_default
+
+  # Assigned by `Plugs.OAuthPrincipal`, which has already refused the request if
+  # the token did not verify — so by the time any dispatch runs this is present.
+  defp principal(conn), do: conn.assigns.agent_principal
 
   ## Validation
 

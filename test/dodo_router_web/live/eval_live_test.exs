@@ -1519,13 +1519,15 @@ defmodule DodoRouterWeb.EvalLiveTest do
     refute has_element?(live, "#run-eval-button[disabled]")
   end
 
-  test "hands the agent API to the user, per router", %{conn: conn, user: user} do
-    {router, _api_key} = RoutersFixtures.router_fixture(user)
+  test "hands the agent surface to the user as a runnable command", %{conn: conn, user: user} do
+    {_router, _api_key} = RoutersFixtures.router_fixture(user)
 
     {:ok, live, _html} = live(conn, ~p"/evals")
 
-    # The command is the only way an agent learns the surface exists, so it
-    # has to name a real router of this user's, not a placeholder slug.
-    assert has_element?(live, "#agent-access", "/r/#{router.slug}/agent")
+    # The command is the only way an agent learns this surface exists. It names
+    # no router because MCP is router-unscoped — the agent asks which routers it
+    # reaches once connected, so there is no slug to get wrong here.
+    assert has_element?(live, "#agent-access", "claude mcp add")
+    assert has_element?(live, "#agent-access", "/mcp")
   end
 end

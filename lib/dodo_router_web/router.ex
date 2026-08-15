@@ -21,18 +21,6 @@ defmodule DodoRouterWeb.Router do
     plug DodoRouterWeb.Plugs.ApiAuth
   end
 
-  # Audit runs before auth on purpose: a call refused for a bad or unscoped
-  # token is exactly the one worth having a record of, and a plug that only
-  # sees authenticated requests cannot write it.
-  pipeline :agent_api do
-    plug :accepts, ["json"]
-    plug DodoRouterWeb.Plugs.AgentAudit, interface: "rest"
-    plug DodoRouterWeb.Plugs.AgentAuth
-  end
-
-  # Same credential and the same audit trail as the REST surface — recorded
-  # under a different `interface` so "which door did this agent come through"
-  # is answerable.
   # The authorization endpoint runs OUR login and consent UI, so it needs a
   # session — but deliberately not the generic :browser pipeline. attesto warns
   # about exactly this: CSRF protection would reject the externally-submitted
@@ -52,9 +40,10 @@ defmodule DodoRouterWeb.Router do
     plug :fetch_current_scope_for_user
   end
 
-  # OAuth only. Agent tokens were the interim credential while this decision was
-  # open (dodo_router-5m5.5); they stay on the REST surface until this flow is
-  # verified end to end, then get removed rather than kept as a second way in.
+  # The only way in. Bearer agent tokens were the interim credential while the
+  # decision was open (dodo_router-5m5.5); once Claude Code completed the OAuth
+  # flow end to end they were deleted rather than kept as a second door — one
+  # credential mechanism means one place where scope and revocation are decided.
   #
   # `Authenticate` rather than `ProtectResource`: the latter also enforces a
   # route-level scope, and ours are per-tool — one scope guarding the whole
@@ -91,16 +80,6 @@ defmodule DodoRouterWeb.Router do
     post "/recordings/active/stop", RecordingsController, :stop
   end
 
-  # The unscoped entry point. Everything else is under /r/:router_slug, so
-  # without this a caller holding only a base URL and a token cannot discover
-  # its first slug — and the per-router guide can only onboard someone who
-  # already knows what it was meant to tell them.
-  scope "/", DodoRouterWeb do
-    pipe_through :agent_api
-
-    get "/agent", AgentController, :index
-  end
-
   # MCP endpoint, revision 2026-07-28. Router-unscoped: the protocol is
   # stateless and every tool takes its router as an argument, resolved against
   # what the token reaches.
@@ -113,32 +92,6 @@ defmodule DodoRouterWeb.Router do
     # which it would read as "no MCP here at all".
     get "/mcp", MCPController, :not_allowed
     delete "/mcp", MCPController, :not_allowed
-  end
-
-  # Agent API - lets a coding agent working on a product measure quality vs
-  # price for that product's own traffic.
-  #
-  # Deliberately NOT :proxy_api. A router's proxy key exists to send traffic;
-  # these endpoints read traffic back, and giving one credential both turns a
-  # leaked .env from "someone burns my tokens" into "someone has every prompt
-  # my product ever sent". Agent tokens are separately issued, scoped and
-  # revocable, and every call here is recorded.
-  #
-  # `/agent` is the discovery endpoint; it describes everything below it.
-  # Static eval paths precede `/evals/:id` so "targets" isn't read as an id.
-  scope "/r/:router_slug", DodoRouterWeb do
-    pipe_through :agent_api
-
-    get "/agent", EvalsController, :guide
-
-    get "/logs", LogsController, :index
-    get "/logs/:id", LogsController, :show
-
-    get "/evals/targets", EvalsController, :targets
-    get "/evals", EvalsController, :index
-    post "/evals", EvalsController, :create
-    get "/evals/:id", EvalsController, :show
-    post "/evals/:id/run", EvalsController, :run
   end
 
   # Legacy endpoint (backwards compatibility)
@@ -182,7 +135,7 @@ defmodule DodoRouterWeb.Router do
 
       live "/providers", ProvidersLive.Index, :index
       live "/api-keys", ApiKeysLive.Index, :index
-      live "/agent-tokens", AgentTokenLive.Index, :index
+      live "/agent-activity", AgentActivityLive.Index, :index
 
       live "/logs", LogLive.Index, :index
       live "/logs/:id", LogLive.Show, :show

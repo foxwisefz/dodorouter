@@ -15,9 +15,13 @@ defmodule DodoRouter.Agents.ApiCall do
   @foreign_key_type :binary_id
 
   @outcomes ~w(ok denied error)
+  # "rest" is retained for rows written before the REST agent surface was
+  # removed. Nothing writes it now, but rejecting it would make old history
+  # unreadable — the point of an audit trail is that it survives the code.
   @interfaces ~w(rest mcp)
   # "unauthenticated" covers a call whose credential never resolved, which
   # still deserves a row: repeated ones are someone trying tokens.
+  # "agent_token" is likewise historical.
   @principal_kinds ~w(agent_token oauth unauthenticated)
 
   schema "agent_api_calls" do
@@ -38,7 +42,6 @@ defmodule DodoRouter.Agents.ApiCall do
     field :duration_ms, :integer
 
     belongs_to :user, DodoRouter.Accounts.User
-    belongs_to :agent_token, DodoRouter.Agents.AgentToken
     belongs_to :router, DodoRouter.Routers.Router
 
     # `timestamps`, not a bare `field :inserted_at` — a plain field is not
@@ -52,7 +55,6 @@ defmodule DodoRouter.Agents.ApiCall do
     call
     |> cast(attrs, [
       :user_id,
-      :agent_token_id,
       :router_id,
       :principal_kind,
       :principal_name,

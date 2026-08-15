@@ -4,7 +4,7 @@ defmodule DodoRouterWeb.Plugs.AgentAudit do
 
   Placed *before* authentication in the pipeline and hooked into
   `register_before_send/2`, so the row is written whatever happens afterwards
-  — a 401 from a token that does not exist is as much a record as a
+  — a 401 from a token that never verified is as much a record as a
   successful read, and arguably more interesting.
 
   This mirrors how `Proxy.Fidelity` earns its coverage: recording lives in the
@@ -69,13 +69,12 @@ defmodule DodoRouterWeb.Plugs.AgentAudit do
       principal_kind: principal.kind,
       principal_name: principal.name,
       user_id: principal.user.id,
-      agent_token_id: principal.id,
       scopes: principal.scopes
     }
   end
 
   # No principal means the credential never resolved. Recorded rather than
-  # skipped: a run of these is someone trying tokens against the surface.
+  # skipped: a run of these is someone probing the surface.
   defp principal_attrs(nil), do: %{principal_kind: "unauthenticated", scopes: []}
 
   defp outcome(status) when is_integer(status) and status < 400, do: "ok"

@@ -62,21 +62,24 @@ defmodule DodoRouterWeb.EvalLive.Index do
         >
           <h2 class="font-semibold">Run evals from your coding agent</h2>
           <p class="mt-1 max-w-2xl text-sm text-base-content/55">
-            Give your agent a router's API key and this one command. It reads back the whole
-            workflow — find a real request, replay it on other models, score the answers — so it
-            can compare quality against price without you in the loop.
+            Connect your agent with this one command and approve it in the browser. It reads back
+            the whole workflow — find a real request, replay it on other models, score the answers
+            — so it can compare quality against price without you in the loop.
           </p>
 
-          <div class="mt-4 space-y-2">
-            <div :for={router <- @nav_routers} class="text-sm">
-              <span class="text-xs uppercase tracking-wider text-base-content/45">
-                {router.name}
-              </span>
-              <code class="mt-1 block overflow-x-auto rounded-lg bg-base-200/70 px-3 py-2 font-mono text-xs">
-                curl -H "Authorization: Bearer $DODO_API_KEY" {@agent_base}/r/{router.slug}/agent
-              </code>
-            </div>
-          </div>
+          <code
+            phx-no-curly-interpolation
+            class="mt-4 block overflow-x-auto rounded-lg bg-base-200/70 px-3 py-2 font-mono text-xs"
+          >
+            claude mcp add --transport http dodorouter {@agent_base}/mcp
+          </code>
+
+          <p class="mt-3 text-xs text-base-content/45">
+            No key to paste — it registers itself and you decide what it may read.
+            <.link navigate={~p"/agent-activity"} class="text-primary hover:underline">
+              See what connected agents have done
+            </.link>
+          </p>
         </div>
       </div>
     </Layouts.app>

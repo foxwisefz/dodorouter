@@ -2,10 +2,12 @@ defmodule DodoRouter.Agents.Principal do
   @moduledoc """
   Who is calling the agent surface, resolved from whatever credential they used.
 
-  This is the seam the credential decision plugs into. Everything downstream —
-  scope checks, audit rows, router ownership — reads this struct and never the
-  credential itself, so adding OAuth access tokens later means adding one
-  resolver, not editing every controller.
+  The seam the credential decision plugs into. Everything downstream — scope
+  checks, audit rows, router ownership — reads this struct and never the
+  credential itself. That is what made replacing bearer agent tokens with OAuth
+  a matter of adding one resolver rather than editing every caller, and it is
+  why the struct keeps a `kind` and a router list even though only one resolver
+  exists today.
   """
 
   @enforce_keys [:kind, :user, :scopes]
@@ -15,7 +17,6 @@ defmodule DodoRouter.Agents.Principal do
     :scopes,
     :id,
     :name,
-    :token,
     router_ids: [],
     all_routers: false
   ]
@@ -26,36 +27,18 @@ defmodule DodoRouter.Agents.Principal do
           scopes: [String.t()],
           id: String.t() | nil,
           name: String.t() | nil,
-          token: DodoRouter.Agents.AgentToken.t() | nil,
           router_ids: [String.t()],
           all_routers: boolean()
         }
 
-  alias DodoRouter.Agents.{AgentToken, Scopes}
-
-  def from_token(%AgentToken{} = token, user) do
-    %__MODULE__{
-      kind: "agent_token",
-      id: token.id,
-      name: token.name,
-      user: user,
-      scopes: token.scopes,
-      token: token,
-      router_ids: token.router_ids || [],
-      all_routers: token.all_routers
-    }
-  end
+  alias DodoRouter.Agents.Scopes
 
   @doc """
   Builds a principal from an attesto-verified access token.
 
-  The other half of the seam: everything downstream reads this struct and never
-  the credential, so an OAuth token and an agent token are indistinguishable to
-  the tools, the scope checks and the audit trail.
-
   Reach is currently every router the owner has. An OAuth token carries scopes
-  but no router list, so the per-router narrowing an agent token can express has
-  no equivalent yet — see dodo_router-5m5.9.
+  but no router list, so the per-router narrowing the retired agent tokens could
+  express has no equivalent yet — see dodo_router-5m5.9.
   """
   def from_oauth(%{} = context, user) do
     %__MODULE__{
@@ -64,7 +47,6 @@ defmodule DodoRouter.Agents.Principal do
       name: context[:client_id] || context["client_id"],
       user: user,
       scopes: context[:scope] || context["scope"] || [],
-      token: nil,
       router_ids: [],
       all_routers: true
     }
@@ -75,7 +57,7 @@ defmodule DodoRouter.Agents.Principal do
   @doc """
   Whether this principal may act on the given router.
 
-  Ownership is checked on every call rather than trusted from the stored list,
+  Ownership is checked on every call rather than trusted from the principal,
   so a router that changed hands cannot be reached through a token minted
   before the change. The list narrows what an owner granted; it never widens it.
 

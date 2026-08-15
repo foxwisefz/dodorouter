@@ -20,9 +20,14 @@ defmodule DodoRouterWeb.MCPControllerTest do
 
   setup do
     user = AccountsFixtures.user_fixture()
-    {router, _proxy_key} = RoutersFixtures.router_fixture(user)
+    {router, proxy_key} = RoutersFixtures.router_fixture(user)
 
-    %{user: user, router: router, token: AuthZFixtures.access_token(user)}
+    %{
+      user: user,
+      router: router,
+      proxy_key: proxy_key,
+      token: AuthZFixtures.access_token(user)
+    }
   end
 
   # Builds a spec-shaped request: the mirrored headers are derived from the
@@ -495,6 +500,48 @@ defmodule DodoRouterWeb.MCPControllerTest do
       assert [call] = DodoRouter.Repo.all(DodoRouter.Agents.ApiCall)
       assert call.interface == "mcp"
       assert call.outcome == "denied"
+    end
+  end
+
+  describe "credential separation" do
+    test "a router's proxy key is not an agent credential", %{
+      conn: conn,
+      proxy_key: proxy_key
+    } do
+      # The regression the whole agent surface exists to prevent: a key that
+      # sends traffic must not read it back. It was true when bearer agent
+      # tokens guarded this and has to stay true now OAuth does.
+      assert conn |> rpc(proxy_key, "tools/list") |> json_response(401)
+
+      assert DodoRouter.Repo.all(DodoRouter.Agents.ApiCall)
+             |> Enum.all?(&(&1.outcome == "denied"))
+    end
+
+    test "the proxy endpoints still take the proxy key", %{
+      conn: conn,
+      router: router,
+      proxy_key: proxy_key
+    } do
+      # ...and the separation must not have broken what that key is for.
+      assert conn
+             |> put_req_header("authorization", "Bearer #{proxy_key}")
+             |> get("/r/#{router.slug}/v1/models")
+             |> json_response(200)
+    end
+  end
+
+  describe "get_guide" do
+    test "returns the workflow prose, with no scope required", %{conn: conn, user: user} do
+      # The guide reached agents through the REST surface's GET /agent until
+      # that was removed. Nothing else carries the part that decides whether
+      # the numbers mean anything, so it has to be callable here — and by a
+      # token holding nothing, since an agent reads it before asking for more.
+      scopeless = AuthZFixtures.access_token(user, scopes: [])
+
+      guide = call_tool(conn, scopeless, "get_guide") |> json_response(200) |> tool_json()
+
+      assert guide["guide"] =~ "Include the model you use today as a candidate"
+      assert guide["guide"] =~ "rubric_feedback"
     end
   end
 end

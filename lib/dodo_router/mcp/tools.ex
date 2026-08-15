@@ -6,9 +6,9 @@ defmodule DodoRouter.MCP.Tools do
   needs, what it returns, how a router argument is resolved — is testable
   without constructing JSON-RPC envelopes.
 
-  These call the same contexts the REST surface does rather than calling the
-  REST surface itself. The MCP server runs in-process; going out over HTTP to
-  our own API would buy nothing and add a hop that can fail on its own.
+  These call the contexts directly. The MCP server runs in-process; going out
+  over HTTP to our own API would buy nothing and add a hop that can fail on its
+  own.
   """
 
   alias DodoRouter.Agents
@@ -18,6 +18,13 @@ defmodule DodoRouter.MCP.Tools do
 
   @output_preview 2_000
 
+  # Read at compile time from the source tree rather than `priv` at runtime:
+  # the guide has to be there for a release too, and a missing file should fail
+  # the build, not the first agent that asks for it.
+  @guide_path Path.expand("../../../priv/agent/evals_guide.md", __DIR__)
+  @external_resource @guide_path
+  @guide File.read!(@guide_path)
+
   @router_arg %{
     "type" => "string",
     "description" =>
@@ -26,10 +33,17 @@ defmodule DodoRouter.MCP.Tools do
 
   @definitions [
     %{
+      name: "get_guide",
+      title: "How to evaluate models",
+      description:
+        "Read this first. The full workflow for comparing models on your own traffic — how to pick a source request, write criteria that can fail, choose a judge, and read the scores without fooling yourself. Tool descriptions say what each call does; this says what makes the numbers mean anything.",
+      scopes: [],
+      schema: %{"type" => "object", "properties" => %{}}
+    },
+    %{
       name: "list_routers",
       title: "List routers",
-      description:
-        "Every router this token can reach. Start here — most other tools take a router slug.",
+      description: "Every router this token can reach. Most other tools take a router slug.",
       scopes: [],
       schema: %{"type" => "object", "properties" => %{}}
     },
@@ -284,6 +298,12 @@ defmodule DodoRouter.MCP.Tools do
   end
 
   ## Tools
+
+  # Returned as one markdown string rather than decomposed into fields. It is
+  # prose whose value is in the argument it makes — "include the incumbent or
+  # you have no baseline" is not a parameter, and shredding it into a schema
+  # would leave the caller with the parts and not the point.
+  defp run("get_guide", _principal, _args), do: {:ok, %{guide: @guide}}
 
   defp run("list_routers", principal, _args) do
     routers = Agents.routers_for(principal.user, principal)
