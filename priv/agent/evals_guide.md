@@ -141,6 +141,12 @@ targets that produced it, so a changed setup is a new evaluation, never an edit.
 To test a prompt change, change the prompt in the product, make one real call,
 and evaluate that new log with the same criteria and the same judge.
 
+You never have to re-send the rubric to vary one thing: pass `from_eval_id`
+to `create_eval` and everything — criteria, examples, judge, candidates,
+repetitions, the source log — carries over from that evaluation, with any
+argument you pass alongside overriding its copy. Swap `request_log_id` to
+point the same rubric at a new log, or `candidates` to try another model.
+
 ## Reading the numbers honestly
 
 - **Compare within one evaluation, not across two.** Different judges, different

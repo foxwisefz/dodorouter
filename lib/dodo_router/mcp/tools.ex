@@ -133,9 +133,22 @@ defmodule DodoRouter.MCP.Tools do
       scopes: ["evals:write"],
       schema: %{
         "type" => "object",
-        "required" => ["request_log_id", "name", "criteria", "judge", "candidates"],
+        # Either a full definition, or a clone: from_eval_id carries every
+        # missing field over from the source evaluation.
+        "anyOf" => [
+          %{"required" => ["request_log_id", "name", "criteria", "judge", "candidates"]},
+          %{"required" => ["from_eval_id"]}
+        ],
         "properties" => %{
           "router" => @router_arg,
+          "from_eval_id" => %{
+            "type" => "string",
+            "description" =>
+              "Clone an existing evaluation: criteria, examples, judge, candidates, " <>
+                "repetitions and the source log carry over, and any argument passed " <>
+                "alongside overrides its copy. Evaluations stay immutable — this creates " <>
+                "a new one."
+          },
           "request_log_id" => %{
             "type" => "string",
             "description" => "An evaluable log from list_logs."
@@ -451,6 +464,7 @@ defmodule DodoRouter.MCP.Tools do
 
   defp run("create_eval", principal, args) do
     with {:ok, router} <- resolve_router(principal, args),
+         {:ok, args} <- expand_from_eval(principal, router, args),
          {:ok, log} <- fetch_log(principal, router, args["request_log_id"]),
          :ok <- evaluable(log),
          {:ok, judge} <- judge_target(principal, args["judge"]),
@@ -750,6 +764,35 @@ defmodule DodoRouter.MCP.Tools do
 
   defp judge_target(_principal, _judge),
     do: {:error, "judge must be an object with provider_key_id and model."}
+
+  # Evaluations are immutable on purpose — a changed rubric is a different
+  # benchmark. from_eval_id keeps that while sparing the caller from
+  # re-sending kilobytes of identical rubric: every field of the source
+  # carries over, and any argument passed alongside overrides its copy
+  # (dodo_router-z8b).
+  defp expand_from_eval(principal, router, %{"from_eval_id" => id} = args)
+       when is_binary(id) do
+    with {:ok, source} <- fetch_eval(principal, router, id) do
+      {:ok,
+       args
+       |> Map.put_new("request_log_id", source.request_log_id)
+       |> Map.put_new("name", source.name)
+       |> Map.put_new("criteria", source.criteria)
+       |> Map.put_new("good_examples", source.good_examples)
+       |> Map.put_new("bad_examples", source.bad_examples)
+       |> Map.put_new("repetitions", source.repetitions)
+       |> Map.put_new("judge", %{
+         "provider_key_id" => source.judge_provider_key_id,
+         "model" => source.judge_model
+       })
+       |> Map.put_new(
+         "candidates",
+         Enum.map(source.candidate_targets, &Map.take(&1, ["provider_key_id", "model"]))
+       )}
+    end
+  end
+
+  defp expand_from_eval(_principal, _router, args), do: {:ok, args}
 
   # A benchmark without the incumbent has numbers but no baseline, and the
   # source log already names what served it — so the caller should not have

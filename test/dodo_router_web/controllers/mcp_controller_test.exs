@@ -496,6 +496,89 @@ defmodule DodoRouterWeb.MCPControllerTest do
       assert by_label["plan key"]["judge_advice"] =~ "metered key for the judge"
     end
 
+    test "create_eval clones an existing evaluation via from_eval_id with overrides", %{
+      conn: conn,
+      token: token,
+      user: user,
+      router: router
+    } do
+      key = DodoRouter.ProvidersFixtures.provider_key_fixture(user, %{"label" => "Key 1"})
+
+      log =
+        DodoRouter.LogsFixtures.log_fixture(router, %{
+          request_body:
+            Jason.encode!(%{
+              "model" => "m",
+              "messages" => [%{"role" => "user", "content" => "hi"}]
+            })
+        })
+
+      {:ok, source} =
+        DodoRouter.Evaluations.create_evaluation(user, log, %{
+          name: "Original",
+          criteria: "A long rubric that should not need re-sending",
+          good_examples: "a fine answer",
+          judge_model: "judge-model",
+          judge_provider_key_id: key.id,
+          candidate_targets: [
+            %{"provider_key_id" => key.id, "provider" => "test_provider", "model" => "test-model"}
+          ],
+          repetitions: 2
+        })
+
+      # Override only the candidates; everything else carries over.
+      body =
+        json_response(
+          call_tool(conn, token, "create_eval", %{
+            "from_eval_id" => source.id,
+            "candidates" => [%{"provider_key_id" => key.id, "model" => "challenger-model"}],
+            "include_incumbent" => false
+          }),
+          200
+        )
+
+      payload = tool_json(body)
+      assert payload["id"] != source.id
+
+      clone = DodoRouter.Evaluations.get_evaluation!(user, payload["id"])
+      assert clone.criteria == source.criteria
+      assert clone.good_examples == "a fine answer"
+      assert clone.judge_model == "judge-model"
+      assert clone.repetitions == 2
+      assert clone.request_log_id == log.id
+      assert Enum.map(clone.candidate_targets, & &1["model"]) == ["challenger-model"]
+
+      # An id that is not yours reads as absent, not as someone else's.
+      other_user = DodoRouter.AccountsFixtures.user_fixture()
+      {other_router, _} = DodoRouter.RoutersFixtures.router_fixture(other_user)
+      other_log = DodoRouter.LogsFixtures.log_fixture(other_router)
+
+      other_key = DodoRouter.ProvidersFixtures.provider_key_fixture(other_user)
+
+      {:ok, foreign} =
+        DodoRouter.Evaluations.create_evaluation(other_user, other_log, %{
+          name: "Foreign",
+          criteria: "x",
+          judge_model: "judge-model",
+          judge_provider_key_id: other_key.id,
+          candidate_targets: [
+            %{
+              "provider_key_id" => other_key.id,
+              "provider" => "test_provider",
+              "model" => "test-model"
+            }
+          ]
+        })
+
+      body =
+        json_response(
+          call_tool(conn, token, "create_eval", %{"from_eval_id" => foreign.id}),
+          200
+        )
+
+      assert body["result"]["isError"]
+    end
+
     test "run_eval can override repetitions", %{
       conn: conn,
       token: token,
