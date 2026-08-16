@@ -95,5 +95,68 @@ defmodule DodoRouterWeb.RouterLiveTest do
       assert html =~ "p95 Latency"
       refute html =~ "Avg Latency"
     end
+
+    test "routing steps show their share of traffic and error rate", %{
+      conn: conn,
+      user: user
+    } do
+      {router, _api_key} = RoutersFixtures.router_fixture(user)
+
+      {:ok, step_a} =
+        DodoRouter.Routers.create_routing_step(router, %{
+          provider: "zai",
+          model: "glm-4.6"
+        })
+
+      {:ok, step_b} =
+        DodoRouter.Routers.create_routing_step(router, %{
+          provider: "moonshot",
+          model: "kimi-k2"
+        })
+
+      # step A errors, falls back to step B — one served request each
+      DodoRouter.LogsFixtures.log_fixture(router, %{
+        status: "fallback",
+        attempted_steps: [
+          %{"step_id" => step_a.id, "status" => "error"},
+          %{"step_id" => step_b.id, "status" => "success"}
+        ]
+      })
+
+      # step A alone serves this one cleanly
+      DodoRouter.LogsFixtures.log_fixture(router, %{
+        status: "success",
+        attempted_steps: [
+          %{"step_id" => step_a.id, "status" => "success"}
+        ]
+      })
+
+      {:ok, _live, html} = live(conn, ~p"/routers/#{router.id}")
+
+      assert html =~ ~s(data-step-id="#{step_a.id}")
+      assert html =~ ~s(data-step-share="50%")
+      assert html =~ ~s(data-step-errors="1")
+
+      assert html =~ ~s(data-step-id="#{step_b.id}")
+      assert html =~ ~s(data-step-share="50%")
+    end
+
+    test "a step with no traffic in the window is dimmed, not silently zero", %{
+      conn: conn,
+      user: user
+    } do
+      {router, _api_key} = RoutersFixtures.router_fixture(user)
+
+      {:ok, unused_step} =
+        DodoRouter.Routers.create_routing_step(router, %{
+          provider: "zai",
+          model: "glm-4.6"
+        })
+
+      {:ok, _live, html} = live(conn, ~p"/routers/#{router.id}")
+
+      assert html =~ ~s(data-step-id="#{unused_step.id}")
+      assert html =~ "no traffic in 24h"
+    end
   end
 end

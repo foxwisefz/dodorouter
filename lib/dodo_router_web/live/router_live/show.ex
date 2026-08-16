@@ -30,6 +30,7 @@ defmodule DodoRouterWeb.RouterLive.Show do
       |> assign(:router, router)
       |> assign(:stats, Logs.stats(router))
       |> assign(:latency_percentiles, Logs.latency_percentiles(router))
+      |> assign(:step_traffic, Logs.step_traffic(router))
       |> assign(:recent_events, [])
       |> assign(:stats_timer, nil)
       |> assign(:active_requests, 0)
@@ -396,7 +397,8 @@ defmodule DodoRouterWeb.RouterLive.Show do
     {:noreply,
      socket
      |> assign(:stats, stats)
-     |> assign(:latency_percentiles, Logs.latency_percentiles(router))}
+     |> assign(:latency_percentiles, Logs.latency_percentiles(router))
+     |> assign(:step_traffic, Logs.step_traffic(router))}
   end
 
   def handle_info({:log_pending, pending}, socket) do
@@ -723,6 +725,13 @@ defmodule DodoRouterWeb.RouterLive.Show do
             <div class="flex items-center justify-between mb-3">
               <div class="flex items-center gap-3">
                 <h2 class="section-title mb-0">Routing Chain</h2>
+                <span
+                  :if={@has_routing_steps}
+                  class="text-xs text-base-content/40"
+                  title="Share of served requests and error rate per step, last 24h"
+                >
+                  traffic share · last 24h
+                </span>
                 <div
                   :if={@active_request}
                   class="flex items-center gap-2 px-2.5 py-1 bg-green-500/25 rounded-full text-xs font-medium text-green-400"
@@ -811,6 +820,11 @@ defmodule DodoRouterWeb.RouterLive.Show do
                         thinking
                       </span>
                     </div>
+                    <.step_traffic_indicator
+                      step={step}
+                      traffic={Map.get(@step_traffic, step.id)}
+                      total_served={step_traffic_total(@step_traffic)}
+                    />
                     <div class="mt-2">
                       <.form for={%{}} phx-change="assign_key">
                         <input type="hidden" name="step_id" value={step.id} />
@@ -1581,6 +1595,56 @@ defmodule DodoRouterWeb.RouterLive.Show do
 
   defp setup_complete?(setup) do
     setup.keys and setup.steps and setup.assigned and setup.request
+  end
+
+  # A chain where step 1 serves 100% and one where step 1 500s every
+  # request used to render identically — this is the ambient-awareness fix
+  # (dodo_router-f6v.6): share of served requests plus an error-rate pill,
+  # for the same 24h window as the page's other stat cards. A step absent
+  # from `traffic` (no attempts at all in the window) is dimmed rather than
+  # shown as "0%" — that's a distinct, worse signal (dead or unreachable
+  # step) from "reached but never served".
+  attr :step, :map, required: true
+  attr :traffic, :map, default: nil
+  attr :total_served, :integer, required: true
+
+  defp step_traffic_indicator(assigns) do
+    ~H"""
+    <div
+      :if={@traffic}
+      class="mt-1.5 flex items-center gap-2 text-xs"
+      data-step-share={"#{step_share_pct(@traffic, @total_served)}%"}
+      data-step-errors={@traffic.errors}
+    >
+      <span class="font-medium text-base-content/70">
+        {step_share_pct(@traffic, @total_served)}% of traffic
+      </span>
+      <span
+        :if={@traffic.errors > 0}
+        class="px-1.5 py-0.5 rounded-full bg-error/15 text-error font-medium"
+        title={"#{@traffic.errors} error#{if @traffic.errors == 1, do: "", else: "s"} in the last 24h"}
+      >
+        {@traffic.errors} error{if @traffic.errors == 1, do: "", else: "s"}
+      </span>
+    </div>
+    <div
+      :if={!@traffic}
+      class="mt-1.5 text-xs text-base-content/30"
+      data-step-share="0%"
+    >
+      no traffic in 24h
+    </div>
+    """
+  end
+
+  defp step_share_pct(_traffic, 0), do: 0
+  defp step_share_pct(%{served: served}, total_served), do: round(served / total_served * 100)
+
+  defp step_traffic_total(step_traffic) do
+    step_traffic
+    |> Map.values()
+    |> Enum.map(& &1.served)
+    |> Enum.sum()
   end
 
   attr :n, :integer, required: true

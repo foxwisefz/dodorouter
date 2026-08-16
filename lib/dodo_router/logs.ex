@@ -282,6 +282,50 @@ defmodule DodoRouter.Logs do
     Repo.one(query) || empty_stats()
   end
 
+  @doc """
+  Per-routing-step traffic for a router — the share of served requests and
+  the error rate the routing-chain UI needs, since a chain where step 1
+  serves 100% and one where step 1 500s every request otherwise render
+  identically.
+
+  `attempted_steps` is jsonb, not a foreign key, so this is a raw query over
+  `jsonb_array_elements` (same pattern as `Providers.usage_summary_for_keys/2`)
+  grouped by the `step_id` each attempt recorded, rather than `final_provider`
+  (which only names whichever step actually served the response, not every
+  step attempted along the way).
+
+  Returns `%{step_id => %{served: n, errors: n}}`. A step with no attempts in
+  the window is simply absent from the map — the caller renders that as "no
+  traffic", not zero traffic (a step that errors 100% of the time still has
+  attempts).
+  """
+  def step_traffic(%Router{} = router, opts \\ []) do
+    hours = Keyword.get(opts, :hours, 24)
+    since = DateTime.add(DateTime.utc_now(), -hours * 3600, :second)
+
+    {:ok, %{rows: rows}} =
+      Ecto.Adapters.SQL.query(
+        Repo,
+        """
+        SELECT
+          step->>'step_id' AS step_id,
+          count(*) FILTER (WHERE step->>'status' = 'success') AS served,
+          count(*) FILTER (WHERE step->>'status' = 'error') AS errors
+        FROM request_logs l, jsonb_array_elements(l.attempted_steps) AS step
+        WHERE l.router_id::text = $1
+          AND l.inserted_at >= $2
+          AND l.traffic_type = 'proxy'
+          AND step->>'step_id' IS NOT NULL
+        GROUP BY step->>'step_id'
+        """,
+        [router.id, since]
+      )
+
+    Map.new(rows, fn [step_id, served, errors] ->
+      {Ecto.UUID.cast!(step_id), %{served: served, errors: errors}}
+    end)
+  end
+
   def stats_by_provider(%Router{} = router, opts \\ []) do
     hours = Keyword.get(opts, :hours, 24)
     since = DateTime.add(DateTime.utc_now(), -hours * 3600, :second)
