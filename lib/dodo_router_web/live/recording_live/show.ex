@@ -106,8 +106,11 @@ defmodule DodoRouterWeb.RecordingLive.Show do
             <div class="stat-value text-lg">{@stats.total_tokens || 0}</div>
           </div>
           <div class="stat bg-base-100 border border-base-300 rounded-lg p-3">
-            <div class="stat-title text-xs">Avg Latency</div>
-            <div class="stat-value text-lg">{format_latency(@stats.avg_latency_ms)}ms</div>
+            <div class="stat-title text-xs">p95 Latency</div>
+            <div class="stat-value text-lg">{format_latency(@latency_percentiles.p95)}ms</div>
+            <div class="text-xs text-base-content/50 mt-0.5">
+              p50 {format_latency(@latency_percentiles.p50)}ms
+            </div>
           </div>
           <div class="stat bg-base-100 border border-base-300 rounded-lg p-3">
             <div class="stat-title text-xs">Success Rate</div>
@@ -174,6 +177,28 @@ defmodule DodoRouterWeb.RecordingLive.Show do
     socket
     |> assign(:stats, stats)
     |> assign(:logs, logs)
+    |> assign(:latency_percentiles, latency_percentiles(logs))
+  end
+
+  # A recording is bounded like a session — the logs are already loaded for
+  # the timeline, so percentiles are computed from those in memory rather
+  # than a separate DB aggregate (nearest-rank method).
+  defp latency_percentiles(logs) do
+    latencies =
+      logs
+      |> Enum.map(&Map.get(&1, :latency_ms))
+      |> Enum.filter(&is_number/1)
+      |> Enum.sort()
+
+    %{p50: percentile(latencies, 0.50), p95: percentile(latencies, 0.95)}
+  end
+
+  defp percentile([], _p), do: nil
+
+  defp percentile(sorted, p) do
+    count = length(sorted)
+    index = max(0, ceil(p * count) - 1)
+    Enum.at(sorted, index)
   end
 
   defp format_latency(nil), do: "0"

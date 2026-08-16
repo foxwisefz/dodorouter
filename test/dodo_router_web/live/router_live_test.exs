@@ -79,4 +79,21 @@ defmodule DodoRouterWeb.RouterLiveTest do
       refute html =~ other_router.name
     end
   end
+
+  describe "Show" do
+    test "latency stat shows p95 with p50 subtext, not a bare mean", %{conn: conn, user: user} do
+      {router, _api_key} = RoutersFixtures.router_fixture(user)
+
+      for _ <- 1..20 do
+        DodoRouter.LogsFixtures.log_fixture(router, %{latency_ms: 100})
+      end
+
+      DodoRouter.LogsFixtures.log_fixture(router, %{latency_ms: 10_000})
+
+      {:ok, _live, html} = live(conn, ~p"/routers/#{router.id}")
+
+      assert html =~ "p95 Latency"
+      refute html =~ "Avg Latency"
+    end
+  end
 end

@@ -123,8 +123,11 @@ defmodule DodoRouterWeb.SessionLive.Show do
             <div class="stat-value text-lg">{@stats.total_tokens || 0}</div>
           </div>
           <div class="stat bg-base-100 border border-base-300 rounded-lg p-3">
-            <div class="stat-title text-xs">Avg Latency</div>
-            <div class="stat-value text-lg">{format_latency(@stats.avg_latency_ms)}ms</div>
+            <div class="stat-title text-xs">p95 Latency</div>
+            <div class="stat-value text-lg">{format_latency(@latency_percentiles.p95)}ms</div>
+            <div class="text-xs text-base-content/50 mt-0.5">
+              p50 {format_latency(@latency_percentiles.p50)}ms
+            </div>
           </div>
           <div class="stat bg-base-100 border border-base-300 rounded-lg p-3">
             <div class="stat-title text-xs">Success Rate</div>
@@ -344,6 +347,28 @@ defmodule DodoRouterWeb.SessionLive.Show do
     |> assign(:logs, logs)
     |> assign(:session_name, session_name)
     |> assign(:cache_regression, cache_regression(logs))
+    |> assign(:latency_percentiles, latency_percentiles(logs))
+  end
+
+  # A session is small enough that a per-session DB percentile query is
+  # overkill — the logs are already loaded for the timeline, so the
+  # percentiles are computed from those in memory (nearest-rank method).
+  defp latency_percentiles(logs) do
+    latencies =
+      logs
+      |> Enum.map(&Map.get(&1, :latency_ms))
+      |> Enum.filter(&is_number/1)
+      |> Enum.sort()
+
+    %{p50: percentile(latencies, 0.50), p95: percentile(latencies, 0.95)}
+  end
+
+  defp percentile([], _p), do: nil
+
+  defp percentile(sorted, p) do
+    count = length(sorted)
+    index = max(0, ceil(p * count) - 1)
+    Enum.at(sorted, index)
   end
 
   # The classifier names the turn; the view also needs the turn *before* it —

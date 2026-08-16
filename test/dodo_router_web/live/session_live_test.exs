@@ -205,6 +205,21 @@ defmodule DodoRouterWeb.SessionLiveTest do
       assert html =~ "at API rates"
     end
 
+    test "latency stat shows p95 with p50 subtext, not a bare mean", %{conn: conn, router: router} do
+      session_id = "latency-session"
+
+      for _ <- 1..20 do
+        LogsFixtures.log_with_session(router, session_id, %{latency_ms: 100})
+      end
+
+      LogsFixtures.log_with_session(router, session_id, %{latency_ms: 10_000})
+
+      {:ok, _live, html} = live(conn, ~p"/routers/#{router.id}/sessions/#{session_id}")
+
+      assert html =~ "p95 Latency"
+      refute html =~ "Avg Latency"
+    end
+
     test "allows editing session name", %{conn: conn, router: router} do
       session_id = "test-session"
       LogsFixtures.log_with_session(router, session_id)

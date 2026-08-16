@@ -11,6 +11,7 @@ defmodule DodoRouterWeb.RouterLive.Show do
   alias DodoRouter.Providers
   alias DodoRouter.Proxy.Adapter.Registry
   alias DodoRouter.Usage
+  alias DodoRouterWeb.Components.Charts
 
   @impl true
   def mount(%{"id" => id}, _session, socket) do
@@ -28,6 +29,7 @@ defmodule DodoRouterWeb.RouterLive.Show do
       socket
       |> assign(:router, router)
       |> assign(:stats, Logs.stats(router))
+      |> assign(:latency_percentiles, Logs.latency_percentiles(router))
       |> assign(:recent_events, [])
       |> assign(:stats_timer, nil)
       |> assign(:active_requests, 0)
@@ -388,8 +390,13 @@ defmodule DodoRouterWeb.RouterLive.Show do
   end
 
   def handle_info(:refresh_stats, socket) do
-    stats = Logs.stats(socket.assigns.router)
-    {:noreply, assign(socket, :stats, stats)}
+    router = socket.assigns.router
+    stats = Logs.stats(router)
+
+    {:noreply,
+     socket
+     |> assign(:stats, stats)
+     |> assign(:latency_percentiles, Logs.latency_percentiles(router))}
   end
 
   def handle_info({:log_pending, pending}, socket) do
@@ -587,8 +594,9 @@ defmodule DodoRouterWeb.RouterLive.Show do
               <div class="stat-value">{format_number(@stats.total_tokens)}</div>
             </div>
             <div class="stat-card">
-              <div class="stat-label">Avg Latency</div>
-              <div class="stat-value">{format_latency(@stats.avg_latency_ms)}</div>
+              <div class="stat-label">p95 Latency</div>
+              <div class="stat-value">{Charts.format_ms(@latency_percentiles.p95)}</div>
+              <div class="stat-desc">p50 {Charts.format_ms(@latency_percentiles.p50)}</div>
             </div>
           </div>
           
@@ -1285,10 +1293,6 @@ defmodule DodoRouterWeb.RouterLive.Show do
   defp format_number(n) when n >= 1_000_000, do: "#{Float.round(n / 1_000_000, 1)}M"
   defp format_number(n) when n >= 1_000, do: "#{Float.round(n / 1_000, 1)}K"
   defp format_number(n), do: to_string(n)
-
-  defp format_latency(nil), do: "-"
-  defp format_latency(%Decimal{} = ms), do: "#{ms |> Decimal.round(0) |> Decimal.to_integer()}ms"
-  defp format_latency(ms), do: "#{round(ms)}ms"
 
   defp event_class(%{status: :success}), do: "bg-success/10"
   defp event_class(%{status: :fallback}), do: "bg-warning/10"
