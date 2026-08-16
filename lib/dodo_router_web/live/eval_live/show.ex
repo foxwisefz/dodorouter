@@ -154,7 +154,7 @@ defmodule DodoRouterWeb.EvalLive.Show do
     {:noreply,
      socket
      |> assign(:running?, false)
-     |> put_flash(:error, "Benchmark stopped: #{inspect(reason)}")}
+     |> put_flash(:error, "Benchmark stopped: " <> Evaluations.proxy_error_message(reason))}
   end
 
   # nil means "keep the evaluation's current repetitions"; the input's
@@ -212,7 +212,11 @@ defmodule DodoRouterWeb.EvalLive.Show do
         put_flash(socket, :error, "Repetitions must be between 1 and 10")
 
       {:error, reason} ->
-        put_flash(socket, :error, "Could not start benchmark: #{inspect(reason)}")
+        put_flash(
+          socket,
+          :error,
+          "Could not start benchmark: " <> Evaluations.proxy_error_message(reason)
+        )
     end
   end
 

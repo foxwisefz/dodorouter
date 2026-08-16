@@ -306,6 +306,8 @@ defmodule DodoRouterWeb.MCPControllerTest do
       # The stage is what tells an agent this is recoverable at all.
       assert [run] = payload["runs"]
       assert run["failure_stage"] == "judge"
+      # And the category spares it regexing the prose (dodo_router-5wq).
+      assert is_binary(run["error_category"])
       assert run["judged_by"] == "Key 1"
       assert payload["retryable"]["judge"] == 1
 

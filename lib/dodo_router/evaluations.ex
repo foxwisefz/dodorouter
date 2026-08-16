@@ -690,6 +690,7 @@ defmodule DodoRouter.Evaluations do
           status: "failed",
           failure_stage: "candidate",
           error: "The benchmark stopped before this run finished",
+          error_category: "interrupted",
           updated_at: DateTime.utc_now() |> DateTime.truncate(:second)
         ]
       )
@@ -891,6 +892,7 @@ defmodule DodoRouter.Evaluations do
             status: "failed",
             failure_stage: "candidate",
             error: "The benchmark was cancelled before this run finished",
+            error_category: "cancelled",
             updated_at: DateTime.utc_now() |> DateTime.truncate(:second)
           ]
         )
@@ -986,12 +988,17 @@ defmodule DodoRouter.Evaluations do
       {:error,
        update_run!(run, %{
          status: "failed",
-         error: "Run crashed: #{Exception.message(exception)}"
+         error: "Run crashed: #{Exception.message(exception)}",
+         error_category: "crashed"
        })}
   catch
     kind, reason ->
       {:error,
-       update_run!(run, %{status: "failed", error: "Run crashed: #{inspect({kind, reason})}"})}
+       update_run!(run, %{
+         status: "failed",
+         error: "Run crashed: #{inspect({kind, reason})}",
+         error_category: "crashed"
+       })}
   end
 
   defp generate_and_judge(user, evaluation, run, target, started_at) do
@@ -1014,6 +1021,7 @@ defmodule DodoRouter.Evaluations do
                status: "failed",
                failure_stage: "candidate",
                error: candidate_error_message(candidate_log, target["model"]),
+               error_category: category_from_log(candidate_log),
                candidate_log_id: candidate_log.id,
                candidate_latency_ms: candidate_log.latency_ms,
                candidate_cost_usd: candidate_log.estimated_cost_usd,
@@ -1028,6 +1036,7 @@ defmodule DodoRouter.Evaluations do
                status: "failed",
                failure_stage: "candidate",
                error: "Candidate response contained no message content",
+               error_category: "empty_response",
                candidate_log_id: candidate_log.id,
                candidate_latency_ms: candidate_log.latency_ms,
                candidate_cost_usd: candidate_log.estimated_cost_usd,
@@ -1055,6 +1064,7 @@ defmodule DodoRouter.Evaluations do
            status: "failed",
            failure_stage: "candidate",
            error: candidate_failure_message(reason, target),
+           error_category: category_from_reason(reason),
            duration_ms: System.monotonic_time(:millisecond) - started_at
          })}
     end
@@ -1069,7 +1079,26 @@ defmodule DodoRouter.Evaluations do
   end
 
   defp candidate_failure_message(reason, _target) do
-    "Candidate generation error: #{inspect(reason)}"
+    "Candidate generation error: " <> humanize_reason(reason)
+  end
+
+  # The machine-readable twin of the prose above: a stable token off the
+  # proxy's own error taxonomy (`Adapter.categorize_error/2` atoms travel
+  # through attempt rows as strings), so a client can branch on
+  # "rate_limited" instead of regexing sentences (dodo_router-5wq).
+  defp category_from_reason(:provider_key_not_found), do: "provider_key_missing"
+  defp category_from_reason({:error, reason}), do: category_from_reason(reason)
+  defp category_from_reason({:error, reason, _details}), do: category_from_reason(reason)
+  defp category_from_reason(reason) when is_atom(reason) and not is_nil(reason), do: to_string(reason)
+  defp category_from_reason(_), do: "unknown"
+
+  # A failed replay still logged the attempts; the last one's `error` field
+  # is the categorized reason the proxy recorded on the wire.
+  defp category_from_log(candidate_log) do
+    case List.last(candidate_log.attempted_steps || []) do
+      %{"error" => error} when is_binary(error) and error != "" -> error
+      _ -> "provider_error"
+    end
   end
 
   defp judge_candidate(user, evaluation, run, candidate_content, started_at) do
@@ -1137,7 +1166,8 @@ defmodule DodoRouter.Evaluations do
                    Map.merge(judge_attrs, %{
                      status: "failed",
                      failure_stage: "judge",
-                     error: judge_parse_message(reason)
+                     error: judge_parse_message(reason),
+                     error_category: "judge_unparseable"
                    })
                  )}
             end
@@ -1148,6 +1178,7 @@ defmodule DodoRouter.Evaluations do
                status: "failed",
                failure_stage: "judge",
                error: "Judge call failed — " <> proxy_error_message(error),
+               error_category: category_from_reason(error),
                duration_ms: System.monotonic_time(:millisecond) - started_at
              })}
         end
@@ -1158,6 +1189,7 @@ defmodule DodoRouter.Evaluations do
            status: "failed",
            failure_stage: "judge",
            error: judge_setup_message(reason),
+           error_category: "judge_setup",
            duration_ms: System.monotonic_time(:millisecond) - started_at
          })}
     end

@@ -128,8 +128,11 @@ Poll until `running` is false. Then:
   ids to `get_log` for the full text of an answer or of the judge's reasoning.
 
 A `status` of `failed` on a run is not a low score — it is a call that never
-produced a comparable answer. `error` says why (provider rejected it, no
-content, judge returned unparseable output), `failure_stage` says where it broke
+produced a comparable answer. `error` says why in prose; `error_category` says
+the same thing as a stable token you can branch on (`rate_limited`,
+`auth_error`, `provider_key_missing`, `empty_response`, `judge_unparseable`,
+`judge_setup`, `crashed`, `cancelled`, `interrupted`, …— `null` on runs
+recorded before the field existed). `failure_stage` says where it broke
 and `retryable` whether trying again could help. `retry_eval` re-runs only the
 failed runs. Failed runs are excluded from `avg_score` but their cost is still
 in `summary.total_cost_usd`.

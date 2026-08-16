@@ -703,6 +703,10 @@ defmodule DodoRouter.MCP.Tools do
             summary: run.summary,
             issues: run.issues,
             error: run.error,
+            # Stable token (rate_limited, provider_key_missing, crashed, …)
+            # so a client decides whether retrying helps without regexing
+            # the prose. Nil on runs recorded before it existed.
+            error_category: run.error_category,
             # Which half failed. "judge" means the answer exists and was paid
             # for and only the scoring call failed, so retry_eval re-scores it
             # without generating anything; "candidate" means there is no

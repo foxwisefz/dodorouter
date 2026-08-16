@@ -691,6 +691,42 @@ defmodule DodoRouter.EvaluationsTest do
     assert {:error, :already_running} = Evaluations.enqueue(user, loaded)
   end
 
+  test "failed runs carry a machine-readable error_category alongside the prose" do
+    user = AccountsFixtures.user_fixture()
+    {router, _key} = RoutersFixtures.router_fixture(user)
+    provider_key = ProvidersFixtures.provider_key_fixture(user)
+
+    log =
+      LogsFixtures.log_fixture(router, %{
+        request_body:
+          Jason.encode!(%{"model" => "m", "messages" => [%{"role" => "user", "content" => "hi"}]})
+      })
+
+    {:ok, evaluation} =
+      Evaluations.create_evaluation(user, log, %{
+        name: "Categorised failure",
+        criteria: "Be correct",
+        judge_model: "judge-model",
+        judge_provider_key_id: provider_key.id,
+        candidate_targets: [
+          %{
+            "provider_key_id" => provider_key.id,
+            "provider" => "test_provider",
+            "model" => "fail-model"
+          }
+        ],
+        repetitions: 1
+      })
+
+    {:ok, _} = Evaluations.run(user, evaluation)
+
+    [run] = Evaluations.latest_batch_runs(Evaluations.get_evaluation!(user, evaluation.id))
+    assert run.status == "failed"
+    # The prose stays for humans; the category is for clients that were
+    # regexing strings to find out whether retrying could help.
+    assert run.error_category == "server_error"
+  end
+
   test "cancel_benchmark kills the live batch and sweeps the remaining runs" do
     user = AccountsFixtures.user_fixture()
     {router, _key} = RoutersFixtures.router_fixture(user)

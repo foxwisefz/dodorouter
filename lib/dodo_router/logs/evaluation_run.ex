@@ -21,6 +21,12 @@ defmodule DodoRouter.Logs.EvaluationRun do
     field :rubric_gaps, {:array, :string}, default: []
     field :raw_judge_response, :string
     field :error, :string
+    # Machine-readable twin of `error`: a stable token (rate_limited,
+    # auth_error, provider_key_missing, empty_response, judge_unparseable,
+    # judge_setup, crashed, cancelled, interrupted, ...) so clients decide
+    # whether retrying could help without regexing prose. Nil on rows
+    # written before the column existed.
+    field :error_category, :string
     # "candidate" | "judge" — which half of the run failed. A judge failure
     # keeps candidate_output, so it can be re-judged without paying for the
     # answer twice. Nil unless status is "failed".
@@ -78,6 +84,7 @@ defmodule DodoRouter.Logs.EvaluationRun do
       :rubric_gaps,
       :raw_judge_response,
       :error,
+      :error_category,
       :failure_stage,
       :superseded_at,
       :superseded_by_id,
