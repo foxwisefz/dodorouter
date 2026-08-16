@@ -71,6 +71,7 @@ defmodule DodoRouter.Logs do
     |> maybe_filter_call_type(opts[:call_type])
     |> maybe_filter_date_range(opts[:from], opts[:to])
     |> maybe_filter_favorite(opts[:favorites_only])
+    |> maybe_filter_failures(opts[:failures_only])
     |> Repo.all()
   end
 
@@ -88,6 +89,7 @@ defmodule DodoRouter.Logs do
     |> maybe_filter_call_type(opts[:call_type])
     |> maybe_filter_date_range(opts[:from], opts[:to])
     |> maybe_filter_favorite(opts[:favorites_only])
+    |> maybe_filter_failures(opts[:failures_only])
     |> Repo.aggregate(:count)
   end
 
@@ -107,6 +109,7 @@ defmodule DodoRouter.Logs do
     |> maybe_filter_call_type(opts[:call_type])
     |> maybe_filter_date_range(opts[:from], opts[:to])
     |> maybe_filter_favorite(opts[:favorites_only])
+    |> maybe_filter_failures(opts[:failures_only])
     |> Repo.aggregate(:count)
   end
 
@@ -129,6 +132,7 @@ defmodule DodoRouter.Logs do
     |> maybe_filter_call_type(opts[:call_type])
     |> maybe_filter_date_range(opts[:from], opts[:to])
     |> maybe_filter_favorite(opts[:favorites_only])
+    |> maybe_filter_failures(opts[:failures_only])
     |> Repo.all()
   end
 
@@ -956,6 +960,11 @@ defmodule DodoRouter.Logs do
 
   defp maybe_filter_favorite(query, true), do: where(query, [l], l.favorite == true)
   defp maybe_filter_favorite(query, _), do: query
+
+  defp maybe_filter_failures(query, true),
+    do: where(query, [l], l.status in ["error", "fallback"])
+
+  defp maybe_filter_failures(query, _), do: query
 
   defp empty_stats do
     %{

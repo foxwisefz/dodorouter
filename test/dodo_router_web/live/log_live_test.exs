@@ -152,6 +152,73 @@ defmodule DodoRouterWeb.LogLiveTest do
 
       assert Logs.get_log!(user, log.id).favorite
     end
+
+    test "failures filter shows only error/fallback rows and the breakdown banner", %{
+      conn: conn,
+      user: user
+    } do
+      {router, _api_key} = RoutersFixtures.router_fixture(user)
+
+      LogsFixtures.log_fixture(router, %{
+        status: "error",
+        final_provider: "flaky-provider",
+        final_model: "flaky-model"
+      })
+
+      LogsFixtures.log_fixture(router, %{
+        status: "fallback",
+        final_provider: "backup-provider",
+        final_model: "backup-model"
+      })
+
+      LogsFixtures.log_fixture(router, %{status: "success", final_provider: "ok-provider"})
+
+      {:ok, live, html} =
+        live(conn, ~p"/logs?router_id=#{router.id}&failures=true")
+
+      assert html =~ "flaky-provider"
+      assert html =~ "backup-provider"
+      refute html =~ "ok-provider"
+
+      assert has_element?(live, "#failure-breakdown")
+      assert html =~ "last 24h"
+      assert html =~ "flaky-provider/flaky-model"
+      assert html =~ "backup-provider/backup-model"
+    end
+
+    test "a :log_created success does not appear while in failures mode", %{
+      conn: conn,
+      user: user
+    } do
+      {router, _api_key} = RoutersFixtures.router_fixture(user)
+
+      {:ok, live, _html} = live(conn, ~p"/logs?router_id=#{router.id}&failures=true")
+
+      # broadcasts to subscribers, mirroring how a real request completes
+      {:ok, _log} =
+        Logs.create_log(%{
+          router_id: router.id,
+          request_id: Ecto.UUID.generate(),
+          status: "success",
+          final_provider: "should-not-appear",
+          final_model: "test-model"
+        })
+
+      html = render(live)
+      refute html =~ "should-not-appear"
+
+      {:ok, _log} =
+        Logs.create_log(%{
+          router_id: router.id,
+          request_id: Ecto.UUID.generate(),
+          status: "error",
+          final_provider: "should-appear",
+          final_model: "test-model"
+        })
+
+      html = render(live)
+      assert html =~ "should-appear"
+    end
   end
 
   describe "Show favorite toggle" do

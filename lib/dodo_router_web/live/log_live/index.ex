@@ -20,6 +20,8 @@ defmodule DodoRouterWeb.LogLive.Index do
       |> assign(:selected_router, nil)
       |> assign(:subscribed_all, false)
       |> assign(:favorites_only, false)
+      |> assign(:failures_only, false)
+      |> assign(:failure_breakdown, [])
       |> assign(:replay_counts, %{})
       |> assign(:log_count, 0)
       |> assign(:log_shown_count, 0)
@@ -48,7 +50,11 @@ defmodule DodoRouterWeb.LogLive.Index do
     old_router_id = socket.assigns.selected_router_id
     was_all = old_router_id == nil && socket.assigns[:subscribed_all]
     favorites_only = params["favorites"] == "true"
-    list_opts = [limit: 100, favorites_only: favorites_only]
+    failures_only = params["failures"] == "true"
+
+    list_opts =
+      [limit: 100, favorites_only: favorites_only, failures_only: failures_only] ++
+        failures_window_opts(failures_only)
 
     # Unsubscribe from previous subscriptions
     if connected?(socket) do
@@ -85,6 +91,11 @@ defmodule DodoRouterWeb.LogLive.Index do
         |> assign(:selected_router, router)
         |> assign(:subscribed_all, false)
         |> assign(:favorites_only, favorites_only)
+        |> assign(:failures_only, failures_only)
+        |> assign(
+          :failure_breakdown,
+          if(failures_only, do: Logs.failure_breakdown(router), else: [])
+        )
         |> assign(:replay_counts, Logs.replay_counts(Enum.map(logs, & &1.id)))
         |> assign(:log_count, count)
         |> assign(:log_shown_count, length(logs))
@@ -105,6 +116,10 @@ defmodule DodoRouterWeb.LogLive.Index do
         |> assign(:selected_router, nil)
         |> assign(:subscribed_all, true)
         |> assign(:favorites_only, favorites_only)
+        |> assign(:failures_only, failures_only)
+        # The breakdown is per-router; the all-routers view still filters
+        # the list correctly, it just has no single router to summarize.
+        |> assign(:failure_breakdown, [])
         |> assign(:replay_counts, Logs.replay_counts(Enum.map(logs, & &1.id)))
         |> assign(:log_count, count)
         |> assign(:log_shown_count, length(logs))
@@ -114,6 +129,17 @@ defmodule DodoRouterWeb.LogLive.Index do
 
     {:noreply, socket}
   end
+
+  # Failure mode is time-boxed to a fixed trailing 24h window, applied in
+  # the query itself — so the "showing X of N" header gives an honest,
+  # windowed denominator rather than counting failures since the dawn of
+  # the router.
+  @failure_window_hours 24
+
+  defp failures_window_opts(true),
+    do: [from: DateTime.add(DateTime.utc_now(), -@failure_window_hours * 3600, :second)]
+
+  defp failures_window_opts(_), do: []
 
   defp subscribe_all_routers(socket) do
     Enum.each(socket.assigns.routers, fn router ->
@@ -128,10 +154,37 @@ defmodule DodoRouterWeb.LogLive.Index do
   end
 
   @impl true
+  def handle_info({:log_pending, _pending}, %{assigns: %{failures_only: true}} = socket) do
+    # A pending request has no terminal status yet, so it can't be known to
+    # be a failure — and it isn't counted by the query either. Skip the
+    # insert entirely rather than show (then possibly yank) a row.
+    {:noreply, socket}
+  end
+
   def handle_info({:log_pending, pending}, socket) do
     # Use request_id as stream key so completed log replaces it in place
     pending = Map.put(pending, :id, pending.request_id)
     {:noreply, stream_insert(socket, :logs, pending, at: 0)}
+  end
+
+  def handle_info({:log_created, log}, %{assigns: %{failures_only: true}} = socket) do
+    # The terminal status arrives here, so a pending -> error transition
+    # still lands even though :log_pending was skipped for it. A log
+    # outside the failure set is simply not part of the filtered view —
+    # counts stay honest by only bumping them for what actually matches.
+    if log.status in ["error", "fallback"] do
+      log = Map.put(log, :id, log.request_id)
+
+      socket =
+        socket
+        |> assign(:log_count, socket.assigns.log_count + 1)
+        |> assign(:log_shown_count, socket.assigns.log_shown_count + 1)
+        |> stream_insert(:logs, log)
+
+      {:noreply, socket}
+    else
+      {:noreply, socket}
+    end
   end
 
   def handle_info({:log_created, log}, socket) do
@@ -176,7 +229,11 @@ defmodule DodoRouterWeb.LogLive.Index do
   defp reload_logs(socket) do
     user = socket.assigns.current_user
     favorites_only = socket.assigns[:favorites_only]
-    opts = [limit: 100, favorites_only: favorites_only]
+    failures_only = socket.assigns[:failures_only]
+
+    opts =
+      [limit: 100, favorites_only: favorites_only, failures_only: failures_only] ++
+        failures_window_opts(failures_only)
 
     {logs, count, latency_percentiles} =
       if socket.assigns.selected_router_id do
@@ -231,6 +288,17 @@ defmodule DodoRouterWeb.LogLive.Index do
               />
               <span>Favorites</span>
             </.link>
+            <.link
+              patch={failures_toggle_path(@selected_router_id, @failures_only)}
+              class={[
+                "btn btn-sm gap-1.5",
+                @failures_only && "btn-error",
+                !@failures_only && "btn-ghost"
+              ]}
+            >
+              <.icon name="hero-exclamation-triangle" class="w-4 h-4" />
+              <span>Failures</span>
+            </.link>
             <form phx-change="select_router" class="contents">
               <select
                 name="router_id"
@@ -247,6 +315,24 @@ defmodule DodoRouterWeb.LogLive.Index do
               </select>
             </form>
           </div>
+        </div>
+        
+    <!-- Failure breakdown banner -->
+        <div
+          :if={@failures_only and @failure_breakdown != []}
+          id="failure-breakdown"
+          class="mb-4 flex flex-wrap gap-2"
+        >
+          <span
+            :for={row <- @failure_breakdown}
+            class={[
+              "inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium",
+              row.status == "error" && "bg-error/10 text-error",
+              row.status == "fallback" && "bg-warning/10 text-warning"
+            ]}
+          >
+            {row.count} {if row.status == "error", do: "errors", else: "fallbacks"} on {row.provider}/{row.model} · last 24h
+          </span>
         </div>
         
     <!-- Logs Table -->
@@ -584,6 +670,20 @@ defmodule DodoRouterWeb.LogLive.Index do
       if current?,
         do: Map.delete(params, "favorites"),
         else: Map.put(params, "favorites", "true")
+
+    ~p"/logs?#{params}"
+  end
+
+  defp failures_toggle_path(router_id, current?) do
+    params =
+      if router_id,
+        do: %{"router_id" => router_id},
+        else: %{}
+
+    params =
+      if current?,
+        do: Map.delete(params, "failures"),
+        else: Map.put(params, "failures", "true")
 
     ~p"/logs?#{params}"
   end

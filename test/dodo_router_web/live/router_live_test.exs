@@ -34,6 +34,20 @@ defmodule DodoRouterWeb.RouterLiveTest do
       assert html =~ "last 24h"
     end
 
+    test "the error pill links to the router's failures view", %{conn: conn, user: user} do
+      {router, _api_key} = RoutersFixtures.router_fixture(user, %{name: "Flaky Router"})
+
+      DodoRouter.LogsFixtures.log_fixture(router, %{status: "success"})
+      DodoRouter.LogsFixtures.log_fixture(router, %{status: "error"})
+
+      {:ok, live, _html} = live(conn, ~p"/routers")
+
+      assert has_element?(
+               live,
+               ~s(a[href="/logs?router_id=#{router.id}&failures=true"])
+             )
+    end
+
     test "shows empty state when no routers", %{conn: conn} do
       {:ok, _live, html} = live(conn, ~p"/routers")
 

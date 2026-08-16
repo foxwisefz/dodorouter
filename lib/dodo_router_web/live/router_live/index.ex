@@ -217,7 +217,7 @@ defmodule DodoRouterWeb.RouterLive.Index do
               </span>
             </div>
 
-            <.router_activity activity={Map.get(@activity, router.id)} />
+            <.router_activity activity={Map.get(@activity, router.id)} router_id={router.id} />
 
             <div class="flex justify-end">
               <.link navigate={~p"/routers/#{router}"} class="btn btn-primary btn-sm">
@@ -262,6 +262,7 @@ defmodule DodoRouterWeb.RouterLive.Index do
   # identically — request count, error rate and an hourly sparkline for the
   # same 24h window, ambient rather than a dashboard (dodo_router-f6v.4).
   attr :activity, :map, default: nil
+  attr :router_id, :string, default: nil
 
   defp router_activity(assigns) do
     ~H"""
@@ -273,9 +274,13 @@ defmodule DodoRouterWeb.RouterLive.Index do
     >
       {sparkline_svg(@activity.hourly)}
       <span>{@activity.request_count} req · last 24h</span>
-      <span :if={@activity.error_count > 0} class="text-error font-medium">
+      <.link
+        :if={@activity.error_count > 0}
+        navigate={~p"/logs?router_id=#{@router_id}&failures=true"}
+        class="text-error font-medium hover:underline"
+      >
         {error_rate_pct(@activity)}% errors
-      </span>
+      </.link>
     </div>
     <div
       :if={!@activity || @activity.request_count == 0}
