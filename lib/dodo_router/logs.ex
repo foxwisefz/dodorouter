@@ -74,6 +74,42 @@ defmodule DodoRouter.Logs do
     |> Repo.all()
   end
 
+  @doc """
+  Counts logs matching the same filters as `list_logs/2`, without the
+  limit/offset — the honest denominator behind a possibly-truncated list.
+  """
+  def count_logs(%Router{} = router, opts \\ []) do
+    from(l in RequestLog,
+      where: l.router_id == ^router.id and l.traffic_type == "proxy"
+    )
+    |> maybe_filter_status(opts[:status])
+    |> maybe_filter_provider(opts[:provider])
+    |> maybe_filter_model(opts[:model])
+    |> maybe_filter_call_type(opts[:call_type])
+    |> maybe_filter_date_range(opts[:from], opts[:to])
+    |> maybe_filter_favorite(opts[:favorites_only])
+    |> Repo.aggregate(:count)
+  end
+
+  @doc """
+  Counts logs matching the same filters as `list_logs_for_user/2`, without
+  the limit/offset — the honest denominator behind a possibly-truncated list.
+  """
+  def count_logs_for_user(%User{} = user, opts \\ []) do
+    from(l in RequestLog,
+      join: r in Router,
+      on: l.router_id == r.id,
+      where: r.user_id == ^user.id and l.traffic_type == "proxy"
+    )
+    |> maybe_filter_status(opts[:status])
+    |> maybe_filter_provider(opts[:provider])
+    |> maybe_filter_model(opts[:model])
+    |> maybe_filter_call_type(opts[:call_type])
+    |> maybe_filter_date_range(opts[:from], opts[:to])
+    |> maybe_filter_favorite(opts[:favorites_only])
+    |> Repo.aggregate(:count)
+  end
+
   def list_logs_for_user(%User{} = user, opts \\ []) do
     limit = Keyword.get(opts, :limit, 100)
     offset = Keyword.get(opts, :offset, 0)

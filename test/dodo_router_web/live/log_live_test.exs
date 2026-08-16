@@ -20,6 +20,36 @@ defmodule DodoRouterWeb.LogLiveTest do
       assert html =~ log.final_provider
     end
 
+    test "shows plain count when under the limit", %{conn: conn, user: user} do
+      {router, _api_key} = RoutersFixtures.router_fixture(user)
+      LogsFixtures.log_fixture(router)
+      LogsFixtures.log_fixture(router)
+
+      {:ok, live, _html} = live(conn, ~p"/logs")
+
+      html = render(live)
+      assert html =~ ~s(id="logs-count")
+      assert html =~ "2 requests"
+      refute html =~ "showing"
+    end
+
+    test "shows 'showing X of N' when results are truncated by the limit", %{
+      conn: conn,
+      user: user
+    } do
+      {router, _api_key} = RoutersFixtures.router_fixture(user)
+
+      for _ <- 1..101 do
+        LogsFixtures.log_fixture(router)
+      end
+
+      {:ok, live, _html} = live(conn, ~p"/logs")
+
+      html = render(live)
+      assert html =~ ~s(id="logs-count")
+      assert html =~ "showing 100 of 101 requests"
+    end
+
     test "shows empty state when no logs", %{conn: conn, user: user} do
       {_router, _api_key} = RoutersFixtures.router_fixture(user)
 

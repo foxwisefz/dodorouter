@@ -21,6 +21,8 @@ defmodule DodoRouterWeb.LogLive.Index do
       |> assign(:subscribed_all, false)
       |> assign(:favorites_only, false)
       |> assign(:replay_counts, %{})
+      |> assign(:log_count, 0)
+      |> assign(:log_shown_count, 0)
       |> stream(:logs, [])
 
     {:ok, socket}
@@ -63,6 +65,7 @@ defmodule DodoRouterWeb.LogLive.Index do
         router = Routers.get_router!(socket.assigns.current_user, router_id)
 
         logs = Logs.list_logs(router, list_opts)
+        count = Logs.count_logs(router, list_opts)
         # Subscribe to this router
         if connected?(socket) && old_router_id != router_id do
           Logs.subscribe_to_logs(router_id)
@@ -74,11 +77,14 @@ defmodule DodoRouterWeb.LogLive.Index do
         |> assign(:subscribed_all, false)
         |> assign(:favorites_only, favorites_only)
         |> assign(:replay_counts, Logs.replay_counts(Enum.map(logs, & &1.id)))
+        |> assign(:log_count, count)
+        |> assign(:log_shown_count, length(logs))
         |> stream(:logs, logs, reset: true)
       else
         # Show all logs across all routers
 
         logs = Logs.list_logs_for_user(socket.assigns.current_user, list_opts)
+        count = Logs.count_logs_for_user(socket.assigns.current_user, list_opts)
         # Subscribe to all routers
         if connected?(socket) && !was_all do
           subscribe_all_routers(socket)
@@ -90,6 +96,8 @@ defmodule DodoRouterWeb.LogLive.Index do
         |> assign(:subscribed_all, true)
         |> assign(:favorites_only, favorites_only)
         |> assign(:replay_counts, Logs.replay_counts(Enum.map(logs, & &1.id)))
+        |> assign(:log_count, count)
+        |> assign(:log_shown_count, length(logs))
         |> stream(:logs, logs, reset: true)
       end
 
@@ -118,7 +126,14 @@ defmodule DodoRouterWeb.LogLive.Index do
   def handle_info({:log_created, log}, socket) do
     # Use request_id as key to replace pending entry in place
     log = Map.put(log, :id, log.request_id)
-    {:noreply, stream_insert(socket, :logs, log)}
+
+    socket =
+      socket
+      |> assign(:log_count, socket.assigns.log_count + 1)
+      |> assign(:log_shown_count, socket.assigns.log_shown_count + 1)
+      |> stream_insert(:logs, log)
+
+    {:noreply, socket}
   end
 
   @impl true
@@ -152,15 +167,18 @@ defmodule DodoRouterWeb.LogLive.Index do
     favorites_only = socket.assigns[:favorites_only]
     opts = [limit: 100, favorites_only: favorites_only]
 
-    logs =
+    {logs, count} =
       if socket.assigns.selected_router_id do
         router = Routers.get_router!(user, socket.assigns.selected_router_id)
-        Logs.list_logs(router, opts)
+        {Logs.list_logs(router, opts), Logs.count_logs(router, opts)}
       else
-        Logs.list_logs_for_user(user, opts)
+        {Logs.list_logs_for_user(user, opts), Logs.count_logs_for_user(user, opts)}
       end
 
-    stream(socket, :logs, logs, reset: true)
+    socket
+    |> assign(:log_count, count)
+    |> assign(:log_shown_count, length(logs))
+    |> stream(:logs, logs, reset: true)
   end
 
   @impl true
@@ -174,6 +192,13 @@ defmodule DodoRouterWeb.LogLive.Index do
             <h1 class="text-lg font-semibold text-base-content">Request Logs</h1>
             <p :if={@selected_router} class="text-sm text-base-content/50 mt-0.5">
               {@selected_router.name}
+            </p>
+            <p id="logs-count" class="text-sm text-base-content/50 mt-0.5">
+              <%= if @log_count > @log_shown_count do %>
+                showing {@log_shown_count} of {pluralize(@log_count, "request")}
+              <% else %>
+                {pluralize(@log_count, "request")}
+              <% end %>
             </p>
           </div>
 
