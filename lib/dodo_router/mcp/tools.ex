@@ -1552,29 +1552,21 @@ defmodule DodoRouter.MCP.Tools do
 
   # A patch whose index points past a log's messages would fail minutes
   # into the spend — dry-run every (variant x log) pair up front and name
-  # the mismatch, same principle as the evaluability check.
-  defp check_message_patches(variants, logs) when is_list(variants) do
-    pairs =
-      for variant <- variants,
-          patches = variant["message_patches"],
-          is_list(patches) and patches != [],
-          log <- logs,
-          do: {variant, patches, log}
+  # the mismatch, same principle as the evaluability check. The dry run
+  # itself is shared with the builder (Evaluations.message_patch_blocker);
+  # only the wording is the agent's, since a log id is actionable here.
+  defp check_message_patches(variants, logs) do
+    case Evaluations.message_patch_blocker(variants, logs) do
+      nil ->
+        :ok
 
-    Enum.find_value(pairs, :ok, fn {variant, patches, log} ->
-      case Replays.prepare_request(log, "replay-probe", nil, nil, message_patches: patches) do
-        {:ok, _request} ->
-          nil
-
-        {:error, reason} ->
-          {:error,
-           "Variant #{inspect(variant["name"])} cannot patch log #{log.id}: #{reason}. " <>
-             "Patch indexes are 0-based into that log's messages array as served."}
-      end
-    end)
+      blocker ->
+        {:error,
+         "Variant #{inspect(blocker.variant)} cannot patch log #{blocker.log_id}: " <>
+           "#{blocker.reason}. Patch indexes are 0-based into that log's messages " <>
+           "array as served."}
+    end
   end
-
-  defp check_message_patches(_variants, _logs), do: :ok
 
   defp fetch_recording(principal, router, id) do
     case Recordings.get_recording(principal.user, id) do

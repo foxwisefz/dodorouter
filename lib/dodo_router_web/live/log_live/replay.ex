@@ -899,31 +899,6 @@ defmodule DodoRouterWeb.LogLive.Replay do
     """
   end
 
-  attr :segments, :list, required: true
-  attr :mono, :boolean, default: false
-
-  defp diff_block(assigns) do
-    assigns = assign(assigns, :segments, TextDiff.compact_for_display(assigns.segments))
-
-    ~H"""
-    <div class={[
-      "whitespace-pre-wrap break-words leading-relaxed",
-      if(@mono, do: "font-mono text-xs", else: "text-sm")
-    ]}>
-      <%= for {op, text} <- @segments do %>
-        <%= case op do %>
-          <% :eq -> %>
-            <span>{text}</span>
-          <% :del -> %>
-            <del class="bg-error/15 text-error rounded-sm no-underline">{text}</del>
-          <% :ins -> %>
-            <ins class="bg-success/15 text-success rounded-sm no-underline">{text}</ins>
-        <% end %>
-      <% end %>
-    </div>
-    """
-  end
-
   attr :source_msg, :map, default: nil
   attr :replay_msg, :map, default: nil
   attr :source, :map, required: true

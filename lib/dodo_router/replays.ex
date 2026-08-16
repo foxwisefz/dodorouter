@@ -293,6 +293,70 @@ defmodule DodoRouter.Replays do
   end
 
   @doc """
+  The messages of a stored request, numbered exactly the way
+  `message_patches` indexes them, as `[%{index:, role:, content:, text?:}]`.
+
+  Anyone authoring a patch is choosing a position in this list, so they
+  have to be able to read it — an index typed against a request you cannot
+  see is a guess, and a wrong guess is only found out minutes into a paid
+  benchmark. `[]` when the body is missing or undecodable, which is the
+  same condition `replay_blocker/2` already refuses on.
+
+  `content` is flattened to text for reading and for seeding a patch.
+  `text?` is false when the stored content was a block array rather than a
+  string, because replacing one with a string changes the message's shape
+  and the author should know that before doing it.
+  """
+  def source_messages(%RequestLog{} = log) do
+    with {:ok, decoded} <- decode_body(log.request_body),
+         :ok <- ensure_messages(decoded) do
+      decoded["messages"]
+      |> Enum.with_index()
+      |> Enum.map(fn {message, index} ->
+        content = if is_map(message), do: message["content"], else: nil
+
+        %{
+          index: index,
+          role: (is_map(message) && message["role"]) || "message",
+          content: flatten_content(content),
+          text?: is_binary(content) or is_nil(content)
+        }
+      end)
+    else
+      _error -> []
+    end
+  end
+
+  @doc """
+  The system prompt this request was served with, flattened to text, or nil
+  when it had none — the starting point for a prompt variant, since a
+  variant is nearly always an edit of the real prompt rather than a fresh
+  one written from memory.
+  """
+  def served_system_prompt(%RequestLog{} = log) do
+    case Enum.find(source_messages(log), &(&1.role == "system")) do
+      %{content: content} when content != "" -> content
+      _none -> nil
+    end
+  end
+
+  defp flatten_content(content) when is_binary(content), do: content
+
+  # Multi-block content joins its text parts; a non-text block (an image,
+  # a tool result) is named rather than dropped, so the preview never
+  # reads as a shorter message than the one that was really sent.
+  defp flatten_content(content) when is_list(content) do
+    Enum.map_join(content, "\n", fn
+      %{"type" => "text", "text" => text} when is_binary(text) -> text
+      %{"text" => text} when is_binary(text) -> text
+      %{"type" => type} -> "[#{type}]"
+      _other -> "[block]"
+    end)
+  end
+
+  defp flatten_content(_content), do: ""
+
+  @doc """
   The `%{provider_key_id, model}` that actually served a log — the incumbent
   an evaluation needs as its baseline — or `nil` when the serving key is
   unknown (legacy rows, or steps that predate provider keys).

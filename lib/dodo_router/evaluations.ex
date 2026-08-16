@@ -2080,6 +2080,37 @@ defmodule DodoRouter.Evaluations do
   end
 
   @doc """
+  The first variant whose message patches cannot be applied to one of the
+  source logs, as `%{variant:, log_id:, reason:}` — or nil when every
+  patch lands.
+
+  Whether an index points at a message is only knowable per source log, so
+  `Evaluation`'s shape validation cannot decide it. A benchmark that
+  silently measured the unpatched request would be confidently wrong, so
+  both creation paths — the agent's `create_eval` and the builder — refuse
+  before anything is spent. Callers word their own message: an agent can
+  use the log id, a builder user cannot.
+  """
+  def message_patch_blocker(variants, logs) when is_list(variants) do
+    pairs =
+      for variant <- variants,
+          is_map(variant),
+          patches = variant["message_patches"],
+          is_list(patches) and patches != [],
+          log <- logs,
+          do: {variant, patches, log}
+
+    Enum.find_value(pairs, fn {variant, patches, log} ->
+      case Replays.prepare_request(log, "replay-probe", nil, nil, message_patches: patches) do
+        {:ok, _request} -> nil
+        {:error, reason} -> %{variant: variant["name"], log_id: log.id, reason: reason}
+      end
+    end)
+  end
+
+  def message_patch_blocker(_variants, _logs), do: nil
+
+  @doc """
   Extracts the assistant's answer text from a stored response body, in
   either wire format — OpenAI-shaped (`choices`) or Anthropic-shaped
   (`content` blocks). nil when there is nothing judgeable.

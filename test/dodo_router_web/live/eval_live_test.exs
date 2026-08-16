@@ -1870,6 +1870,482 @@ defmodule DodoRouterWeb.EvalLiveTest do
     assert flash["error"] =~ "can be replayed"
   end
 
+  describe "prompt variants in the builder" do
+    setup %{user: user} do
+      {router, _api_key} = RoutersFixtures.router_fixture(user)
+      provider_key = ProvidersFixtures.provider_key_fixture(user)
+
+      log =
+        LogsFixtures.log_fixture(router, %{
+          final_model: "test-model",
+          attempted_steps: [
+            %{
+              "status" => "success",
+              "provider_key_id" => provider_key.id,
+              "model" => "test-model"
+            }
+          ],
+          request_body:
+            Jason.encode!(%{
+              "model" => "test-model",
+              "messages" => [
+                %{"role" => "system", "content" => "original prompt"},
+                %{"role" => "user", "content" => "the long tool result"}
+              ]
+            })
+        })
+
+      %{router: router, provider_key: provider_key, log: log}
+    end
+
+    defp add_variant(live, index, name, system_prompt) do
+      live |> element("#add-variant-button") |> render_click()
+
+      live
+      |> form("#eval-form", %{
+        "evaluation" => %{
+          "prompt_variants" => %{
+            to_string(index) => %{"name" => name, "system_prompt" => system_prompt}
+          }
+        }
+      })
+      |> render_change()
+
+      live
+    end
+
+    defp submit_eval(live, provider_key, extra) do
+      live
+      |> form("#eval-form", %{"evaluation" => %{"judge_key" => provider_key.id}})
+      |> render_change()
+
+      live
+      |> form("#eval-form", %{
+        "evaluation" =>
+          Map.merge(
+            %{
+              "name" => "Prompt A/B",
+              "criteria" => "Answer accurately",
+              "candidate_target_values" => ["#{provider_key.id}|test-model"],
+              "repetitions" => "1",
+              "judge_key" => provider_key.id,
+              "judge_target" => "#{provider_key.id}|test-model"
+            },
+            extra
+          )
+      })
+      |> render_submit()
+    end
+
+    test "a variant authored in the builder reaches the wire", %{
+      conn: conn,
+      user: user,
+      provider_key: provider_key,
+      log: log
+    } do
+      {:ok, live, _html} = live(conn, ~p"/logs/#{log.id}/evals/new")
+
+      # Nothing until asked for: the default stays "replay it as served".
+      assert has_element?(live, "#prompt-variants", "No variants")
+      refute has_element?(live, "#variant-0")
+
+      add_variant(live, 0, "terse", "You are terse. Reply in one word.")
+      assert has_element?(live, "#variant-0-name")
+
+      submit_eval(live, provider_key, %{
+        "prompt_variants" => %{
+          "0" => %{"name" => "terse", "system_prompt" => "You are terse. Reply in one word."}
+        }
+      })
+
+      {path, _flash} = assert_redirect(live)
+      id = path |> String.trim_leading("/evals/") |> URI.parse() |> Map.fetch!(:path)
+      evaluation = Evaluations.get_evaluation!(user, id)
+
+      assert evaluation.prompt_variants == [
+               %{"name" => "terse", "system_prompt" => "You are terse. Reply in one word."}
+             ]
+
+      assert Enum.map(evaluation.runs, & &1.variant_name) == ["terse"]
+
+      candidate_log =
+        Repo.get!(DodoRouter.Logs.RequestLog, hd(evaluation.runs).candidate_log_id)
+
+      assert candidate_log.request_body =~ "You are terse"
+    end
+
+    test "a blank system prompt is the as-served baseline, not an empty prompt", %{
+      conn: conn,
+      user: user,
+      provider_key: provider_key,
+      log: log
+    } do
+      {:ok, live, _html} = live(conn, ~p"/logs/#{log.id}/evals/new")
+
+      add_variant(live, 0, "as-served", "")
+
+      submit_eval(live, provider_key, %{
+        "prompt_variants" => %{"0" => %{"name" => "as-served", "system_prompt" => ""}}
+      })
+
+      {path, _flash} = assert_redirect(live)
+      id = path |> String.trim_leading("/evals/") |> URI.parse() |> Map.fetch!(:path)
+      evaluation = Evaluations.get_evaluation!(user, id)
+
+      # nil, not "": the baseline sits in the comparison under its own name
+      # rather than being served an empty system message.
+      assert evaluation.prompt_variants == [%{"name" => "as-served", "system_prompt" => nil}]
+
+      candidate_log =
+        Repo.get!(DodoRouter.Logs.RequestLog, hd(evaluation.runs).candidate_log_id)
+
+      assert candidate_log.request_body =~ "original prompt"
+    end
+
+    test "a message patch authored in the builder replaces that message", %{
+      conn: conn,
+      user: user,
+      provider_key: provider_key,
+      log: log
+    } do
+      {:ok, live, _html} = live(conn, ~p"/logs/#{log.id}/evals/new")
+
+      add_variant(live, 0, "compressed", "")
+      live |> element("#add-patch-0") |> render_click()
+      assert has_element?(live, "#variant-0-patch-0-index")
+
+      patched = %{
+        "0" => %{
+          "name" => "compressed",
+          "system_prompt" => "",
+          "message_patches" => %{"0" => %{"index" => "1", "content" => "short tool result"}}
+        }
+      }
+
+      submit_eval(live, provider_key, %{"prompt_variants" => patched})
+
+      {path, _flash} = assert_redirect(live)
+      id = path |> String.trim_leading("/evals/") |> URI.parse() |> Map.fetch!(:path)
+      evaluation = Evaluations.get_evaluation!(user, id)
+
+      assert evaluation.prompt_variants == [
+               %{
+                 "name" => "compressed",
+                 "system_prompt" => nil,
+                 "message_patches" => [%{"index" => 1, "content" => "short tool result"}]
+               }
+             ]
+
+      candidate_log =
+        Repo.get!(DodoRouter.Logs.RequestLog, hd(evaluation.runs).candidate_log_id)
+
+      assert candidate_log.request_body =~ "short tool result"
+      refute candidate_log.request_body =~ "the long tool result"
+    end
+
+    test "an index the anchor has but a shorter sampled request does not is refused", %{
+      conn: conn,
+      user: user,
+      router: router,
+      provider_key: provider_key
+    } do
+      {:ok, recording} = DodoRouter.Recordings.start_recording(router, %{name: "Prod capture"})
+
+      body = fn contents ->
+        Jason.encode!(%{
+          "model" => "test-model",
+          "messages" => Enum.map(contents, &%{"role" => "user", "content" => &1})
+        })
+      end
+
+      LogsFixtures.log_fixture(router, %{
+        recording_id: recording.id,
+        request_body: body.(["one", "two", "three"]),
+        final_model: "test-model",
+        attempted_steps: [
+          %{"status" => "success", "provider_key_id" => provider_key.id, "model" => "test-model"}
+        ]
+      })
+
+      LogsFixtures.log_fixture(router, %{
+        recording_id: recording.id,
+        request_body: body.(["only one"])
+      })
+
+      {:ok, live, _html} =
+        live(conn, ~p"/routers/#{router.id}/recordings/#{recording.id}/evals/new")
+
+      # The picker offers the anchor's messages; the same position in every
+      # OTHER sampled request is the part no page can show, so it is checked.
+      add_variant(live, 0, "compressed", "")
+      live |> element("#add-patch-0") |> render_click()
+
+      html =
+        submit_eval(live, provider_key, %{
+          "prompt_variants" => %{
+            "0" => %{
+              "name" => "compressed",
+              "system_prompt" => "",
+              "message_patches" => %{"0" => %{"index" => "2", "content" => "short"}}
+            }
+          }
+        })
+
+      assert html =~ "compressed"
+      assert html =~ "does not have"
+      assert Evaluations.list_evaluations(user) == []
+      # The refusal re-renders the builder, so the row that caused it is
+      # still there to be corrected.
+      assert has_element?(live, "#variant-0-patch-0-content", "short")
+    end
+
+    test "the request being varied is on the page, numbered the way patches index it", %{
+      conn: conn,
+      log: log
+    } do
+      {:ok, live, _html} = live(conn, ~p"/logs/#{log.id}/evals/new")
+
+      assert has_element?(live, "#source-request", "2 messages")
+      refute has_element?(live, "#source-request", "the long tool result")
+
+      html = live |> element("#toggle-source-request") |> render_click()
+
+      assert html =~ "the long tool result"
+      assert html =~ "original prompt"
+
+      # And it opens itself the moment there is a variant to author.
+      live |> element("#toggle-source-request") |> render_click()
+      refute has_element?(live, "#source-request", "the long tool result")
+
+      live |> element("#add-variant-button") |> render_click()
+      assert has_element?(live, "#source-request", "the long tool result")
+    end
+
+    test "a variant starts from the served prompt rather than a blank box", %{
+      conn: conn,
+      log: log
+    } do
+      {:ok, live, _html} = live(conn, ~p"/logs/#{log.id}/evals/new")
+
+      live |> element("#add-variant-button") |> render_click()
+      # Nothing to diff until the two sides differ.
+      refute has_element?(live, "#variant-0-prompt-diff")
+      refute has_element?(live, "#variant-0-system-prompt", "original prompt")
+
+      live |> element("#use-served-prompt-0") |> render_click()
+      assert has_element?(live, "#variant-0-system-prompt", "original prompt")
+      refute has_element?(live, "#variant-0-prompt-diff")
+
+      # ...and editing it shows what the edit did, not just the new text.
+      html =
+        live
+        |> form("#eval-form", %{
+          "evaluation" => %{
+            "prompt_variants" => %{
+              "0" => %{"name" => "terse", "system_prompt" => "original prompt, but terse"}
+            }
+          }
+        })
+        |> render_change()
+
+      assert html =~ "Served prompt → this variant"
+      assert has_element?(live, "#variant-0-prompt-diff ins", "terse")
+    end
+
+    test "choosing a message opens its real text for editing, and diffs the edit", %{
+      conn: conn,
+      log: log
+    } do
+      {:ok, live, _html} = live(conn, ~p"/logs/#{log.id}/evals/new")
+
+      live |> element("#add-variant-button") |> render_click()
+      live |> element("#add-patch-0") |> render_click()
+
+      # The index field is the request's own messages, not a number to guess.
+      assert has_element?(
+               live,
+               "#variant-0-patch-0-index option",
+               "1 · user · the long tool result"
+             )
+
+      live
+      |> form("#eval-form", %{
+        "evaluation" => %{
+          "prompt_variants" => %{
+            "0" => %{
+              "name" => "compressed",
+              "system_prompt" => "",
+              "message_patches" => %{"0" => %{"index" => "1", "content" => ""}}
+            }
+          }
+        }
+      })
+      |> render_change()
+
+      # Picking it seeds the box with what was really sent.
+      assert has_element?(live, "#variant-0-patch-0-content", "the long tool result")
+
+      html =
+        live
+        |> form("#eval-form", %{
+          "evaluation" => %{
+            "prompt_variants" => %{
+              "0" => %{
+                "name" => "compressed",
+                "system_prompt" => "",
+                "message_patches" => %{"0" => %{"index" => "1", "content" => "the short result"}}
+              }
+            }
+          }
+        })
+        |> render_change()
+
+      assert html =~ "Message 1 as served → this variant"
+      assert has_element?(live, "#variant-0-patch-0-diff del", "long")
+      assert has_element?(live, "#variant-0-patch-0-diff ins", "short")
+    end
+
+    test "an edit already made is never re-seeded out from under the author", %{
+      conn: conn,
+      log: log
+    } do
+      {:ok, live, _html} = live(conn, ~p"/logs/#{log.id}/evals/new")
+
+      live |> element("#add-variant-button") |> render_click()
+      live |> element("#add-patch-0") |> render_click()
+
+      patch = fn content ->
+        live
+        |> form("#eval-form", %{
+          "evaluation" => %{
+            "prompt_variants" => %{
+              "0" => %{
+                "name" => "compressed",
+                "system_prompt" => "",
+                "message_patches" => %{"0" => %{"index" => "1", "content" => content}}
+              }
+            }
+          }
+        })
+        |> render_change()
+      end
+
+      patch.("")
+      assert has_element?(live, "#variant-0-patch-0-content", "the long tool result")
+
+      # Clearing the box on a message already chosen is the author's edit,
+      # not a fresh pick — re-seeding here would make the field unclearable.
+      patch.("")
+
+      refute has_element?(live, "#variant-0-patch-0-content", "the long tool result")
+    end
+
+    test "two variants with one name are refused, and the typed rows survive saying so", %{
+      conn: conn,
+      log: log
+    } do
+      {:ok, live, _html} = live(conn, ~p"/logs/#{log.id}/evals/new")
+
+      live |> element("#add-variant-button") |> render_click()
+      live |> element("#add-variant-button") |> render_click()
+
+      html =
+        live
+        |> form("#eval-form", %{
+          "evaluation" => %{
+            "prompt_variants" => %{
+              "0" => %{"name" => "terse", "system_prompt" => "one word"},
+              "1" => %{"name" => "terse", "system_prompt" => "two words"}
+            }
+          }
+        })
+        |> render_change()
+
+      assert html =~ "variant names must be distinct"
+      # A shape the schema rejects never becomes a change, so the rows have
+      # to be rendered from what was typed or the message erases its cause.
+      assert has_element?(live, "#variant-1-system-prompt", "two words")
+    end
+
+    test "the planned-runs note multiplies by the variant count", %{conn: conn, log: log} do
+      {:ok, live, _html} = live(conn, ~p"/logs/#{log.id}/evals/new")
+
+      # One source log and no variants: nothing to multiply, nothing to say.
+      refute has_element?(live, "#planned-runs-note")
+
+      live |> element("#add-variant-button") |> render_click()
+      live |> element("#add-variant-button") |> render_click()
+
+      html =
+        live
+        |> form("#eval-form", %{
+          "evaluation" => %{
+            "repetitions" => "3",
+            "prompt_variants" => %{
+              "0" => %{"name" => "a", "system_prompt" => ""},
+              "1" => %{"name" => "b", "system_prompt" => ""}
+            }
+          }
+        })
+        |> render_change()
+
+      assert html =~ "2 prompt variants"
+      assert has_element?(live, "#planned-runs-note", "6")
+    end
+
+    test "duplicating an evaluation carries its variants into the builder", %{
+      conn: conn,
+      user: user,
+      provider_key: provider_key,
+      log: log
+    } do
+      {:ok, source} =
+        Evaluations.create_evaluation(user, log, %{
+          name: "Prompt A/B",
+          criteria: "Be correct",
+          judge_model: "test-model",
+          judge_provider_key_id: provider_key.id,
+          prompt_variants: [
+            %{"name" => "as-served", "system_prompt" => nil},
+            %{
+              "name" => "compressed",
+              "system_prompt" => "You are terse.",
+              "message_patches" => [%{"index" => 1, "content" => "short"}]
+            }
+          ],
+          candidate_targets: [
+            %{
+              "provider_key_id" => provider_key.id,
+              "provider" => "test_provider",
+              "model" => "test-model"
+            }
+          ],
+          repetitions: 1
+        })
+
+      {:ok, live, _html} = live(conn, ~p"/logs/#{log.id}/evals/new?from=#{source.id}")
+
+      assert has_element?(live, "#variant-0-name[value='as-served']")
+      assert has_element?(live, "#variant-1-name[value='compressed']")
+      assert has_element?(live, "#variant-1-system-prompt", "You are terse.")
+      assert has_element?(live, "#variant-1-patch-0-index option[selected][value='1']")
+      assert has_element?(live, "#variant-1-patch-0-content", "short")
+    end
+
+    test "a variant row can be removed again", %{conn: conn, log: log} do
+      {:ok, live, _html} = live(conn, ~p"/logs/#{log.id}/evals/new")
+
+      live |> element("#add-variant-button") |> render_click()
+      live |> element("#add-variant-button") |> render_click()
+      assert has_element?(live, "#variant-1")
+
+      live |> element("#variant-0 button[phx-click='remove_variant']") |> render_click()
+
+      refute has_element?(live, "#variant-1")
+      assert has_element?(live, "#variant-0")
+    end
+  end
+
   test "someone else's recording is not a benchmark entry point", %{conn: conn} do
     other = DodoRouter.AccountsFixtures.user_fixture()
     {other_router, _} = RoutersFixtures.router_fixture(other)

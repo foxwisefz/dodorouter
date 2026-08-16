@@ -8,6 +8,7 @@ defmodule DodoRouterWeb.EvalLive.New do
   alias DodoRouter.Recordings
   alias DodoRouter.Replays
   alias DodoRouter.Routers
+  alias DodoRouter.TextDiff
 
   @impl true
   def mount(%{"recording_id" => recording_id, "router_id" => router_id}, _session, socket) do
@@ -112,6 +113,13 @@ defmodule DodoRouterWeb.EvalLive.New do
      |> assign(:selected_targets, selected_targets)
      |> assign(:recent_judges, recent_judges(socket.assigns.current_user, target_lookup))
      |> assign_judge(judge_target)
+     |> assign(:variants, display_variants(source && source.prompt_variants))
+     # A variant is authored against a request, so the request is on the
+     # page. Patch indexes address the anchor's messages; for a recording
+     # the same index addresses every sampled request, which the panel says.
+     |> assign(:source_messages, Replays.source_messages(log))
+     |> assign(:served_system_prompt, Replays.served_system_prompt(log))
+     |> assign(:show_source_request, false)
      |> assign(:form, form)}
   end
 
@@ -252,6 +260,7 @@ defmodule DodoRouterWeb.EvalLive.New do
       bad_examples: source.bad_examples,
       judge_model: source.judge_model,
       judge_provider_key_id: source.judge_provider_key_id,
+      prompt_variants: source.prompt_variants || [],
       repetitions: source.repetitions
     }
   end
@@ -265,7 +274,15 @@ defmodule DodoRouterWeb.EvalLive.New do
 
   @impl true
   def handle_event("validate", %{"evaluation" => params}, socket) do
-    params = prepare_params(params, socket.assigns.target_lookup)
+    variants =
+      params
+      |> variants_from_params()
+      |> seed_patch_contents(socket.assigns.variants, socket.assigns.source_messages)
+
+    params =
+      params
+      |> Map.put("prompt_variants", variants)
+      |> prepare_params(socket.assigns.target_lookup)
 
     form =
       %Evaluation{}
@@ -277,7 +294,57 @@ defmodule DodoRouterWeb.EvalLive.New do
      socket
      |> assign(:form, form)
      |> assign(:selected_targets, params["candidate_target_values"] || [])
+     # The variant rows are rendered from what was typed, not from the
+     # changeset: a shape the schema rejects (two variants named the same)
+     # never becomes a change, and reading the field back would erase the
+     # user's text at exactly the keystroke that told them it was wrong.
+     |> assign(:variants, variants)
      |> sync_judge(params)}
+  end
+
+  def handle_event("add_variant", _params, socket) do
+    {:noreply,
+     socket
+     # Adding the first variant is the moment the request stops being
+     # background and becomes the thing being edited, so it opens itself
+     # rather than waiting to be found.
+     |> assign(
+       :show_source_request,
+       socket.assigns.variants == [] or socket.assigns.show_source_request
+     )
+     |> assign(:variants, socket.assigns.variants ++ [blank_variant()])}
+  end
+
+  def handle_event("toggle_source_request", _params, socket) do
+    {:noreply, assign(socket, :show_source_request, !socket.assigns.show_source_request)}
+  end
+
+  # A prompt variant is almost always an edit of the real prompt, not one
+  # written from memory — so the real one is one click away, and the diff
+  # under the box then shows exactly what the edit did.
+  def handle_event("use_served_prompt", %{"index" => index}, socket) do
+    {:noreply,
+     update_variant(socket, index, fn variant ->
+       Map.put(variant, "system_prompt", socket.assigns.served_system_prompt || "")
+     end)}
+  end
+
+  def handle_event("remove_variant", %{"index" => index}, socket) do
+    {:noreply, update_at(socket, index, &List.delete_at/2)}
+  end
+
+  def handle_event("add_patch", %{"index" => index}, socket) do
+    {:noreply,
+     update_variant(socket, index, fn variant ->
+       Map.update(variant, "message_patches", [blank_patch()], &(&1 ++ [blank_patch()]))
+     end)}
+  end
+
+  def handle_event("remove_patch", %{"index" => index, "patch" => patch}, socket) do
+    {:noreply,
+     update_variant(socket, index, fn variant ->
+       Map.update(variant, "message_patches", [], &delete_at(&1, patch))
+     end)}
   end
 
   def handle_event("pick_recent_judge", %{"target" => target}, socket) do
@@ -320,21 +387,81 @@ defmodule DodoRouterWeb.EvalLive.New do
   end
 
   def handle_event("save", %{"evaluation" => params}, socket) do
+    # Every path out of here re-renders the rows, and two of them are
+    # refusals — so the typed variants are taken from the submission before
+    # anything can reject it.
+    socket = assign(socket, :variants, variants_from_params(params))
+
     params =
       params
       |> prepare_params(socket.assigns.target_lookup)
       |> add_sources(socket.assigns.recording, socket.assigns.source_logs)
 
+    with :ok <- check_next_action(socket, params),
+         :ok <- check_message_patches(socket, params) do
+      save_evaluation(socket, params)
+    else
+      {:error, message} -> {:noreply, put_flash(socket, :error, message)}
+    end
+  end
+
+  defp update_variant(socket, index, fun) do
+    update_at(socket, index, fn variants, i ->
+      List.replace_at(variants, i, fun.(Enum.at(variants, i)))
+    end)
+  end
+
+  # A row index arrives as a string from the DOM. Negative indexes are how
+  # `List` addresses the tail, so an unparseable one must drop the update
+  # rather than fall through to deleting the last row the user has.
+  defp update_at(socket, index, fun) do
+    variants = socket.assigns.variants
+
+    case index_within(index, variants) do
+      nil -> socket
+      i -> assign(socket, :variants, fun.(variants, i))
+    end
+  end
+
+  defp delete_at(list, index) do
+    case index_within(index, list) do
+      nil -> list
+      i -> List.delete_at(list, i)
+    end
+  end
+
+  defp index_within(index, list) do
+    case Integer.parse(to_string(index)) do
+      {i, ""} when i >= 0 -> if i < length(list), do: i
+      _ -> nil
+    end
+  end
+
+  defp blank_variant, do: %{"name" => "", "system_prompt" => "", "message_patches" => []}
+  defp blank_patch, do: %{"index" => "", "content" => ""}
+
+  defp check_next_action(socket, params) do
     if params["comparison_mode"] == "next_action" and
          Enum.any?(socket.assigns.source_logs, &Evaluations.next_action_blocker/1) do
-      {:noreply,
-       put_flash(
-         socket,
-         :error,
-         "Next-action mode compares against the recorded response, and at least one source request has none on record. Use rubric mode for this set."
-       )}
+      {:error,
+       "Next-action mode compares against the recorded response, and at least one source request has none on record. Use rubric mode for this set."}
     else
-      save_evaluation(socket, params)
+      :ok
+    end
+  end
+
+  # An index with no message behind it fails minutes into a paid benchmark,
+  # so it is refused here — named, since the user cannot see which of a
+  # recording's requests is short.
+  defp check_message_patches(socket, params) do
+    case Evaluations.message_patch_blocker(params["prompt_variants"], socket.assigns.source_logs) do
+      nil ->
+        :ok
+
+      blocker ->
+        {:error,
+         "Variant #{inspect(blocker.variant)} patches a message index that at least one source " <>
+           "request does not have. Indexes are 0-based into that request's messages as served."}
     end
   end
 
@@ -408,10 +535,291 @@ defmodule DodoRouterWeb.EvalLive.New do
       "candidate_targets",
       Enum.map(selected, &Map.get(target_lookup, &1)) |> Enum.reject(&is_nil/1)
     )
+    |> Map.put("prompt_variants", params |> variants_from_params() |> typed_variants())
+  end
+
+  # Nested form params arrive index-keyed; the schema and the rendered rows
+  # both want them in the order the user sees.
+  defp variants_from_params(params) do
+    params
+    |> Map.get("prompt_variants")
+    |> indexed_list()
+    |> Enum.map(fn variant ->
+      %{
+        "name" => to_string(variant["name"] || ""),
+        "system_prompt" => to_string(variant["system_prompt"] || ""),
+        "message_patches" =>
+          variant
+          |> Map.get("message_patches")
+          |> indexed_list()
+          |> Enum.map(
+            &%{
+              "index" => to_string(&1["index"] || ""),
+              "content" => to_string(&1["content"] || "")
+            }
+          )
+      }
+    end)
+  end
+
+  # Choosing a message is the moment its text is known, so that is when the
+  # replacement box gets seeded with it: authoring a patch becomes editing
+  # the real message rather than retyping it from a preview. Only when the
+  # chosen index actually changed, and only into an empty box — re-seeding
+  # would undo the edit the user came here to make.
+  defp seed_patch_contents(variants, previous, source_messages) do
+    variants
+    |> Enum.with_index()
+    |> Enum.map(fn {variant, index} ->
+      was = Map.get(Enum.at(previous, index) || %{}, "message_patches", [])
+
+      patches =
+        variant["message_patches"]
+        |> Enum.with_index()
+        |> Enum.map(fn {patch, patch_index} ->
+          previous_index = Map.get(Enum.at(was, patch_index) || %{}, "index")
+
+          if patch["index"] != previous_index and patch["content"] == "" do
+            %{patch | "content" => source_message_content(source_messages, patch["index"])}
+          else
+            patch
+          end
+        end)
+
+      %{variant | "message_patches" => patches}
+    end)
+  end
+
+  defp source_message_content(source_messages, index) do
+    case Enum.find(source_messages, &(to_string(&1.index) == to_string(index))) do
+      nil -> ""
+      message -> message.content
+    end
+  end
+
+  defp indexed_list(%{} = map) do
+    map
+    |> Enum.filter(fn {_key, value} -> is_map(value) end)
+    |> Enum.sort_by(fn {key, _value} ->
+      case Integer.parse(to_string(key)) do
+        {index, _rest} -> index
+        :error -> 0
+      end
+    end)
+    |> Enum.map(&elem(&1, 1))
+  end
+
+  defp indexed_list(list) when is_list(list), do: Enum.filter(list, &is_map/1)
+  defp indexed_list(_other), do: []
+
+  # What the replay will actually apply. A blank system prompt is "as
+  # served" (nil), not an empty prompt — that is how a baseline sits in the
+  # comparison under its own name — and a variant with no patch rows
+  # carries no `message_patches` key at all.
+  defp typed_variants(variants) do
+    Enum.map(variants, fn variant ->
+      %{
+        "name" => String.trim(variant["name"] || ""),
+        "system_prompt" => blank_to_nil(variant["system_prompt"])
+      }
+      |> put_patches(variant["message_patches"])
+    end)
+  end
+
+  defp put_patches(variant, patches) do
+    case Enum.reject(patches || [], &blank_patch?/1) do
+      [] -> variant
+      patches -> Map.put(variant, "message_patches", Enum.map(patches, &typed_patch/1))
+    end
+  end
+
+  # An untouched row the user added and then ignored is not a patch; a
+  # half-filled one is, and has to reach the changeset so it can say so.
+  defp blank_patch?(patch),
+    do: blank_to_nil(patch["index"]) == nil and blank_to_nil(patch["content"]) == nil
+
+  defp typed_patch(patch) do
+    index =
+      case Integer.parse(to_string(patch["index"] || "")) do
+        {index, ""} -> index
+        _ -> to_string(patch["index"] || "")
+      end
+
+    %{"index" => index, "content" => patch_content(patch["content"])}
+  end
+
+  # Multimodal content is a block array, which the MCP path can send and a
+  # textarea cannot. Duplicating such a variant would otherwise silently
+  # rewrite the array into a JSON string, so text that parses back to a
+  # list is restored as one.
+  defp patch_content(content) do
+    content = to_string(content || "")
+
+    case Jason.decode(content) do
+      {:ok, blocks} when is_list(blocks) -> blocks
+      _ -> content
+    end
+  end
+
+  # Duplication seeds the rows from a stored evaluation, which holds the
+  # typed shape: nil system prompt reads as the empty textarea it came from.
+  defp display_variants(variants) when is_list(variants) do
+    Enum.map(indexed_list(variants), fn variant ->
+      %{
+        "name" => to_string(variant["name"] || ""),
+        "system_prompt" => to_string(variant["system_prompt"] || ""),
+        "message_patches" =>
+          variant
+          |> Map.get("message_patches")
+          |> indexed_list()
+          |> Enum.map(
+            &%{
+              "index" => to_string(&1["index"] || ""),
+              "content" => display_content(&1["content"])
+            }
+          )
+      }
+    end)
+  end
+
+  defp display_variants(_variants), do: []
+
+  defp display_content(content) when is_list(content), do: Jason.encode!(content)
+  defp display_content(content), do: to_string(content || "")
+
+  defp variant_errors(form), do: Enum.map(form[:prompt_variants].errors, &translate_error/1)
+
+  # The message select is the index field: an index is a position in a list
+  # the author can now read, so it is chosen rather than remembered.
+  defp message_options(source_messages) do
+    Enum.map(source_messages, &{"#{&1.index} · #{&1.role} · #{preview(&1.content)}", &1.index})
+  end
+
+  defp preview(content) do
+    content = content |> to_string() |> String.replace(~r/\s+/, " ") |> String.trim()
+
+    if String.length(content) > 60, do: String.slice(content, 0, 60) <> "…", else: content
+  end
+
+  defp source_message(source_messages, index),
+    do: Enum.find(source_messages, &(to_string(&1.index) == to_string(index)))
+
+  # Nothing to show until the two sides differ; an unchanged variant is a
+  # variant the author has not written yet, not a diff of nothing.
+  defp prompt_diff(served, prompt) do
+    prompt = to_string(prompt)
+
+    if String.trim(prompt) != "" and prompt != to_string(served || ""),
+      do: TextDiff.diff(served, prompt)
+  end
+
+  defp patch_diff(nil, _content), do: nil
+
+  defp patch_diff(%{content: served}, content) do
+    content = to_string(content)
+    if content != served, do: TextDiff.diff(served, content)
+  end
+
+  # Everything the template needs about a variant, computed once: HEEx can
+  # only read assigns, and a diff is not something to recompute inside a
+  # comprehension.
+  defp variant_views(variants, source_messages, served_prompt) do
+    variants
+    |> Enum.with_index()
+    |> Enum.map(fn {variant, index} ->
+      %{
+        index: index,
+        name: variant["name"],
+        system_prompt: variant["system_prompt"],
+        prompt_diff: prompt_diff(served_prompt, variant["system_prompt"]),
+        patches: patch_views(variant["message_patches"] || [], source_messages)
+      }
+    end)
+  end
+
+  defp patch_views(patches, source_messages) do
+    patches
+    |> Enum.with_index()
+    |> Enum.map(fn {patch, index} ->
+      source = source_message(source_messages, patch["index"])
+
+      %{
+        index: index,
+        message_index: patch["index"],
+        content: patch["content"],
+        source: source,
+        diff: patch_diff(source, patch["content"])
+      }
+    end)
+  end
+
+  # A diff whose inputs were too large to align comes back with no segments
+  # — saying so beats an empty box that reads as "nothing changed".
+  attr :id, :string, required: true
+  attr :label, :string, required: true
+  attr :diff, :map, required: true
+
+  defp change_preview(assigns) do
+    ~H"""
+    <div id={@id} class="mt-2 rounded-lg border border-base-300/60 bg-base-100/70 p-3">
+      <p class="mb-1.5 text-xs font-medium text-base-content/45">{@label}</p>
+      <.diff_block
+        :if={@diff.segments != []}
+        segments={@diff.segments}
+        mono
+        eq_class="text-base-content/40"
+        class="max-h-64 overflow-y-auto"
+      />
+      <p :if={@diff.segments == []} class="text-xs text-base-content/45">
+        Both sides are too large to line up word by word.
+      </p>
+    </div>
+    """
+  end
+
+  # A factor of one multiplies nothing, so naming it only lengthens the
+  # sentence — except for models and repetitions, which are the two the
+  # user is choosing right here.
+  defp run_plan(source_logs, variants, targets, repetitions) do
+    factors = [
+      {length(source_logs), "request", "requests"},
+      {max(length(variants), 1), "prompt variant", "prompt variants"},
+      {max(length(targets), 1), "model", "models"},
+      {repetitions, "repetition", "repetitions"}
+    ]
+
+    shown =
+      Enum.reject(factors, fn {count, singular, _plural} ->
+        count <= 1 and singular in ["request", "prompt variant"]
+      end)
+
+    %{
+      sentence:
+        Enum.map_join(shown, " × ", fn {count, singular, plural} ->
+          "#{count} #{if count == 1, do: singular, else: plural}"
+        end),
+      total: Enum.reduce(factors, 1, fn {count, _singular, _plural}, acc -> acc * count end)
+    }
   end
 
   @impl true
   def render(assigns) do
+    assigns =
+      assigns
+      |> assign(
+        :run_plan,
+        run_plan(
+          assigns.source_logs,
+          assigns.variants,
+          assigns.selected_targets,
+          reps_value(assigns.form)
+        )
+      )
+      |> assign(
+        :variant_views,
+        variant_views(assigns.variants, assigns.source_messages, assigns.served_system_prompt)
+      )
+
     ~H"""
     <Layouts.app flash={@flash} current_scope={@current_scope}>
       <div class="mx-auto max-w-5xl space-y-6">
@@ -580,10 +988,247 @@ defmodule DodoRouterWeb.EvalLive.New do
             <.input field={@form[:name]} type="text" label="Evaluation name" />
 
             <section
-              id="judge-rubric"
+              id="prompt-variants"
               class="rounded-2xl border border-base-300/60 bg-base-100 p-6 shadow-sm"
             >
               <p class="text-xs font-semibold uppercase tracking-wider text-primary">Step 2</p>
+              <h2 class="text-lg font-semibold">
+                Prompt variants
+                <span class="ml-1 align-middle text-xs font-normal text-base-content/40">
+                  optional
+                </span>
+              </h2>
+              <p class="mb-4 text-sm text-base-content/50">
+                Hold the model constant and vary the prompt. Every candidate answers every variant,
+                against one rubric, ranked per model × variant. With none, the request is replayed
+                exactly as it was served.
+              </p>
+
+              <div
+                :if={@source_messages != []}
+                id="source-request"
+                class="mb-4 overflow-hidden rounded-xl border border-base-300/70 bg-base-200/30"
+              >
+                <button
+                  type="button"
+                  id="toggle-source-request"
+                  phx-click="toggle_source_request"
+                  class="flex w-full items-center gap-2 px-4 py-2.5 text-left text-sm transition hover:bg-base-200/60"
+                >
+                  <.icon
+                    name={
+                      if @show_source_request, do: "hero-chevron-down", else: "hero-chevron-right"
+                    }
+                    class="size-4 shrink-0 text-base-content/40"
+                  />
+                  <span class="font-medium">Request as served</span>
+                  <span class="text-base-content/45">
+                    {length(@source_messages)} messages{if length(@source_logs) > 1,
+                      do: " · first of #{length(@source_logs)} sampled requests"}
+                  </span>
+                </button>
+                <div :if={@show_source_request} class="border-t border-base-300/70">
+                  <div
+                    :for={message <- @source_messages}
+                    class="flex gap-3 border-b border-base-300/40 px-4 py-2.5 last:border-b-0"
+                  >
+                    <span class="w-6 shrink-0 text-right font-mono text-xs text-base-content/35">
+                      {message.index}
+                    </span>
+                    <span class="w-20 shrink-0 text-xs font-medium text-base-content/55">
+                      {message.role}
+                    </span>
+                    <%!-- A real agent system prompt is thousands of lines; it scrolls
+                    in place rather than pushing the form it belongs to off-screen. --%>
+                    <span class="max-h-48 min-w-0 flex-1 overflow-y-auto whitespace-pre-wrap break-words font-mono text-xs text-base-content/70">
+                      {message.content}
+                    </span>
+                  </div>
+                  <p
+                    :if={length(@source_logs) > 1}
+                    class="border-t border-base-300/40 px-4 py-2.5 text-xs text-base-content/45"
+                  >
+                    A patch index addresses this position in <em>every</em>
+                    sampled request, not just this one. Saving refuses any index a sampled request
+                    is too short for.
+                  </p>
+                </div>
+              </div>
+
+              <p
+                :if={@source_messages == []}
+                id="source-request-unavailable"
+                class="mb-4 rounded-xl border border-warning/40 bg-warning/5 px-4 py-3 text-xs text-base-content/70"
+              >
+                This request's body was not stored, so there is nothing to show or patch here — and
+                nothing to replay either. Pick a request whose body is on record.
+              </p>
+
+              <p :for={message <- variant_errors(@form)} class="mb-3 text-sm text-error">
+                {message}
+              </p>
+
+              <p
+                :if={@variants == []}
+                class="rounded-xl border border-dashed border-base-300 px-4 py-6 text-center text-sm text-base-content/40"
+              >
+                No variants — every candidate answers the request as served.
+              </p>
+
+              <div id="variant-list" class="space-y-4">
+                <div
+                  :for={view <- @variant_views}
+                  id={"variant-#{view.index}"}
+                  class="rounded-xl border border-base-300/70 bg-base-200/40 p-4"
+                >
+                  <div class="mb-2 flex items-center justify-between">
+                    <p class="text-xs font-semibold uppercase tracking-wider text-base-content/45">
+                      Variant {view.index + 1}
+                    </p>
+                    <button
+                      type="button"
+                      phx-click="remove_variant"
+                      phx-value-index={view.index}
+                      class="btn btn-ghost btn-xs btn-square"
+                      aria-label="Remove variant"
+                    >
+                      <.icon name="hero-x-mark" class="size-4" />
+                    </button>
+                  </div>
+                  <.input
+                    id={"variant-#{view.index}-name"}
+                    name={"evaluation[prompt_variants][#{view.index}][name]"}
+                    value={view.name}
+                    type="text"
+                    label="Variant name"
+                    placeholder="Names the ranking row — the judge never sees it"
+                  />
+                  <div class="mt-1 flex items-end justify-between gap-3">
+                    <p class="text-xs text-base-content/55">
+                      {if @served_system_prompt,
+                        do: "System prompt — replaces the served one",
+                        else: "System prompt — this request had none, so it is prepended"}
+                    </p>
+                    <button
+                      :if={@served_system_prompt}
+                      type="button"
+                      id={"use-served-prompt-#{view.index}"}
+                      phx-click="use_served_prompt"
+                      phx-value-index={view.index}
+                      class="btn btn-ghost btn-xs gap-1"
+                    >
+                      <.icon name="hero-document-duplicate" class="size-3" /> Start from served prompt
+                    </button>
+                  </div>
+                  <.input
+                    id={"variant-#{view.index}-system-prompt"}
+                    name={"evaluation[prompt_variants][#{view.index}][system_prompt]"}
+                    value={view.system_prompt}
+                    type="textarea"
+                    placeholder="Leave blank to score the request as served, under this name."
+                  />
+                  <.change_preview
+                    :if={view.prompt_diff}
+                    id={"variant-#{view.index}-prompt-diff"}
+                    label="Served prompt → this variant"
+                    diff={view.prompt_diff}
+                  />
+
+                  <div class="mt-3 rounded-lg border border-base-300/60 bg-base-100/70 p-3">
+                    <div class="flex items-center justify-between gap-3">
+                      <p class="text-xs font-medium text-base-content/55">Message patches</p>
+                      <button
+                        type="button"
+                        id={"add-patch-#{view.index}"}
+                        phx-click="add_patch"
+                        phx-value-index={view.index}
+                        class="btn btn-ghost btn-xs gap-1"
+                        disabled={@source_messages == []}
+                      >
+                        <.icon name="hero-plus" class="size-3" /> Patch a message
+                      </button>
+                    </div>
+                    <p :if={view.patches == []} class="mt-1 text-xs text-base-content/40">
+                      Advanced. Replace one message's content while everything else stays exactly
+                      what production sent — the same frozen history with one bit flipped, for
+                      context transforms like "does compressing this tool result preserve the
+                      reasoning?". Pick the message; its text opens for editing.
+                    </p>
+                    <div
+                      :for={patch <- view.patches}
+                      id={"variant-#{view.index}-patch-#{patch.index}"}
+                      class="mt-2 rounded-lg border border-base-300/60 bg-base-200/40 p-3"
+                    >
+                      <div class="flex items-end gap-2">
+                        <div class="min-w-0 flex-1">
+                          <.input
+                            id={"variant-#{view.index}-patch-#{patch.index}-index"}
+                            name={
+                              "evaluation[prompt_variants][#{view.index}][message_patches][#{patch.index}][index]"
+                            }
+                            value={patch.message_index}
+                            type="select"
+                            label="Message"
+                            prompt="Choose a message to replace"
+                            options={message_options(@source_messages)}
+                          />
+                        </div>
+                        <button
+                          type="button"
+                          phx-click="remove_patch"
+                          phx-value-index={view.index}
+                          phx-value-patch={patch.index}
+                          class="btn btn-ghost btn-xs btn-square mb-2"
+                          aria-label="Remove message patch"
+                        >
+                          <.icon name="hero-x-mark" class="size-4" />
+                        </button>
+                      </div>
+                      <p
+                        :if={patch.source && !patch.source.text?}
+                        class="mb-1 flex items-start gap-1.5 text-xs text-warning"
+                      >
+                        <.icon name="hero-exclamation-triangle" class="mt-0.5 size-3.5 shrink-0" />
+                        <span class="text-base-content/70">
+                          This message was sent as content blocks, not plain text. Replacing it with
+                          text changes its shape as well as its wording.
+                        </span>
+                      </p>
+                      <.input
+                        id={"variant-#{view.index}-patch-#{patch.index}-content"}
+                        name={
+                          "evaluation[prompt_variants][#{view.index}][message_patches][#{patch.index}][content]"
+                        }
+                        value={patch.content}
+                        type="textarea"
+                        label="Replacement content"
+                      />
+                      <.change_preview
+                        :if={patch.diff}
+                        id={"variant-#{view.index}-patch-#{patch.index}-diff"}
+                        label={"Message #{patch.message_index} as served → this variant"}
+                        diff={patch.diff}
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                id="add-variant-button"
+                phx-click="add_variant"
+                class="btn btn-ghost btn-sm mt-4 gap-2 border border-base-300/70"
+              >
+                <.icon name="hero-plus" class="size-4" /> Add prompt variant
+              </button>
+            </section>
+
+            <section
+              id="judge-rubric"
+              class="rounded-2xl border border-base-300/60 bg-base-100 p-6 shadow-sm"
+            >
+              <p class="text-xs font-semibold uppercase tracking-wider text-primary">Step 3</p>
               <h2 class="mb-4 text-lg font-semibold">Judge rubric</h2>
               <.input
                 field={@form[:comparison_mode]}
@@ -685,7 +1330,7 @@ defmodule DodoRouterWeb.EvalLive.New do
               id="run-plan"
               class="rounded-2xl border border-base-300/60 bg-base-100 p-6 shadow-sm"
             >
-              <p class="text-xs font-semibold uppercase tracking-wider text-primary">Step 3</p>
+              <p class="text-xs font-semibold uppercase tracking-wider text-primary">Step 4</p>
               <h2 class="mb-4 text-lg font-semibold">Run plan</h2>
               <.input
                 field={@form[:repetitions]}
@@ -698,16 +1343,11 @@ defmodule DodoRouterWeb.EvalLive.New do
                 Repeated generations reveal model consistency, not just one lucky answer.
               </p>
               <p
-                :if={length(@source_logs) > 1}
+                :if={length(@source_logs) > 1 or @variants != []}
                 id="planned-runs-note"
                 class="mt-2 text-xs text-base-content/55"
               >
-                {length(@source_logs)} requests × {max(length(@selected_targets), 1)} models × {reps_value(
-                  @form
-                )} repetitions =
-                <span class="font-semibold">
-                  {length(@source_logs) * max(length(@selected_targets), 1) * reps_value(@form)}
-                </span>
+                {@run_plan.sentence} = <span class="font-semibold">{@run_plan.total}</span>
                 judged runs. Benchmarks are capped at 300 runs.
               </p>
             </section>
