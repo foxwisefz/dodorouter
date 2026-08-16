@@ -848,16 +848,34 @@ defmodule DodoRouterWeb.MCPControllerTest do
           ]
         })
 
-      {:ok, _step, _event} =
+      {:ok, _step, event} =
         DodoRouter.Evaluations.apply_verdict(user, evaluation, %{
           "provider_key_id" => candidate_key.id,
           "model" => "cheap-model"
         })
 
+      # A scored ranking for the applied model, so monitoring has a baseline.
+      %DodoRouter.Logs.EvaluationRun{}
+      |> DodoRouter.Logs.EvaluationRun.changeset(%{
+        evaluation_id: evaluation.id,
+        status: "completed",
+        score: 82,
+        candidate_provider: "test_provider",
+        candidate_model: "cheap-model"
+      })
+      |> DodoRouter.Repo.insert!()
+
+      {:ok, _monitor} = DodoRouter.Evaluations.enable_monitor(user, evaluation, event)
+
       payload =
         tool_json(
           json_response(call_tool(conn, token, "get_eval", %{"id" => evaluation.id}), 200)
         )
+
+      assert payload["monitor"]["status"] == "active"
+      assert payload["monitor"]["baseline_avg"] == 82
+      assert payload["monitor"]["target_model"] == "cheap-model"
+      assert payload["monitor"]["alerted_at"] == nil
 
       assert [change] = payload["applied_changes"]
       assert change["before"]["model"] == "incumbent-model"

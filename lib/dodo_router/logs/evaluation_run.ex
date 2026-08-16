@@ -27,6 +27,10 @@ defmodule DodoRouter.Logs.EvaluationRun do
     # (and every run from before variants existed). The patch itself lives
     # on the immutable evaluation, keyed by this name.
     field :variant_name, :string
+    # nil = a benchmark run (every pre-monitor row reads that way);
+    # "monitor" marks judge-only runs a monitor sweep produced from live
+    # traffic, so benchmark aggregates never mix them in.
+    field :kind, :string
     # What the provider's response claimed actually answered — nil when the
     # response named nothing or the row predates the column. The ranking is
     # keyed on candidate_model (what was requested); a difference here is a
@@ -97,6 +101,7 @@ defmodule DodoRouter.Logs.EvaluationRun do
       :raw_judge_response,
       :source_log_id,
       :variant_name,
+      :kind,
       :candidate_served_model,
       :error,
       :error_category,

@@ -4,7 +4,8 @@ defmodule DodoRouter.Evaluations do
   import Ecto.Query
 
   alias DodoRouter.Accounts.User
-  alias DodoRouter.Logs.{Evaluation, EvaluationRun}
+  alias DodoRouter.Logs.{EvalMonitor, Evaluation, EvaluationRun}
+  alias DodoRouter.Logs.RequestLog
   alias DodoRouter.Providers.ProviderKey
   alias DodoRouter.Proxy.Adapter.Registry, as: AdapterRegistry
   alias DodoRouter.Recordings
@@ -37,7 +38,7 @@ defmodule DodoRouter.Evaluations do
   def list_evaluations(%User{} = user) do
     run_counts =
       from(r in EvaluationRun,
-        where: r.evaluation_id == parent_as(:evaluation).id,
+        where: r.evaluation_id == parent_as(:evaluation).id and is_nil(r.kind),
         select: count()
       )
 
@@ -67,7 +68,7 @@ defmodule DodoRouter.Evaluations do
 
     run_counts =
       from(r in EvaluationRun,
-        where: r.evaluation_id == parent_as(:evaluation).id,
+        where: r.evaluation_id == parent_as(:evaluation).id and is_nil(r.kind),
         select: count()
       )
 
@@ -93,7 +94,7 @@ defmodule DodoRouter.Evaluations do
   def list_for_recording(%User{} = user, recording_id) do
     run_counts =
       from(r in EvaluationRun,
-        where: r.evaluation_id == parent_as(:evaluation).id,
+        where: r.evaluation_id == parent_as(:evaluation).id and is_nil(r.kind),
         select: count()
       )
 
@@ -1374,10 +1375,18 @@ defmodule DodoRouter.Evaluations do
   # Superseded rows are history, never data: a retried attempt would
   # otherwise be counted twice — once as the failure it was and once as the
   # result it became — and drag every average with it.
-  def latest_batch_runs(%Evaluation{runs: runs, last_batch_id: nil}), do: live_runs(runs)
+  # Monitor sweeps write runs of their own; benchmark aggregates never mix
+  # them in. The batch filter already excludes them on the second clause —
+  # a monitor batch never becomes last_batch_id — but a draft evaluation
+  # (nil last_batch_id) reads every run, so the kind filter is load-bearing
+  # there.
+  def latest_batch_runs(%Evaluation{runs: runs, last_batch_id: nil}),
+    do: runs |> benchmark_runs() |> live_runs()
 
   def latest_batch_runs(%Evaluation{runs: runs, last_batch_id: batch_id}),
-    do: runs |> live_runs() |> Enum.filter(&(&1.batch_id == batch_id))
+    do: runs |> benchmark_runs() |> live_runs() |> Enum.filter(&(&1.batch_id == batch_id))
+
+  defp benchmark_runs(runs), do: Enum.reject(runs, &(&1.kind == "monitor"))
 
   @doc "Every run of this evaluation that has not been superseded."
   def live_runs(runs) when is_list(runs), do: Enum.reject(runs, & &1.superseded_at)
@@ -1761,6 +1770,275 @@ defmodule DodoRouter.Evaluations do
   defp plan_type_for_key(key) do
     if String.contains?(key.provider_slug, "coding"), do: "coding", else: "standard"
   end
+
+  ## Continuous monitoring of a shipped downgrade
+
+  # Completed monitor scores considered when judging drift, and how many
+  # of them a verdict needs — three scores over a rolling window, not one
+  # unlucky answer.
+  @monitor_window 6
+  @monitor_min_scores 3
+  # Sweeps in a row below baseline before the alert fires: one bad sweep
+  # is a bad afternoon, two is a trend.
+  @monitor_drop_streak 2
+  # A drop smaller than the benchmark's own spread (floored at 5 points)
+  # is indistinguishable from noise.
+  @monitor_min_tolerance 5
+
+  @doc """
+  Starts monitoring an applied verdict: the evaluation's rubric and judge
+  keep scoring what production actually serves on this router, and a
+  sustained drop below the accepted baseline raises an anomaly.
+
+  The baseline is the applied model's own average (and spread) from the
+  accepted benchmark — what "as good as measured" means. One monitor per
+  evaluation.
+  """
+  def enable_monitor(%User{} = user, %Evaluation{} = evaluation, %RoutingChangeEvent{} = event) do
+    evaluation = get_evaluation!(user, evaluation.id)
+    target_model = event.after_step["model"]
+
+    ranking =
+      evaluation
+      |> rankings()
+      |> Enum.find(&(&1.model == target_model and is_nil(&1.variant)))
+
+    cond do
+      get_monitor(evaluation) ->
+        {:error, :already_monitoring}
+
+      is_nil(ranking) or is_nil(ranking.average) ->
+        {:error, :no_baseline}
+
+      true ->
+        %EvalMonitor{
+          router_id: evaluation.request_log.router_id,
+          evaluation_id: evaluation.id,
+          change_event_id: event.id,
+          baseline_avg: ranking.average,
+          baseline_stddev: ranking.stddev && round(ranking.stddev),
+          target_model: target_model
+        }
+        |> Repo.insert()
+    end
+  end
+
+  def get_monitor(%Evaluation{} = evaluation),
+    do: Repo.get_by(EvalMonitor, evaluation_id: evaluation.id)
+
+  def pause_monitor(%User{} = user, monitor_id),
+    do: set_monitor_status(user, monitor_id, "paused")
+
+  def resume_monitor(%User{} = user, monitor_id),
+    do: set_monitor_status(user, monitor_id, "active")
+
+  defp set_monitor_status(user, monitor_id, status) do
+    case fetch_monitor(user, monitor_id) do
+      nil -> {:error, :not_found}
+      monitor -> monitor |> Ecto.Changeset.change(status: status) |> Repo.update()
+    end
+  end
+
+  defp fetch_monitor(user, monitor_id) do
+    from(m in EvalMonitor,
+      join: r in assoc(m, :router),
+      where: m.id == ^monitor_id and r.user_id == ^user.id
+    )
+    |> Repo.one()
+  end
+
+  @doc "Active monitors whose interval has elapsed (or that never sampled)."
+  def due_monitors(now \\ DateTime.utc_now()) do
+    from(m in EvalMonitor, where: m.status == "active")
+    |> Repo.all()
+    |> Enum.filter(fn monitor ->
+      case monitor.last_sampled_at do
+        nil -> true
+        last -> DateTime.diff(now, last, :second) >= monitor.interval_hours * 3600
+      end
+    end)
+  end
+
+  @doc """
+  One monitoring sweep: judge the most recent live answers this router
+  served on the monitored model, then re-evaluate drift.
+
+  Judge-only — the answers were already generated and paid for by real
+  traffic, which is also why they are the honest thing to score. Skips
+  without sampling when the judge's key is known to be unusable (the
+  monitor stays due, so it self-heals when the key does).
+  """
+  def sweep_monitor(%EvalMonitor{} = monitor) do
+    evaluation =
+      Evaluation
+      |> Repo.get!(monitor.evaluation_id)
+      |> Repo.preload([:evaluated_by, :judge_provider_key, request_log: :router])
+
+    user = evaluation.evaluated_by
+
+    case preflight(user, evaluation).judge do
+      nil ->
+        logs = monitor_sample_logs(monitor)
+        batch_id = Ecto.UUID.generate()
+
+        for log <- logs do
+          judge_served_answer(user, evaluation, log, batch_id)
+        end
+
+        {:ok, finalize_sweep(monitor, length(logs))}
+
+      _blocker ->
+        {:error, :judge_unusable}
+    end
+  end
+
+  # The most recent live answers worth judging: real proxy traffic, served
+  # successfully by the monitored model, newer than the last sweep, whose
+  # request can feed the judge and whose answer text is extractable.
+  defp monitor_sample_logs(monitor) do
+    since = monitor.last_sampled_at || monitor.inserted_at
+
+    query =
+      from(l in RequestLog,
+        where:
+          l.router_id == ^monitor.router_id and
+            l.traffic_type == "proxy" and
+            l.status in ["success", "fallback"] and
+            l.inserted_at > ^since,
+        order_by: [desc: l.inserted_at],
+        limit: ^(monitor.sample_size * 4)
+      )
+
+    query =
+      case monitor.target_model do
+        nil -> query
+        model -> from(l in query, where: l.final_model == ^model)
+      end
+
+    query
+    |> Repo.all()
+    |> Enum.filter(&(is_nil(Replays.replay_blocker(&1)) and served_answer(&1) != nil))
+    |> Enum.take(monitor.sample_size)
+  end
+
+  defp judge_served_answer(user, evaluation, log, batch_id) do
+    started_at = System.monotonic_time(:millisecond)
+    answer = served_answer(log)
+
+    case create_run(evaluation, %{
+           kind: "monitor",
+           batch_id: batch_id,
+           source_log_id: log.id,
+           candidate_log_id: log.id,
+           candidate_provider: log.final_provider,
+           candidate_model: log.final_model,
+           candidate_latency_ms: log.latency_ms,
+           candidate_cost_usd: log.estimated_cost_usd,
+           candidate_list_cost_usd: log.list_cost_usd,
+           candidate_output: answer
+         }) do
+      {:ok, run} ->
+        with_run_failure_guard(run, fn ->
+          judge_candidate(user, evaluation, log, run, answer, started_at)
+        end)
+
+      {:error, changeset} ->
+        {:error, changeset}
+    end
+  end
+
+  defp finalize_sweep(monitor, _sampled_count) do
+    window = monitor_window_scores(monitor)
+    tolerance = max(monitor.baseline_stddev || 0, @monitor_min_tolerance)
+
+    dropped? =
+      length(window) >= @monitor_min_scores and
+        Enum.sum(window) / length(window) < monitor.baseline_avg - tolerance
+
+    drops = if dropped?, do: monitor.consecutive_drops + 1, else: 0
+
+    # Recovery clears the alert: an anomaly describes the present, not a
+    # grudge. A stale alert would train the operator to ignore the panel.
+    alerted_at =
+      cond do
+        not dropped? -> nil
+        drops >= @monitor_drop_streak -> monitor.alerted_at || DateTime.utc_now()
+        true -> monitor.alerted_at
+      end
+
+    monitor
+    |> Ecto.Changeset.change(
+      last_sampled_at: DateTime.utc_now(),
+      consecutive_drops: drops,
+      alerted_at: alerted_at
+    )
+    |> Repo.update!()
+    |> tap(fn updated ->
+      Phoenix.PubSub.broadcast(
+        DodoRouter.PubSub,
+        "evaluation:#{updated.evaluation_id}",
+        {:monitor_updated, updated.id}
+      )
+    end)
+  end
+
+  @doc "The rolling window of completed monitor scores, newest first."
+  def monitor_window_scores(%EvalMonitor{} = monitor) do
+    from(r in EvaluationRun,
+      where:
+        r.evaluation_id == ^monitor.evaluation_id and r.kind == "monitor" and
+          r.status == "completed" and not is_nil(r.score),
+      order_by: [desc: r.inserted_at],
+      limit: @monitor_window,
+      select: r.score
+    )
+    |> Repo.all()
+  end
+
+  @doc "Recent monitor runs for display, newest first."
+  def monitor_runs(%Evaluation{} = evaluation, limit \\ 20) do
+    from(r in EvaluationRun,
+      where: r.evaluation_id == ^evaluation.id and r.kind == "monitor",
+      order_by: [desc: r.inserted_at],
+      limit: ^limit
+    )
+    |> Repo.all()
+  end
+
+  @doc """
+  Extracts the assistant's answer text from a stored response body, in
+  either wire format — OpenAI-shaped (`choices`) or Anthropic-shaped
+  (`content` blocks). nil when there is nothing judgeable.
+  """
+  def served_answer(%RequestLog{response_body: body}) when is_binary(body) do
+    case Jason.decode(body) do
+      {:ok, decoded} -> response_content(decoded) || anthropic_response_content(decoded)
+      {:error, _} -> nil
+    end
+  end
+
+  def served_answer(_log), do: nil
+
+  defp anthropic_response_content(%{"content" => blocks}) when is_list(blocks) do
+    blocks
+    |> Enum.map(fn
+      %{"type" => "text", "text" => text} when is_binary(text) ->
+        text
+
+      %{"type" => "tool_use"} = block ->
+        "[tool call] #{block["name"]}(#{Jason.encode!(block["input"] || %{})})"
+
+      _other ->
+        nil
+    end)
+    |> Enum.reject(&(&1 in [nil, ""]))
+    |> case do
+      [] -> nil
+      parts -> Enum.join(parts, "\n\n")
+    end
+  end
+
+  defp anthropic_response_content(_), do: nil
 
   def parse_judgement(raw) when is_binary(raw) do
     json =

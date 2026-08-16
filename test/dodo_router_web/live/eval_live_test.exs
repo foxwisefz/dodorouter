@@ -1835,6 +1835,17 @@ defmodule DodoRouterWeb.EvalLiveTest do
     assert updated.model == "cheap-model"
     assert updated.provider_key_id == candidate_key.id
 
+    # Keep the decision honest: monitoring starts from the applied change
+    # and the panel appears with the benchmark's baseline.
+    html = live |> element("button[phx-click='enable_monitor']") |> render_click()
+    assert html =~ "Monitoring on"
+    assert has_element?(live, "#eval-monitor", "Live monitoring")
+    assert has_element?(live, "#eval-monitor", "cheap-model")
+
+    html = live |> element("#toggle-monitor") |> render_click()
+    assert html =~ "Monitoring paused"
+    assert has_element?(live, "#eval-monitor", "paused")
+
     html = live |> element("button[phx-click='revert_verdict']") |> render_click()
     assert html =~ "Routing reverted"
     assert has_element?(live, "#applied-changes", "reverted")

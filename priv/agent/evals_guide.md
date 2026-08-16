@@ -160,6 +160,12 @@ running (the keys were checked at start). Then:
   click in the dashboard ("Route here" on a ranking row) — these tools
   read the audit trail, they do not change routing. If your benchmark
   earned a switch, say so to your operator and point at the evaluation.
+- `monitor` — present once the operator turned on live monitoring for an
+  applied verdict: the same rubric and judge keep scoring a few live
+  answers per interval, and `alerted_at` is set while the rolling live
+  average sits below the benchmark baseline (it clears on recovery). A set
+  `alerted_at` means the downgrade is no longer earning its evidence —
+  surface that.
 - `rubric_feedback` — **read this before you trust the scores.** It reports how
   often the judge said your criteria were too thin to decide, and what it said
   was missing. If `flagged` is high, fix `criteria` and create a new evaluation;

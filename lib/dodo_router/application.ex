@@ -36,6 +36,9 @@ defmodule DodoRouter.Application do
       # list_cost_usd is computed from, so a stale catalog is wrong money
       # rather than a cosmetic problem.
       {DodoRouter.Models.SyncScheduler, []},
+      # Sweeps eval monitors so a shipped downgrade keeps producing scores
+      # on live traffic instead of staying honest only when someone looks.
+      {DodoRouter.Evaluations.MonitorSweeper, []},
       # Start to serve requests, typically the last entry
       DodoRouterWeb.Endpoint
     ]

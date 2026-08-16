@@ -358,6 +358,8 @@ defmodule DodoRouter.MCP.Tools do
 
       applied_changes, when present, is the audit trail of routing changes made from this benchmark's verdict — what served before, what serves now, when, and whether it was reverted. Applying is the operator's click in the dashboard; these tools read the trail, they do not change routing.
 
+      monitor, when present, is the continuous check on an applied verdict: the same rubric and judge keep scoring a few live answers per interval, and alerted_at is set while the rolling live average sits below the benchmark baseline (it clears on recovery). If alerted_at is set, the downgrade is no longer earning its evidence — say so to your operator.
+
       A failed run is not always a failed model. `failure_stage` says which half broke: "judge" means the answer was generated and paid for and only the scoring call failed — retry_eval re-scores it for free — while "candidate" means the model never answered. `retryable` counts both. `blockers` reports what is already known to be broken before spending anything: a key seen refusing, or a candidate model the provider has retired; it is omitted while the benchmark is running, since the keys were checked at start and a poll should stay cheap.
 
       The default payload is built for polling: status, summary, rankings, rubric feedback and retry counts. Pass include: ["runs"] for the per-run detail (up to 2,000 chars of output_preview per run — a full batch can be large) and include: ["criteria"] for the rubric text.
@@ -866,6 +868,7 @@ defmodule DodoRouter.MCP.Tools do
     payload
     |> maybe_put_projection(principal, evaluation, rankings)
     |> maybe_put_applied_changes(evaluation)
+    |> maybe_put_monitor(evaluation)
     |> maybe_put_blockers(principal, evaluation, running?)
     |> maybe_put_criteria(evaluation, "criteria" in include)
     # "attempts" implies runs: attempt history hangs off the run it was
@@ -957,6 +960,34 @@ defmodule DodoRouter.MCP.Tools do
             }
           end)
         )
+    end
+  end
+
+  # The continuous check that keeps an applied downgrade honest. Read-only
+  # here, like applied_changes: enabling costs judge money on a schedule,
+  # which is the operator's call in the dashboard.
+  defp maybe_put_monitor(payload, evaluation) do
+    case Evaluations.get_monitor(evaluation) do
+      nil ->
+        payload
+
+      monitor ->
+        scores = Evaluations.monitor_window_scores(monitor)
+
+        Map.put(payload, :monitor, %{
+          status: monitor.status,
+          target_model: monitor.target_model,
+          baseline_avg: monitor.baseline_avg,
+          baseline_stddev: monitor.baseline_stddev,
+          recent_scores: scores,
+          sample_size: monitor.sample_size,
+          interval_hours: monitor.interval_hours,
+          last_sampled_at: monitor.last_sampled_at,
+          consecutive_drops: monitor.consecutive_drops,
+          # Set while live scores sit a tolerance below the benchmark's
+          # baseline; clears on recovery.
+          alerted_at: monitor.alerted_at
+        })
     end
   end
 

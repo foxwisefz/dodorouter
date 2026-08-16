@@ -118,6 +118,51 @@ defmodule DodoRouterWeb.EvalLive.Show do
     end
   end
 
+  def handle_event("enable_monitor", %{"event" => event_id}, socket) do
+    event = Enum.find(socket.assigns.applied_changes, &(&1.id == event_id))
+
+    result =
+      event &&
+        Evaluations.enable_monitor(socket.assigns.current_user, socket.assigns.evaluation, event)
+
+    case result do
+      {:ok, _monitor} ->
+        {:noreply,
+         socket
+         |> put_flash(
+           :info,
+           "Monitoring on — the same rubric and judge keep scoring live answers, and a sustained drop below the benchmark raises an alert."
+         )
+         |> load(socket.assigns.evaluation)}
+
+      {:error, :already_monitoring} ->
+        {:noreply, put_flash(socket, :info, "This evaluation is already monitoring.")}
+
+      {:error, :no_baseline} ->
+        {:noreply,
+         put_flash(
+           socket,
+           :error,
+           "No scored ranking for the applied model — run the benchmark before monitoring against it."
+         )}
+
+      _other ->
+        {:noreply, put_flash(socket, :error, "Could not start monitoring.")}
+    end
+  end
+
+  def handle_event("pause_monitor", _params, socket) do
+    toggle_monitor(
+      socket,
+      &Evaluations.pause_monitor/2,
+      "Monitoring paused — no further judge spend."
+    )
+  end
+
+  def handle_event("resume_monitor", _params, socket) do
+    toggle_monitor(socket, &Evaluations.resume_monitor/2, "Monitoring resumed.")
+  end
+
   def handle_event("revert_verdict", %{"event" => event_id}, socket) do
     case Evaluations.revert_verdict(socket.assigns.current_user, event_id) do
       {:ok, _step} ->
@@ -201,6 +246,13 @@ defmodule DodoRouterWeb.EvalLive.Show do
      socket
      |> assign(:running?, false)
      |> put_flash(:error, "Benchmark stopped: " <> Evaluations.proxy_error_message(reason))}
+  end
+
+  def handle_info({:monitor_updated, _monitor_id}, socket) do
+    evaluation =
+      Evaluations.get_evaluation!(socket.assigns.current_user, socket.assigns.evaluation.id)
+
+    {:noreply, load(socket, evaluation)}
   end
 
   # nil means "keep the evaluation's current repetitions"; the input's
@@ -374,6 +426,8 @@ defmodule DodoRouterWeb.EvalLive.Show do
       evaluation.recording_id &&
         Recordings.get_recording(socket.assigns.current_user, evaluation.recording_id)
 
+    monitor = Evaluations.get_monitor(evaluation)
+
     socket
     |> assign(:page_title, evaluation.name)
     |> assign(:evaluation, evaluation)
@@ -381,6 +435,8 @@ defmodule DodoRouterWeb.EvalLive.Show do
     |> assign(:recording, recording)
     |> assign(:projection, projection(recording, rankings))
     |> assign(:applied_changes, Evaluations.list_applied_changes(evaluation))
+    |> assign(:monitor, monitor)
+    |> assign(:monitor_scores, (monitor && Evaluations.monitor_window_scores(monitor)) || [])
     |> assign(:batches, batches)
     |> assign(:selected_batch, selected)
     |> assign(:selected_group, group)
@@ -650,6 +706,9 @@ defmodule DodoRouterWeb.EvalLive.Show do
   defp group_batches(evaluation) do
     {latest, earlier} =
       evaluation.runs
+      # Monitor sweeps write runs of their own; the benchmark's batch list
+      # is not where they belong.
+      |> Enum.reject(&(&1.kind == "monitor"))
       |> Enum.group_by(& &1.batch_id)
       |> Enum.map(fn {batch_id, runs} ->
         %{
@@ -698,6 +757,25 @@ defmodule DodoRouterWeb.EvalLive.Show do
       target["model"] == ranking.model and target["provider"] == ranking.provider
     end)
   end
+
+  defp toggle_monitor(socket, fun, message) do
+    case socket.assigns.monitor do
+      nil ->
+        {:noreply, socket}
+
+      monitor ->
+        case fun.(socket.assigns.current_user, monitor.id) do
+          {:ok, _monitor} ->
+            {:noreply, socket |> put_flash(:info, message) |> load(socket.assigns.evaluation)}
+
+          {:error, _reason} ->
+            {:noreply, put_flash(socket, :error, "Could not update monitoring.")}
+        end
+    end
+  end
+
+  defp monitor_recent_avg([]), do: nil
+  defp monitor_recent_avg(scores), do: round(Enum.sum(scores) / length(scores))
 
   defp verdict_error(:no_incumbent),
     do:
@@ -1599,17 +1677,102 @@ defmodule DodoRouterWeb.EvalLive.Show do
               >
                 reverted
               </span>
-              <button
-                :if={is_nil(event.reverted_at)}
-                type="button"
-                id={"revert-#{event.id}"}
-                phx-click="revert_verdict"
-                phx-value-event={event.id}
-                data-confirm="Put the routing step back to what it was before this change?"
-                class="btn btn-ghost btn-xs"
+              <div :if={is_nil(event.reverted_at)} class="flex items-center gap-2">
+                <button
+                  :if={is_nil(@monitor)}
+                  type="button"
+                  id={"monitor-#{event.id}"}
+                  phx-click="enable_monitor"
+                  phx-value-event={event.id}
+                  data-confirm="Keep this decision honest? The same rubric and judge will score a few live answers a day, at judge cost, and a sustained drop below the benchmark raises an alert."
+                  class="btn btn-outline btn-xs gap-1"
+                  title="Keep scoring live traffic against this benchmark's baseline"
+                >
+                  <.icon name="hero-eye" class="size-3.5" /> Keep honest
+                </button>
+                <button
+                  type="button"
+                  id={"revert-#{event.id}"}
+                  phx-click="revert_verdict"
+                  phx-value-event={event.id}
+                  data-confirm="Put the routing step back to what it was before this change?"
+                  class="btn btn-ghost btn-xs"
+                >
+                  Revert
+                </button>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section
+          :if={@monitor}
+          id="eval-monitor"
+          class="rounded-2xl border border-base-300/60 bg-base-100 p-6 shadow-sm"
+        >
+          <div class="flex flex-wrap items-center justify-between gap-3">
+            <div class="flex items-center gap-2">
+              <h2 class="text-lg font-semibold">Live monitoring</h2>
+              <span class={[
+                "badge badge-sm",
+                if(@monitor.status == "active", do: "badge-success badge-soft", else: "badge-ghost")
+              ]}>
+                {@monitor.status}
+              </span>
+              <span
+                :if={@monitor.alerted_at}
+                id="monitor-alert"
+                class="badge badge-error badge-sm gap-1"
+                title={"Scores have stayed below the benchmark since #{Calendar.strftime(@monitor.alerted_at, "%b %d, %H:%M")}"}
               >
-                Revert
-              </button>
+                <.icon name="hero-exclamation-triangle" class="size-3" /> below baseline
+              </span>
+            </div>
+            <button
+              type="button"
+              id="toggle-monitor"
+              phx-click={if @monitor.status == "active", do: "pause_monitor", else: "resume_monitor"}
+              class="btn btn-ghost btn-xs"
+            >
+              {if @monitor.status == "active", do: "Pause", else: "Resume"}
+            </button>
+          </div>
+          <p class="mt-1 text-sm text-base-content/45">
+            {@monitor.sample_size} live answers judged every {@monitor.interval_hours}h with this
+            benchmark's rubric and judge{if @monitor.target_model,
+              do: ", on #{@monitor.target_model}"}. A downgrade decision is only valid for the
+            traffic it was measured on — this notices when that stops being true.
+          </p>
+          <div class="mt-4 flex flex-wrap gap-6 text-sm">
+            <div>
+              <span class="text-base-content/45">Benchmark baseline</span>
+              <div class="font-semibold">
+                {@monitor.baseline_avg}<span
+                  :if={@monitor.baseline_stddev}
+                  class="font-normal text-base-content/45"
+                > ± {@monitor.baseline_stddev}</span>
+              </div>
+            </div>
+            <div>
+              <span class="text-base-content/45">Live average (last {length(@monitor_scores)})</span>
+              <div class={[
+                "font-semibold",
+                @monitor.alerted_at && "text-error"
+              ]}>
+                {monitor_recent_avg(@monitor_scores) || "no scores yet"}
+              </div>
+            </div>
+            <div>
+              <span class="text-base-content/45">Last sweep</span>
+              <div>
+                {if @monitor.last_sampled_at,
+                  do: Calendar.strftime(@monitor.last_sampled_at, "%b %d, %H:%M"),
+                  else: "pending"}
+              </div>
+            </div>
+            <div :if={@monitor.consecutive_drops > 0}>
+              <span class="text-base-content/45">Sweeps below baseline</span>
+              <div class="font-semibold text-warning">{@monitor.consecutive_drops}</div>
             </div>
           </div>
         </section>
