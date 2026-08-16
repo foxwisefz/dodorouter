@@ -1502,20 +1502,76 @@ defmodule DodoRouter.Evaluations do
   defp judge_setup_message(reason), do: "Judge setup failed — " <> humanize_reason(reason)
 
   # Retries `fun` while it comes back rate limited, walking the backoff
-  # ladder. Delays are configurable so the test suite doesn't sleep.
+  # ladder. Delays are configurable so the test suite doesn't sleep. A
+  # Retry-After the provider sent outranks the ladder — sleeping less than
+  # the provider asked just converts one 429 into two (dodo_router-6py).
   defp with_rate_limit_backoff(fun) do
     delays =
       Application.get_env(:dodo_router, :eval_rate_limit_backoff_ms, @rate_limit_backoff_ms)
 
     Enum.reduce_while(delays, fun.(), fn delay, result ->
       if rate_limited?(result) do
-        Process.sleep(delay)
+        Process.sleep(max(delay, retry_after_ms(result) || 0))
         {:cont, fun.()}
       else
         {:halt, result}
       end
     end)
   end
+
+  # Capped: a provider asking for ten minutes must not stall the runner
+  # longer than a run is worth.
+  @retry_after_cap_ms 30_000
+
+  @doc false
+  def retry_after_ms(result) do
+    steps =
+      case result do
+        {:ok, %{attempted_steps: steps}} -> steps
+        {:error, :all_providers_failed, attempts} -> attempts
+        _ -> []
+      end
+
+    steps
+    |> List.wrap()
+    |> Enum.reverse()
+    |> Enum.find_value(fn step ->
+      (step[:response_headers] || step["response_headers"])
+      |> header_value("retry-after")
+      |> parse_retry_after()
+    end)
+  end
+
+  defp header_value(headers, name) when is_list(headers) do
+    Enum.find_value(headers, fn
+      {key, value} -> if String.downcase(to_string(key)) == name, do: value
+      _ -> nil
+    end)
+  end
+
+  defp header_value(headers, name) when is_map(headers) do
+    Enum.find_value(headers, fn {key, value} ->
+      if String.downcase(to_string(key)) == name do
+        case value do
+          [first | _] -> first
+          other -> other
+        end
+      end
+    end)
+  end
+
+  defp header_value(_, _), do: nil
+
+  # Seconds form only; the HTTP-date form is rare on 429s and the ladder is
+  # a fine fallback for it.
+  defp parse_retry_after(value) when is_binary(value) do
+    case Integer.parse(value) do
+      {seconds, ""} when seconds > 0 -> min(seconds * 1000, @retry_after_cap_ms)
+      _ -> nil
+    end
+  end
+
+  defp parse_retry_after(_), do: nil
 
   # Both shapes a rate limit can arrive in: a persisted candidate log whose
   # attempts were all rate limited, and a judge dispatch that returned the

@@ -171,6 +171,24 @@ repetitions, the source log — carries over from that evaluation, with any
 argument you pass alongside overriding its copy. Swap `request_log_id` to
 point the same rubric at a new log, or `candidates` to try another model.
 
+## Runner limits
+
+Three limits shape every benchmark; know them before reading close results:
+
+- **120 seconds per provider call.** A candidate that has not finished by
+  then is failed by our deadline, not by the model. When two models finish
+  near two minutes and one "fails", the comparison was censored by the
+  timeout — treat latencies approaching 120s as unrankable, and consider a
+  smaller task.
+- **Rate limits back off twice** (2s, then 8s), honoring the provider's
+  `Retry-After` when it sends one (capped at 30s). A run that still comes
+  back rate-limited after that fails with `error_category: "rate_limited"` —
+  `retry_eval` later is the recovery, and a judge on its own key (see above)
+  is the prevention.
+- **Three runs execute concurrently per benchmark**, regardless of how many
+  provider keys are involved. Candidates sharing one key contend with each
+  other and with the judge.
+
 ## Reading the numbers honestly
 
 - **Compare within one evaluation, not across two.** Different judges, different

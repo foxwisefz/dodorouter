@@ -691,6 +691,43 @@ defmodule DodoRouter.EvaluationsTest do
     assert {:error, :already_running} = Evaluations.enqueue(user, loaded)
   end
 
+  test "backoff honors a Retry-After header from the rate-limited attempt" do
+    result =
+      {:error, :all_providers_failed,
+       [
+         %{
+           error: "rate_limited",
+           response_headers: [{"retry-after", "12"}, {"content-type", "application/json"}]
+         }
+       ]}
+
+    assert Evaluations.retry_after_ms(result) == 12_000
+
+    # Header map shape (Req-style), string keys, list values.
+    result =
+      {:ok,
+       %{
+         status: "error",
+         attempted_steps: [%{"error" => "rate_limited", "response_headers" => %{"retry-after" => ["3"]}}]
+       }}
+
+    assert Evaluations.retry_after_ms(result) == 3_000
+
+    # Absent, unparseable, or absurd values fall back to the ladder.
+    assert Evaluations.retry_after_ms({:error, :all_providers_failed, [%{error: "rate_limited"}]}) ==
+             nil
+
+    assert Evaluations.retry_after_ms(
+             {:error, :all_providers_failed,
+              [%{response_headers: [{"retry-after", "Wed, 21 Oct 2026 07:28:00 GMT"}]}]}
+           ) == nil
+
+    # Capped: a provider asking for ten minutes does not stall the runner.
+    assert Evaluations.retry_after_ms(
+             {:error, :all_providers_failed, [%{response_headers: [{"retry-after", "600"}]}]}
+           ) == 30_000
+  end
+
   test "a run records the model the provider actually served, and flags an alias swap" do
     user = AccountsFixtures.user_fixture()
     {router, _key} = RoutersFixtures.router_fixture(user)
