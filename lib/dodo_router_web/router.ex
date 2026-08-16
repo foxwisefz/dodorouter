@@ -149,6 +149,7 @@ defmodule DodoRouterWeb.Router do
 
       live "/routers/:router_id/recordings", RecordingLive.Index, :index
       live "/routers/:router_id/recordings/:id", RecordingLive.Show, :show
+      live "/routers/:router_id/recordings/:recording_id/evals/new", EvalLive.New, :from_recording
 
       live "/dashboard", DashboardLive, :index
     end

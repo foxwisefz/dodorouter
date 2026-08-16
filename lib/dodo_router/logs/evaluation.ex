@@ -30,6 +30,13 @@ defmodule DodoRouter.Logs.Evaluation do
     # Batch written by the most recent benchmark execution; aggregates are
     # scoped to it. Set programmatically, never cast from params.
     field :last_batch_id, :binary_id
+    # Provenance: the recording this benchmark's source logs were sampled
+    # from, when it was created from one. Set programmatically after the
+    # caller resolved the recording through an ownership-scoped fetch —
+    # never cast, so a client cannot stamp someone else's recording onto
+    # its evaluation. No FK on purpose (matching request_logs.recording_id):
+    # deleting a recording must not delete the benchmarks measured on it.
+    field :recording_id, :binary_id
     field :run_count, :integer, virtual: true, default: 0
     # Compatibility with databases created from the earlier unused schema.
     field :rating_type, :string, default: "good"

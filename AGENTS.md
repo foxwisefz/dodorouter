@@ -36,6 +36,7 @@ A coding agent working on a product whose traffic goes through DodoRouter can ru
 | `get_guide` | `priv/agent/evals_guide.md` — read first | — |
 | `list_routers` | Every router this token reaches | — |
 | `list_logs` | Recent requests, with `evaluable` / `not_evaluable_because` | `logs:read` |
+| `list_recordings` | Capture windows; `create_eval` takes a `recording_id` to benchmark one | `logs:read` |
 | `get_log` | One request with its stored bodies | `logs:read` (+ `logs:read_bodies`) |
 | `list_eval_targets` | Provider keys × models with list prices | `evals:read` |
 | `list_evals` / `get_eval` | Setups, rankings, `rubric_feedback`, runs | `evals:read` |

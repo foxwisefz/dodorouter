@@ -41,6 +41,15 @@ patch the anchor with `prompt_variants` (below) rather than inventing a
 request from scratch: everything except the hypothesis under test stays
 exactly what production sent.
 
+**The strongest source is a recording.** An operator can start a capture
+window on the router (`list_recordings` shows them); every request the
+product made while it ran is in it, and nobody hand-picked any of them.
+Pass a recording's id to `create_eval` as `recording_id` and every
+replayable captured request becomes a source log — evenly sampled across
+the capture in time order when more than 20 are replayable, so the sample
+is not biased toward how a session starts. When a recording exists that
+covers the traffic you care about, prefer it over picking logs by hand.
+
     get_log { "id": "<id from list_logs>" }
 
 returns the full stored request and response bodies, if you hold
@@ -208,10 +217,11 @@ Three limits shape every benchmark; know them before reading close results:
 - **Compare within one evaluation, not across two.** Different judges, different
   rubrics and different source requests are different scales.
 - **One source log is one task.** A model that wins on one support reply has
-  not been shown to win on your traffic. Pass `request_log_ids` with several
-  logs that cover the shapes your product actually sees — one benchmark, one
-  judge, one ranking aggregated across all of them — before you switch
-  anything. Every candidate answers every log, so runs =
+  not been shown to win on your traffic. Pass `recording_id` (best — a
+  capture of real traffic nobody hand-picked) or `request_log_ids` with
+  several logs that cover the shapes your product actually sees — one
+  benchmark, one judge, one ranking aggregated across all of them — before
+  you switch anything. Every candidate answers every log, so runs =
   logs × candidates × repetitions; `planned_runs` in the result states the
   volume before you start it.
 - **`cost_usd` can be $0** on a plan/subscription key, because nothing was
@@ -231,6 +241,7 @@ Three limits shape every benchmark; know them before reading close results:
 | `get_guide` | This guide | — |
 | `list_routers` | Every router this token reaches | — |
 | `list_logs` | Recent requests, with `evaluable` per row | `logs:read` |
+| `list_recordings` | Capture windows; benchmark one via `create_eval` `recording_id` | `logs:read` |
 | `get_log` | One request, with its stored bodies | `logs:read` (bodies need `logs:read_bodies`) |
 | `list_eval_targets` | Provider keys, models, list prices | `evals:read` |
 | `list_evals` | Evaluations against this router's logs | `evals:read` |

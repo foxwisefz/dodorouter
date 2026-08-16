@@ -2,6 +2,8 @@ defmodule DodoRouterWeb.EvalLive.Show do
   use DodoRouterWeb, :live_view
 
   alias DodoRouter.Evaluations
+  alias DodoRouter.Logs.Evaluation
+  alias DodoRouter.Recordings
 
   @impl true
   def mount(%{"id" => id}, _session, socket) do
@@ -327,6 +329,12 @@ defmodule DodoRouterWeb.EvalLive.Show do
     socket
     |> assign(:page_title, evaluation.name)
     |> assign(:evaluation, evaluation)
+    |> assign(:source_count, length(Evaluation.source_log_ids(evaluation)))
+    |> assign(
+      :recording,
+      evaluation.recording_id &&
+        Recordings.get_recording(socket.assigns.current_user, evaluation.recording_id)
+    )
     |> assign(:batches, batches)
     |> assign(:selected_batch, selected)
     |> assign(:selected_group, group)
@@ -638,9 +646,24 @@ defmodule DodoRouterWeb.EvalLive.Show do
               <p class="text-xs font-semibold uppercase tracking-[0.2em] text-primary">Evaluation</p>
               <h1 class="text-3xl font-semibold tracking-tight">{@evaluation.name}</h1>
               <div class="mt-2 flex flex-wrap gap-2 text-xs text-base-content/50">
-                <span class="rounded-full bg-base-200 px-2.5 py-1">
+                <span :if={@source_count == 1} class="rounded-full bg-base-200 px-2.5 py-1">
                   Source: {@evaluation.request_log.final_provider} / {@evaluation.request_log.final_model}
                 </span>
+                <span
+                  :if={@source_count > 1}
+                  id="eval-source-count"
+                  class="rounded-full bg-base-200 px-2.5 py-1"
+                >
+                  Sources: {@source_count} requests — rankings aggregate across all of them
+                </span>
+                <.link
+                  :if={@recording}
+                  id="eval-recording-link"
+                  navigate={~p"/routers/#{@recording.router_id}/recordings/#{@recording.id}"}
+                  class="rounded-full bg-base-200 px-2.5 py-1 hover:text-primary"
+                >
+                  From recording: {@recording.name || "Recording"}
+                </.link>
                 <span class="rounded-full bg-primary/10 px-2.5 py-1 text-primary">
                   Judge: {@evaluation.judge_model}
                 </span>
@@ -1093,7 +1116,10 @@ defmodule DodoRouterWeb.EvalLive.Show do
               navigate={~p"/logs/#{@evaluation.request_log.id}"}
               class="mt-5 inline-flex items-center gap-1 text-sm font-medium text-primary hover:underline"
             >
-              Open source request <.icon name="hero-arrow-up-right" class="size-4" />
+              {if @source_count > 1,
+                do: "Open first source request (of #{@source_count})",
+                else: "Open source request"}
+              <.icon name="hero-arrow-up-right" class="size-4" />
             </.link>
           </section>
         </div>

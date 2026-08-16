@@ -1594,4 +1594,95 @@ defmodule DodoRouterWeb.EvalLiveTest do
     assert has_element?(live, "#agent-access", "claude mcp add")
     assert has_element?(live, "#agent-access", "/mcp")
   end
+
+  test "benchmarks a recording in one motion", %{conn: conn, user: user} do
+    {router, _api_key} = RoutersFixtures.router_fixture(user)
+    provider_key = ProvidersFixtures.provider_key_fixture(user)
+    {:ok, recording} = DodoRouter.Recordings.start_recording(router, %{name: "Prod capture"})
+
+    body = fn text ->
+      Jason.encode!(%{"model" => "m", "messages" => [%{"role" => "user", "content" => text}]})
+    end
+
+    log1 =
+      LogsFixtures.log_fixture(router, %{
+        recording_id: recording.id,
+        request_body: body.("one"),
+        final_model: "test-model",
+        attempted_steps: [
+          %{"status" => "success", "provider_key_id" => provider_key.id, "model" => "test-model"}
+        ]
+      })
+
+    log2 =
+      LogsFixtures.log_fixture(router, %{recording_id: recording.id, request_body: body.("two")})
+
+    # Captured but not replayable: excluded from the sample, not fatal.
+    LogsFixtures.log_fixture(router, %{recording_id: recording.id})
+
+    {:ok, live, html} =
+      live(conn, ~p"/routers/#{router.id}/recordings/#{recording.id}/evals/new")
+
+    # The source panel says what is being benchmarked and what fell out.
+    assert has_element?(live, "#eval-recording-source", "Prod capture")
+    assert html =~ "of 3 captured"
+    assert has_element?(live, "#planned-runs-note")
+
+    # The incumbent that served the capture is preselected as a candidate.
+    assert has_element?(live, "#selected-candidates", "test-model")
+
+    live
+    |> form("#eval-form", %{"evaluation" => %{"judge_key" => provider_key.id}})
+    |> render_change()
+
+    live
+    |> form("#eval-form", %{
+      "evaluation" => %{
+        "name" => "Recording benchmark",
+        "criteria" => "Answer accurately",
+        "candidate_target_values" => ["#{provider_key.id}|test-model"],
+        "repetitions" => "1",
+        "judge_key" => provider_key.id,
+        "judge_target" => "#{provider_key.id}|test-model"
+      }
+    })
+    |> render_submit()
+
+    {path, _flash} = assert_redirect(live)
+    assert String.starts_with?(path, "/evals/")
+
+    evaluation_id = path |> String.trim_leading("/evals/") |> URI.parse() |> Map.fetch!(:path)
+    evaluation = Evaluations.get_evaluation!(user, evaluation_id)
+
+    assert evaluation.recording_id == recording.id
+    assert Enum.sort(evaluation.source_log_ids) == Enum.sort([log1.id, log2.id])
+    # 2 source logs x 1 candidate x 1 repetition, run by the save action.
+    assert length(evaluation.runs) == 2
+  end
+
+  test "a recording with nothing replayable bounces back with the reason", %{
+    conn: conn,
+    user: user
+  } do
+    {router, _api_key} = RoutersFixtures.router_fixture(user)
+    {:ok, recording} = DodoRouter.Recordings.start_recording(router)
+    LogsFixtures.log_fixture(router, %{recording_id: recording.id})
+
+    assert {:error, {:redirect, %{to: to, flash: flash}}} =
+             live(conn, ~p"/routers/#{router.id}/recordings/#{recording.id}/evals/new")
+
+    assert to == "/routers/#{router.id}/recordings/#{recording.id}"
+    assert flash["error"] =~ "can be replayed"
+  end
+
+  test "someone else's recording is not a benchmark entry point", %{conn: conn} do
+    other = DodoRouter.AccountsFixtures.user_fixture()
+    {other_router, _} = RoutersFixtures.router_fixture(other)
+    {:ok, foreign} = DodoRouter.Recordings.start_recording(other_router)
+
+    # The router fetch is scoped first, so a foreign router 404s outright.
+    assert_raise Ecto.NoResultsError, fn ->
+      live(conn, ~p"/routers/#{other_router.id}/recordings/#{foreign.id}/evals/new")
+    end
+  end
 end

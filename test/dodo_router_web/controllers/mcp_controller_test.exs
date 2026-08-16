@@ -619,6 +619,87 @@ defmodule DodoRouterWeb.MCPControllerTest do
       assert hd(resp["result"]["content"])["text"] =~ "Log "
     end
 
+    test "list_recordings names the captures and create_eval benchmarks one", %{
+      conn: conn,
+      token: token,
+      user: user,
+      router: router
+    } do
+      key = DodoRouter.ProvidersFixtures.provider_key_fixture(user, %{"label" => "Key 1"})
+      {:ok, recording} = DodoRouter.Recordings.start_recording(router, %{name: "Prod capture"})
+
+      body = fn text ->
+        Jason.encode!(%{"model" => "m", "messages" => [%{"role" => "user", "content" => text}]})
+      end
+
+      log1 =
+        DodoRouter.LogsFixtures.log_fixture(router, %{
+          recording_id: recording.id,
+          request_body: body.("one")
+        })
+
+      log2 =
+        DodoRouter.LogsFixtures.log_fixture(router, %{
+          recording_id: recording.id,
+          request_body: body.("two")
+        })
+
+      # A log with no stored body is captured but not replayable — it must
+      # be excluded from the benchmark, not fail it.
+      DodoRouter.LogsFixtures.log_fixture(router, %{recording_id: recording.id})
+
+      listed = tool_json(json_response(call_tool(conn, token, "list_recordings"), 200))
+
+      assert [%{"id" => listed_id, "name" => "Prod capture", "request_count" => 3}] =
+               listed["recordings"]
+
+      assert listed_id == recording.id
+
+      resp =
+        json_response(
+          call_tool(conn, token, "create_eval", %{
+            "recording_id" => recording.id,
+            "name" => "Recording benchmark",
+            "criteria" => "Be useful",
+            "judge" => %{"provider_key_id" => key.id, "model" => "judge-model"},
+            "candidates" => [%{"provider_key_id" => key.id, "model" => "test-model"}],
+            "include_incumbent" => false
+          }),
+          200
+        )
+
+      payload = tool_json(resp)
+      assert Enum.sort(payload["source_log_ids"]) == Enum.sort([log1.id, log2.id])
+      assert payload["recording_id"] == recording.id
+    end
+
+    test "create_eval refuses a recording the token's user does not own", %{
+      conn: conn,
+      token: token,
+      user: user
+    } do
+      key = DodoRouter.ProvidersFixtures.provider_key_fixture(user, %{"label" => "Key 1"})
+
+      other_user = DodoRouter.AccountsFixtures.user_fixture()
+      {other_router, _} = DodoRouter.RoutersFixtures.router_fixture(other_user)
+      {:ok, foreign} = DodoRouter.Recordings.start_recording(other_router)
+
+      resp =
+        json_response(
+          call_tool(conn, token, "create_eval", %{
+            "recording_id" => foreign.id,
+            "name" => "Foreign capture",
+            "criteria" => "Be useful",
+            "judge" => %{"provider_key_id" => key.id, "model" => "judge-model"},
+            "candidates" => [%{"provider_key_id" => key.id, "model" => "test-model"}]
+          }),
+          200
+        )
+
+      assert resp["result"]["isError"]
+      assert hd(resp["result"]["content"])["text"] =~ "No recording"
+    end
+
     test "superseded attempts are one include away", %{
       conn: conn,
       token: token,

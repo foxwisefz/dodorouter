@@ -13,7 +13,7 @@ defmodule DodoRouter.MCP.Tools do
 
   alias DodoRouter.Agents
   alias DodoRouter.Agents.Principal
-  alias DodoRouter.{Evaluations, Logs, Providers, Replays}
+  alias DodoRouter.{Evaluations, Logs, Providers, Recordings, Replays}
   alias DodoRouter.Proxy.Adapter.Registry
 
   @output_preview 2_000
@@ -60,6 +60,25 @@ defmodule DodoRouter.MCP.Tools do
           "limit" => %{"type" => "integer", "description" => "Max 100. Defaults to 20."},
           "status" => %{"type" => "string", "description" => "success, fallback or error."},
           "model" => %{"type" => "string", "description" => "Filter by served model."}
+        }
+      }
+    },
+    %{
+      name: "list_recordings",
+      title: "List recordings",
+      description:
+        "Capture windows of real traffic on this router — an operator starts one, the " <>
+          "product runs, and every request served while it was recording is captured. Pass a " <>
+          "recording's id to create_eval as recording_id to benchmark that whole capture in " <>
+          "one evaluation: candidates answer real production traffic, not a hand-picked " <>
+          "request. request_count counts everything captured; which requests can actually be " <>
+          "replayed is decided at create_eval time.",
+      scopes: ["logs:read"],
+      schema: %{
+        "type" => "object",
+        "properties" => %{
+          "router" => @router_arg,
+          "limit" => %{"type" => "integer", "description" => "Max 100. Defaults to 20."}
         }
       }
     },
@@ -122,7 +141,7 @@ defmodule DodoRouter.MCP.Tools do
       name: "create_eval",
       title: "Create an evaluation",
       description: """
-      Replay one real request against several models and score the answers with a judge model.
+      Replay real requests against several models and score the answers with a judge model. The source is one log (request_log_id), a set of logs (request_log_ids), or a whole recording (recording_id) — a recording is the strongest basis, because the sample is production traffic nobody hand-picked.
 
       The model that served the source log (the incumbent) is added as a candidate automatically when you leave it out — a score only means something next to another score from the same rubric and judge. Pass include_incumbent: false to opt out. Write criteria that can fail: name the facts that must be right, the format, the length, and what must not appear. Set run=true to start it immediately.
 
@@ -138,10 +157,20 @@ defmodule DodoRouter.MCP.Tools do
         "anyOf" => [
           %{"required" => ["request_log_id", "name", "criteria", "judge", "candidates"]},
           %{"required" => ["request_log_ids", "name", "criteria", "judge", "candidates"]},
+          %{"required" => ["recording_id", "name", "criteria", "judge", "candidates"]},
           %{"required" => ["from_eval_id"]}
         ],
         "properties" => %{
           "router" => @router_arg,
+          "recording_id" => %{
+            "type" => "string",
+            "description" =>
+              "Benchmark a whole recording (see list_recordings): every replayable captured " <>
+                "request becomes a source log, evenly sampled across the capture in time " <>
+                "order when more than 20 are replayable. The models that served the capture " <>
+                "are added as candidates automatically (include_incumbent). Takes precedence " <>
+                "over request_log_id and request_log_ids."
+          },
           "from_eval_id" => %{
             "type" => "string",
             "description" =>
@@ -470,6 +499,30 @@ defmodule DodoRouter.MCP.Tools do
     end
   end
 
+  defp run("list_recordings", principal, args) do
+    with {:ok, router} <- resolve_router(principal, args) do
+      limit = args |> Map.get("limit", 20) |> clamp(1, 100)
+      recordings = Recordings.list_recordings(router, limit: limit)
+      counts = Recordings.log_counts(Enum.map(recordings, & &1.id))
+
+      {:ok,
+       %{
+         router: router.slug,
+         recordings:
+           Enum.map(recordings, fn recording ->
+             %{
+               id: recording.id,
+               name: recording.name,
+               status: recording.status,
+               started_at: recording.started_at,
+               stopped_at: recording.stopped_at,
+               request_count: Map.get(counts, recording.id, 0)
+             }
+           end)
+       }}
+    end
+  end
+
   defp run("get_log", principal, args) do
     with {:ok, router} <- resolve_router(principal, args),
          {:ok, log} <- fetch_log(principal, router, args["id"]) do
@@ -549,12 +602,11 @@ defmodule DodoRouter.MCP.Tools do
   defp run("create_eval", principal, args) do
     with {:ok, router} <- resolve_router(principal, args),
          {:ok, args} <- expand_from_eval(principal, router, args),
-         {:ok, source_ids} <- source_log_ids(args),
-         {:ok, logs} <- fetch_evaluable_logs(principal, router, source_ids),
+         {:ok, logs, recording} <- resolve_source_logs(principal, router, args),
          [log | _] = logs,
          {:ok, judge} <- judge_target(principal, args["judge"]),
          {:ok, candidates} <- candidate_targets(principal, args["candidates"]) do
-      candidates = maybe_add_incumbent(principal, log, candidates, args["include_incumbent"])
+      candidates = maybe_add_incumbents(principal, logs, candidates, args["include_incumbent"])
 
       attrs = %{
         "name" => args["name"],
@@ -565,6 +617,7 @@ defmodule DodoRouter.MCP.Tools do
         "judge_model" => judge.model,
         "candidate_targets" => candidates,
         "source_log_ids" => Enum.map(logs, & &1.id),
+        "recording_id" => recording && recording.id,
         "prompt_variants" => args["prompt_variants"] || [],
         "repetitions" => args["repetitions"] || 3
       }
@@ -771,6 +824,8 @@ defmodule DodoRouter.MCP.Tools do
       repetitions: evaluation.repetitions,
       request_log_id: evaluation.request_log_id,
       source_log_ids: DodoRouter.Logs.Evaluation.source_log_ids(evaluation),
+      # Provenance: set when the source set was sampled from a recording.
+      recording_id: evaluation.recording_id,
       # logs x candidates x repetitions — the volume one run_eval buys,
       # stated before it is spent.
       planned_runs: Evaluations.planned_run_count(evaluation),
@@ -985,6 +1040,44 @@ defmodule DodoRouter.MCP.Tools do
   defp judge_target(_principal, _judge),
     do: {:error, "judge must be an object with provider_key_id and model."}
 
+  # The three source shapes, strongest first: a recording (production
+  # traffic nobody hand-picked, sampled by Evaluations), a set of logs,
+  # one log. Returns the recording alongside the logs so provenance is
+  # recorded on the evaluation.
+  defp resolve_source_logs(principal, router, %{"recording_id" => id}) when is_binary(id) do
+    with {:ok, recording} <- fetch_recording(principal, router, id) do
+      case Evaluations.source_logs_from_recording(recording) do
+        %{selected: [], total: 0} ->
+          {:error, "Recording #{id} has captured no requests yet."}
+
+        %{selected: [], excluded: excluded} ->
+          reasons = Enum.map_join(excluded, ", ", fn {reason, count} -> "#{count} #{reason}" end)
+
+          {:error, "None of recording #{id}'s captured requests can be replayed (#{reasons})."}
+
+        %{selected: logs} ->
+          {:ok, logs, recording}
+      end
+    end
+  end
+
+  defp resolve_source_logs(principal, router, args) do
+    with {:ok, ids} <- source_log_ids(args),
+         {:ok, logs} <- fetch_evaluable_logs(principal, router, ids) do
+      {:ok, logs, nil}
+    end
+  end
+
+  defp fetch_recording(principal, router, id) do
+    case Recordings.get_recording(principal.user, id) do
+      %{router_id: router_id} = recording when router_id == router.id ->
+        {:ok, recording}
+
+      _ ->
+        {:error, "No recording #{id} on router #{router.slug}. Use list_recordings to see them."}
+    end
+  end
+
   # One benchmark over a set of logs answers "on my traffic"; the single-log
   # form stays as the common case (dodo_router-3hr).
   defp source_log_ids(%{"request_log_ids" => ids}) when is_list(ids) and ids != [] do
@@ -1044,27 +1137,34 @@ defmodule DodoRouter.MCP.Tools do
   defp expand_from_eval(_principal, _router, args), do: {:ok, args}
 
   # A benchmark without the incumbent has numbers but no baseline, and the
-  # source log already names what served it — so the caller should not have
-  # to remember. Appended only when the incumbent model is absent, the
+  # source logs already name what served them — so the caller should not
+  # have to remember. A multi-log set (a recording especially) can span
+  # models, so every distinct serving pair is considered, not just the
+  # first log's. Appended only when that incumbent model is absent, the
   # serving key is known, and it is still one of the caller's keys;
   # include_incumbent: false opts out (dodo_router-sdc).
-  defp maybe_add_incumbent(_principal, _log, candidates, false), do: candidates
+  defp maybe_add_incumbents(_principal, _logs, candidates, false), do: candidates
 
-  defp maybe_add_incumbent(principal, log, candidates, _default_true) do
-    with incumbent when not is_nil(incumbent) <- Replays.incumbent_target(log),
-         false <- Enum.any?(candidates, &(&1["model"] == incumbent.model)),
-         key when not is_nil(key) <- provider_key(principal, incumbent.provider_key_id) do
-      candidates ++
-        [
-          %{
-            "provider_key_id" => key.id,
-            "provider" => Registry.adapter_provider(key.provider_slug),
-            "model" => incumbent.model
-          }
-        ]
-    else
-      _ -> candidates
-    end
+  defp maybe_add_incumbents(principal, logs, candidates, _default_true) do
+    logs
+    |> Enum.map(&Replays.incumbent_target/1)
+    |> Enum.reject(&is_nil/1)
+    |> Enum.uniq_by(& &1.model)
+    |> Enum.reduce(candidates, fn incumbent, acc ->
+      with false <- Enum.any?(acc, &(&1["model"] == incumbent.model)),
+           key when not is_nil(key) <- provider_key(principal, incumbent.provider_key_id) do
+        acc ++
+          [
+            %{
+              "provider_key_id" => key.id,
+              "provider" => Registry.adapter_provider(key.provider_slug),
+              "model" => incumbent.model
+            }
+          ]
+      else
+        _ -> acc
+      end
+    end)
   end
 
   defp candidate_targets(principal, candidates) when is_list(candidates) and candidates != [] do

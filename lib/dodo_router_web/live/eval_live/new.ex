@@ -5,11 +5,44 @@ defmodule DodoRouterWeb.EvalLive.New do
   alias DodoRouter.Logs
   alias DodoRouter.Logs.Evaluation
   alias DodoRouter.Providers
+  alias DodoRouter.Recordings
   alias DodoRouter.Replays
+  alias DodoRouter.Routers
 
   @impl true
+  def mount(%{"recording_id" => recording_id, "router_id" => router_id}, _session, socket) do
+    user = socket.assigns.current_user
+    router = Routers.get_router!(user, router_id)
+    recording = Recordings.get_recording(user, recording_id)
+
+    cond do
+      is_nil(recording) or recording.router_id != router.id ->
+        {:ok, redirect(socket, to: ~p"/routers/#{router.id}/recordings")}
+
+      true ->
+        case Evaluations.source_logs_from_recording(recording) do
+          %{selected: []} = sample ->
+            {:ok,
+             socket
+             |> put_flash(:error, no_replayable_message(sample))
+             |> redirect(to: ~p"/routers/#{router.id}/recordings/#{recording.id}")}
+
+          %{selected: logs} = sample ->
+            setup(socket, %{}, logs, recording, sample)
+        end
+    end
+  end
+
   def mount(%{"id" => id} = params, _session, socket) do
     log = Logs.get_log!(socket.assigns.current_user, id)
+    setup(socket, params, [log], nil, nil)
+  end
+
+  # Everything below the source selection is one builder: the recording
+  # entry point differs from the single-log one only in where the source
+  # logs came from and where "back" leads.
+  defp setup(socket, params, source_logs, recording, sample) do
+    [log | _] = source_logs
     targets = Replays.list_targets(socket.assigns.current_user)
 
     target_lookup =
@@ -34,23 +67,24 @@ defmodule DodoRouterWeb.EvalLive.New do
     source = duplication_source(socket.assigns.current_user, params["from"])
 
     form =
-      prefill_evaluation(source, log)
+      prefill_evaluation(source, log, recording)
       |> Evaluations.change_evaluation()
       |> to_form()
 
     selected_targets =
       case source do
         nil ->
-          # Start from the model that actually served this log: a benchmark
+          # Start from the models that actually served these logs: a benchmark
           # without the incumbent has numbers but no baseline, and the form
-          # should not ask every user to remember the guide's first rule.
-          case Replays.incumbent_target(log) do
-            %{provider_key_id: key_id, model: model} ->
-              Enum.filter(["#{key_id}|#{model}"], &Map.has_key?(target_lookup, &1))
-
-            nil ->
-              []
-          end
+          # should not ask every user to remember the guide's first rule. A
+          # recording can span models, so every distinct serving pair is
+          # seeded, not just the anchor's.
+          source_logs
+          |> Enum.map(&Replays.incumbent_target/1)
+          |> Enum.reject(&is_nil/1)
+          |> Enum.map(fn %{provider_key_id: key_id, model: model} -> "#{key_id}|#{model}" end)
+          |> Enum.uniq()
+          |> Enum.filter(&Map.has_key?(target_lookup, &1))
 
         source ->
           source.candidate_targets
@@ -64,6 +98,9 @@ defmodule DodoRouterWeb.EvalLive.New do
      socket
      |> assign(:page_title, "Create evaluation")
      |> assign(:log, log)
+     |> assign(:source_logs, source_logs)
+     |> assign(:recording, recording)
+     |> assign(:sample, sample)
      |> assign(:target_lookup, target_lookup)
      |> assign(:target_labels, target_labels(targets))
      |> assign(:provider_options, provider_options)
@@ -166,11 +203,48 @@ defmodule DodoRouterWeb.EvalLive.New do
   defp duplication_source(_user, nil), do: nil
   defp duplication_source(user, from_id), do: Evaluations.get_evaluation(user, from_id)
 
-  defp prefill_evaluation(nil, log) do
+  defp back_path(%Recordings.Recording{} = recording, _log),
+    do: ~p"/routers/#{recording.router_id}/recordings/#{recording.id}"
+
+  defp back_path(nil, log), do: ~p"/logs/#{log.id}"
+
+  defp excluded_summary(excluded),
+    do: Enum.map_join(excluded, ", ", fn {reason, count} -> "#{count} #{reason}" end)
+
+  # The form field arrives as a string mid-edit; the planned-runs math should
+  # not crash on a half-typed value.
+  defp reps_value(form) do
+    case form[:repetitions].value do
+      n when is_integer(n) ->
+        n
+
+      s when is_binary(s) ->
+        case Integer.parse(s) do
+          {n, _rest} -> n
+          :error -> 1
+        end
+
+      _ ->
+        1
+    end
+  end
+
+  defp no_replayable_message(%{total: 0}), do: "This recording has no captured requests yet."
+
+  defp no_replayable_message(%{excluded: excluded}) do
+    reasons = Enum.map_join(excluded, ", ", fn {reason, count} -> "#{count} #{reason}" end)
+    "None of this recording's captured requests can be replayed (#{reasons})."
+  end
+
+  defp prefill_evaluation(nil, _log, %Recordings.Recording{} = recording) do
+    %Evaluation{name: String.slice("Benchmark of #{recording.name || "recording"}", 0, 120)}
+  end
+
+  defp prefill_evaluation(nil, log, nil) do
     %Evaluation{name: "Evaluation of #{String.slice(log.request_id, 0, 8)}"}
   end
 
-  defp prefill_evaluation(source, _log) do
+  defp prefill_evaluation(source, _log, _recording) do
     %Evaluation{
       name: String.slice("Copy of #{source.name}", 0, 120),
       criteria: source.criteria,
@@ -246,23 +320,56 @@ defmodule DodoRouterWeb.EvalLive.New do
   end
 
   def handle_event("save", %{"evaluation" => params}, socket) do
-    params = prepare_params(params, socket.assigns.target_lookup)
+    params =
+      params
+      |> prepare_params(socket.assigns.target_lookup)
+      |> add_sources(socket.assigns.recording, socket.assigns.source_logs)
 
     case Evaluations.create_evaluation(socket.assigns.current_user, socket.assigns.log, params) do
       {:ok, evaluation} ->
         # Enqueue here, from the explicit save action: a run flag in the
         # destination URL would re-trigger a paid benchmark on refresh.
-        Evaluations.enqueue(socket.assigns.current_user, evaluation)
+        {kind, message} =
+          Evaluations.enqueue(socket.assigns.current_user, evaluation) |> enqueue_flash()
 
         {:noreply,
          socket
-         |> put_flash(:info, "Benchmark queued")
+         |> put_flash(kind, message)
          |> push_navigate(to: ~p"/evals/#{evaluation.id}")}
 
       {:error, changeset} ->
         {:noreply, assign(socket, :form, to_form(changeset))}
     end
   end
+
+  # A multi-log benchmark can genuinely hit the run cap or a blocked key at
+  # enqueue time; the evaluation still exists, so navigate to it either way
+  # and say why nothing is running rather than flashing "queued" over a
+  # refusal.
+  defp enqueue_flash(:ok), do: {:info, "Benchmark queued"}
+
+  defp enqueue_flash({:error, {:too_many_runs, planned, max}}),
+    do:
+      {:error,
+       "Created, but not started: #{planned} runs planned (logs × candidates × repetitions); the cap is #{max}. Lower repetitions or remove candidates, then run it from this page."}
+
+  defp enqueue_flash({:error, {:judge_key_unusable, blocker}}),
+    do:
+      {:error, "Created, but not started: the judge's key #{blocker.label} is #{blocker.status}."}
+
+  defp enqueue_flash({:error, {:candidates_unusable, _blockers}}),
+    do: {:error, "Created, but not started: every candidate's key is currently blocked."}
+
+  defp enqueue_flash({:error, _other}),
+    do: {:error, "Created, but the benchmark could not be started. Run it from this page."}
+
+  defp add_sources(params, %Recordings.Recording{} = recording, source_logs) do
+    params
+    |> Map.put("source_log_ids", Enum.map(source_logs, & &1.id))
+    |> Map.put("recording_id", recording.id)
+  end
+
+  defp add_sources(params, nil, _source_logs), do: params
 
   defp split_target(%{"judge_target" => target} = params) do
     case String.split(target, "|", parts: 2) do
@@ -295,7 +402,11 @@ defmodule DodoRouterWeb.EvalLive.New do
     <Layouts.app flash={@flash} current_scope={@current_scope}>
       <div class="mx-auto max-w-5xl space-y-6">
         <div class="flex items-center gap-4">
-          <.link navigate={~p"/logs/#{@log.id}"} class="btn btn-ghost btn-square" id="eval-back-link">
+          <.link
+            navigate={back_path(@recording, @log)}
+            class="btn btn-ghost btn-square"
+            id="eval-back-link"
+          >
             <.icon name="hero-arrow-left" class="size-5" />
           </.link>
           <div>
@@ -303,15 +414,50 @@ defmodule DodoRouterWeb.EvalLive.New do
               New evaluation
             </p>
             <h1 class="text-3xl font-semibold tracking-tight">
-              Turn this request into a quality test
+              {if @recording,
+                do: "Benchmark this recording's traffic",
+                else: "Turn this request into a quality test"}
             </h1>
             <p class="mt-1 text-sm text-base-content/55">
-              The request and response are preserved as judge evidence.
+              {if @recording,
+                do: "Every candidate model answers every sampled request.",
+                else: "The request and response are preserved as judge evidence."}
             </p>
           </div>
         </div>
 
-        <div id="eval-source" class="rounded-2xl border border-base-300/60 bg-base-100 p-5 shadow-sm">
+        <div
+          :if={@recording}
+          id="eval-recording-source"
+          class="rounded-2xl border border-base-300/60 bg-base-100 p-5 shadow-sm"
+        >
+          <div class="flex flex-wrap items-center gap-6 text-sm">
+            <div>
+              <span class="text-base-content/45">Recording</span>
+              <div class="font-medium">{@recording.name || "Recording"}</div>
+            </div>
+            <div>
+              <span class="text-base-content/45">Source requests</span>
+              <div>
+                <span class="font-semibold">{length(@source_logs)}</span>
+                <span class="text-base-content/45">of {@sample.total} captured</span>
+              </div>
+            </div>
+            <div :if={@sample.evaluable > length(@source_logs)} class="text-base-content/55">
+              Sampled evenly across the capture — {@sample.evaluable} were replayable, an
+              evaluation holds at most {length(@source_logs)}.
+            </div>
+            <div :if={@sample.excluded != %{}} class="text-base-content/55">
+              Not replayable: {excluded_summary(@sample.excluded)}.
+            </div>
+          </div>
+        </div>
+
+        <div
+          :if={is_nil(@recording)}
+          id="eval-source"
+          class="rounded-2xl border border-base-300/60 bg-base-100 p-5 shadow-sm"
+        >
           <div class="flex flex-wrap gap-6 text-sm">
             <div>
               <span class="text-base-content/45">Model</span>
@@ -337,7 +483,9 @@ defmodule DodoRouterWeb.EvalLive.New do
               <p class="text-xs font-semibold uppercase tracking-wider text-primary">Step 1</p>
               <h2 class="text-lg font-semibold">Candidate models</h2>
               <p class="text-sm text-base-content/50">
-                Each selected model will answer the source request.
+                {if @recording,
+                  do: "Each selected model will answer all #{length(@source_logs)} sampled requests.",
+                  else: "Each selected model will answer the source request."}
               </p>
             </div>
           </div>
@@ -520,6 +668,19 @@ defmodule DodoRouterWeb.EvalLive.New do
               />
               <p class="text-xs text-base-content/45">
                 Repeated generations reveal model consistency, not just one lucky answer.
+              </p>
+              <p
+                :if={length(@source_logs) > 1}
+                id="planned-runs-note"
+                class="mt-2 text-xs text-base-content/55"
+              >
+                {length(@source_logs)} requests × {max(length(@selected_targets), 1)} models × {reps_value(
+                  @form
+                )} repetitions =
+                <span class="font-semibold">
+                  {length(@source_logs) * max(length(@selected_targets), 1) * reps_value(@form)}
+                </span>
+                judged runs. Benchmarks are capped at 300 runs.
               </p>
             </section>
           </div>

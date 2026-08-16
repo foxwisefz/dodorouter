@@ -6,6 +6,8 @@ defmodule DodoRouter.Evaluations do
   alias DodoRouter.Accounts.User
   alias DodoRouter.Logs.{Evaluation, EvaluationRun}
   alias DodoRouter.Providers.ProviderKey
+  alias DodoRouter.Recordings
+  alias DodoRouter.Recordings.Recording
   alias DodoRouter.{Logs, Providers, Proxy, Redact, Replays, Repo}
 
   # v2: dropped the pass/fail verdict — scores and their distributions
@@ -75,6 +77,28 @@ defmodule DodoRouter.Evaluations do
       offset: ^offset,
       select_merge: %{run_count: subquery(run_counts)},
       preload: [request_log: :router]
+    )
+    |> Repo.all()
+  end
+
+  @doc """
+  The user's evaluations created from one recording, newest first.
+
+  This is the provenance read: the recording page shows which benchmarks
+  were measured on its capture.
+  """
+  def list_for_recording(%User{} = user, recording_id) do
+    run_counts =
+      from(r in EvaluationRun,
+        where: r.evaluation_id == parent_as(:evaluation).id,
+        select: count()
+      )
+
+    from(e in Evaluation,
+      as: :evaluation,
+      where: e.evaluated_by_id == ^user.id and e.recording_id == ^recording_id,
+      order_by: [desc: e.inserted_at],
+      select_merge: %{run_count: subquery(run_counts)}
     )
     |> Repo.all()
   end
@@ -252,10 +276,69 @@ defmodule DodoRouter.Evaluations do
       |> Map.put("request_log_id", request_log.id)
       |> Map.put("evaluated_by_id", user.id)
 
+    # Provenance, not a param: recording_id is applied outside the cast so
+    # a client cannot stamp a foreign recording onto its evaluation. The
+    # two callers that pass it (the recording benchmark page and the MCP
+    # create_eval handler) both resolved the recording through an
+    # ownership-scoped fetch first.
+    {recording_id, attrs} = Map.pop(attrs, "recording_id")
+
     %Evaluation{}
     |> Evaluation.changeset(attrs)
+    |> put_recording(recording_id)
     |> validate_key_ownership(user)
     |> Repo.insert()
+  end
+
+  defp put_recording(changeset, nil), do: changeset
+
+  defp put_recording(changeset, recording_id),
+    do: Ecto.Changeset.put_change(changeset, :recording_id, recording_id)
+
+  @max_recording_source_logs 20
+
+  @doc """
+  Picks the source-log set a benchmark of this recording should replay.
+
+  Every captured request is checked with `Replays.replay_blocker/1`; when
+  more evaluable logs remain than an evaluation can hold
+  (#{@max_recording_source_logs}), the picks are spread evenly across the
+  capture in time order rather than taken from the front — the start of an
+  agent session (cold cache, short prompts) is not representative of it.
+
+  Returns `%{selected: logs, total: n, evaluable: n, excluded: %{reason => count}}`;
+  `excluded` counts the capture's non-replayable logs by blocker reason so
+  callers can say *why* the sample is smaller than the recording.
+  """
+  def source_logs_from_recording(%Recording{} = recording, opts \\ []) do
+    cap = Keyword.get(opts, :cap, @max_recording_source_logs)
+    logs = Recordings.list_logs_for_recording(recording, limit: :all)
+
+    {evaluable, blocked} =
+      logs
+      |> Enum.map(&{&1, Replays.replay_blocker(&1)})
+      |> Enum.split_with(fn {_log, blocker} -> is_nil(blocker) end)
+
+    excluded = blocked |> Enum.map(fn {_log, reason} -> reason end) |> Enum.frequencies()
+    evaluable = Enum.map(evaluable, fn {log, nil} -> log end)
+
+    %{
+      selected: evenly_sample(evaluable, cap),
+      total: length(logs),
+      evaluable: length(evaluable),
+      excluded: excluded
+    }
+  end
+
+  defp evenly_sample(list, cap) when length(list) <= cap, do: list
+  defp evenly_sample(list, cap) when cap <= 1, do: Enum.take(list, cap)
+
+  defp evenly_sample(list, cap) do
+    # cap indices spread over 0..n-1, endpoints included. With n > cap the
+    # step exceeds 1, so the floored indices are strictly increasing — no
+    # duplicates to dedupe.
+    n = length(list)
+    for i <- 0..(cap - 1), do: Enum.at(list, div(i * (n - 1), cap - 1))
   end
 
   # The UI only offers the user's own keys, but the ids arrive as client

@@ -38,7 +38,7 @@ Sessions group related requests (e.g. every call in one coding-agent conversatio
 
 ## Recordings
 
-A recording is an explicit start/stop capture window, separate from sessions — useful for bracketing "everything that happened during this one debugging run" or a scripted test, regardless of session id. Start one from the dashboard or via `POST /recordings/start`, make your requests, stop it, then review exactly that batch under Recordings.
+A recording is an explicit start/stop capture window, separate from sessions — useful for bracketing "everything that happened during this one debugging run" or a scripted test, regardless of session id. Start one from the dashboard or via `POST /recordings/start`, make your requests, stop it, then review exactly that batch under Recordings. A recording is also the strongest input to an [evaluation](/docs/dashboard/#evaluations): **Benchmark this recording** on the recording page replays its captured requests against candidate models and ranks them on quality, latency and cost — a verdict measured on real traffic nobody hand-picked.
 
 ## Logs & replay
 

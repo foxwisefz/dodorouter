@@ -49,6 +49,26 @@ defmodule DodoRouter.Recordings do
     Repo.get!(Recording, id)
   end
 
+  # Ownership-scoped fetch, for the entry points where a recording id
+  # triggers spending (benchmark creation): the id arrives as a client
+  # param, so it is resolved through the router's owner rather than
+  # trusted. Returns nil for someone else's recording, same as a missing
+  # one — existence is not leaked either way.
+  def get_recording(%DodoRouter.Accounts.User{} = user, id) do
+    case Ecto.UUID.cast(id) do
+      {:ok, uuid} ->
+        from(r in Recording,
+          join: router in Router,
+          on: r.router_id == router.id,
+          where: r.id == ^uuid and router.user_id == ^user.id
+        )
+        |> Repo.one()
+
+      :error ->
+        nil
+    end
+  end
+
   def list_recordings(%Router{} = router, opts \\ []) do
     limit = Keyword.get(opts, :limit, 50)
     offset = Keyword.get(opts, :offset, 0)
@@ -103,13 +123,38 @@ defmodule DodoRouter.Recordings do
     limit = Keyword.get(opts, :limit, 100)
     offset = Keyword.get(opts, :offset, 0)
 
+    query =
+      from(l in RequestLog,
+        where: l.recording_id == ^recording.id,
+        order_by: [asc: l.inserted_at]
+      )
+
+    # :all exists for the benchmark sampler, which must see the whole
+    # capture to spread its picks across it — a page would silently bias
+    # the sample toward session start. Recordings are bounded sessions,
+    # so "all" is dozens to a few hundred rows, not a table scan.
+    query =
+      case limit do
+        :all -> query
+        limit -> from(l in query, limit: ^limit, offset: ^offset)
+      end
+
+    Repo.all(query)
+  end
+
+  @doc """
+  Captured-request counts for a set of recordings, in one query.
+  """
+  def log_counts(recording_ids) when is_list(recording_ids) do
+    alias DodoRouter.Logs.RequestLog
+
     from(l in RequestLog,
-      where: l.recording_id == ^recording.id,
-      order_by: [asc: l.inserted_at],
-      limit: ^limit,
-      offset: ^offset
+      where: l.recording_id in ^recording_ids,
+      group_by: l.recording_id,
+      select: {l.recording_id, count(l.id)}
     )
     |> Repo.all()
+    |> Map.new()
   end
 
   defp stop_active_query(%Router{} = router) do

@@ -61,6 +61,7 @@ Refusing a permission is not the same as an error. The agent still connects; the
 | `get_guide` | The full evaluation workflow, in prose. **An agent should read this first.** | — |
 | `list_routers` | Every router this connection reaches | — |
 | `list_logs` | Recent requests, with `evaluable` per row | `logs:read` |
+| `list_recordings` | Capture windows of real traffic; benchmark one via `create_eval` | `logs:read` |
 | `get_log` | One request, with its stored bodies | `logs:read` (+ `logs:read_bodies` for text) |
 | `list_eval_targets` | Your provider keys × the models each can serve, with list prices | `evals:read` |
 | `list_evals` | Evaluations created against this router's logs | `evals:read` |
@@ -69,9 +70,9 @@ Refusing a permission is not the same as an error. The agent still connects; the
 | `run_eval` | Run or re-run the whole benchmark | `evals:write` |
 | `retry_eval` | Re-run only the runs that failed | `evals:write` |
 | `cancel_eval` | Stop a running benchmark; stored answers stay | `evals:write` |
-
-`create_eval` accepts either one `request_log_id` or a `request_log_ids` set — with a set, every candidate answers every log and the ranking aggregates across them, so the score answers "on my traffic" rather than "on this one request". It also takes `prompt_variants` to hold the model constant and vary the system prompt: each variant patches the served request, and the ranking carries one row per model × variant under the same judge.
 | `send_feedback` | Send feedback about the agent surface to the DodoRouter team | — |
+
+`create_eval` accepts one `request_log_id`, a `request_log_ids` set, or a `recording_id` — with a set, every candidate answers every log and the ranking aggregates across them, so the score answers "on my traffic" rather than "on this one request". A recording is the strongest source: every replayable request captured during the window becomes a source log (evenly sampled across the capture when more than 20 are replayable), so the sample is production traffic nobody hand-picked. It also takes `prompt_variants` to hold the model constant and vary the system prompt: each variant patches the served request, and the ranking carries one row per model × variant under the same judge.
 
 Most tools take an optional `router` slug. It is optional when your connection reaches exactly one router and required when it reaches several — rather than silently picking one.
 

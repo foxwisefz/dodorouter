@@ -36,3 +36,13 @@ Every request, live-streamed in as it happens. Filter by router or favorites. Ea
 ## Sessions & Recordings
 
 Reached from a router's page. [Sessions](/docs/concepts/#sessions) group requests by your `x-session-id` header; [Recordings](/docs/concepts/#recordings) are explicit start/stop capture windows started from the dashboard or the [recordings API](/docs/api/#endpoints). Both give you a scoped log list with their own stat tiles (requests, tokens, avg latency, success rate).
+
+A recording's page also carries **Benchmark this recording**: one click turns the capture into an [evaluation](#evaluations) whose source set is the recording's replayable requests — evenly sampled across the capture when more than 20 qualify, so the sample isn't biased toward how a session starts. Benchmarks created this way are listed back on the recording's page, so the capture and the verdicts measured on it stay together.
+
+## Evaluations
+
+**Evaluations** (in the sidebar) benchmarks candidate models against requests your router actually served: each candidate model re-answers the source request(s), a judge model you pick scores every answer against your rubric, and the results page ranks candidates by average score, consistency (std dev), latency and cost — including a quality-versus-price scatter with the Pareto frontier marked.
+
+Start one from any log page ("Evaluate"), from a recording ("Benchmark this recording" — the strongest basis, since the sample is production traffic nobody hand-picked), or let a connected coding agent drive the whole loop over [agent access](/docs/agent-access/). A benchmark built on several source logs aggregates its ranking across all of them, so the score answers "on my traffic", not "on this one request".
+
+Evaluations are immutable — a changed rubric or candidate list is a new evaluation (use **Duplicate**), so past scores always mean what they meant. Failed runs can be retried without re-paying for answers already generated, and a running benchmark can be cancelled mid-flight.

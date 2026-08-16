@@ -1,6 +1,7 @@
 defmodule DodoRouterWeb.RecordingLive.Show do
   use DodoRouterWeb, :live_view
 
+  alias DodoRouter.Evaluations
   alias DodoRouter.Recordings
   alias DodoRouter.Routers
 
@@ -81,6 +82,16 @@ defmodule DodoRouterWeb.RecordingLive.Show do
               ]}>
                 {@recording.status}
               </span>
+              <div class="ml-auto">
+                <.link
+                  :if={@stats.request_count > 0}
+                  id="benchmark-recording-button"
+                  navigate={~p"/routers/#{@router.id}/recordings/#{@recording.id}/evals/new"}
+                  class="btn btn-primary btn-sm gap-2"
+                >
+                  <.icon name="hero-scale" class="size-4" /> Benchmark this recording
+                </.link>
+              </div>
             </div>
             <p class="text-sm text-base-content/50 mt-0.5">
               {Calendar.strftime(@recording.started_at, "%b %d, %H:%M:%S")}
@@ -121,6 +132,30 @@ defmodule DodoRouterWeb.RecordingLive.Show do
                 —
               <% end %>
             </div>
+          </div>
+        </div>
+        
+    <!-- Benchmarks measured on this capture -->
+        <div :if={@evaluations != []} id="recording-benchmarks" class="mb-6">
+          <h2 class="text-lg font-semibold mb-3">Benchmarks on this recording</h2>
+          <div class="space-y-2">
+            <.link
+              :for={evaluation <- @evaluations}
+              navigate={~p"/evals/#{evaluation.id}"}
+              class="block bg-base-100 border border-base-300 rounded-lg p-3 hover:border-primary transition-colors"
+            >
+              <div class="flex items-center justify-between">
+                <div class="flex items-center gap-3">
+                  <.icon name="hero-scale" class="size-4 text-primary" />
+                  <span class="text-sm font-medium">{evaluation.name}</span>
+                  <span class="badge badge-sm badge-ghost">{evaluation.benchmark_status}</span>
+                </div>
+                <div class="text-xs text-base-content/50">
+                  {evaluation.run_count} runs
+                  · {Calendar.strftime(evaluation.inserted_at, "%b %d, %H:%M")}
+                </div>
+              </div>
+            </.link>
           </div>
         </div>
         
@@ -177,6 +212,10 @@ defmodule DodoRouterWeb.RecordingLive.Show do
     socket
     |> assign(:stats, stats)
     |> assign(:logs, logs)
+    |> assign(
+      :evaluations,
+      Evaluations.list_for_recording(socket.assigns.current_user, recording.id)
+    )
     |> assign(:latency_percentiles, latency_percentiles(logs))
   end
 
