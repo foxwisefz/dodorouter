@@ -111,7 +111,12 @@ defmodule DodoRouter.Recordings do
         avg_latency_ms: avg(l.latency_ms),
         successful_requests:
           count(fragment("CASE WHEN ? IN ('success', 'fallback') THEN 1 END", l.status)),
-        error_requests: count(fragment("CASE WHEN ? = 'error' THEN 1 END", l.status))
+        error_requests: count(fragment("CASE WHEN ? = 'error' THEN 1 END", l.status)),
+        # What this capture's traffic cost at API list prices — the
+        # comparable figure when plan keys metered $0. Coalesced per row:
+        # logs recorded before list prices were captured fall back to
+        # their actual cost.
+        total_list_cost_usd: sum(coalesce(l.list_cost_usd, l.estimated_cost_usd))
       }
     )
     |> Repo.one()

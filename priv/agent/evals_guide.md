@@ -146,6 +146,14 @@ running (the keys were checked at start). Then:
   catastrophic on 2, and a weak row's `source_log_id` fed to `get_log`
   shows you exactly which request breaks it.
 - `summary` — totals for the batch, including what the whole benchmark cost.
+- `savings_projection` — on a recording-based benchmark only: each
+  candidate's generation cost scaled to the capture's real request rate,
+  next to what the traffic cost as served (`baseline_monthly_cost_usd`).
+  This is the "$X/month at your current rate" figure a switch decision
+  needs. At API list prices, judge spend excluded; absent when the capture
+  window is under 10 minutes, because a rate measured that briefly is an
+  artifact of when the operator clicked stop, not a property of the
+  traffic.
 - `rubric_feedback` — **read this before you trust the scores.** It reports how
   often the judge said your criteria were too thin to decide, and what it said
   was missing. If `flagged` is high, fix `criteria` and create a new evaluation;

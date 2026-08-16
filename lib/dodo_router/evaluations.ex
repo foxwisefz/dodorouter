@@ -1519,6 +1519,77 @@ defmodule DodoRouter.Evaluations do
     |> Decimal.div(length(values))
   end
 
+  @seconds_per_month 30 * 24 * 3600
+  # Below this the rate is an artifact of when the operator clicked stop,
+  # not a property of the traffic.
+  @min_projection_window_seconds 600
+
+  @doc """
+  Projects each ranking row's per-request cost onto the recording's real
+  traffic rate — the sentence the downgrade loop exists for: "this model
+  scores within N points at ~$X/month at your current rate."
+
+  The baseline is what the capture's traffic actually cost as served,
+  scaled to a month; candidate rows are `avg_cost x monthly requests`.
+  Everything is at API list prices (the comparable figure when plan keys
+  meter $0), and judge spend is excluded — production does not pay a judge.
+
+  Returns `{:error, :window_too_short}` when the capture spans less than
+  #{@min_projection_window_seconds}s and `{:error, :no_traffic}` when it
+  holds no requests: a rate needs a denominator worth trusting.
+  """
+  def savings_projection(rankings, %Recording{} = recording, stats) do
+    seconds = capture_seconds(recording)
+
+    cond do
+      is_nil(seconds) or seconds < @min_projection_window_seconds ->
+        {:error, :window_too_short}
+
+      (stats.request_count || 0) == 0 ->
+        {:error, :no_traffic}
+
+      true ->
+        factor = Decimal.from_float(@seconds_per_month / seconds)
+        monthly_requests = round(stats.request_count * @seconds_per_month / seconds)
+
+        baseline =
+          stats.total_list_cost_usd && Decimal.mult(stats.total_list_cost_usd, factor)
+
+        rows =
+          for ranking <- rankings, not is_nil(ranking.avg_cost) do
+            projected = Decimal.mult(ranking.avg_cost, Decimal.new(monthly_requests))
+
+            %{
+              provider: ranking.provider,
+              model: ranking.model,
+              variant: ranking.variant,
+              avg_score: ranking.average,
+              projected_monthly_cost: projected,
+              monthly_savings: baseline && Decimal.sub(baseline, projected)
+            }
+          end
+
+        {:ok,
+         %{
+           window_seconds: seconds,
+           captured_requests: stats.request_count,
+           monthly_requests: monthly_requests,
+           baseline_monthly_cost: baseline,
+           rows: rows
+         }}
+    end
+  end
+
+  defp capture_seconds(%Recording{started_at: nil}), do: nil
+
+  # A still-running recording projects against the window so far — the
+  # rate is just as real, it only keeps refining.
+  defp capture_seconds(%Recording{started_at: started, stopped_at: nil}),
+    do: DateTime.diff(DateTime.utc_now(), started, :second)
+
+  defp capture_seconds(%Recording{started_at: started, stopped_at: stopped}),
+    do: DateTime.diff(stopped, started, :second)
+
   def parse_judgement(raw) when is_binary(raw) do
     json =
       raw

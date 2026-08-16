@@ -728,6 +728,80 @@ defmodule DodoRouterWeb.MCPControllerTest do
       assert worst_id == log2.id
     end
 
+    test "a recording-based benchmark projects savings at the capture's rate", %{
+      conn: conn,
+      token: token,
+      user: user,
+      router: router
+    } do
+      key = DodoRouter.ProvidersFixtures.provider_key_fixture(user, %{"label" => "Key 1"})
+      {:ok, recording} = DodoRouter.Recordings.start_recording(router, %{name: "Rate capture"})
+
+      # Backdate to a 15-day window: 2 captured requests -> 4/month.
+      recording =
+        recording
+        |> Ecto.Changeset.change(
+          started_at: DateTime.add(DateTime.utc_now(), -15, :day),
+          stopped_at: DateTime.utc_now(),
+          status: "stopped"
+        )
+        |> DodoRouter.Repo.update!()
+
+      body = fn text ->
+        Jason.encode!(%{"model" => "m", "messages" => [%{"role" => "user", "content" => text}]})
+      end
+
+      log =
+        DodoRouter.LogsFixtures.log_fixture(router, %{
+          recording_id: recording.id,
+          request_body: body.("one"),
+          list_cost_usd: Decimal.new("1.00")
+        })
+
+      DodoRouter.LogsFixtures.log_fixture(router, %{
+        recording_id: recording.id,
+        request_body: body.("two"),
+        list_cost_usd: Decimal.new("1.00")
+      })
+
+      {:ok, evaluation} =
+        DodoRouter.Evaluations.create_evaluation(user, log, %{
+          name: "Projection",
+          criteria: "Be useful",
+          judge_model: "judge-model",
+          judge_provider_key_id: key.id,
+          candidate_targets: [
+            %{"provider_key_id" => key.id, "provider" => "test_provider", "model" => "cheap"}
+          ],
+          recording_id: recording.id
+        })
+
+      %DodoRouter.Logs.EvaluationRun{}
+      |> DodoRouter.Logs.EvaluationRun.changeset(%{
+        evaluation_id: evaluation.id,
+        status: "completed",
+        score: 90,
+        candidate_provider: "test_provider",
+        candidate_model: "cheap",
+        candidate_list_cost_usd: Decimal.new("0.25")
+      })
+      |> DodoRouter.Repo.insert!()
+
+      payload =
+        tool_json(
+          json_response(call_tool(conn, token, "get_eval", %{"id" => evaluation.id}), 200)
+        )
+
+      projection = payload["savings_projection"]
+      assert projection["monthly_requests"] == 4
+      # $2 over 15 days -> $4/month as served; candidate at $0.25 x 4 = $1.
+      assert_in_delta projection["baseline_monthly_cost_usd"], 4.0, 0.001
+      assert [row] = projection["rows"]
+      assert row["model"] == "cheap"
+      assert_in_delta row["projected_monthly_cost_usd"], 1.0, 0.001
+      assert_in_delta row["monthly_savings_usd"], 3.0, 0.001
+    end
+
     test "create_eval refuses a recording the token's user does not own", %{
       conn: conn,
       token: token,

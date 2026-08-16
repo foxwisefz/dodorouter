@@ -338,15 +338,16 @@ defmodule DodoRouterWeb.EvalLive.Show do
     batch_runs = if group, do: Evaluations.live_runs(group.runs), else: []
     rankings = Evaluations.rankings(batch_runs)
 
+    recording =
+      evaluation.recording_id &&
+        Recordings.get_recording(socket.assigns.current_user, evaluation.recording_id)
+
     socket
     |> assign(:page_title, evaluation.name)
     |> assign(:evaluation, evaluation)
     |> assign(:source_count, length(Evaluation.source_log_ids(evaluation)))
-    |> assign(
-      :recording,
-      evaluation.recording_id &&
-        Recordings.get_recording(socket.assigns.current_user, evaluation.recording_id)
-    )
+    |> assign(:recording, recording)
+    |> assign(:projection, projection(recording, rankings))
     |> assign(:batches, batches)
     |> assign(:selected_batch, selected)
     |> assign(:selected_group, group)
@@ -655,6 +656,31 @@ defmodule DodoRouterWeb.EvalLive.Show do
   # which is the louder signal.
   defp worst_source_label(%{per_source: [worst | _]}) do
     worst.average || "unscored"
+  end
+
+  # Only a recording gives the projection its denominator: a hand-picked
+  # log set has no traffic rate to scale by.
+  defp projection(nil, _rankings), do: nil
+  defp projection(_recording, []), do: nil
+
+  defp projection(recording, rankings) do
+    stats = Recordings.recording_stats(recording)
+
+    case Evaluations.savings_projection(rankings, recording, stats) do
+      {:ok, projection} -> projection
+      {:error, reason} -> reason
+    end
+  end
+
+  defp window_label(seconds) when seconds >= 3600,
+    do: "#{div(seconds, 3600)}h #{div(rem(seconds, 3600), 60)}m"
+
+  defp window_label(seconds), do: "#{div(seconds, 60)}m"
+
+  defp savings_class(nil), do: "text-base-content/40"
+
+  defp savings_class(savings) do
+    if Decimal.negative?(savings), do: "text-error", else: "text-success"
   end
 
   @impl true
@@ -1378,6 +1404,69 @@ defmodule DodoRouterWeb.EvalLive.Show do
                     class="py-10 text-center text-base-content/40"
                   >
                     No completed model runs yet.
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section
+          :if={@projection}
+          id="savings-projection"
+          class="overflow-hidden rounded-2xl border border-base-300/60 bg-base-100 shadow-sm"
+        >
+          <div class="border-b border-base-300/60 p-6">
+            <h2 class="text-lg font-semibold">Projected at this capture's traffic rate</h2>
+            <p :if={is_map(@projection)} class="text-sm text-base-content/45">
+              ~{@projection.monthly_requests} requests/month, from {@projection.captured_requests} captured
+              over {window_label(@projection.window_seconds)}. Generation cost at API list prices;
+              judge spend excluded — production does not pay a judge.
+            </p>
+          </div>
+          <p
+            :if={@projection == :window_too_short}
+            id="projection-window-note"
+            class="p-6 text-sm text-base-content/55"
+          >
+            This capture spans less than 10 minutes — too short to call its request rate a
+            property of your traffic. Record a longer window to get a monthly projection.
+          </p>
+          <p :if={@projection == :no_traffic} class="p-6 text-sm text-base-content/55">
+            The capture holds no requests, so there is no rate to project.
+          </p>
+          <div :if={is_map(@projection)} class="overflow-x-auto">
+            <p
+              :if={@projection.baseline_monthly_cost}
+              class="px-6 pt-4 text-sm text-base-content/70"
+            >
+              As served, this traffic projects to <span class="font-semibold">{money(@projection.baseline_monthly_cost)}/month</span>.
+            </p>
+            <table class="table">
+              <thead>
+                <tr>
+                  <th>Model</th>
+                  <th>Avg score</th>
+                  <th>Projected /month</th>
+                  <th title="Against what the capture's traffic actually cost as served">
+                    Savings /month
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr :for={row <- @projection.rows}>
+                  <td class="font-mono text-xs">
+                    {row.model}<span :if={row.variant} class="text-base-content/45"> · {row.variant}</span>
+                  </td>
+                  <td class="font-semibold text-success">{row.avg_score || "—"}</td>
+                  <td class="font-mono text-xs">{money(row.projected_monthly_cost)}</td>
+                  <td class={["font-mono text-xs font-semibold", savings_class(row.monthly_savings)]}>
+                    {if row.monthly_savings, do: money(row.monthly_savings), else: "—"}
+                  </td>
+                </tr>
+                <tr :if={@projection.rows == []}>
+                  <td colspan="4" class="py-8 text-center text-base-content/40">
+                    No cost data on the scored runs yet.
                   </td>
                 </tr>
               </tbody>

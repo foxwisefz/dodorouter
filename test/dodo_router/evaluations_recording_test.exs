@@ -172,6 +172,80 @@ defmodule DodoRouter.EvaluationsRecordingTest do
     end
   end
 
+  describe "savings_projection/3" do
+    alias DodoRouter.Recordings.Recording
+
+    defp recording_window(days) do
+      stopped = ~U[2026-08-16 12:00:00.000000Z]
+      %Recording{started_at: DateTime.add(stopped, -days, :day), stopped_at: stopped}
+    end
+
+    defp ranking(model, avg_cost, average) do
+      %{
+        provider: "test_provider",
+        model: model,
+        variant: nil,
+        average: average,
+        avg_cost: avg_cost && Decimal.new(avg_cost)
+      }
+    end
+
+    test "scales candidate cost and the as-served baseline to a month" do
+      # 50 requests over 15 days -> 100/month; $5 as served -> $10/month.
+      recording = recording_window(15)
+      stats = %{request_count: 50, total_list_cost_usd: Decimal.new("5.00")}
+
+      rankings = [
+        ranking("cheap", "0.02", 88),
+        # No cost data: the row is excluded rather than projected as $0.
+        ranking("unknown", nil, 91)
+      ]
+
+      assert {:ok, projection} = Evaluations.savings_projection(rankings, recording, stats)
+
+      assert projection.monthly_requests == 100
+      assert Decimal.equal?(projection.baseline_monthly_cost, Decimal.new("10.00"))
+
+      assert [%{model: "cheap", projected_monthly_cost: projected, monthly_savings: savings}] =
+               projection.rows
+
+      assert Decimal.equal?(projected, Decimal.new("2.00"))
+      assert Decimal.equal?(savings, Decimal.new("8.00"))
+    end
+
+    test "a capture without cost data projects candidates but no savings" do
+      recording = recording_window(15)
+      stats = %{request_count: 50, total_list_cost_usd: nil}
+
+      assert {:ok, projection} =
+               Evaluations.savings_projection([ranking("cheap", "0.02", 88)], recording, stats)
+
+      assert projection.baseline_monthly_cost == nil
+      assert [%{monthly_savings: nil}] = projection.rows
+    end
+
+    test "refuses a window too short to be a rate" do
+      stopped = ~U[2026-08-16 12:00:00.000000Z]
+
+      recording = %Recording{
+        started_at: DateTime.add(stopped, -5, :minute),
+        stopped_at: stopped
+      }
+
+      stats = %{request_count: 50, total_list_cost_usd: Decimal.new("5.00")}
+
+      assert {:error, :window_too_short} =
+               Evaluations.savings_projection([ranking("cheap", "0.02", 88)], recording, stats)
+    end
+
+    test "refuses an empty capture" do
+      stats = %{request_count: 0, total_list_cost_usd: nil}
+
+      assert {:error, :no_traffic} =
+               Evaluations.savings_projection([], recording_window(1), stats)
+    end
+  end
+
   describe "Recordings.get_recording/2" do
     test "resolves only the owner's recording" do
       user = AccountsFixtures.user_fixture()

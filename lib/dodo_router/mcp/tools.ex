@@ -354,6 +354,8 @@ defmodule DodoRouter.MCP.Tools do
 
       On a multi-log benchmark each ranking row also carries per_source — the same aggregates per source log, sorted worst-first. Read it before switching models: an average hides a candidate that is fine on 18 of 20 requests and catastrophic on 2. Pass a weak row's source_log_id to get_log to see which request breaks it.
 
+      A recording-based benchmark adds savings_projection: each candidate's generation cost scaled to the capture's real request rate, next to what the traffic cost as served — "$X/month at your current rate", at API list prices with judge spend excluded. Absent when the capture window is under 10 minutes, because a rate measured that briefly is an artifact of when the operator clicked stop.
+
       A failed run is not always a failed model. `failure_stage` says which half broke: "judge" means the answer was generated and paid for and only the scoring call failed — retry_eval re-scores it for free — while "candidate" means the model never answered. `retryable` counts both. `blockers` reports what is already known to be broken before spending anything: a key seen refusing, or a candidate model the provider has retired; it is omitted while the benchmark is running, since the keys were checked at start and a poll should stay cheap.
 
       The default payload is built for polling: status, summary, rankings, rubric feedback and retry counts. Pass include: ["runs"] for the per-run detail (up to 2,000 chars of output_preview per run — a full batch can be large) and include: ["criteria"] for the rubric text.
@@ -807,6 +809,7 @@ defmodule DodoRouter.MCP.Tools do
   defp eval_payload(principal, id, opts \\ []) do
     evaluation = Evaluations.get_evaluation!(principal.user, id)
     runs = Evaluations.latest_batch_runs(evaluation)
+    rankings = Evaluations.rankings(evaluation)
     shared_key_label = shared_judge_key_label(evaluation)
     running? = Evaluations.benchmark_running?(evaluation)
     include = opts |> Keyword.get(:include) |> List.wrap()
@@ -837,7 +840,7 @@ defmodule DodoRouter.MCP.Tools do
         |> Map.update!(:total_cost_usd, &money/1)
         |> Map.update!(:total_list_cost_usd, &money/1),
       rankings:
-        Enum.map(Evaluations.rankings(evaluation), fn ranking ->
+        Enum.map(rankings, fn ranking ->
           %{
             provider: ranking.provider,
             model: ranking.model,
@@ -859,6 +862,7 @@ defmodule DodoRouter.MCP.Tools do
     }
 
     payload
+    |> maybe_put_projection(principal, evaluation, rankings)
     |> maybe_put_blockers(principal, evaluation, running?)
     |> maybe_put_criteria(evaluation, "criteria" in include)
     # "attempts" implies runs: attempt history hangs off the run it was
@@ -891,6 +895,40 @@ defmodule DodoRouter.MCP.Tools do
         }
       end)
     )
+  end
+
+  # Only on recording-based benchmarks: the capture's window and request
+  # count give the projection its denominator, which a hand-picked log set
+  # does not have. Absent when the window is too short to trust or the
+  # recording is gone — a missing projection is honest, a garbage rate
+  # dressed as $/month is not.
+  defp maybe_put_projection(payload, _principal, %{recording_id: nil}, _rankings), do: payload
+
+  defp maybe_put_projection(payload, principal, evaluation, rankings) do
+    with %{} = recording <- Recordings.get_recording(principal.user, evaluation.recording_id),
+         stats = Recordings.recording_stats(recording),
+         {:ok, projection} <- Evaluations.savings_projection(rankings, recording, stats) do
+      Map.put(payload, :savings_projection, %{
+        monthly_requests: projection.monthly_requests,
+        captured_requests: projection.captured_requests,
+        window_seconds: projection.window_seconds,
+        baseline_monthly_cost_usd: money(projection.baseline_monthly_cost),
+        note: "Costs at API list prices; judge spend excluded — production does not pay a judge.",
+        rows:
+          Enum.map(projection.rows, fn row ->
+            %{
+              provider: row.provider,
+              model: row.model,
+              variant: row.variant,
+              avg_score: row.avg_score,
+              projected_monthly_cost_usd: money(row.projected_monthly_cost),
+              monthly_savings_usd: money(row.monthly_savings)
+            }
+          end)
+      })
+    else
+      _ -> payload
+    end
   end
 
   # Problems knowable before spending anything: a key the proxy has seen

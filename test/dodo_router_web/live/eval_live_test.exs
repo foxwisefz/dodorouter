@@ -1714,6 +1714,65 @@ defmodule DodoRouterWeb.EvalLiveTest do
     assert html =~ String.slice(log2.id, 0, 8)
   end
 
+  test "a recording-based benchmark shows the monthly projection panel", %{
+    conn: conn,
+    user: user
+  } do
+    {router, _api_key} = RoutersFixtures.router_fixture(user)
+    provider_key = ProvidersFixtures.provider_key_fixture(user)
+    {:ok, recording} = DodoRouter.Recordings.start_recording(router, %{name: "Rate capture"})
+
+    recording =
+      recording
+      |> Ecto.Changeset.change(
+        started_at: DateTime.add(DateTime.utc_now(), -15, :day),
+        stopped_at: DateTime.utc_now(),
+        status: "stopped"
+      )
+      |> Repo.update!()
+
+    log =
+      LogsFixtures.log_fixture(router, %{
+        recording_id: recording.id,
+        request_body:
+          Jason.encode!(%{"model" => "m", "messages" => [%{"role" => "user", "content" => "hi"}]}),
+        list_cost_usd: Decimal.new("1.00")
+      })
+
+    {:ok, evaluation} =
+      Evaluations.create_evaluation(user, log, %{
+        name: "Projection UI",
+        criteria: "Be useful",
+        judge_model: "judge-model",
+        judge_provider_key_id: provider_key.id,
+        candidate_targets: [
+          %{
+            "provider_key_id" => provider_key.id,
+            "provider" => "test_provider",
+            "model" => "cheap"
+          }
+        ],
+        recording_id: recording.id
+      })
+
+    %EvaluationRun{}
+    |> EvaluationRun.changeset(%{
+      evaluation_id: evaluation.id,
+      status: "completed",
+      score: 90,
+      candidate_provider: "test_provider",
+      candidate_model: "cheap",
+      candidate_list_cost_usd: Decimal.new("0.25")
+    })
+    |> Repo.insert!()
+
+    {:ok, live, html} = live(conn, ~p"/evals/#{evaluation.id}")
+
+    assert has_element?(live, "#savings-projection")
+    assert html =~ "As served, this traffic projects to"
+    assert html =~ "Savings /month"
+  end
+
   test "a recording with nothing replayable bounces back with the reason", %{
     conn: conn,
     user: user
