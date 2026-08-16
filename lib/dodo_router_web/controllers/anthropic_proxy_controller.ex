@@ -105,6 +105,16 @@ defmodule DodoRouterWeb.AnthropicProxyController do
   defp request_body(%{body_params: %{} = body}, _merged) when not is_struct(body), do: body
   defp request_body(_conn, merged), do: merged
 
+  # Reading the body directly (dodo_router-b3l) stopped query parameters from
+  # masquerading as body fields — and also stopped them travelling at all.
+  # Probed 2026-08-16: Anthropic's `?beta=true` changes nothing when the
+  # anthropic-beta header is forwarded, so they stay dropped — but recorded,
+  # because a loss channel without a record decays into folklore
+  # (dodo_router-69m).
+  defp dropped_query_params(conn) do
+    Plug.Conn.fetch_query_params(conn).query_params
+  end
+
   # `client_format` is always declared, not only when untranslated fields
   # exist: the response-direction passthrough (native content blocks, real
   # message ids, streaming passthrough) keys off it for every request, and
@@ -214,7 +224,8 @@ defmodule DodoRouterWeb.AnthropicProxyController do
         request_id: request_id,
         session: session,
         client_headers: client_headers,
-        recording_id: recording_id
+        recording_id: recording_id,
+        dropped_query_params: dropped_query_params(conn)
       ] ++ fidelity_opts(untranslated)
 
     case Proxy.dispatch(router, openai_params, dispatch_opts) do
@@ -328,6 +339,7 @@ defmodule DodoRouterWeb.AnthropicProxyController do
           session: session,
           recording_id: recording_id,
           client_headers: client_headers,
+          dropped_query_params: dropped_query_params(conn),
           # `message_start` carries the model and can never be revised, so the
           # client must be told which provider is answering *before* the first
           # chunk. Without this a silent fallback echoes back the requested

@@ -234,9 +234,14 @@ defmodule DodoRouter.Proxy do
         Keyword.get(opts, :dropped_request_fields_detail)
       )
 
+    # The fourth loss channel: query parameters never travel upstream, and
+    # until dodo_router-69m nothing recorded that they existed.
+    query =
+      Fidelity.dropped_query_param_changes(Keyword.get(opts, :dropped_query_params, %{}))
+
     per_step = Enum.flat_map(attempted_steps, &(&1[:fidelity_changes] || []))
 
-    ingress ++ per_step
+    ingress ++ query ++ per_step
   end
 
   @doc false

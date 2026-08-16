@@ -230,6 +230,25 @@ defmodule DodoRouter.ProxyTest do
       assert Decimal.compare(log.list_cost_usd, Decimal.new(0)) == :gt
     end
 
+    test "dropped query parameters are recorded as their own fidelity channel", ctx do
+      # Query params are the fourth loss channel (headers, request body,
+      # response fields) — never forwarded, and until dodo_router-69m never
+      # recorded either.
+      assert {:ok, _resp, %{log: log}} =
+               Proxy.dispatch(ctx.router, ctx.request,
+                 steps: [ctx.step],
+                 log_mode: :sync,
+                 dropped_query_params: %{"beta" => "true"}
+               )
+
+      assert Enum.any?(log.fidelity_changes, fn change ->
+               change["channel"] == "query_params" and change["name"] == "beta" and
+                 change["action"] == "dropped" and
+                 change["reason"] == "query_params_not_forwarded" and
+                 change["value"] =~ "true"
+             end)
+    end
+
     test "unknown usage prices as nil, not zero", ctx do
       # A pricing row exists, so the only reason for a nil cost is the
       # absent token counts — zero would mean "free", not "unknown".

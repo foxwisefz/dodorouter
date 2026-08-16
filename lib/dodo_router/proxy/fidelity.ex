@@ -62,7 +62,9 @@ defmodule DodoRouter.Proxy.Fidelity do
     proxy_value_wins: "collides with a header the proxy must set itself",
     not_in_provider_allowlist: "not a field the upstream Chat Completions API accepts",
     unsupported_by_format_conversion: "the format conversion has no translation for it yet",
-    unsupported_by_model: "the serving model rejects it; sent without the field"
+    unsupported_by_model: "the serving model rejects it; sent without the field",
+    query_params_not_forwarded:
+      "query parameters do not travel upstream; feature opt-ins ride the headers"
   }
 
   # Three reasons say nothing about the request they are attached to, because
@@ -172,6 +174,21 @@ defmodule DodoRouter.Proxy.Fidelity do
   def dropped_body_changes(fields, reason, detail \\ nil) do
     build_dropped("request_body", fields, reason, detail)
   end
+
+  @doc """
+  Rows for client query parameters the proxy did not forward — the fourth
+  loss channel (headers, request body, response fields being the other
+  three), which went unrecorded until dodo_router-69m. Probed 2026-08-16:
+  Anthropic's `?beta=true` changes nothing when the `anthropic-beta` header
+  is forwarded, so the drop is deliberate and this row is its record.
+  """
+  def dropped_query_param_changes(params, detail \\ nil)
+
+  def dropped_query_param_changes(params, detail) when map_size(params) > 0 do
+    build_dropped("query_params", params, :query_params_not_forwarded, detail)
+  end
+
+  def dropped_query_param_changes(_params, _detail), do: []
 
   defp record_dropped(channel, fields, reason, detail) do
     channel

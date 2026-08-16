@@ -647,7 +647,7 @@ Nothing on `request_logs` records which convention a row used, so `DodoRouter.Us
 
 ## Request & Response Fidelity
 
-Fidelity is the product. A client asks for something and gets a 200 that quietly ignored it — that is the failure mode this whole section exists to prevent. There are three loss channels between the client and the provider, and every adapter has to satisfy all three.
+Fidelity is the product. A client asks for something and gets a 200 that quietly ignored it — that is the failure mode this whole section exists to prevent. There are three loss channels between the client and the provider, and every adapter has to satisfy all three. (A fourth — query parameters — is closed by policy rather than per adapter: they never travel upstream, and the drop is recorded via `Fidelity.dropped_query_param_changes/2` on the `query_params` channel. Probed 2026-08-16: Anthropic's `?beta=true` changes nothing when the `anthropic-beta` header is forwarded.)
 
 ### 1. Client headers forward by default
 
