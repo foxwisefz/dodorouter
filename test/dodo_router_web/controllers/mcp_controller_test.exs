@@ -991,6 +991,155 @@ defmodule DodoRouterWeb.MCPControllerTest do
       assert text =~ log.id
     end
 
+    test "session aggregates answer the 'what did this question cost' shape", %{
+      conn: conn,
+      token: token,
+      router: router
+    } do
+      for {text, cost, list_cost} <- [{"a", "0.40", "1.00"}, {"b", "1.00", "2.50"}] do
+        DodoRouter.LogsFixtures.log_fixture(router, %{
+          session_id: "question-7",
+          session_name: "Q7",
+          request_body: Jason.encode!(%{"messages" => [%{"role" => "user", "content" => text}]}),
+          estimated_cost_usd: Decimal.new(cost),
+          list_cost_usd: Decimal.new(list_cost)
+        })
+      end
+
+      DodoRouter.LogsFixtures.log_fixture(router, %{session_id: "question-8", status: "error"})
+
+      listed = tool_json(json_response(call_tool(conn, token, "list_sessions"), 200))
+      assert listed["returned"] == 2
+      assert %{"session_id" => "question-8"} = hd(listed["sessions"])
+
+      session =
+        tool_json(
+          json_response(
+            call_tool(conn, token, "get_session", %{"session_id" => "question-7"}),
+            200
+          )
+        )
+
+      assert session["request_count"] == 2
+      assert session["successful_requests"] == 2
+      # Metered and list price stay two figures, never blended.
+      assert_in_delta session["cost_usd"], 1.40, 0.001
+      assert_in_delta session["list_cost_usd"], 3.50, 0.001
+      assert session["first_request"]
+
+      # A session still in flight (or not yet started) answers with its
+      # current truth — zeros — never an error the caller must special-case.
+      pending =
+        tool_json(
+          json_response(
+            call_tool(conn, token, "get_session", %{"session_id" => "not-started-yet"}),
+            200
+          )
+        )
+
+      assert pending["request_count"] == 0
+      assert pending["cost_usd"] == nil
+    end
+
+    test "list_logs drills into a session with an honest total", %{
+      conn: conn,
+      token: token,
+      router: router
+    } do
+      for text <- ~w(a b c) do
+        DodoRouter.LogsFixtures.log_fixture(router, %{
+          session_id: "question-7",
+          request_body: Jason.encode!(%{"messages" => [%{"role" => "user", "content" => text}]})
+        })
+      end
+
+      DodoRouter.LogsFixtures.log_fixture(router, %{session_id: "other"})
+
+      body =
+        tool_json(
+          json_response(
+            call_tool(conn, token, "list_logs", %{"session_id" => "question-7", "limit" => 2}),
+            200
+          )
+        )
+
+      assert body["returned"] == 2
+      assert body["total"] == 3
+      assert Enum.all?(body["logs"], &(&1["session_id"] == "question-7"))
+
+      # A window in the future matches nothing; a bad timestamp is an error,
+      # not an ignored filter.
+      empty =
+        tool_json(
+          json_response(
+            call_tool(conn, token, "list_logs", %{"since" => "2030-01-01T00:00:00Z"}),
+            200
+          )
+        )
+
+      assert empty["total"] == 0
+
+      bad =
+        json_response(call_tool(conn, token, "list_logs", %{"since" => "yesterday-ish"}), 200)
+
+      assert bad["result"]["isError"]
+      assert hd(bad["result"]["content"])["text"] =~ "ISO 8601"
+    end
+
+    test "spend, cache and recording aggregates carry both cost figures and no bodies", %{
+      conn: conn,
+      token: token,
+      router: router
+    } do
+      {:ok, recording} = DodoRouter.Recordings.start_recording(router, %{name: "Capture"})
+
+      DodoRouter.LogsFixtures.log_fixture(router, %{
+        recording_id: recording.id,
+        final_model: "cheap-model",
+        estimated_cost_usd: Decimal.new("0.10"),
+        list_cost_usd: Decimal.new("0.30"),
+        cache_read_tokens: 80
+      })
+
+      DodoRouter.LogsFixtures.log_fixture(router, %{
+        final_model: "big-model",
+        estimated_cost_usd: Decimal.new("2.00"),
+        list_cost_usd: Decimal.new("2.00")
+      })
+
+      spend = tool_json(json_response(call_tool(conn, token, "get_spend"), 200))
+      assert spend["window_hours"] == 24
+      # Highest spend first, both figures separate.
+      assert [%{"model" => "big-model"}, %{"model" => "cheap-model"} = cheap] = spend["by_model"]
+      assert_in_delta cheap["cost_usd"], 0.10, 0.001
+      assert_in_delta cheap["list_cost_usd"], 0.30, 0.001
+      refute Map.has_key?(cheap, "request_body")
+
+      cache = tool_json(json_response(call_tool(conn, token, "get_cache_stats"), 200))
+      assert cache["cache_read_tokens"] == 80
+      assert cache["cached_requests"] == 1
+      assert cache["total_requests"] == 2
+      assert is_number(cache["hit_rate"])
+
+      stats =
+        tool_json(
+          json_response(call_tool(conn, token, "get_recording", %{"id" => recording.id}), 200)
+        )
+
+      assert stats["request_count"] == 1
+      assert_in_delta stats["cost_usd"], 0.10, 0.001
+      assert_in_delta stats["list_cost_usd"], 0.30, 0.001
+      refute Map.has_key?(stats, "request_body")
+
+      # Foreign recordings stay indistinguishable from missing ones.
+      other = DodoRouter.AccountsFixtures.user_fixture()
+      {other_router, _} = DodoRouter.RoutersFixtures.router_fixture(other)
+      {:ok, foreign} = DodoRouter.Recordings.start_recording(other_router)
+
+      resp = json_response(call_tool(conn, token, "get_recording", %{"id" => foreign.id}), 200)
+      assert resp["result"]["isError"]
+    end
+
     test "create_eval refuses a recording the token's user does not own", %{
       conn: conn,
       token: token,

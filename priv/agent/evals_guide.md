@@ -283,13 +283,44 @@ Three limits shape every benchmark; know them before reading close results:
 - **Latency here includes the proxy's own hop** and one cold call per run; it
   ranks models against each other rather than predicting production latency.
 
+## Reading your traffic
+
+The same scope that lets you pick a source request lets you answer spend
+and quality questions without a benchmark:
+
+- `get_session { "session_id": "..." }` — aggregates for one session
+  (tag each of your product's questions with an `X-Session-Id` header and
+  this answers "this question cost $1.40"). Costs come as two figures:
+  `cost_usd` is what was actually metered, `list_cost_usd` the same tokens
+  at pay-as-you-go API prices. It answers consistently while the session
+  is still in flight — an id with no requests yet returns zeros, never an
+  error — so poll it freely.
+- `list_sessions` — recent sessions with the same per-session figures.
+- `get_spend { "hours": 24 }` — spend grouped by served model.
+- `get_cache_stats { "hours": 24 }` — prompt-cache hit rate and token
+  volumes. A falling hit rate on an agent workload usually means something
+  volatile slipped into the cached prefix.
+- `get_recording { "id": "..." }` — aggregates for one capture window.
+
+**Every aggregate is drillable through `list_logs`**: pass a spend row's
+`model`, a session's `session_id`, or a recording's `recording_id` back as
+a filter (plus `since`/`until` for the same window) to see the requests
+behind any number. `total` on the result counts every match, so a capped
+page is never mistaken for the whole answer. None of these return request
+or response text — bodies stay behind `get_log` and its own scope.
+
 ## Tool reference
 
 | Tool | Purpose | Scope |
 |---|---|---|
 | `get_guide` | This guide | — |
 | `list_routers` | Every router this token reaches | — |
-| `list_logs` | Recent requests, with `evaluable` per row | `logs:read` |
+| `list_logs` | Recent requests, with `evaluable` per row; the drill-down for every aggregate | `logs:read` |
+| `list_sessions` | Sessions with per-session cost/tokens/latency | `logs:read` |
+| `get_session` | One session's aggregates ("this question cost $1.40") | `logs:read` |
+| `get_spend` | Spend by served model over a window | `logs:read` |
+| `get_cache_stats` | Prompt-cache hit rate over a window | `logs:read` |
+| `get_recording` | One capture window's aggregates | `logs:read` |
 | `list_recordings` | Capture windows; benchmark one via `create_eval` `recording_id` | `logs:read` |
 | `get_log` | One request, with its stored bodies | `logs:read` (bodies need `logs:read_bodies`) |
 | `list_eval_targets` | Provider keys, models, list prices | `evals:read` |

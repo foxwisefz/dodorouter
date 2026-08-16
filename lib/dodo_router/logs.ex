@@ -72,6 +72,8 @@ defmodule DodoRouter.Logs do
     |> maybe_filter_date_range(opts[:from], opts[:to])
     |> maybe_filter_favorite(opts[:favorites_only])
     |> maybe_filter_failures(opts[:failures_only])
+    |> maybe_filter_session(opts[:session_id])
+    |> maybe_filter_recording(opts[:recording_id])
     |> Repo.all()
   end
 
@@ -90,6 +92,8 @@ defmodule DodoRouter.Logs do
     |> maybe_filter_date_range(opts[:from], opts[:to])
     |> maybe_filter_favorite(opts[:favorites_only])
     |> maybe_filter_failures(opts[:failures_only])
+    |> maybe_filter_session(opts[:session_id])
+    |> maybe_filter_recording(opts[:recording_id])
     |> Repo.aggregate(:count)
   end
 
@@ -960,6 +964,14 @@ defmodule DodoRouter.Logs do
 
   defp maybe_filter_favorite(query, true), do: where(query, [l], l.favorite == true)
   defp maybe_filter_favorite(query, _), do: query
+
+  defp maybe_filter_session(query, nil), do: query
+  defp maybe_filter_session(query, session_id), do: where(query, [l], l.session_id == ^session_id)
+
+  defp maybe_filter_recording(query, nil), do: query
+
+  defp maybe_filter_recording(query, recording_id),
+    do: where(query, [l], l.recording_id == ^recording_id)
 
   defp maybe_filter_failures(query, true),
     do: where(query, [l], l.status in ["error", "fallback"])

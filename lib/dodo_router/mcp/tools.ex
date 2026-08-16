@@ -51,7 +51,12 @@ defmodule DodoRouter.MCP.Tools do
       name: "list_logs",
       title: "List requests",
       description:
-        "Recent requests this router served, with model, tokens, cost and latency. `evaluable` says whether a request can be replayed into an evaluation.",
+        "Recent requests this router served, with model, tokens, cost and latency. " <>
+          "`evaluable` says whether a request can be replayed into an evaluation. " <>
+          "`total` counts every match, so a capped page is never mistaken for the whole " <>
+          "answer. This is also the drill-down for every aggregate tool: feed a spend " <>
+          "row's model, a session's id, or a recording's id back in as filters to see " <>
+          "the requests behind any number.",
       scopes: ["logs:read"],
       schema: %{
         "type" => "object",
@@ -59,7 +64,66 @@ defmodule DodoRouter.MCP.Tools do
           "router" => @router_arg,
           "limit" => %{"type" => "integer", "description" => "Max 100. Defaults to 20."},
           "status" => %{"type" => "string", "description" => "success, fallback or error."},
-          "model" => %{"type" => "string", "description" => "Filter by served model."}
+          "model" => %{"type" => "string", "description" => "Filter by served model."},
+          "provider" => %{"type" => "string", "description" => "Filter by serving provider."},
+          "session_id" => %{
+            "type" => "string",
+            "description" => "Only requests tagged with this session id (see list_sessions)."
+          },
+          "recording_id" => %{
+            "type" => "string",
+            "description" => "Only requests captured by this recording (see list_recordings)."
+          },
+          "since" => %{
+            "type" => "string",
+            "description" => "ISO 8601 lower bound on when the request was served."
+          },
+          "until" => %{
+            "type" => "string",
+            "description" => "ISO 8601 upper bound on when the request was served."
+          }
+        }
+      }
+    },
+    %{
+      name: "list_sessions",
+      title: "List sessions",
+      description:
+        "Sessions this router has served, newest activity first — a session groups the " <>
+          "requests a client tagged with one X-Session-Id (one agent conversation, one " <>
+          "user question). Each row carries request_count, tokens, avg latency, and cost " <>
+          "as two figures: cost_usd (actually metered) and list_cost_usd (the same tokens " <>
+          "at pay-as-you-go API prices — the comparable number on plan keys).",
+      scopes: ["logs:read"],
+      schema: %{
+        "type" => "object",
+        "properties" => %{
+          "router" => @router_arg,
+          "limit" => %{"type" => "integer", "description" => "Max 100. Defaults to 20."},
+          "hours" => %{
+            "type" => "integer",
+            "description" => "Only sessions with activity in the last N hours; omit for all."
+          }
+        }
+      }
+    },
+    %{
+      name: "get_session",
+      title: "Get one session's aggregates",
+      description:
+        "Aggregate stats for one session id: request count, tokens, latency, error split, " <>
+          "first/last request, and cost as cost_usd + list_cost_usd separately — the shape " <>
+          "for writing \"this question cost $1.40\" back onto your own records. Answers " <>
+          "consistently while the session is still in flight: the numbers cover what has " <>
+          "been served so far, and an id with no requests yet returns zeros, never an " <>
+          "error. Drill down with list_logs {session_id}.",
+      scopes: ["logs:read"],
+      schema: %{
+        "type" => "object",
+        "required" => ["session_id"],
+        "properties" => %{
+          "router" => @router_arg,
+          "session_id" => %{"type" => "string"}
         }
       }
     },
@@ -79,6 +143,65 @@ defmodule DodoRouter.MCP.Tools do
         "properties" => %{
           "router" => @router_arg,
           "limit" => %{"type" => "integer", "description" => "Max 100. Defaults to 20."}
+        }
+      }
+    },
+    %{
+      name: "get_recording",
+      title: "Get one recording's aggregates",
+      description:
+        "Aggregate stats for one capture window: request count, tokens, latency, success " <>
+          "split, and cost as total_cost_usd (actually metered) + total_list_cost_usd (the " <>
+          "same traffic at API list prices) separately. Drill down with list_logs " <>
+          "{recording_id}; benchmark the capture with create_eval {recording_id}.",
+      scopes: ["logs:read"],
+      schema: %{
+        "type" => "object",
+        "required" => ["id"],
+        "properties" => %{
+          "router" => @router_arg,
+          "id" => %{"type" => "string", "description" => "Recording id from list_recordings."}
+        }
+      }
+    },
+    %{
+      name: "get_spend",
+      title: "Spend by model",
+      description:
+        "What this router's traffic cost over a window, grouped by served model: requests, " <>
+          "tokens, cost_usd (actually metered) and list_cost_usd (the same tokens at " <>
+          "pay-as-you-go API prices) per model, highest spend first. Every row is " <>
+          "drillable: pass its model and provider to list_logs with the same window to see " <>
+          "the requests behind the number.",
+      scopes: ["logs:read"],
+      schema: %{
+        "type" => "object",
+        "properties" => %{
+          "router" => @router_arg,
+          "hours" => %{
+            "type" => "integer",
+            "description" => "Window size in hours, 1-720. Defaults to 24."
+          }
+        }
+      }
+    },
+    %{
+      name: "get_cache_stats",
+      title: "Prompt-cache stats",
+      description:
+        "How well prompt caching is working over a window: hit rate, cache-read and " <>
+          "cache-write tokens, and how many requests hit the cache at all. A falling hit " <>
+          "rate on an agent workload usually means something volatile slipped into the " <>
+          "cached prefix; list_logs over the same window finds the requests to inspect.",
+      scopes: ["logs:read"],
+      schema: %{
+        "type" => "object",
+        "properties" => %{
+          "router" => @router_arg,
+          "hours" => %{
+            "type" => "integer",
+            "description" => "Window size in hours, 1-720. Defaults to 24."
+          }
         }
       }
     },
@@ -526,17 +649,149 @@ defmodule DodoRouter.MCP.Tools do
   end
 
   defp run("list_logs", principal, args) do
-    with {:ok, router} <- resolve_router(principal, args) do
+    with {:ok, router} <- resolve_router(principal, args),
+         {:ok, since} <- parse_time(args["since"], "since"),
+         {:ok, until} <- parse_time(args["until"], "until") do
       limit = args |> Map.get("limit", 20) |> clamp(1, 100)
 
-      logs =
-        Logs.list_logs(router,
-          limit: limit,
-          status: presence(args["status"]),
-          model: presence(args["model"])
-        )
+      filters = [
+        status: presence(args["status"]),
+        model: presence(args["model"]),
+        provider: presence(args["provider"]),
+        session_id: presence(args["session_id"]),
+        recording_id: presence(args["recording_id"]),
+        from: since,
+        to: until
+      ]
 
-      {:ok, %{router: router.slug, returned: length(logs), logs: Enum.map(logs, &log_summary/1)}}
+      logs = Logs.list_logs(router, [limit: limit] ++ filters)
+
+      {:ok,
+       %{
+         router: router.slug,
+         returned: length(logs),
+         # The honest denominator: a capped page must not read as the
+         # whole answer when an agent is summing costs off it.
+         total: Logs.count_logs(router, filters),
+         logs: Enum.map(logs, &log_summary/1)
+       }}
+    end
+  end
+
+  defp run("list_sessions", principal, args) do
+    with {:ok, router} <- resolve_router(principal, args) do
+      limit = args |> Map.get("limit", 20) |> clamp(1, 100)
+      hours = args["hours"] && clamp(args["hours"], 1, 720)
+
+      sessions = Logs.list_sessions(router, limit: limit, hours: hours)
+
+      {:ok,
+       %{
+         router: router.slug,
+         returned: length(sessions),
+         sessions:
+           Enum.map(sessions, fn session ->
+             %{
+               session_id: session.session_id,
+               session_name: session.session_name,
+               request_count: session.request_count,
+               total_tokens: session.total_tokens,
+               avg_latency_ms: round_ms(session.avg_latency_ms),
+               last_activity: session.last_activity,
+               cost_usd: money(session.total_cost_usd),
+               list_cost_usd: money(session.total_list_cost_usd)
+             }
+           end)
+       }}
+    end
+  end
+
+  defp run("get_session", principal, args) do
+    with {:ok, router} <- resolve_router(principal, args),
+         {:ok, session_id} <- require_session_id(args["session_id"]) do
+      # Never a 404: the aggregates cover what has been served so far, so a
+      # session still in flight — or one whose first request has not landed
+      # yet — answers with its current truth (zeros included) instead of
+      # making the caller poll an error away.
+      stats = Logs.session_stats(router, session_id)
+
+      {:ok,
+       %{
+         session_id: session_id,
+         request_count: stats.request_count,
+         total_tokens: stats.total_tokens || 0,
+         prompt_tokens: stats.prompt_tokens || 0,
+         completion_tokens: stats.completion_tokens || 0,
+         avg_latency_ms: round_ms(stats.avg_latency_ms),
+         successful_requests: stats.successful_requests,
+         error_requests: stats.error_requests,
+         first_request: stats.first_request,
+         last_request: stats.last_request,
+         cost_usd: money(stats.total_cost_usd),
+         list_cost_usd: money(stats.total_list_cost_usd)
+       }, %{target_type: "session", target_id: session_id}}
+    end
+  end
+
+  defp run("get_recording", principal, args) do
+    with {:ok, router} <- resolve_router(principal, args),
+         {:ok, recording} <- fetch_recording(principal, router, args["id"]) do
+      stats = Recordings.recording_stats(recording)
+
+      {:ok,
+       %{
+         id: recording.id,
+         name: recording.name,
+         status: recording.status,
+         started_at: recording.started_at,
+         stopped_at: recording.stopped_at,
+         request_count: stats.request_count,
+         total_tokens: stats.total_tokens || 0,
+         prompt_tokens: stats.prompt_tokens || 0,
+         completion_tokens: stats.completion_tokens || 0,
+         avg_latency_ms: round_ms(stats.avg_latency_ms),
+         successful_requests: stats.successful_requests,
+         error_requests: stats.error_requests,
+         cost_usd: money(stats.total_cost_usd),
+         list_cost_usd: money(stats.total_list_cost_usd)
+       }, %{target_type: "recording", target_id: recording.id}}
+    end
+  end
+
+  defp run("get_spend", principal, args) do
+    with {:ok, router} <- resolve_router(principal, args) do
+      hours = args |> Map.get("hours", 24) |> clamp(1, 720)
+
+      {:ok,
+       %{
+         router: router.slug,
+         window_hours: hours,
+         by_model:
+           router
+           |> Logs.spend_by_model(hours: hours)
+           |> Enum.map(fn row ->
+             %{
+               model: row.model,
+               provider: row.provider,
+               requests: row.total_requests,
+               total_tokens: row.total_tokens,
+               cost_usd: money(row.cost_usd),
+               list_cost_usd: money(row.list_cost_usd)
+             }
+           end)
+       }}
+    end
+  end
+
+  defp run("get_cache_stats", principal, args) do
+    with {:ok, router} <- resolve_router(principal, args) do
+      hours = args |> Map.get("hours", 24) |> clamp(1, 720)
+
+      {:ok,
+       Map.merge(
+         %{router: router.slug, window_hours: hours},
+         Logs.cache_stats(router, hours: hours)
+       )}
     end
   end
 
@@ -1146,6 +1401,7 @@ defmodule DodoRouter.MCP.Tools do
       completion_tokens: log.completion_tokens,
       total_tokens: log.total_tokens,
       cache_read_tokens: log.cache_read_tokens,
+      session_id: log.session_id,
       latency_ms: log.latency_ms,
       cost_usd: money(log.estimated_cost_usd),
       list_cost_usd: money(log.list_cost_usd),
@@ -1174,6 +1430,29 @@ defmodule DodoRouter.MCP.Tools do
   end
 
   defp fetch_log(_principal, _router, _id), do: {:error, "A log id is required."}
+
+  defp require_session_id(id) when is_binary(id) and id != "", do: {:ok, id}
+  defp require_session_id(_id), do: {:error, "A session_id is required."}
+
+  defp parse_time(value, _name) when value in [nil, ""], do: {:ok, nil}
+
+  defp parse_time(value, name) when is_binary(value) do
+    case DateTime.from_iso8601(value) do
+      {:ok, datetime, _offset} ->
+        {:ok, datetime}
+
+      {:error, _reason} ->
+        {:error,
+         "#{name} must be an ISO 8601 timestamp (e.g. 2026-08-16T00:00:00Z), got #{inspect(value)}."}
+    end
+  end
+
+  defp parse_time(_value, name), do: {:error, "#{name} must be an ISO 8601 timestamp string."}
+
+  # avg() comes back as a Decimal; a latency reads as whole milliseconds.
+  defp round_ms(nil), do: nil
+  defp round_ms(%Decimal{} = value), do: value |> Decimal.round(0) |> Decimal.to_integer()
+  defp round_ms(value) when is_number(value), do: round(value)
 
   defp fetch_eval(principal, router, id) when is_binary(id) do
     with {:ok, uuid} <- Ecto.UUID.cast(id),

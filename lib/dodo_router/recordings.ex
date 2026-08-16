@@ -116,7 +116,10 @@ defmodule DodoRouter.Recordings do
         # comparable figure when plan keys metered $0. Coalesced per row:
         # logs recorded before list prices were captured fall back to
         # their actual cost.
-        total_list_cost_usd: sum(coalesce(l.list_cost_usd, l.estimated_cost_usd))
+        total_list_cost_usd: sum(coalesce(l.list_cost_usd, l.estimated_cost_usd)),
+        # And what was actually metered, uncoalesced — readers get both
+        # figures separately rather than one blended number.
+        total_cost_usd: sum(l.estimated_cost_usd)
       }
     )
     |> Repo.one()
