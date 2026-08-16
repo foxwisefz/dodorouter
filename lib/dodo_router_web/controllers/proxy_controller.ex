@@ -19,10 +19,37 @@ defmodule DodoRouterWeb.ProxyController do
         "client_headers=#{inspect(redact_headers(client_headers))}"
     )
 
-    if params["stream"] == true do
-      stream_response(conn, router, params, request_id, session, client_headers, recording_id)
-    else
-      sync_response(conn, router, params, request_id, session, recording_id, client_headers)
+    idempotency_key = get_req_header(conn, "idempotency-key") |> List.first()
+
+    cond do
+      params["stream"] == true and is_binary(idempotency_key) ->
+        # A guarantee the proxy cannot honor must be refused, not silently
+        # dropped: stored responses replay as JSON, and a streaming client
+        # would hang waiting for SSE that never comes.
+        conn
+        |> put_status(400)
+        |> json(%{
+          error: %{
+            message:
+              "Idempotency-Key is not supported on streaming requests. Retry without stream, or without the header.",
+            type: "invalid_request_error"
+          }
+        })
+
+      params["stream"] == true ->
+        stream_response(conn, router, params, request_id, session, client_headers, recording_id)
+
+      true ->
+        sync_response(
+          conn,
+          router,
+          params,
+          request_id,
+          session,
+          recording_id,
+          client_headers,
+          idempotency_key
+        )
     end
   end
 
@@ -43,6 +70,13 @@ defmodule DodoRouterWeb.ProxyController do
   def create_legacy(conn, params) do
     create(conn, params)
   end
+
+  # Stripe precedent: replays are marked on the wire, so a client can tell
+  # a fresh answer from a re-served one without diffing bodies.
+  defp maybe_replayed_header(conn, %{idempotent_replay: true}),
+    do: put_resp_header(conn, "idempotent-replayed", "true")
+
+  defp maybe_replayed_header(conn, _timing), do: conn
 
   defp extract_session(conn) do
     router = conn.assigns.current_router
@@ -67,14 +101,24 @@ defmodule DodoRouterWeb.ProxyController do
     end
   end
 
-  defp sync_response(conn, router, params, request_id, session, recording_id, client_headers) do
+  defp sync_response(
+         conn,
+         router,
+         params,
+         request_id,
+         session,
+         recording_id,
+         client_headers,
+         idempotency_key
+       ) do
     start_time = System.monotonic_time(:millisecond)
 
     case Proxy.dispatch(router, params,
            request_id: request_id,
            session: session,
            client_headers: client_headers,
-           recording_id: recording_id
+           recording_id: recording_id,
+           idempotency_key: idempotency_key
          ) do
       {:ok, response, timing} ->
         total_ms = System.monotonic_time(:millisecond) - start_time
@@ -86,7 +130,34 @@ defmodule DodoRouterWeb.ProxyController do
         |> put_resp_header("x-timing-total-ms", to_string(total_ms))
         |> put_resp_header("x-timing-provider-ms", to_string(provider_ms))
         |> put_resp_header("x-timing-overhead-ms", to_string(overhead_ms))
+        |> maybe_replayed_header(timing)
         |> json(response)
+
+      {:error, :idempotency_in_progress} ->
+        conn
+        |> put_status(409)
+        |> put_resp_header("x-request-id", request_id)
+        |> json(%{
+          error: %{
+            message:
+              "A request with this Idempotency-Key is still executing. Retry after it completes.",
+            type: "idempotency_error",
+            code: "idempotency_in_progress"
+          }
+        })
+
+      {:error, :idempotency_key_mismatch} ->
+        conn
+        |> put_status(409)
+        |> put_resp_header("x-request-id", request_id)
+        |> json(%{
+          error: %{
+            message:
+              "This Idempotency-Key was already used with a different request body. Keys must be unique per request.",
+            type: "idempotency_error",
+            code: "idempotency_key_reused"
+          }
+        })
 
       {:error, :no_routing_configured} ->
         conn

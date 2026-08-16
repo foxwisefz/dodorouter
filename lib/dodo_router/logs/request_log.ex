@@ -51,6 +51,11 @@ defmodule DodoRouter.Logs.RequestLog do
 
     # Recording (server-side capture)
     field :recording_id, :binary_id
+    # Set on the original row when the client sent an Idempotency-Key, and
+    # on replay rows, which also link the original they re-served — a
+    # zero-cost row must say why it cost nothing.
+    field :idempotency_key, :string
+    field :idempotent_replay_of_id, :binary_id
 
     # Truncation metadata
     field :truncation_flags, {:array, :string}, default: []
@@ -119,6 +124,8 @@ defmodule DodoRouter.Logs.RequestLog do
       :session_id,
       :session_name,
       :recording_id,
+      :idempotency_key,
+      :idempotent_replay_of_id,
       :truncation_flags,
       :fidelity_changes,
       :favorite,

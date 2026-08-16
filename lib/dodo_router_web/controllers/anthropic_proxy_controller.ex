@@ -30,29 +30,48 @@ defmodule DodoRouterWeb.AnthropicProxyController do
     )
 
     untranslated = warn_untranslated(params, request_id, router)
+    idempotency_key = get_req_header(conn, "idempotency-key") |> List.first()
 
-    if params["stream"] == true do
-      stream_anthropic(
-        conn,
-        router,
-        openai_params,
-        request_id,
-        session,
-        client_headers,
-        recording_id,
-        untranslated
-      )
-    else
-      sync_anthropic(
-        conn,
-        router,
-        openai_params,
-        request_id,
-        session,
-        recording_id,
-        client_headers,
-        untranslated
-      )
+    cond do
+      params["stream"] == true and is_binary(idempotency_key) ->
+        # A guarantee the proxy cannot honor must be refused, not silently
+        # dropped: stored responses replay as JSON, and a streaming client
+        # would hang waiting for SSE that never comes.
+        conn
+        |> put_status(400)
+        |> json(%{
+          "type" => "error",
+          "error" => %{
+            "type" => "invalid_request_error",
+            "message" =>
+              "Idempotency-Key is not supported on streaming requests. Retry without stream, or without the header."
+          }
+        })
+
+      params["stream"] == true ->
+        stream_anthropic(
+          conn,
+          router,
+          openai_params,
+          request_id,
+          session,
+          client_headers,
+          recording_id,
+          untranslated
+        )
+
+      true ->
+        sync_anthropic(
+          conn,
+          router,
+          openai_params,
+          request_id,
+          session,
+          recording_id,
+          client_headers,
+          untranslated,
+          idempotency_key
+        )
     end
   end
 
@@ -95,11 +114,6 @@ defmodule DodoRouterWeb.AnthropicProxyController do
   # reports them as lost (see `FallbackChain.apply_passthrough/3`). That is
   # also why the record lands per-step instead of "before routing" — whether
   # anything was actually lost depends on which provider answered.
-  # Plug.Parsers populates body_params for JSON; anything else (an unparsed or
-  # empty body) falls back to the merged params rather than losing the request.
-  defp request_body(%{body_params: %{} = body}, _merged) when not is_struct(body), do: body
-  defp request_body(_conn, merged), do: merged
-
   # Plug.Parsers populates body_params for JSON; anything else (an unparsed or
   # empty body) falls back to the merged params rather than losing the request.
   defp request_body(%{body_params: %{} = body}, _merged) when not is_struct(body), do: body
@@ -215,7 +229,8 @@ defmodule DodoRouterWeb.AnthropicProxyController do
          session,
          recording_id,
          client_headers,
-         untranslated
+         untranslated,
+         idempotency_key
        ) do
     start_time = System.monotonic_time(:millisecond)
 
@@ -225,6 +240,7 @@ defmodule DodoRouterWeb.AnthropicProxyController do
         session: session,
         client_headers: client_headers,
         recording_id: recording_id,
+        idempotency_key: idempotency_key,
         dropped_query_params: dropped_query_params(conn)
       ] ++ fidelity_opts(untranslated)
 
@@ -244,7 +260,34 @@ defmodule DodoRouterWeb.AnthropicProxyController do
         |> put_resp_header("x-timing-total-ms", to_string(total_ms))
         |> put_resp_header("x-timing-provider-ms", to_string(provider_ms))
         |> forward_ratelimit_headers(timing[:response_headers])
+        |> maybe_replayed_header(timing)
         |> json(anthropic_response)
+
+      {:error, :idempotency_in_progress} ->
+        conn
+        |> put_status(409)
+        |> put_resp_header("x-request-id", request_id)
+        |> json(%{
+          "type" => "error",
+          "error" => %{
+            "type" => "idempotency_error",
+            "message" =>
+              "A request with this Idempotency-Key is still executing. Retry after it completes."
+          }
+        })
+
+      {:error, :idempotency_key_mismatch} ->
+        conn
+        |> put_status(409)
+        |> put_resp_header("x-request-id", request_id)
+        |> json(%{
+          "type" => "error",
+          "error" => %{
+            "type" => "idempotency_error",
+            "message" =>
+              "This Idempotency-Key was already used with a different request body. Keys must be unique per request."
+          }
+        })
 
       {:error, :no_routing_configured} ->
         conn
@@ -290,6 +333,13 @@ defmodule DodoRouterWeb.AnthropicProxyController do
         |> json(error_response)
     end
   end
+
+  # Stripe precedent: replays are marked on the wire, so a client can tell
+  # a fresh answer from a re-served one without diffing bodies.
+  defp maybe_replayed_header(conn, %{idempotent_replay: true}),
+    do: put_resp_header(conn, "idempotent-replayed", "true")
+
+  defp maybe_replayed_header(conn, _timing), do: conn
 
   defp stream_anthropic(
          conn,

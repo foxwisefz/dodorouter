@@ -21,31 +21,56 @@ defmodule DodoRouterWeb.ResponsesProxyController do
     )
 
     dropped_fields = warn_dropped_fields(params, request_id, router)
+    idempotency_key = get_req_header(conn, "idempotency-key") |> List.first()
 
-    if params["stream"] == true do
-      stream_responses(
-        conn,
-        router,
-        openai_params,
-        request_id,
-        session,
-        client_headers,
-        recording_id,
-        dropped_fields
-      )
-    else
-      sync_responses(
-        conn,
-        router,
-        openai_params,
-        request_id,
-        session,
-        recording_id,
-        client_headers,
-        dropped_fields
-      )
+    cond do
+      params["stream"] == true and is_binary(idempotency_key) ->
+        # A guarantee the proxy cannot honor must be refused, not silently
+        # dropped: stored responses replay as JSON, and a streaming client
+        # would hang waiting for SSE that never comes.
+        conn
+        |> put_status(400)
+        |> json(%{
+          "error" => %{
+            "message" =>
+              "Idempotency-Key is not supported on streaming requests. Retry without stream, or without the header.",
+            "type" => "invalid_request_error"
+          }
+        })
+
+      params["stream"] == true ->
+        stream_responses(
+          conn,
+          router,
+          openai_params,
+          request_id,
+          session,
+          client_headers,
+          recording_id,
+          dropped_fields
+        )
+
+      true ->
+        sync_responses(
+          conn,
+          router,
+          openai_params,
+          request_id,
+          session,
+          recording_id,
+          client_headers,
+          dropped_fields,
+          idempotency_key
+        )
     end
   end
+
+  # Stripe precedent: replays are marked on the wire, so a client can tell
+  # a fresh answer from a re-served one without diffing bodies.
+  defp maybe_replayed_header(conn, %{idempotent_replay: true}),
+    do: put_resp_header(conn, "idempotent-replayed", "true")
+
+  defp maybe_replayed_header(conn, _timing), do: conn
 
   # See AnthropicProxyController: ingress conversion drops travel to the
   # request log alongside the header and egress-allowlist drops.
@@ -70,7 +95,8 @@ defmodule DodoRouterWeb.ResponsesProxyController do
          session,
          recording_id,
          client_headers,
-         dropped_fields
+         dropped_fields,
+         idempotency_key
        ) do
     start_time = System.monotonic_time(:millisecond)
 
@@ -79,7 +105,8 @@ defmodule DodoRouterWeb.ResponsesProxyController do
         request_id: request_id,
         session: session,
         client_headers: client_headers,
-        recording_id: recording_id
+        recording_id: recording_id,
+        idempotency_key: idempotency_key
       ] ++ fidelity_opts(dropped_fields)
 
     case Proxy.dispatch(router, openai_params, dispatch_opts) do
@@ -98,7 +125,34 @@ defmodule DodoRouterWeb.ResponsesProxyController do
         |> put_resp_header("x-request-id", request_id)
         |> put_resp_header("x-timing-total-ms", to_string(total_ms))
         |> put_resp_header("x-timing-provider-ms", to_string(provider_ms))
+        |> maybe_replayed_header(timing)
         |> json(responses_response)
+
+      {:error, :idempotency_in_progress} ->
+        conn
+        |> put_status(409)
+        |> put_resp_header("x-request-id", request_id)
+        |> json(%{
+          "error" => %{
+            "message" =>
+              "A request with this Idempotency-Key is still executing. Retry after it completes.",
+            "type" => "idempotency_error",
+            "code" => "idempotency_in_progress"
+          }
+        })
+
+      {:error, :idempotency_key_mismatch} ->
+        conn
+        |> put_status(409)
+        |> put_resp_header("x-request-id", request_id)
+        |> json(%{
+          "error" => %{
+            "message" =>
+              "This Idempotency-Key was already used with a different request body. Keys must be unique per request.",
+            "type" => "idempotency_error",
+            "code" => "idempotency_key_reused"
+          }
+        })
 
       {:error, :no_routing_configured} ->
         conn

@@ -642,6 +642,16 @@ defmodule DodoRouter.Proxy.Adapter do
   # third party our auth credential.
   @non_client_headers ~w(cookie)
 
+  # 4. Addressed to the proxy and fulfilled by it. Idempotency-Key asks
+  # *this* hop for exactly-once semantics (no upstream LLM endpoint honors
+  # it); forwarding it would misstate who made the guarantee. Recorded
+  # visibly, unlike the silent reasons — "your key was honored here" is
+  # something an operator debugging a request wants to see. This also
+  # covers replays of stored traffic: a logged request's own key must not
+  # resurrect upstream, and replays never re-trigger idempotency because
+  # the opt is only ever set by the proxy controllers.
+  @proxy_fulfilled_headers ~w(idempotency-key)
+
   # 3b. The client did not send it at all: our own edge (Caddy) added it on the
   # way in, and it discloses the end user's real IP and our internal hostnames.
   # Kept separate from 3 because the caller cannot be shown a change to a header
@@ -726,6 +736,7 @@ defmodule DodoRouter.Proxy.Adapter do
       key in @transport_headers -> :transport
       key in @provider_scoped_headers -> :account_scoped
       key in @non_client_headers -> :not_client_sent
+      key in @proxy_fulfilled_headers -> :fulfilled_by_proxy
       key in @edge_headers -> :edge_added
       String.starts_with?(key, @edge_prefixes) -> :edge_added
       MapSet.member?(proxy_keys, key) -> :proxy_value_wins

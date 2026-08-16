@@ -654,11 +654,12 @@ Fidelity is the product. A client asks for something and gets a 200 that quietly
 
 ### 1. Client headers forward by default
 
-Policy decided 2026-08-08: client headers reach the provider by default, **including on fallback**. A header is stripped for exactly three reasons, all enumerated in `Adapter.build_forwarded_headers/2`:
+Policy decided 2026-08-08: client headers reach the provider by default, **including on fallback**. A header is stripped for exactly four reasons, all enumerated in `Adapter.build_forwarded_headers/2`:
 
 1. **We must replace it** — the proxy authenticates with its own credentials (`authorization`, `x-api-key`, `content-type`).
 2. **The provider will break** — hop-by-hop and body-describing headers after we rewrite the body (`content-length`, `transfer-encoding`, `accept-encoding`, …), plus account-scoped headers that name the *client's* account on a provider we authenticate to with *our* key (`openai-organization`, `chatgpt-account-id`, `x-goog-api-key`, …). Note `openai-beta` and `anthropic-beta` are deliberately absent: they are feature opt-ins, not account scope.
 3. **Not the client's to send** — `cookie` (carries the user's own DodoRouter session), and anything our edge added (`x-forwarded-*`, `cf-*`, `via`, `x-real-ip`).
+4. **Addressed to the proxy and fulfilled by it** — `Idempotency-Key` asks *this* hop for exactly-once semantics (no upstream LLM endpoint honors it; `DodoRouter.Proxy.Idempotency` does). Recorded visibly as `:fulfilled_by_proxy`, unlike the silent reasons — "your key was honored here" is diagnostic, not noise.
 
 **The contract:** every adapter that makes an upstream request exposes `request_headers(api_key, client_headers)` and builds its outbound headers through `Adapter.build_forwarded_headers/2`. Nothing else may assemble headers — a policy only applies where it is called, and for a while it was called by three adapters out of twelve while four more accepted `client_headers` and dropped them on the floor.
 

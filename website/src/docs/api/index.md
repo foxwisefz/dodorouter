@@ -38,6 +38,27 @@ A missing or invalid key returns `401` with `{"error":{"message":"Invalid API ke
 
 Every proxy response also carries `x-request-id`, `x-timing-total-ms`, and `x-timing-provider-ms` response headers.
 
+## Idempotency
+
+All three proxy endpoints accept an `Idempotency-Key` request header ([Stripe semantics](https://stripe.com/docs/idempotency), the [IETF `Idempotency-Key` draft](https://datatracker.ietf.org/doc/draft-ietf-httpapi-idempotency-key-header/)). Send a unique key per logical request — a row ID, a question ID — and a retry with the same key returns the stored response **without calling the provider or billing you again**. Built for batch work: an interrupted 8,000-row backfill resumes at zero cost, and "the provider answered but my own DB write failed" stops meaning paying twice for the same answer.
+
+```bash
+curl https://api.dodorouter.com/r/{slug}/v1/chat/completions \
+  -H "Authorization: Bearer $DODO_KEY" \
+  -H "Idempotency-Key: backfill-row-3821" \
+  -d '{"model":"default","messages":[{"role":"user","content":"…"}]}'
+```
+
+The exact contract:
+
+- **Keys are scoped per router** and expire after **24 hours**; after that the same key executes fresh.
+- Replayed responses carry an **`Idempotent-Replayed: true`** header, so you can tell a re-served answer from a fresh one.
+- Reusing a key with a **different request body is a `409`** (`idempotency_key_reused`) — never served-anyway, because a silently wrong answer is worse than a loud error.
+- A retry that arrives **while the original is still executing** gets a `409` (`idempotency_in_progress`); retry after it completes.
+- Only **successful** responses are stored: an error outcome releases the key so the retry executes fresh, and a response too large to store in full is also re-executed rather than replayed truncated.
+- **Streaming requests are refused** (`400`) when they carry the header — stored responses replay as JSON, and silently dropping the guarantee would be worse than saying no. Retries of a stored answer work in either non-streaming format: the response is stored provider-agnostically and re-rendered in whichever endpoint's format you retry against.
+- Replays appear in your logs as **zero-cost, zero-token rows** linked to the original, so spend analytics count each answer exactly once. The header itself is consumed by DodoRouter and never forwarded upstream (recorded in the request's fidelity trace).
+
 ## The `model` field is ignored
 
 This trips people up, so it's worth stating plainly: whatever `model` you put in the request body is discarded. DodoRouter always substitutes the model configured on the routing step it's currently attempting. Send `"default"`, your router's slug, or anything else — it makes no functional difference. To control which model actually answers, edit the router's [routing chain](/docs/concepts/#routing-steps-fallback), not the request.
