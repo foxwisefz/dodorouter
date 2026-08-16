@@ -423,8 +423,7 @@ defmodule DodoRouter.Logs do
       select: %{
         router_id: l.router_id,
         last_request_at: max(l.inserted_at),
-        request_count_24h:
-          count(fragment("CASE WHEN ? >= ? THEN 1 END", l.inserted_at, ^since))
+        request_count_24h: count(fragment("CASE WHEN ? >= ? THEN 1 END", l.inserted_at, ^since))
       }
     )
     |> Repo.all()
@@ -678,6 +677,42 @@ defmodule DodoRouter.Logs do
         }
 
     Repo.one(query) || %{p50: nil, p95: nil, p99: nil}
+  end
+
+  @doc """
+  Router-wide comparison basis for a single request's timing/cost trace page:
+  this router's median (p50) and p95 total latency, plus its median cost,
+  over the trailing window (`:hours`, default 24). One query for both
+  figures — `overhead` isn't its own column (it's `latency_ms` minus provider
+  time), so rather than a separate median-overhead aggregate the honest
+  comparison for a single request's total time is against this same p50/p95,
+  which IS directly queryable.
+
+  Returns `nil` fields (never `0`) when the router has no traffic in the
+  window, so callers can omit the comparison rather than show a fabricated
+  baseline.
+  """
+  def request_baselines(router_id, opts \\ []) do
+    hours = Keyword.get(opts, :hours, 24)
+    since = DateTime.add(DateTime.utc_now(), -hours * 3600, :second)
+
+    query =
+      from l in RequestLog,
+        where:
+          l.router_id == ^router_id and l.inserted_at >= ^since and l.traffic_type == "proxy" and
+            not is_nil(l.latency_ms),
+        select: %{
+          p50_latency_ms:
+            fragment("percentile_cont(0.5) WITHIN GROUP (ORDER BY ?)", l.latency_ms),
+          p95_latency_ms:
+            fragment("percentile_cont(0.95) WITHIN GROUP (ORDER BY ?)", l.latency_ms),
+          median_cost_usd:
+            fragment("percentile_cont(0.5) WITHIN GROUP (ORDER BY ?)", l.estimated_cost_usd),
+          sample_size: count(l.id)
+        }
+
+    Repo.one(query) ||
+      %{p50_latency_ms: nil, p95_latency_ms: nil, median_cost_usd: nil, sample_size: 0}
   end
 
   def requests_per_minute(%Router{} = router, opts \\ []) do

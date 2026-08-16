@@ -393,6 +393,86 @@ defmodule DodoRouterWeb.LogLiveTest do
       refute has_element?(live, "[data-timing-segment='processing']")
     end
 
+    test "overhead and cost carry a router-median comparison basis", %{conn: conn, user: user} do
+      {router, _api_key} = RoutersFixtures.router_fixture(user)
+
+      # establish a router baseline: several requests at a known latency/cost
+      for _ <- 1..5 do
+        LogsFixtures.log_fixture(router, %{
+          latency_ms: 1000,
+          estimated_cost_usd: Decimal.new("0.0200")
+        })
+      end
+
+      log =
+        LogsFixtures.log_fixture(router, %{
+          latency_ms: 7000,
+          attempted_steps: [%{"latency_ms" => 6800}],
+          estimated_cost_usd: Decimal.new("0.0412")
+        })
+
+      {:ok, live, html} = live(conn, ~p"/logs/#{log.request_id}")
+
+      assert has_element?(live, "#overhead-baseline")
+      assert has_element?(live, "#cost-baseline")
+      assert html =~ "router median"
+    end
+
+    test "omits the baseline rather than fabricate one when the router has no recent traffic", %{
+      conn: conn,
+      user: user
+    } do
+      {router, _api_key} = RoutersFixtures.router_fixture(user)
+
+      log =
+        LogsFixtures.log_fixture(router, %{
+          latency_ms: 3000,
+          estimated_cost_usd: Decimal.new("0.0100")
+        })
+
+      {:ok, live, _html} = live(conn, ~p"/logs/#{log.request_id}")
+
+      # this log IS the router's only traffic — its own p50 equals itself,
+      # so no meaningful comparison basis exists and none should be fabricated
+      refute has_element?(live, "#overhead-baseline")
+      refute has_element?(live, "#cost-baseline")
+    end
+
+    test "marks the dominant hop in a multi-attempt routing chain", %{conn: conn, user: user} do
+      {router, _api_key} = RoutersFixtures.router_fixture(user)
+
+      log =
+        LogsFixtures.log_fixture(router, %{
+          latency_ms: 5000,
+          attempted_steps: [
+            %{"provider" => "provider_a", "status" => "error", "latency_ms" => 4500},
+            %{"provider" => "provider_b", "status" => "success", "latency_ms" => 500}
+          ]
+        })
+
+      {:ok, live, _html} = live(conn, ~p"/logs/#{log.request_id}")
+
+      assert has_element?(live, "[data-hop-slow='true']")
+      refute has_element?(live, "[data-hop-slow='true']", "provider_b")
+    end
+
+    test "does not mark any hop when latency is evenly spread", %{conn: conn, user: user} do
+      {router, _api_key} = RoutersFixtures.router_fixture(user)
+
+      log =
+        LogsFixtures.log_fixture(router, %{
+          latency_ms: 1000,
+          attempted_steps: [
+            %{"provider" => "provider_a", "status" => "error", "latency_ms" => 500},
+            %{"provider" => "provider_b", "status" => "success", "latency_ms" => 500}
+          ]
+        })
+
+      {:ok, live, _html} = live(conn, ~p"/logs/#{log.request_id}")
+
+      refute has_element?(live, "[data-hop-slow='true']")
+    end
+
     test "model reasoning is viewable but collapsed", %{conn: conn, user: user} do
       {router, _api_key} = RoutersFixtures.router_fixture(user)
 

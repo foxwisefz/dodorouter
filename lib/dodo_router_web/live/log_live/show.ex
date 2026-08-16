@@ -76,6 +76,7 @@ defmodule DodoRouterWeb.LogLive.Show do
       |> assign(:finish_reason, extract_finish_reason(log.response_body))
       |> assign(:evaluations, Evaluations.list_for_log(socket.assigns.current_user, log.id))
       |> assign(:replay_count, Logs.replay_counts([log.id]) |> Map.get(log.id, 0))
+      |> assign(:baselines, Logs.request_baselines(log.router_id))
 
     {:ok, socket}
   end
@@ -298,6 +299,20 @@ defmodule DodoRouterWeb.LogLive.Show do
                     <span class="text-base-content/60">Overhead</span>
                     <span class="font-mono">{fmt_ms(overhead_time(@log))}</span>
                   </div>
+                  <%!-- "Overhead" has no median of its own to compare against
+                     (it isn't a stored column); comparing this request's
+                     Total against the router's own p50/p95 total latency is
+                     the honest basis that's actually queryable. Omitted
+                     entirely when the router has no other recent traffic to
+                     compare against, rather than comparing a value to
+                     itself. --%>
+                  <div
+                    :if={total_baseline_note(@log, @baselines)}
+                    id="overhead-baseline"
+                    class="text-[10px] text-base-content/40 -mt-0.5"
+                  >
+                    {total_baseline_note(@log, @baselines)}
+                  </div>
                   <div :if={@log.ttfb_ms} class="flex justify-between">
                     <span class="text-base-content/60">TTFB</span>
                     <span class="font-mono">{fmt_ms(@log.ttfb_ms)}</span>
@@ -455,6 +470,13 @@ defmodule DodoRouterWeb.LogLive.Show do
                     </span>
                   <% end %>
                 </div>
+                <div
+                  :if={cost_baseline_note(@log, @baselines)}
+                  id="cost-baseline"
+                  class="text-[10px] text-base-content/40 text-right -mt-0.5"
+                >
+                  {cost_baseline_note(@log, @baselines)}
+                </div>
                 <div class="flex justify-between">
                   <span class="text-base-content/60" title="Request payload size">Req size</span>
                   <span class="font-mono">{format_bytes(@log.payload_size_bytes)}</span>
@@ -483,14 +505,22 @@ defmodule DodoRouterWeb.LogLive.Show do
               <div class="text-[10px] uppercase tracking-wider text-base-content/40 font-semibold mb-1">
                 Routing
               </div>
+              <%!-- The slow hop is marked relative to the OTHER hops of this
+                 same request (>60% of the summed attempt latencies), not
+                 against any router-wide baseline — that's the honest
+                 comparison for a single trace, and it needs no query. --%>
               <div class="space-y-1">
-                <%= for {attempt, _idx} <- Enum.with_index(@log.attempted_steps) do %>
+                <%= for {attempt, dominant?} <- dominant_hop_flags(@log.attempted_steps) do %>
                   <div
                     phx-click="set_tab"
                     phx-value-tab="trace"
                     role="button"
                     title="Open the trace"
-                    class="flex items-center gap-1.5 text-xs rounded px-1 -mx-1 py-0.5 cursor-pointer hover:bg-secondary/60 transition-colors"
+                    data-hop-slow={if dominant?, do: "true"}
+                    class={[
+                      "flex items-center gap-1.5 text-xs rounded px-1 -mx-1 py-0.5 cursor-pointer hover:bg-secondary/60 transition-colors",
+                      dominant? && "bg-warning/10"
+                    ]}
                   >
                     <%= if attempt["status"] == "success" do %>
                       <span class="text-success">✓</span>
@@ -509,7 +539,13 @@ defmodule DodoRouterWeb.LogLive.Show do
                         {attempt["provider_key_label"]}
                       </.link>
                     <% end %>
-                    <span class="text-base-content/40 font-mono ml-auto">
+                    <span
+                      class={[
+                        "font-mono ml-auto",
+                        if(dominant?, do: "text-warning", else: "text-base-content/40")
+                      ]}
+                      title={if dominant?, do: "Dominates this request's routing chain"}
+                    >
                       {attempt["latency_ms"]}ms
                     </span>
                   </div>
@@ -1634,6 +1670,60 @@ defmodule DodoRouterWeb.LogLive.Show do
   end
 
   defp wait_time(_), do: "-"
+
+  # Router-median comparison basis for the request's Total latency (see the
+  # comment above the "Overhead" row) — omitted when the router has no other
+  # recent traffic to compare against (sample_size <= 1 means this log is
+  # its own only data point).
+  defp total_baseline_note(log, baselines) do
+    with true <- is_integer(log.latency_ms),
+         true <- (baselines[:sample_size] || 0) > 1,
+         p50 when is_number(p50) <- baselines[:p50_latency_ms] do
+      "router median #{fmt_ms(round(p50))} · 24h"
+    else
+      _ -> nil
+    end
+  end
+
+  defp cost_baseline_note(log, baselines) do
+    with true <- match?(%Decimal{}, log.estimated_cost_usd),
+         true <- (baselines[:sample_size] || 0) > 1,
+         median when is_number(median) <- decimal_to_float(baselines[:median_cost_usd]) do
+      "router median $#{:erlang.float_to_binary(median, decimals: 4)} · 24h"
+    else
+      _ -> nil
+    end
+  end
+
+  defp decimal_to_float(%Decimal{} = d), do: Decimal.to_float(d)
+  defp decimal_to_float(v) when is_float(v), do: v
+  defp decimal_to_float(_), do: nil
+
+  # Marks the hop that dominates this request's own routing chain (>60% of
+  # the summed attempt latencies) — a within-request comparison against the
+  # OTHER hops of the same request, not a router-wide baseline, so it needs
+  # no query. Only meaningful with 2+ attempts; a single-attempt chain has
+  # nothing to compare against.
+  defp dominant_hop_flags(steps) when is_list(steps) and length(steps) >= 2 do
+    total = steps |> Enum.map(&(&1["latency_ms"] || 0)) |> Enum.sum()
+    max_latency = steps |> Enum.map(&(&1["latency_ms"] || 0)) |> Enum.max(fn -> 0 end)
+    threshold = total * 0.6
+
+    {marked, _} =
+      Enum.map_reduce(steps, false, fn step, marked_already ->
+        latency = step["latency_ms"] || 0
+
+        dominant? =
+          not marked_already and total > 0 and latency == max_latency and latency > threshold
+
+        {{step, dominant?}, marked_already or dominant?}
+      end)
+
+    marked
+  end
+
+  defp dominant_hop_flags(steps) when is_list(steps), do: Enum.map(steps, &{&1, false})
+  defp dominant_hop_flags(_), do: []
 
   # Non-overlapping partition of `latency_ms` for the timing share bar — see
   # the comment above the <Charts.share_bar> call for why this split (and not
