@@ -7,9 +7,14 @@
 // Children are built on first expand rather than up front: a coding agent's
 // request is routinely megabytes, and rendering every node of one to find the
 // four top-level keys is the same waste in DOM that it was in scrollback.
-const COLLAPSED_STRING = 160
-const EXPAND_ALL_LIMIT = 4000
-const AUTO_OPEN_CHILDREN = 25
+import {
+  truncateString,
+  shouldAutoOpen,
+  summarizeContainer,
+  nextVisitCount,
+  shouldVisit,
+  parseJsonForTree
+} from "./hooks/json_tree_logic"
 
 const CLASSES = {
   row: "flex items-start gap-1 rounded px-1 -mx-1 leading-5",
@@ -46,10 +51,9 @@ function entries(value) {
 // "{ 4 keys }" / "[ 12 items ]" — a collapsed node still has to say how much it
 // is hiding, or collapsing everything just hides the shape of the request.
 function summarize(value) {
-  const count = Array.isArray(value) ? value.length : Object.keys(value).length
-  const noun = Array.isArray(value) ? (count === 1 ? "item" : "items") : count === 1 ? "key" : "keys"
-  const [open, close] = Array.isArray(value) ? ["[", "]"] : ["{", "}"]
-  return `${open} ${count} ${noun} ${close}`
+  const isArray = Array.isArray(value)
+  const count = isArray ? value.length : Object.keys(value).length
+  return summarizeContainer(isArray, count)
 }
 
 function renderPrimitive(value) {
@@ -60,23 +64,24 @@ function renderPrimitive(value) {
   // Quoted, because this is a fidelity tool: "true" and true are different
   // answers to "did the client send a boolean?", and colour alone is not proof.
   const text = String(value)
-  if (text.length <= COLLAPSED_STRING && !text.includes("\n")) {
+  const { truncated, shown, label } = truncateString(text)
+  if (!truncated) {
     return el("span", CLASSES.string, `"${text}"`)
   }
 
   // A system prompt is one of these. It gets a preview and its real length,
   // so a long value never silently costs you the rest of the object.
-  const preview = `"${text.slice(0, COLLAPSED_STRING)}…`
+  const preview = `"${shown}…`
   const wrap = el("span", "min-w-0")
   const body = el("span", CLASSES.string, preview)
-  const toggle = el("button", CLASSES.more, `+${text.length - COLLAPSED_STRING} chars`)
+  const toggle = el("button", CLASSES.more, label)
   let expanded = false
 
   toggle.addEventListener("click", (event) => {
     event.stopPropagation()
     expanded = !expanded
     body.textContent = expanded ? `"${text}"` : preview
-    toggle.textContent = expanded ? "less" : `+${text.length - COLLAPSED_STRING} chars`
+    toggle.textContent = expanded ? "less" : label
   })
 
   wrap.appendChild(body)
@@ -126,7 +131,7 @@ function renderNode(key, value, depth) {
   row.addEventListener("click", () => setOpen(children.hidden))
   // Top level opens so the shape of the request is visible without a click,
   // unless it is a long array — 300 collapsed message rows is not a shape.
-  setOpen(depth === 0 && entries(value).length <= AUTO_OPEN_CHILDREN)
+  setOpen(depth === 0 && shouldAutoOpen(entries(value).length))
   return node
 }
 
@@ -137,7 +142,9 @@ function toggleAll(root, open) {
   let visited = 0
 
   const walk = (node) => {
-    if (visited++ > EXPAND_ALL_LIMIT) return
+    const proceed = shouldVisit(visited)
+    visited = nextVisitCount(visited)
+    if (!proceed) return
     if (node.__setOpen) node.__setOpen(open)
     node.querySelectorAll(":scope > .jt-children > .jt-node").forEach(walk)
   }
@@ -154,15 +161,8 @@ export const JsonTree = {
     // Read from the rendered <pre> rather than a data- attribute: these
     // payloads run to megabytes and there is no reason to ship each one twice.
     const source = this.el.textContent
-    let parsed
-
-    try {
-      parsed = JSON.parse(source)
-    } catch (_) {
-      return // not JSON: the server-rendered <pre> stays exactly as it is
-    }
-
-    if (!container(parsed)) return
+    const { ok, value: parsed } = parseJsonForTree(source)
+    if (!ok) return // not JSON, or not a container: the server-rendered <pre> stays as-is
 
     // The panel is the root object, so it gets no row of its own: a lone
     // "{ 2 keys }" above the two keys is a line that says nothing.
