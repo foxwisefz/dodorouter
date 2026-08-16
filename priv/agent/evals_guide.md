@@ -247,11 +247,14 @@ is refused by name at creation.
 
 Three limits shape every benchmark; know them before reading close results:
 
-- **120 seconds per provider call.** A candidate that has not finished by
-  then is failed by our deadline, not by the model. When two models finish
-  near two minutes and one "fails", the comparison was censored by the
-  timeout — treat latencies approaching 120s as unrankable, and consider a
-  smaller task.
+- **10 minutes per candidate or judge call.** Evaluation replays wait for
+  the answer they are paying to measure — a build-shaped generation that
+  legitimately runs five minutes is rankable. (Live proxy traffic keeps a
+  120s deadline; there, failing over beats waiting out a stuck provider.)
+  A run that still hits 10 minutes is failed by our deadline, not by the
+  model — treat latencies approaching it as unrankable. Long candidates ×
+  3-way concurrency make batches slow: check `planned_runs` and scope the
+  first pass tight.
 - **Rate limits back off twice** (2s, then 8s), honoring the provider's
   `Retry-After` when it sends one (capped at 30s). A run that still comes
   back rate-limited after that fails with `error_category: "rate_limited"` —

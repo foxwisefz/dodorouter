@@ -32,7 +32,6 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
   @response_passthrough_key Adapter.response_passthrough_key()
 
   @base_url "https://api.anthropic.com/v1"
-  @timeout_ms 120_000
   @api_version "2023-06-01"
   @oauth_beta "oauth-2025-04-20"
 
@@ -145,7 +144,7 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
     payload_size_bytes = Adapter.record_outbound_body(body)
     start_time = FinchTelemetry.mark_request_start()
 
-    case Req.post(url, headers: headers, json: body, receive_timeout: @timeout_ms) do
+    case Req.post(url, headers: headers, json: body, receive_timeout: Adapter.receive_timeout()) do
       {:ok, %{status: 200, body: response_body, headers: resp_headers}} ->
         total_ms = latency(start_time)
         upload_ms = FinchTelemetry.get_upload_ms(start_time)
@@ -258,7 +257,7 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
       Req.post(url,
         headers: headers,
         json: body,
-        receive_timeout: @timeout_ms,
+        receive_timeout: Adapter.receive_timeout(),
         into: into_fun
       )
 

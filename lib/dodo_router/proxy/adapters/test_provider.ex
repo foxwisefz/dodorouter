@@ -227,7 +227,11 @@ defmodule DodoRouter.Proxy.Adapters.TestProvider do
         "ttfb_ms" => 100,
         "upload_ms" => 10,
         "payload_size_bytes" => 100,
-        "provider_processing_ms" => 50
+        "provider_processing_ms" => 50,
+        # The per-call provider deadline this dispatch would have used —
+        # recorded so the traffic-type-aware timeout is testable at the
+        # seam without sleeping through a real one.
+        "receive_timeout_ms" => DodoRouter.Proxy.Adapter.receive_timeout()
       }
     }
 
@@ -338,7 +342,11 @@ defmodule DodoRouter.Proxy.Adapters.TestProvider do
         "ttfb_ms" => 100,
         "upload_ms" => 10,
         "payload_size_bytes" => 100,
-        "provider_processing_ms" => 50
+        "provider_processing_ms" => 50,
+        # The per-call provider deadline this dispatch would have used —
+        # recorded so the traffic-type-aware timeout is testable at the
+        # seam without sleeping through a real one.
+        "receive_timeout_ms" => DodoRouter.Proxy.Adapter.receive_timeout()
       }
     }
 

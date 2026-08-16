@@ -45,6 +45,11 @@ defmodule DodoRouter.Proxy.FallbackChain do
     # has to flip the moment the first chunk goes out.
     Process.delete(:__chain_wire_touched__)
 
+    # Eval replays wait for the answer they are paying to measure; live
+    # traffic fails over. Set unconditionally so a reused process never
+    # carries the previous dispatch's deadline.
+    Adapter.put_receive_timeout(Keyword.get(opts, :traffic_type))
+
     send_chunk =
       if stream do
         fn data ->

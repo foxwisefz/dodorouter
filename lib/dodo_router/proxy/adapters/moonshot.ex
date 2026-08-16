@@ -32,7 +32,6 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
 
   @standard_base_url "https://api.moonshot.ai/v1"
   @coding_base_url "https://api.kimi.com/coding/v1"
-  @timeout_ms 120_000
 
   @doc false
   def base_url(%RoutingStep{plan_type: "coding"}), do: @coding_base_url
@@ -78,7 +77,7 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
     payload_size_bytes = Adapter.record_outbound_body(body)
     start_time = FinchTelemetry.mark_request_start()
 
-    case Req.post(url, headers: headers, json: body, receive_timeout: @timeout_ms) do
+    case Req.post(url, headers: headers, json: body, receive_timeout: Adapter.receive_timeout()) do
       {:ok, %{status: 200, body: response_body, headers: resp_headers}} ->
         total_ms = latency(start_time)
         upload_ms = FinchTelemetry.get_upload_ms(start_time)
@@ -198,7 +197,7 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
       Req.post(url,
         headers: headers,
         json: body,
-        receive_timeout: @timeout_ms,
+        receive_timeout: Adapter.receive_timeout(),
         into: into_fun
       )
 

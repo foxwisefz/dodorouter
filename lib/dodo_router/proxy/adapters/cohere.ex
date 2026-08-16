@@ -27,7 +27,6 @@ defmodule DodoRouter.Proxy.Adapters.Cohere do
   alias DodoRouter.Routers.RoutingStep
 
   @base_url "https://api.cohere.com/v2"
-  @timeout_ms 120_000
 
   @doc """
   Upstream headers: our credentials plus the client's forwardable headers, per
@@ -50,7 +49,7 @@ defmodule DodoRouter.Proxy.Adapters.Cohere do
     payload_size_bytes = Adapter.record_outbound_body(body)
     start_time = FinchTelemetry.mark_request_start()
 
-    case Req.post(url, headers: headers, json: body, receive_timeout: @timeout_ms) do
+    case Req.post(url, headers: headers, json: body, receive_timeout: Adapter.receive_timeout()) do
       {:ok, %{status: 200, body: response_body, headers: resp_headers}} ->
         total_ms = latency(start_time)
         upload_ms = FinchTelemetry.get_upload_ms(start_time)
@@ -129,7 +128,12 @@ defmodule DodoRouter.Proxy.Adapters.Cohere do
     end
 
     result =
-      Req.post(url, headers: headers, json: body, receive_timeout: @timeout_ms, into: into_fun)
+      Req.post(url,
+        headers: headers,
+        json: body,
+        receive_timeout: Adapter.receive_timeout(),
+        into: into_fun
+      )
 
     case result do
       {:ok, %Req.Response{status: 200} = resp} ->

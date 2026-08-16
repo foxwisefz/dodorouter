@@ -591,6 +591,43 @@ defmodule DodoRouter.Proxy.Adapter do
     body
   end
 
+  # Live proxy traffic wants fast failover — a two-minute hang should move
+  # to the next step, not wait out a stuck provider. An evaluation replay
+  # wants the opposite: the whole point is to wait for the answer being
+  # paid for and measured, nobody's HTTP request is held open (the runner
+  # is async), and a build-shaped generation legitimately runs ~5 minutes.
+  # A blanket 120s censored those comparisons — the run failed on OUR
+  # deadline and the latency ranking recorded a lie about the model.
+  @default_receive_timeout_ms 120_000
+  @eval_receive_timeout_ms 600_000
+  @receive_timeout_key :__adapter_receive_timeout_ms__
+
+  @doc """
+  The per-call provider deadline for the dispatch in flight.
+
+  Read by every adapter at its `Req` call. Set per dispatch by
+  `FallbackChain` from the traffic type — adapters run inline in the
+  dispatching process, the same property `Fidelity` relies on, and the
+  same caveat applies: anything that moves an adapter call into its own
+  task must carry this across with it.
+  """
+  def receive_timeout do
+    Process.get(@receive_timeout_key, @default_receive_timeout_ms)
+  end
+
+  @doc "Sets the dispatch's provider deadline from its traffic type."
+  def put_receive_timeout(traffic_type) do
+    Process.put(@receive_timeout_key, receive_timeout_for(traffic_type))
+    :ok
+  end
+
+  @doc "The deadline policy itself, pure: eval traffic waits, live traffic fails over."
+  def receive_timeout_for(traffic_type)
+      when traffic_type in ["evaluation_candidate", "evaluation_judge"],
+      do: @eval_receive_timeout_ms
+
+  def receive_timeout_for(_traffic_type), do: @default_receive_timeout_ms
+
   @doc """
   The client's untranslated fields, for an adapter whose format matches theirs.
 

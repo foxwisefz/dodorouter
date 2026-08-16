@@ -32,7 +32,6 @@ defmodule DodoRouter.Proxy.Adapters.Zai do
 
   @standard_base_url "https://api.z.ai/api/paas/v4"
   @coding_base_url "https://api.z.ai/api/coding/paas/v4"
-  @timeout_ms 120_000
 
   @doc """
   Upstream headers: our credentials plus the client's forwardable headers, per
@@ -55,7 +54,7 @@ defmodule DodoRouter.Proxy.Adapters.Zai do
     payload_size_bytes = Adapter.record_outbound_body(body)
     start_time = FinchTelemetry.mark_request_start()
 
-    case Req.post(url, headers: headers, json: body, receive_timeout: @timeout_ms) do
+    case Req.post(url, headers: headers, json: body, receive_timeout: Adapter.receive_timeout()) do
       {:ok, %{status: 200, body: response_body, headers: resp_headers}} ->
         if Adapter.context_overflow?(response_body) do
           {:error, :context_overflow,
@@ -168,7 +167,7 @@ defmodule DodoRouter.Proxy.Adapters.Zai do
       Req.post(url,
         headers: headers,
         json: body,
-        receive_timeout: @timeout_ms,
+        receive_timeout: Adapter.receive_timeout(),
         into: into_fun
       )
 
