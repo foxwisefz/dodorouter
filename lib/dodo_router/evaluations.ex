@@ -603,12 +603,17 @@ defmodule DodoRouter.Evaluations do
   end
 
   defp put_variant(target, nil), do: target
-  defp put_variant(target, variant), do: Map.put(target, "system_prompt", variant["system_prompt"])
+
+  defp put_variant(target, variant),
+    do: Map.put(target, "system_prompt", variant["system_prompt"])
 
   defp variant_patched_source(source_log, nil), do: source_log
 
   defp variant_patched_source(source_log, system_prompt) do
-    %{source_log | request_body: Replays.patch_system_prompt(source_log.request_body, system_prompt)}
+    %{
+      source_log
+      | request_body: Replays.patch_system_prompt(source_log.request_body, system_prompt)
+    }
   end
 
   # A copy of the attempt as it stands, stamped with when it was replaced and

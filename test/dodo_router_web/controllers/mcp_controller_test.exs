@@ -559,7 +559,7 @@ defmodule DodoRouterWeb.MCPControllerTest do
 
           if p["running"] == false and length(p["rankings"]) == 2,
             do: {:halt, p["rankings"]},
-            else: (Process.sleep(100) && {:cont, nil})
+            else: Process.sleep(100) && {:cont, nil}
         end)
 
       assert rankings

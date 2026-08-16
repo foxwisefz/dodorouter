@@ -820,7 +820,9 @@ defmodule DodoRouter.EvaluationsTest do
       {:ok,
        %{
          status: "error",
-         attempted_steps: [%{"error" => "rate_limited", "response_headers" => %{"retry-after" => ["3"]}}]
+         attempted_steps: [
+           %{"error" => "rate_limited", "response_headers" => %{"retry-after" => ["3"]}}
+         ]
        }}
 
     assert Evaluations.retry_after_ms(result) == 3_000

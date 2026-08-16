@@ -1177,7 +1177,12 @@ defmodule DodoRouterWeb.EvalLive.Show do
                   "series cursor-pointer",
                   pareto?(ranking, @rankings, @tradeoff_axis) && "pareto"
                 ]}
-                opacity={series_opacity(@selected_series, "#{ranking.provider}|#{ranking.model}|#{ranking.variant}")}
+                opacity={
+                  series_opacity(
+                    @selected_series,
+                    "#{ranking.provider}|#{ranking.model}|#{ranking.variant}"
+                  )
+                }
                 phx-click="select_series"
                 phx-value-series={"#{ranking.provider}|#{ranking.model}|#{ranking.variant}"}
               >

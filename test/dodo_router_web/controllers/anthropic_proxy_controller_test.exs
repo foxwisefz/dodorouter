@@ -206,9 +206,13 @@ defmodule DodoRouterWeb.AnthropicProxyControllerTest do
       # Asserted on the fidelity record, not the outbound body: this router's
       # step is OpenAI-format, so a passthrough field is *recorded as dropped*
       # rather than merged onto the wire. Checking only the outbound body
-      # passes whether or not the bug is present.
-      dropped = Enum.map(log.fidelity_changes || [], & &1["name"])
-      refute "beta" in dropped
+      # passes whether or not the bug is present. Channel-aware since
+      # dodo_router-69m: the param IS recorded — as a dropped query
+      # parameter, never as a body field.
+      changes = log.fidelity_changes || []
+
+      refute Enum.any?(changes, &(&1["name"] == "beta" and &1["channel"] == "request_body"))
+      assert Enum.any?(changes, &(&1["name"] == "beta" and &1["channel"] == "query_params"))
 
       # And it is not in the normalized request either — it was never a body
       # field, so there is nothing for the conversion to carry or lose.

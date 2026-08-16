@@ -237,7 +237,11 @@ defmodule DodoRouter.Proxy.Adapters.TestProvider do
     response =
       if step.model == @reasoning_model,
         do:
-          put_in(response, ["choices", Access.at(0), "message", "reasoning_content"], "thought about it"),
+          put_in(
+            response,
+            ["choices", Access.at(0), "message", "reasoning_content"],
+            "thought about it"
+          ),
         else: response
 
     {:ok, response, %{headers: [{"content-type", "application/json"} | @ratelimit_headers]}}
