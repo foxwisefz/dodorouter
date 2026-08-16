@@ -306,13 +306,27 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
       |> Map.take(@count_tokens_fields)
       |> Map.put("model", step.model || params["model"])
 
-    # Same translation as build_anthropic_request/2: Claude 5 models reject an
-    # explicit thinking disable; omission is the portable spelling.
+    # Same translation as build_anthropic_request/2: only Fable 5 rejects an
+    # explicit thinking disable, so only there is the block omitted — the
+    # count must describe the request dispatch would actually send.
     case body["thinking"] do
-      %{"type" => "disabled"} -> Map.delete(body, "thinking")
-      _ -> body
+      %{"type" => "disabled"} ->
+        if thinking_always_on_model?(step.model || params["model"]),
+          do: Map.delete(body, "thinking"),
+          else: body
+
+      _ ->
+        body
     end
   end
+
+  # Fable 5 rejects thinking.type=disabled at any effort — thinking has no
+  # off switch there (probed live 2026-08-16, dodo_router-cit). Every other
+  # current Claude model accepts an explicit disable.
+  defp thinking_always_on_model?(model) when is_binary(model),
+    do: String.starts_with?(model, "claude-fable")
+
+  defp thinking_always_on_model?(_), do: false
 
   @doc """
   Forwards a count_tokens request to Anthropic. Returns `{:ok, body}` with the
@@ -380,14 +394,29 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
     body = put_output_config(body, request)
 
     # Forward a client-supplied thinking block (if any) so it takes precedence
-    # over the step-level default. An explicit disable is translated to
-    # omission: Claude 5 models reject thinking.type=disabled outright, and on
-    # older models omission means the same thing. It still counts as a client
-    # choice, so the step-level effort default is not injected over it.
+    # over the step-level default. An explicit disable travels as sent —
+    # probed live 2026-08-16: Opus 5, Sonnet 5 and Opus 4.8 all accept it, and
+    # on the Claude 5 models omission turns thinking ON (adaptive default),
+    # billing the client for the very thing it turned off (dodo_router-cit).
+    # Fable 5 alone rejects disabled at any effort and has no off switch, so
+    # only there is omission the honest spelling — recorded, not silent.
+    # Either way a disable is a client choice, so the step-level effort
+    # default is not injected over it (the :anthropic injection would set
+    # thinking.type=adaptive, overriding the disable).
     body =
       case request["thinking"] do
-        %{"type" => "disabled"} ->
-          body
+        %{"type" => "disabled"} = thinking ->
+          if thinking_always_on_model?(step.model) do
+            Fidelity.record_dropped_body_fields(
+              %{"thinking" => thinking},
+              :unsupported_by_model,
+              "Fable 5 rejects thinking.type=disabled at any effort; thinking cannot be turned off there"
+            )
+
+            body
+          else
+            Map.put(body, "thinking", thinking)
+          end
 
         nil ->
           Adapter.inject_reasoning_effort(body, step.reasoning_effort, :anthropic)

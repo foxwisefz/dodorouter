@@ -61,7 +61,8 @@ defmodule DodoRouter.Proxy.Fidelity do
     edge_added: "our own edge added it; the client never sent it",
     proxy_value_wins: "collides with a header the proxy must set itself",
     not_in_provider_allowlist: "not a field the upstream Chat Completions API accepts",
-    unsupported_by_format_conversion: "the format conversion has no translation for it yet"
+    unsupported_by_format_conversion: "the format conversion has no translation for it yet",
+    unsupported_by_model: "the serving model rejects it; sent without the field"
   }
 
   # Three reasons say nothing about the request they are attached to, because

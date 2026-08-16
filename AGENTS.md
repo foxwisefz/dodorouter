@@ -795,6 +795,8 @@ The helper maps them to provider-specific values:
 
 Two edges worth knowing: `none` sends `thinking.type = "disabled"`, which **Fable 5 rejects outright** (thinking is always on there, so a step asking for none has no honest translation and the provider error is the truthful answer); and `output_config` also carries structured outputs, so the injection merges into the object the client's `response_format` built rather than replacing it.
 
+A **client-supplied** `thinking.type = "disabled"` forwards as sent (probed live 2026-08-16, dodo_router-cit): Opus 5, Sonnet 5 and Opus 4.8 accept it, and on the Claude 5 models omission would leave the adaptive default ON — billing the client for the very thing it turned off. Fable 5 is the one model with no off switch, so only there is the block omitted, with the drop recorded via `Fidelity` (`:unsupported_by_model`) rather than silent. Opus 5 rejects `disabled` combined with `output_config.effort` above `high`; that 400 is the client's own combination and travels back untouched.
+
 **OpenAI-family levels travel verbatim** — never clamped or rewritten. Which levels a model accepts is the step author's choice, and an unsupported one surfaces as a provider error in the logs rather than a silent downgrade.
 
 ### Adding or Modifying an Adapter

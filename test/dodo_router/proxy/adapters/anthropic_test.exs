@@ -534,12 +534,11 @@ defmodule DodoRouter.Proxy.Adapters.AnthropicTest do
       assert body["thinking"]["budget_tokens"] == 999
     end
 
-    test "omits a client thinking.type=disabled block instead of forwarding it" do
-      # Claude 5 models reject an explicit disable ("thinking.type.disabled is
-      # not supported for this model"); omission is the portable spelling —
-      # no thinking on older models, adaptive default on newer ones. This bit
-      # fallbacks: kimi/zai (on_off format) accept disabled, so the request
-      # only blew up when the chain fell back to an Anthropic step.
+    test "forwards a client thinking.type=disabled block as sent" do
+      # Probed live 2026-08-16 (dodo_router-cit): Sonnet 5 accepts an explicit
+      # disable, and omission would leave the adaptive default in charge —
+      # thinking ON for the very request that turned it off. Only Fable 5
+      # rejects disabled; that case is covered in its own describe.
       request = %{
         "messages" => [%{"role" => "user", "content" => "hi"}],
         "thinking" => %{"type" => "disabled"}
@@ -548,10 +547,12 @@ defmodule DodoRouter.Proxy.Adapters.AnthropicTest do
       step = %RoutingStep{model: "claude-sonnet-5"}
       body = Anthropic.build_anthropic_request(request, step)
 
-      refute Map.has_key?(body, "thinking")
+      assert body["thinking"] == %{"type" => "disabled"}
     end
 
-    test "client thinking.type=disabled also suppresses step-level effort injection" do
+    test "client thinking.type=disabled still suppresses step-level effort injection" do
+      # The :anthropic effort injection sets thinking.type=adaptive, which
+      # would silently override the client's disable.
       request = %{
         "messages" => [%{"role" => "user", "content" => "hi"}],
         "thinking" => %{"type" => "disabled"}
@@ -560,7 +561,8 @@ defmodule DodoRouter.Proxy.Adapters.AnthropicTest do
       step = %RoutingStep{model: "claude-sonnet-5", reasoning_effort: "high"}
       body = Anthropic.build_anthropic_request(request, step)
 
-      refute Map.has_key?(body, "thinking")
+      assert body["thinking"] == %{"type" => "disabled"}
+      refute get_in(body, ["output_config", "effort"])
     end
   end
 
@@ -691,7 +693,9 @@ defmodule DodoRouter.Proxy.Adapters.AnthropicTest do
       assert body["model"] == "claude-sonnet-5"
     end
 
-    test "drops a client thinking.type=disabled block (rejected by Claude 5 models)" do
+    test "keeps a client thinking.type=disabled block on models that accept it" do
+      # The count must describe the request dispatch would actually send —
+      # and dispatch now forwards the disable everywhere but Fable 5.
       params = %{
         "model" => "claude-sonnet-5",
         "messages" => [],
@@ -699,7 +703,7 @@ defmodule DodoRouter.Proxy.Adapters.AnthropicTest do
       }
 
       body = Anthropic.build_count_tokens_request(params, %RoutingStep{model: "claude-sonnet-5"})
-      refute Map.has_key?(body, "thinking")
+      assert body["thinking"] == %{"type" => "disabled"}
     end
   end
 
@@ -794,6 +798,71 @@ defmodule DodoRouter.Proxy.Adapters.AnthropicTest do
       [msg] = body["messages"]
 
       assert msg["content"] == [native]
+    end
+  end
+
+  describe "client thinking.type=disabled (dodo_router-cit)" do
+    # Probed live 2026-08-16 with a subscription token presenting as Claude
+    # Code: Opus 5 / Sonnet 5 / Opus 4.8 all accept an explicit disable, and on
+    # the Claude 5 models omission turns thinking ON (adaptive default) — the
+    # very thing the client turned off. Only Fable 5 rejects disabled outright
+    # at any effort, so only there is omission the honest spelling.
+    @disabled %{"type" => "disabled"}
+
+    defp disabled_request do
+      %{
+        "messages" => [%{"role" => "user", "content" => "hi"}],
+        "thinking" => @disabled
+      }
+    end
+
+    test "forwarded verbatim on models that accept it" do
+      for model <- ["claude-opus-5", "claude-sonnet-5", "claude-opus-4-8-20260115"] do
+        body =
+          Anthropic.build_anthropic_request(disabled_request(), %RoutingStep{model: model})
+
+        assert body["thinking"] == @disabled, "expected disabled forwarded on #{model}"
+      end
+    end
+
+    test "still not overridden by the step's reasoning_effort default" do
+      body =
+        Anthropic.build_anthropic_request(disabled_request(), %RoutingStep{
+          model: "claude-opus-5",
+          reasoning_effort: "high"
+        })
+
+      assert body["thinking"] == @disabled
+      refute get_in(body, ["output_config", "effort"])
+    end
+
+    test "omitted on Fable 5, with the drop recorded rather than silent" do
+      DodoRouter.Proxy.Fidelity.reset()
+
+      body =
+        Anthropic.build_anthropic_request(disabled_request(), %RoutingStep{
+          model: "claude-fable-5"
+        })
+
+      refute Map.has_key?(body, "thinking")
+
+      assert [change] = DodoRouter.Proxy.Fidelity.take().changes
+      assert change["name"] == "thinking"
+      assert change["action"] == "dropped"
+    end
+
+    test "count_tokens mirrors the request-path translation per model" do
+      params = %{"messages" => [], "thinking" => @disabled}
+
+      kept =
+        Anthropic.build_count_tokens_request(params, %RoutingStep{model: "claude-opus-5"})
+
+      assert kept["thinking"] == @disabled
+
+      dropped =
+        Anthropic.build_count_tokens_request(params, %RoutingStep{model: "claude-fable-5"})
+
+      refute Map.has_key?(dropped, "thinking")
     end
   end
 
