@@ -13,6 +13,28 @@ defmodule DodoRouterWeb.EvalLiveTest do
 
   setup :register_and_log_in_user
 
+  test "preselects the incumbent model as a candidate", %{conn: conn, user: user} do
+    {router, _api_key} = RoutersFixtures.router_fixture(user)
+    provider_key = ProvidersFixtures.provider_key_fixture(user)
+
+    log =
+      LogsFixtures.log_fixture(router, %{
+        final_model: "test-model",
+        attempted_steps: [
+          %{"status" => "success", "provider_key_id" => provider_key.id, "model" => "test-model"}
+        ]
+      })
+
+    {:ok, live, _html} = live(conn, ~p"/logs/#{log.id}/evals/new")
+
+    # The guide's first rule is "include the model you use today" — the form
+    # starts from it rather than asking every user to remember.
+    assert has_element?(
+             live,
+             "#selected-candidates input[value='#{provider_key.id}|test-model']"
+           ) or has_element?(live, "#selected-candidates", "test-model")
+  end
+
   test "creates an evaluation from a selected log", %{conn: conn, user: user} do
     {router, _api_key} = RoutersFixtures.router_fixture(user)
     provider_key = ProvidersFixtures.provider_key_fixture(user)

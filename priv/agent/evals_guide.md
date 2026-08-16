@@ -82,9 +82,12 @@ a run is measured from the actual call, which is the number to trust.
 
 Notes that change the result:
 
-- **Include the model you use today as a candidate.** A score is only meaningful
-  next to another score from the same rubric and the same judge. Without the
-  incumbent in the list you have numbers but no baseline.
+- **The incumbent is included for you.** A score is only meaningful next to
+  another score from the same rubric and the same judge, so the model that
+  served the source log is added as a candidate automatically when you leave
+  it out (pass `include_incumbent: false` to opt out). If the serving key is
+  no longer on the account, nothing is added — check the candidate list in
+  the result if the baseline matters.
 - **Write criteria that can fail.** "Be helpful" scores everything in the
   eighties and tells you nothing. Name the facts that must be right, the format,
   the length, and what must not appear.

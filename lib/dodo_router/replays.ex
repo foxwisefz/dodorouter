@@ -173,6 +173,23 @@ defmodule DodoRouter.Replays do
   nil so the replayed request body's own values pass through untouched.
   `reasoning_effort` is set only when the user explicitly chose one.
   """
+  @doc """
+  The `%{provider_key_id, model}` that actually served a log — the incumbent
+  an evaluation needs as its baseline — or `nil` when the serving key is
+  unknown (legacy rows, or steps that predate provider keys).
+  """
+  def incumbent_target(%RequestLog{} = log) do
+    (log.attempted_steps || [])
+    |> Enum.find(fn step -> step["status"] == "success" && step["provider_key_id"] end)
+    |> case do
+      %{"provider_key_id" => key_id} = step ->
+        %{provider_key_id: key_id, model: log.final_model || step["model"]}
+
+      _ ->
+        nil
+    end
+  end
+
   def build_step(%User{} = user, router_id, provider_key_id, model, reasoning_effort \\ nil) do
     case Providers.get_provider_key(user, provider_key_id) do
       nil ->

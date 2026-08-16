@@ -496,6 +496,88 @@ defmodule DodoRouterWeb.MCPControllerTest do
       assert by_label["plan key"]["judge_advice"] =~ "metered key for the judge"
     end
 
+    test "create_eval includes the incumbent as a candidate by default", %{
+      conn: conn,
+      token: token,
+      user: user,
+      router: router
+    } do
+      incumbent_key =
+        DodoRouter.ProvidersFixtures.provider_key_fixture(user, %{"label" => "Incumbent"})
+
+      other_key = DodoRouter.ProvidersFixtures.provider_key_fixture(user, %{"label" => "Other"})
+
+      log_attrs = fn ->
+        %{
+          request_body:
+            Jason.encode!(%{
+              "model" => "m",
+              "messages" => [%{"role" => "user", "content" => "hi"}]
+            }),
+          final_model: "test-model",
+          attempted_steps: [
+            %{
+              "status" => "success",
+              "provider_key_id" => incumbent_key.id,
+              "model" => "test-model"
+            }
+          ]
+        }
+      end
+
+      base_args = fn log ->
+        %{
+          "request_log_id" => log.id,
+          "name" => "Baseline check",
+          "criteria" => "Be useful",
+          "judge" => %{"provider_key_id" => other_key.id, "model" => "judge-model"},
+          "candidates" => [
+            %{"provider_key_id" => other_key.id, "model" => "challenger-model"}
+          ]
+        }
+      end
+
+      # A benchmark without the incumbent has numbers but no baseline — the
+      # source log names what served it, so nobody should have to remember.
+      log = DodoRouter.LogsFixtures.log_fixture(router, log_attrs.())
+      body = json_response(call_tool(conn, token, "create_eval", base_args.(log)), 200)
+      payload = tool_json(body)
+
+      eval = DodoRouter.Evaluations.get_evaluation!(user, payload["id"])
+      models = Enum.map(eval.candidate_targets, & &1["model"])
+      assert "test-model" in models
+      assert "challenger-model" in models
+
+      # Opting out is explicit.
+      log = DodoRouter.LogsFixtures.log_fixture(router, log_attrs.())
+
+      body =
+        json_response(
+          call_tool(
+            conn,
+            token,
+            "create_eval",
+            Map.put(base_args.(log), "include_incumbent", false)
+          ),
+          200
+        )
+
+      eval = DodoRouter.Evaluations.get_evaluation!(user, tool_json(body)["id"])
+      assert Enum.map(eval.candidate_targets, & &1["model"]) == ["challenger-model"]
+
+      # Already naming the incumbent model (any key) adds nothing.
+      log = DodoRouter.LogsFixtures.log_fixture(router, log_attrs.())
+
+      args =
+        Map.put(base_args.(log), "candidates", [
+          %{"provider_key_id" => other_key.id, "model" => "test-model"}
+        ])
+
+      body = json_response(call_tool(conn, token, "create_eval", args), 200)
+      eval = DodoRouter.Evaluations.get_evaluation!(user, tool_json(body)["id"])
+      assert length(eval.candidate_targets) == 1
+    end
+
     test "create_eval warns when the judge shares a provider key with a candidate", %{
       conn: conn,
       token: token,
@@ -683,7 +765,7 @@ defmodule DodoRouterWeb.MCPControllerTest do
 
       guide = call_tool(conn, scopeless, "get_guide") |> json_response(200) |> tool_json()
 
-      assert guide["guide"] =~ "Include the model you use today as a candidate"
+      assert guide["guide"] =~ "The incumbent is included for you"
       assert guide["guide"] =~ "rubric_feedback"
     end
   end

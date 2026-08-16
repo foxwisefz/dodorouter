@@ -124,7 +124,7 @@ defmodule DodoRouter.MCP.Tools do
       description: """
       Replay one real request against several models and score the answers with a judge model.
 
-      Include the model you use today as a candidate — a score only means something next to another score from the same rubric and judge. Write criteria that can fail: name the facts that must be right, the format, the length, and what must not appear. Set run=true to start it immediately.
+      The model that served the source log (the incumbent) is added as a candidate automatically when you leave it out — a score only means something next to another score from the same rubric and judge. Pass include_incumbent: false to opt out. Write criteria that can fail: name the facts that must be right, the format, the length, and what must not appear. Set run=true to start it immediately.
 
       Pick a judge on a metered API key, not a subscription/coding-plan key. Plan credentials are issued for a vendor's own coding environment and may refuse or throttle calls made from anywhere else — as a candidate that costs you one data point, but as the judge it means no scores at all. list_eval_targets reports `billing` per key.
 
@@ -176,7 +176,14 @@ defmodule DodoRouter.MCP.Tools do
             "description" =>
               "Runs per candidate, 1-10. This is your variance estimate, not a quality boost. Defaults to 3."
           },
-          "run" => %{"type" => "boolean", "description" => "Start the benchmark now."}
+          "run" => %{"type" => "boolean", "description" => "Start the benchmark now."},
+          "include_incumbent" => %{
+            "type" => "boolean",
+            "description" =>
+              "Default true: the model that served the source log is added as a candidate " <>
+                "when absent, so every benchmark has its baseline. False leaves the " <>
+                "candidate list exactly as given."
+          }
         }
       }
     },
@@ -467,6 +474,8 @@ defmodule DodoRouter.MCP.Tools do
          :ok <- evaluable(log),
          {:ok, judge} <- judge_target(principal, args["judge"]),
          {:ok, candidates} <- candidate_targets(principal, args["candidates"]) do
+      candidates = maybe_add_incumbent(principal, log, candidates, args["include_incumbent"])
+
       attrs = %{
         "name" => args["name"],
         "criteria" => args["criteria"],
@@ -727,6 +736,30 @@ defmodule DodoRouter.MCP.Tools do
 
   defp judge_target(_principal, _judge),
     do: {:error, "judge must be an object with provider_key_id and model."}
+
+  # A benchmark without the incumbent has numbers but no baseline, and the
+  # source log already names what served it — so the caller should not have
+  # to remember. Appended only when the incumbent model is absent, the
+  # serving key is known, and it is still one of the caller's keys;
+  # include_incumbent: false opts out (dodo_router-sdc).
+  defp maybe_add_incumbent(_principal, _log, candidates, false), do: candidates
+
+  defp maybe_add_incumbent(principal, log, candidates, _default_true) do
+    with incumbent when not is_nil(incumbent) <- Replays.incumbent_target(log),
+         false <- Enum.any?(candidates, &(&1["model"] == incumbent.model)),
+         key when not is_nil(key) <- provider_key(principal, incumbent.provider_key_id) do
+      candidates ++
+        [
+          %{
+            "provider_key_id" => key.id,
+            "provider" => Registry.adapter_provider(key.provider_slug),
+            "model" => incumbent.model
+          }
+        ]
+    else
+      _ -> candidates
+    end
+  end
 
   defp candidate_targets(principal, candidates) when is_list(candidates) and candidates != [] do
     Enum.reduce_while(candidates, {:ok, []}, fn candidate, {:ok, acc} ->

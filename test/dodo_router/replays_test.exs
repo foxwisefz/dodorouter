@@ -494,6 +494,30 @@ defmodule DodoRouter.ReplaysTest do
     end
   end
 
+  describe "incumbent_target/1" do
+    test "reads the serving key and model off the successful attempt" do
+      log = %RequestLog{
+        final_model: "kimi-k2.6",
+        attempted_steps: [
+          %{"status" => "error", "provider_key_id" => "key-a", "model" => "m1"},
+          %{"status" => "success", "provider_key_id" => "key-b", "model" => "kimi-k2.6"}
+        ]
+      }
+
+      assert Replays.incumbent_target(log) == %{provider_key_id: "key-b", model: "kimi-k2.6"}
+    end
+
+    test "nil when no attempt carries a provider key (legacy rows)" do
+      log = %RequestLog{
+        final_model: "m",
+        attempted_steps: [%{"status" => "success", "model" => "m"}]
+      }
+
+      assert Replays.incumbent_target(log) == nil
+      assert Replays.incumbent_target(%RequestLog{attempted_steps: nil}) == nil
+    end
+  end
+
   describe "replay_blocker/1" do
     test "returns nil for a replayable log", ctx do
       assert Replays.replay_blocker(ctx.source) == nil

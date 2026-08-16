@@ -41,7 +41,16 @@ defmodule DodoRouterWeb.EvalLive.New do
     selected_targets =
       case source do
         nil ->
-          []
+          # Start from the model that actually served this log: a benchmark
+          # without the incumbent has numbers but no baseline, and the form
+          # should not ask every user to remember the guide's first rule.
+          case Replays.incumbent_target(log) do
+            %{provider_key_id: key_id, model: model} ->
+              Enum.filter(["#{key_id}|#{model}"], &Map.has_key?(target_lookup, &1))
+
+            nil ->
+              []
+          end
 
         source ->
           source.candidate_targets
