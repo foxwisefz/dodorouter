@@ -6,8 +6,11 @@ defmodule DodoRouter.Evaluations do
   alias DodoRouter.Accounts.User
   alias DodoRouter.Logs.{Evaluation, EvaluationRun}
   alias DodoRouter.Providers.ProviderKey
+  alias DodoRouter.Proxy.Adapter.Registry, as: AdapterRegistry
   alias DodoRouter.Recordings
   alias DodoRouter.Recordings.Recording
+  alias DodoRouter.Routers
+  alias DodoRouter.Routers.{RoutingChangeEvent, RoutingStep}
   alias DodoRouter.{Logs, Providers, Proxy, Redact, Replays, Repo}
 
   # v2: dropped the pass/fail verdict — scores and their distributions
@@ -1589,6 +1592,175 @@ defmodule DodoRouter.Evaluations do
 
   defp capture_seconds(%Recording{started_at: started, stopped_at: stopped}),
     do: DateTime.diff(stopped, started, :second)
+
+  ## Applying a verdict as a routing change
+
+  @doc """
+  Applies a benchmark verdict: the routing step that served this
+  evaluation's traffic starts serving the chosen candidate instead, and a
+  `RoutingChangeEvent` records before/after with the evaluation and batch
+  that justified it — the change stays auditable and revertible.
+
+  The step is found by the incumbent, not guessed: the step whose
+  `{provider_key, model}` matches what actually served the source request.
+  No match or several matches refuses rather than editing routing the
+  evidence was not measured on. Only the identity fields change (provider,
+  key, model, plan_type — the latter two derived from the key, never
+  accepted from the caller); temperature, max_tokens and reasoning_effort
+  stay as the operator set them, because the benchmark did not measure a
+  change to them.
+
+  A prompt-variant row cannot be applied — the system prompt belongs to
+  the client's codebase, not to routing.
+  """
+  def apply_verdict(%User{} = user, %Evaluation{} = evaluation, params) do
+    evaluation = get_evaluation!(user, evaluation.id)
+    router = evaluation.request_log.router
+
+    with :ok <- refuse_variant(params["variant"]),
+         {:ok, key} <- fetch_owned_key(user, params["provider_key_id"]),
+         {:ok, step} <- incumbent_step(evaluation, router),
+         :ok <- refuse_noop(step, key, params["model"]) do
+      before_snapshot = step_snapshot(step)
+
+      after_attrs = %{
+        "provider" => AdapterRegistry.adapter_provider(key.provider_slug),
+        "provider_key_id" => key.id,
+        "model" => params["model"],
+        "plan_type" => plan_type_for_key(key)
+      }
+
+      Ecto.Multi.new()
+      |> Ecto.Multi.update(:step, RoutingStep.changeset(step, after_attrs))
+      |> Ecto.Multi.insert(:event, fn %{step: updated} ->
+        %RoutingChangeEvent{
+          router_id: router.id,
+          routing_step_id: step.id,
+          evaluation_id: evaluation.id,
+          batch_id: evaluation.last_batch_id,
+          changed_by_id: user.id,
+          before_step: before_snapshot,
+          after_step: step_snapshot(updated)
+        }
+      end)
+      |> Repo.transaction()
+      |> case do
+        {:ok, %{step: step, event: event}} -> {:ok, step, event}
+        {:error, _op, changeset, _changes} -> {:error, changeset}
+      end
+    end
+  end
+
+  @doc """
+  Reverts an applied verdict: the step goes back to the event's
+  `before_step` and the event is stamped `reverted_at`. The step is
+  restored to what the event recorded even if it was edited since — the
+  event is the authority on what "before" means.
+  """
+  def revert_verdict(%User{} = user, event_id) do
+    event =
+      from(e in RoutingChangeEvent,
+        join: r in assoc(e, :router),
+        where: e.id == ^event_id and r.user_id == ^user.id
+      )
+      |> Repo.one()
+
+    cond do
+      is_nil(event) ->
+        {:error, :not_found}
+
+      event.reverted_at ->
+        {:error, :already_reverted}
+
+      true ->
+        case Repo.get(RoutingStep, event.routing_step_id) do
+          nil ->
+            {:error, :step_deleted}
+
+          step ->
+            attrs =
+              Map.take(event.before_step, ["provider", "provider_key_id", "model", "plan_type"])
+
+            Ecto.Multi.new()
+            |> Ecto.Multi.update(:step, RoutingStep.changeset(step, attrs))
+            |> Ecto.Multi.update(
+              :event,
+              Ecto.Changeset.change(event, reverted_at: DateTime.utc_now())
+            )
+            |> Repo.transaction()
+            |> case do
+              {:ok, %{step: step}} -> {:ok, step}
+              {:error, _op, changeset, _changes} -> {:error, changeset}
+            end
+        end
+    end
+  end
+
+  @doc "Routing changes applied from this evaluation, newest first."
+  def list_applied_changes(%Evaluation{} = evaluation) do
+    from(e in RoutingChangeEvent,
+      where: e.evaluation_id == ^evaluation.id,
+      order_by: [desc: e.inserted_at]
+    )
+    |> Repo.all()
+  end
+
+  defp refuse_variant(variant) when is_binary(variant) and variant != "",
+    do: {:error, :variant_not_applicable}
+
+  defp refuse_variant(_variant), do: :ok
+
+  defp fetch_owned_key(user, key_id) do
+    with {:ok, uuid} <- Ecto.UUID.cast(key_id || ""),
+         %ProviderKey{} = key <- Providers.get_provider_key(user, uuid) do
+      {:ok, key}
+    else
+      _ -> {:error, :unknown_key}
+    end
+  end
+
+  defp incumbent_step(evaluation, router) do
+    case Replays.incumbent_target(evaluation.request_log) do
+      nil ->
+        {:error, :no_incumbent}
+
+      %{provider_key_id: key_id, model: model} ->
+        router
+        |> Routers.list_routing_steps()
+        |> Enum.filter(&(&1.model == model and &1.provider_key_id == key_id))
+        |> case do
+          [step] -> {:ok, step}
+          [] -> {:error, :no_matching_step}
+          _many -> {:error, :ambiguous_step}
+        end
+    end
+  end
+
+  defp refuse_noop(step, key, model) do
+    if step.provider_key_id == key.id and step.model == model,
+      do: {:error, :already_serving},
+      else: :ok
+  end
+
+  # The snapshot keeps the key's label alongside its id so the audit row
+  # stays readable after the key is deleted.
+  defp step_snapshot(step) do
+    step = Repo.preload(step, :provider_key)
+
+    %{
+      "provider" => step.provider,
+      "provider_key_id" => step.provider_key_id,
+      "provider_key_label" => step.provider_key && step.provider_key.label,
+      "model" => step.model,
+      "plan_type" => step.plan_type
+    }
+  end
+
+  # Mirrors the routing UI's derivation: the key's slug decides the plan
+  # type, it is never accepted from the caller.
+  defp plan_type_for_key(key) do
+    if String.contains?(key.provider_slug, "coding"), do: "coding", else: "standard"
+  end
 
   def parse_judgement(raw) when is_binary(raw) do
     json =

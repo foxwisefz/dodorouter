@@ -356,6 +356,8 @@ defmodule DodoRouter.MCP.Tools do
 
       A recording-based benchmark adds savings_projection: each candidate's generation cost scaled to the capture's real request rate, next to what the traffic cost as served — "$X/month at your current rate", at API list prices with judge spend excluded. Absent when the capture window is under 10 minutes, because a rate measured that briefly is an artifact of when the operator clicked stop.
 
+      applied_changes, when present, is the audit trail of routing changes made from this benchmark's verdict — what served before, what serves now, when, and whether it was reverted. Applying is the operator's click in the dashboard; these tools read the trail, they do not change routing.
+
       A failed run is not always a failed model. `failure_stage` says which half broke: "judge" means the answer was generated and paid for and only the scoring call failed — retry_eval re-scores it for free — while "candidate" means the model never answered. `retryable` counts both. `blockers` reports what is already known to be broken before spending anything: a key seen refusing, or a candidate model the provider has retired; it is omitted while the benchmark is running, since the keys were checked at start and a poll should stay cheap.
 
       The default payload is built for polling: status, summary, rankings, rubric feedback and retry counts. Pass include: ["runs"] for the per-run detail (up to 2,000 chars of output_preview per run — a full batch can be large) and include: ["criteria"] for the rubric text.
@@ -863,6 +865,7 @@ defmodule DodoRouter.MCP.Tools do
 
     payload
     |> maybe_put_projection(principal, evaluation, rankings)
+    |> maybe_put_applied_changes(evaluation)
     |> maybe_put_blockers(principal, evaluation, running?)
     |> maybe_put_criteria(evaluation, "criteria" in include)
     # "attempts" implies runs: attempt history hangs off the run it was
@@ -928,6 +931,32 @@ defmodule DodoRouter.MCP.Tools do
       })
     else
       _ -> payload
+    end
+  end
+
+  # Whether this benchmark's verdict has been acted on. Applying is the
+  # operator's click in the dashboard — these tools read the audit trail,
+  # they do not change routing.
+  defp maybe_put_applied_changes(payload, evaluation) do
+    case Evaluations.list_applied_changes(evaluation) do
+      [] ->
+        payload
+
+      events ->
+        Map.put(
+          payload,
+          :applied_changes,
+          Enum.map(events, fn event ->
+            %{
+              applied_at: event.inserted_at,
+              reverted_at: event.reverted_at,
+              batch_id: event.batch_id,
+              routing_step_id: event.routing_step_id,
+              before: event.before_step,
+              after: event.after_step
+            }
+          end)
+        )
     end
   end
 

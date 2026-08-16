@@ -1773,6 +1773,77 @@ defmodule DodoRouterWeb.EvalLiveTest do
     assert html =~ "Savings /month"
   end
 
+  test "a verdict is applied from the ranking row and stays revertible", %{
+    conn: conn,
+    user: user
+  } do
+    {router, _api_key} = RoutersFixtures.router_fixture(user)
+    incumbent_key = ProvidersFixtures.provider_key_fixture(user, %{"label" => "Incumbent key"})
+    candidate_key = ProvidersFixtures.provider_key_fixture(user, %{"label" => "Candidate key"})
+
+    {:ok, step} =
+      DodoRouter.Routers.create_routing_step(router, %{
+        "provider" => "test_provider",
+        "model" => "incumbent-model",
+        "provider_key_id" => incumbent_key.id
+      })
+
+    log =
+      LogsFixtures.log_fixture(router, %{
+        final_model: "incumbent-model",
+        attempted_steps: [
+          %{
+            "status" => "success",
+            "provider_key_id" => incumbent_key.id,
+            "model" => "incumbent-model"
+          }
+        ]
+      })
+
+    {:ok, evaluation} =
+      Evaluations.create_evaluation(user, log, %{
+        name: "Apply flow",
+        criteria: "Answer accurately",
+        judge_model: "judge-model",
+        judge_provider_key_id: candidate_key.id,
+        candidate_targets: [
+          %{
+            "provider_key_id" => candidate_key.id,
+            "provider" => "test_provider",
+            "model" => "cheap-model"
+          }
+        ]
+      })
+
+    %EvaluationRun{}
+    |> EvaluationRun.changeset(%{
+      evaluation_id: evaluation.id,
+      status: "completed",
+      score: 90,
+      candidate_provider: "test_provider",
+      candidate_model: "cheap-model"
+    })
+    |> Repo.insert!()
+
+    {:ok, live, _html} = live(conn, ~p"/evals/#{evaluation.id}")
+
+    html = live |> element("button[phx-click='apply_verdict']") |> render_click()
+    assert html =~ "Routing updated"
+    assert has_element?(live, "#applied-changes", "cheap-model")
+
+    updated = DodoRouter.Routers.get_routing_step!(router, step.id)
+    assert updated.model == "cheap-model"
+    assert updated.provider_key_id == candidate_key.id
+
+    html = live |> element("button[phx-click='revert_verdict']") |> render_click()
+    assert html =~ "Routing reverted"
+    assert has_element?(live, "#applied-changes", "reverted")
+
+    reverted = DodoRouter.Routers.get_routing_step!(router, step.id)
+    assert reverted.model == "incumbent-model"
+    assert reverted.provider_key_id == incumbent_key.id
+  end
+
   test "a recording with nothing replayable bounces back with the reason", %{
     conn: conn,
     user: user

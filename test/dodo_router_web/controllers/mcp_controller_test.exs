@@ -802,6 +802,69 @@ defmodule DodoRouterWeb.MCPControllerTest do
       assert_in_delta row["monthly_savings_usd"], 3.0, 0.001
     end
 
+    test "get_eval reports the routing changes applied from a verdict", %{
+      conn: conn,
+      token: token,
+      user: user,
+      router: router
+    } do
+      incumbent_key =
+        DodoRouter.ProvidersFixtures.provider_key_fixture(user, %{"label" => "Incumbent"})
+
+      candidate_key =
+        DodoRouter.ProvidersFixtures.provider_key_fixture(user, %{"label" => "Candidate"})
+
+      {:ok, _step} =
+        DodoRouter.Routers.create_routing_step(router, %{
+          "provider" => "test_provider",
+          "model" => "incumbent-model",
+          "provider_key_id" => incumbent_key.id
+        })
+
+      log =
+        DodoRouter.LogsFixtures.log_fixture(router, %{
+          final_model: "incumbent-model",
+          attempted_steps: [
+            %{
+              "status" => "success",
+              "provider_key_id" => incumbent_key.id,
+              "model" => "incumbent-model"
+            }
+          ]
+        })
+
+      {:ok, evaluation} =
+        DodoRouter.Evaluations.create_evaluation(user, log, %{
+          name: "Applied",
+          criteria: "Be useful",
+          judge_model: "judge-model",
+          judge_provider_key_id: candidate_key.id,
+          candidate_targets: [
+            %{
+              "provider_key_id" => candidate_key.id,
+              "provider" => "test_provider",
+              "model" => "cheap-model"
+            }
+          ]
+        })
+
+      {:ok, _step, _event} =
+        DodoRouter.Evaluations.apply_verdict(user, evaluation, %{
+          "provider_key_id" => candidate_key.id,
+          "model" => "cheap-model"
+        })
+
+      payload =
+        tool_json(
+          json_response(call_tool(conn, token, "get_eval", %{"id" => evaluation.id}), 200)
+        )
+
+      assert [change] = payload["applied_changes"]
+      assert change["before"]["model"] == "incumbent-model"
+      assert change["after"]["model"] == "cheap-model"
+      assert change["reverted_at"] == nil
+    end
+
     test "create_eval refuses a recording the token's user does not own", %{
       conn: conn,
       token: token,

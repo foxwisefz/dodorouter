@@ -154,6 +154,12 @@ running (the keys were checked at start). Then:
   window is under 10 minutes, because a rate measured that briefly is an
   artifact of when the operator clicked stop, not a property of the
   traffic.
+- `applied_changes` — present once someone acted on the verdict: the
+  routing changes made from this benchmark, each with what served before,
+  what serves now, and whether it was reverted. Applying is the operator's
+  click in the dashboard ("Route here" on a ranking row) — these tools
+  read the audit trail, they do not change routing. If your benchmark
+  earned a switch, say so to your operator and point at the evaluation.
 - `rubric_feedback` — **read this before you trust the scores.** It reports how
   often the judge said your criteria were too thin to decide, and what it said
   was missing. If `flagged` is high, fix `criteria` and create a new evaluation;

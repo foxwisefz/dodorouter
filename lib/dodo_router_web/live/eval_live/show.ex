@@ -99,6 +99,38 @@ defmodule DodoRouterWeb.EvalLive.Show do
     {:noreply, assign(socket, :criteria_expanded, not socket.assigns.criteria_expanded)}
   end
 
+  def handle_event("apply_verdict", %{"key" => key_id, "model" => model}, socket) do
+    case Evaluations.apply_verdict(socket.assigns.current_user, socket.assigns.evaluation, %{
+           "provider_key_id" => key_id,
+           "model" => model
+         }) do
+      {:ok, _step, _event} ->
+        {:noreply,
+         socket
+         |> put_flash(
+           :info,
+           "Routing updated — #{model} now serves this traffic. Revert from this page if it disappoints."
+         )
+         |> load(socket.assigns.evaluation)}
+
+      {:error, reason} ->
+        {:noreply, put_flash(socket, :error, verdict_error(reason))}
+    end
+  end
+
+  def handle_event("revert_verdict", %{"event" => event_id}, socket) do
+    case Evaluations.revert_verdict(socket.assigns.current_user, event_id) do
+      {:ok, _step} ->
+        {:noreply,
+         socket
+         |> put_flash(:info, "Routing reverted to what it was before this benchmark.")
+         |> load(socket.assigns.evaluation)}
+
+      {:error, reason} ->
+        {:noreply, put_flash(socket, :error, verdict_error(reason))}
+    end
+  end
+
   def handle_event("toggle_ranking_sources", %{"key" => key}, socket) do
     expanded = socket.assigns.expanded_rankings
 
@@ -348,6 +380,7 @@ defmodule DodoRouterWeb.EvalLive.Show do
     |> assign(:source_count, length(Evaluation.source_log_ids(evaluation)))
     |> assign(:recording, recording)
     |> assign(:projection, projection(recording, rankings))
+    |> assign(:applied_changes, Evaluations.list_applied_changes(evaluation))
     |> assign(:batches, batches)
     |> assign(:selected_batch, selected)
     |> assign(:selected_group, group)
@@ -657,6 +690,43 @@ defmodule DodoRouterWeb.EvalLive.Show do
   defp worst_source_label(%{per_source: [worst | _]}) do
     worst.average || "unscored"
   end
+
+  # The candidate target that produced this ranking row — carries the
+  # provider_key_id an apply needs, which the ranking itself does not.
+  defp apply_target(evaluation, ranking) do
+    Enum.find(evaluation.candidate_targets || [], fn target ->
+      target["model"] == ranking.model and target["provider"] == ranking.provider
+    end)
+  end
+
+  defp verdict_error(:no_incumbent),
+    do:
+      "The source request doesn't name which routing step served it, so there is nothing to safely update. Edit the routing step directly."
+
+  defp verdict_error(:no_matching_step),
+    do:
+      "No routing step currently serves this benchmark's incumbent — routing may have been edited since. Edit the step directly."
+
+  defp verdict_error(:ambiguous_step),
+    do: "Several routing steps match the incumbent — edit the one you mean directly."
+
+  defp verdict_error(:already_serving), do: "That model already serves this traffic."
+
+  defp verdict_error(:unknown_key),
+    do: "That candidate's provider key is no longer on your account."
+
+  defp verdict_error(:variant_not_applicable),
+    do:
+      "A prompt variant can't be applied as routing — the system prompt lives in your product's code, not in the router."
+
+  defp verdict_error(:not_found), do: "That routing change no longer exists."
+  defp verdict_error(:already_reverted), do: "That routing change was already reverted."
+
+  defp verdict_error(:step_deleted),
+    do: "The routing step this change touched has been deleted — nothing to revert."
+
+  defp verdict_error(%Ecto.Changeset{}),
+    do: "The routing step update was invalid — edit the step directly."
 
   # Only a recording gives the projection its denominator: a hand-picked
   # log set has no traffic rate to scale by.
@@ -1327,6 +1397,7 @@ defmodule DodoRouterWeb.EvalLive.Show do
                   >
                     Weakest request
                   </th>
+                  <th></th>
                 </tr>
               </thead>
               <tbody>
@@ -1362,13 +1433,28 @@ defmodule DodoRouterWeb.EvalLive.Show do
                       </button>
                       <span :if={ranking.per_source == []}>—</span>
                     </td>
+                    <td>
+                      <button
+                        :if={is_nil(ranking.variant) && apply_target(@evaluation, ranking)}
+                        type="button"
+                        id={"apply-#{ranking_dom_id(ranking)}"}
+                        phx-click="apply_verdict"
+                        phx-value-key={apply_target(@evaluation, ranking)["provider_key_id"]}
+                        phx-value-model={ranking.model}
+                        data-confirm={"Route this traffic to #{ranking.model}? The routing step that served this benchmark's incumbent will be updated, and the change stays revertible from this page."}
+                        class="btn btn-outline btn-xs"
+                        title="Update the routing step that served this traffic to this candidate"
+                      >
+                        Route here
+                      </button>
+                    </td>
                   </tr>
                   <tr
                     :if={MapSet.member?(@expanded_rankings, ranking_key(ranking))}
                     id={"sources-#{ranking_dom_id(ranking)}"}
                     class="bg-base-200/30"
                   >
-                    <td colspan={if @source_count > 1, do: "9", else: "8"} class="px-6 py-3">
+                    <td colspan={if @source_count > 1, do: "10", else: "9"} class="px-6 py-3">
                       <p class="mb-2 text-xs font-medium text-base-content/50">
                         Per source request, weakest first
                       </p>
@@ -1400,7 +1486,7 @@ defmodule DodoRouterWeb.EvalLive.Show do
                 <% end %>
                 <tr :if={@rankings == []}>
                   <td
-                    colspan={if @source_count > 1, do: "9", else: "8"}
+                    colspan={if @source_count > 1, do: "10", else: "9"}
                     class="py-10 text-center text-base-content/40"
                   >
                     No completed model runs yet.
@@ -1471,6 +1557,60 @@ defmodule DodoRouterWeb.EvalLive.Show do
                 </tr>
               </tbody>
             </table>
+          </div>
+        </section>
+
+        <section
+          :if={@applied_changes != []}
+          id="applied-changes"
+          class="rounded-2xl border border-base-300/60 bg-base-100 p-6 shadow-sm"
+        >
+          <h2 class="text-lg font-semibold">Routing changes from this benchmark</h2>
+          <p class="text-sm text-base-content/45">
+            Each change is recorded against the batch that justified it, and stays revertible.
+          </p>
+          <div class="mt-4 space-y-2">
+            <div
+              :for={event <- @applied_changes}
+              class="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-base-300/70 bg-base-200/40 px-4 py-3 text-sm"
+            >
+              <div class="flex flex-wrap items-center gap-2">
+                <span class="font-mono text-xs">
+                  {event.before_step["model"]}
+                  <span :if={event.before_step["provider_key_label"]} class="text-base-content/45">
+                    ({event.before_step["provider_key_label"]})
+                  </span>
+                </span>
+                <.icon name="hero-arrow-right" class="size-3.5 text-base-content/40" />
+                <span class="font-mono text-xs font-semibold">
+                  {event.after_step["model"]}
+                  <span :if={event.after_step["provider_key_label"]} class="text-base-content/45">
+                    ({event.after_step["provider_key_label"]})
+                  </span>
+                </span>
+                <span class="text-xs text-base-content/45">
+                  applied {Calendar.strftime(event.inserted_at, "%b %d, %H:%M")}
+                </span>
+              </div>
+              <span
+                :if={event.reverted_at}
+                class="badge badge-ghost badge-sm"
+                title={"Reverted #{Calendar.strftime(event.reverted_at, "%b %d, %H:%M")}"}
+              >
+                reverted
+              </span>
+              <button
+                :if={is_nil(event.reverted_at)}
+                type="button"
+                id={"revert-#{event.id}"}
+                phx-click="revert_verdict"
+                phx-value-event={event.id}
+                data-confirm="Put the routing step back to what it was before this change?"
+                class="btn btn-ghost btn-xs"
+              >
+                Revert
+              </button>
+            </div>
           </div>
         </section>
 
