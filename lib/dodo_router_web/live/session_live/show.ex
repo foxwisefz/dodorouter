@@ -139,6 +139,43 @@ defmodule DodoRouterWeb.SessionLive.Show do
 
         <.cache_regression_notice :if={@cache_regression} finding={@cache_regression} />
         
+    <!-- What the session's input tokens were made of. Shares are pro-rata
+       allocations of the billed totals (no provider tokenizer is public),
+       so the percentages are the trustworthy part. -->
+        <div :if={attribution_rows(@token_attribution) != []} class="mb-6">
+          <h2 class="text-lg font-semibold mb-3">Context breakdown</h2>
+          <div
+            id="session-token-attribution"
+            class="bg-base-100 border border-base-300 rounded-lg p-4 space-y-2 text-xs max-w-xl"
+          >
+            <div :for={row <- attribution_rows(@token_attribution)} class="space-y-0.5">
+              <div class="flex justify-between">
+                <span class="text-base-content/60">{row.label}</span>
+                <span class="font-mono">
+                  {row.pct}% <span class="text-base-content/40">· ~{row.tokens}</span>
+                  <span
+                    :if={row.cached_pct > 0}
+                    class="text-success"
+                    title="Share of this segment that sat in the cacheable prefix"
+                  >
+                    {row.cached_pct}% cached
+                  </span>
+                </span>
+              </div>
+              <div class="h-1 rounded-full bg-base-300/60 overflow-hidden">
+                <div class="h-full rounded-full bg-primary/70" style={"width: #{row.pct}%"}></div>
+              </div>
+              <div :if={row.by_tool != []} class="text-[10px] text-base-content/45 text-right">
+                {Enum.map_join(row.by_tool, " · ", fn {tool, tokens} -> "#{tool} ~#{tokens}" end)}
+              </div>
+            </div>
+            <p class="text-[10px] text-base-content/40 pt-1">
+              Summed across {@token_attribution["rows"]} requests · shares of
+              ~{@token_attribution["basis_tokens"]} billed input tokens, allocated pro-rata
+            </p>
+          </div>
+        </div>
+        
     <!-- Request timeline -->
         <h2 class="text-lg font-semibold mb-3">Requests</h2>
         <div class="space-y-2">
@@ -325,6 +362,37 @@ defmodule DodoRouterWeb.SessionLive.Show do
   defp decimal_float(%Decimal{} = d), do: Decimal.to_float(d)
   defp decimal_float(n) when is_number(n), do: n / 1
 
+  @attribution_labels [
+    {"system", "System prompt"},
+    {"tools", "Tool definitions"},
+    {"history", "History"},
+    {"tool_results", "Tool results"},
+    {"file_contents", "File contents"}
+  ]
+
+  # Non-empty buckets of the session rollup, largest first — same shape the
+  # log page renders per request, summed by Logs.session_token_attribution.
+  defp attribution_rows(%{"buckets" => buckets, "basis_tokens" => basis})
+       when is_integer(basis) and basis > 0 do
+    for {key, label} <- @attribution_labels,
+        bucket = buckets[key],
+        is_map(bucket),
+        (bucket["allocated_tokens"] || 0) > 0 do
+      tokens = bucket["allocated_tokens"]
+
+      %{
+        label: label,
+        tokens: tokens,
+        pct: round(tokens / basis * 100),
+        cached_pct: round((bucket["cached_tokens"] || 0) / tokens * 100),
+        by_tool: bucket |> Map.get("by_tool", %{}) |> Enum.sort_by(fn {_t, n} -> -n end)
+      }
+    end
+    |> Enum.sort_by(&(-&1.tokens))
+  end
+
+  defp attribution_rows(_rollup), do: []
+
   defp load_data(socket) do
     router = socket.assigns.router
     session_id = socket.assigns.session_id
@@ -344,6 +412,7 @@ defmodule DodoRouterWeb.SessionLive.Show do
     |> assign(:session_name, session_name)
     |> assign(:cache_regression, cache_regression(logs))
     |> assign(:latency_percentiles, latency_percentiles(logs))
+    |> assign(:token_attribution, Logs.session_token_attribution(router, session_id))
   end
 
   # A session is small enough that a per-session DB percentile query is

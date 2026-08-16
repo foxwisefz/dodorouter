@@ -549,6 +549,27 @@ defmodule DodoRouterWeb.LogLive.Show do
                   <span class="text-base-content/60" title="Request payload size">Req size</span>
                   <span class="font-mono">{format_bytes(@log.payload_size_bytes)}</span>
                 </div>
+                <div :if={@log.idempotency_key} class="flex justify-between gap-2">
+                  <span
+                    class="text-base-content/60 shrink-0"
+                    title="The client asked for exactly-once semantics on this request"
+                  >
+                    Idempotency key
+                  </span>
+                  <span class="font-mono break-all text-right">{@log.idempotency_key}</span>
+                </div>
+                <div :if={@log.idempotent_replay_of_id} class="flex justify-between text-success">
+                  <span title="Served from the stored response of an earlier request carrying the same Idempotency-Key — no provider call, no cost">
+                    Idempotent replay
+                  </span>
+                  <.link
+                    id="idempotent-replay-link"
+                    navigate={~p"/logs/#{@log.idempotent_replay_of_id}"}
+                    class="font-mono text-primary hover:underline"
+                  >
+                    original ↗
+                  </.link>
+                </div>
               </div>
             </div>
 

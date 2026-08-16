@@ -1418,6 +1418,10 @@ defmodule DodoRouter.MCP.Tools do
       total_tokens: log.total_tokens,
       cache_read_tokens: log.cache_read_tokens,
       session_id: log.session_id,
+      # A zero-cost row says why it cost nothing: the key the client sent,
+      # and — on replays — the original whose stored answer was re-served.
+      idempotency_key: log.idempotency_key,
+      idempotent_replay_of_id: log.idempotent_replay_of_id,
       latency_ms: log.latency_ms,
       cost_usd: money(log.estimated_cost_usd),
       list_cost_usd: money(log.list_cost_usd),
