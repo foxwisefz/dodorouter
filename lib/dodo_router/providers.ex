@@ -8,6 +8,8 @@ defmodule DodoRouter.Providers do
   alias DodoRouter.Repo
   alias DodoRouter.Providers.ProviderKey
   alias DodoRouter.Accounts.User
+  alias DodoRouter.Routers.Router
+  alias DodoRouter.Routers.RoutingStep
 
   @doc """
   Lists all provider keys for a user.
@@ -165,6 +167,73 @@ defmodule DodoRouter.Providers do
       name: :evaluations_judge_provider_key_id_fkey,
       message: "is the judge for existing evaluations"
     )
+  end
+
+  @doc """
+  The blast radius of deleting a provider key, for every key in `key_ids` at
+  once — a destructive confirmation needs this stated, not left to a hover
+  tooltip, and a page listing many keys must not run one query per key.
+
+  Returns `%{key_id => %{routing_step_count:, router_names:, request_count_24h:}}`.
+  `routing_step_count`/`router_names` come from the exact `provider_key_id`
+  foreign key on `routing_steps`. `request_count_24h` is an exact count of
+  distinct requests whose `attempted_steps` snapshot named this key — the
+  denormalized record of which key an attempt actually used, not an
+  approximation via the key's current routing steps (a request may have
+  used a key a routing step no longer references).
+  """
+  def usage_summary_for_keys(key_ids, opts \\ [])
+  def usage_summary_for_keys([], _opts), do: %{}
+
+  def usage_summary_for_keys(key_ids, opts) do
+    hours = Keyword.get(opts, :hours, 24)
+    since = DateTime.add(DateTime.utc_now(), -hours * 3600, :second)
+
+    step_rows =
+      from(rs in RoutingStep,
+        join: r in Router,
+        on: rs.router_id == r.id,
+        where: rs.provider_key_id in ^key_ids,
+        group_by: rs.provider_key_id,
+        select: {rs.provider_key_id, count(rs.id), fragment("array_agg(DISTINCT ?)", r.name)}
+      )
+      |> Repo.all()
+      |> Map.new(fn {key_id, count, names} -> {key_id, {count, names}} end)
+
+    request_counts = request_counts_since(key_ids, since)
+
+    Map.new(key_ids, fn key_id ->
+      {step_count, router_names} = Map.get(step_rows, key_id, {0, []})
+
+      {key_id,
+       %{
+         routing_step_count: step_count,
+         router_names: router_names,
+         request_count_24h: Map.get(request_counts, key_id, 0)
+       }}
+    end)
+  end
+
+  # `attempted_steps` is jsonb, not a foreign key, so this is a raw query
+  # over `jsonb_array_elements` rather than Ecto's query DSL. Grouped once
+  # for every key in `key_ids`, not one query per key.
+  defp request_counts_since(key_ids, since) do
+    ids = Enum.map(key_ids, &to_string/1)
+
+    {:ok, %{rows: rows}} =
+      Ecto.Adapters.SQL.query(
+        Repo,
+        """
+        SELECT step->>'provider_key_id' AS provider_key_id, count(DISTINCT l.id)
+        FROM request_logs l, jsonb_array_elements(l.attempted_steps) AS step
+        WHERE l.inserted_at >= $1
+          AND step->>'provider_key_id' = ANY($2)
+        GROUP BY step->>'provider_key_id'
+        """,
+        [since, ids]
+      )
+
+    Map.new(rows, fn [key_id, count] -> {Ecto.UUID.cast!(key_id), count} end)
   end
 
   @doc """

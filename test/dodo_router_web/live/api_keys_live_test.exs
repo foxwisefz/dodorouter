@@ -33,5 +33,35 @@ defmodule DodoRouterWeb.ApiKeysLiveTest do
       assert html =~ "New API Key Generated"
       assert has_element?(live, "#copy-new-api-key[phx-hook=CopyButton][data-copy]")
     end
+
+    test "confirming regenerate states recent usage volume for that router", %{
+      conn: conn,
+      user: user
+    } do
+      {router, _api_key} = RoutersFixtures.router_fixture(user)
+
+      for _ <- 1..5 do
+        DodoRouter.LogsFixtures.log_fixture(router)
+      end
+
+      {:ok, live, _html} = live(conn, ~p"/api-keys")
+
+      html = live |> element("#regenerate-#{router.id}") |> render_click()
+
+      assert html =~ "5 requests in the last 24h"
+    end
+
+    test "confirming regenerate on an idle router signals it's safe", %{
+      conn: conn,
+      user: user
+    } do
+      {router, _api_key} = RoutersFixtures.router_fixture(user)
+
+      {:ok, live, _html} = live(conn, ~p"/api-keys")
+
+      html = live |> element("#regenerate-#{router.id}") |> render_click()
+
+      assert html =~ "No requests in the last 24h"
+    end
   end
 end

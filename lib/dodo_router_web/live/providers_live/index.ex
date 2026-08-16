@@ -16,6 +16,7 @@ defmodule DodoRouterWeb.ProvidersLive.Index do
       socket
       |> assign(:page_title, "Providers")
       |> assign(:provider_keys, provider_keys)
+      |> assign(:key_usage, key_usage_for(provider_keys))
       |> assign(:provider_info, Registry.provider_info())
       |> assign(
         :display_slugs,
@@ -240,10 +241,53 @@ defmodule DodoRouterWeb.ProvidersLive.Index do
   end
 
   defp key_removed(socket, message \\ "API key removed") do
+    provider_keys = Providers.list_provider_keys_grouped(socket.assigns.current_user)
+
     socket
-    |> assign(:provider_keys, Providers.list_provider_keys_grouped(socket.assigns.current_user))
+    |> assign(:provider_keys, provider_keys)
+    |> assign(:key_usage, key_usage_for(provider_keys))
     |> assign(:blocked_delete, nil)
     |> put_flash(:info, message)
+  end
+
+  # One grouped query for every key currently listed, not one per row — see
+  # Providers.usage_summary_for_keys/2.
+  defp key_usage_for(provider_keys) do
+    provider_keys
+    |> Map.values()
+    |> List.flatten()
+    |> Enum.map(& &1.id)
+    |> Providers.usage_summary_for_keys()
+  end
+
+  # "Delete key 'X'? Referenced by 2 routing steps on routers A, B. Served
+  # ~3,100 requests in the last 24h. Steps using it will start failing." —
+  # the confirmation states the blast radius instead of a bare "are you
+  # sure", per dodo_router-f6v.5. Zero on both counts is the safe-rotation
+  # signal.
+  defp delete_confirm_message(key, usage) do
+    %{routing_step_count: steps, router_names: routers, request_count_24h: requests} =
+      usage || %{routing_step_count: 0, router_names: [], request_count_24h: 0}
+
+    if steps == 0 and requests == 0 do
+      "Delete key \"#{key.label}\"? No requests in the last 24h and no routing steps reference it."
+    else
+      step_clause =
+        if steps > 0 do
+          "Referenced by #{pluralize(steps, "routing step")} on #{Enum.join(routers, ", ")}."
+        end
+
+      request_clause = "#{pluralize(requests, "request")} in the last 24h."
+
+      [
+        "Delete key \"#{key.label}\"?",
+        step_clause,
+        request_clause,
+        "Steps using it will start failing."
+      ]
+      |> Enum.reject(&is_nil/1)
+      |> Enum.join(" ")
+    end
   end
 
   defp blocked_delete(provider_key) do
@@ -654,7 +698,7 @@ defmodule DodoRouterWeb.ProvidersLive.Index do
                           <button
                             phx-click="delete"
                             phx-value-id={key.id}
-                            data-confirm="Remove this API key?"
+                            data-confirm={delete_confirm_message(key, Map.get(@key_usage, key.id))}
                             class="text-base-content/40 hover:text-error transition-colors p-1"
                           >
                             <svg

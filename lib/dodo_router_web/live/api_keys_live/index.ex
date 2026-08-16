@@ -1,6 +1,7 @@
 defmodule DodoRouterWeb.ApiKeysLive.Index do
   use DodoRouterWeb, :live_view
 
+  alias DodoRouter.Logs
   alias DodoRouter.Routers
 
   @impl true
@@ -14,6 +15,7 @@ defmodule DodoRouterWeb.ApiKeysLive.Index do
       |> assign(:routers, routers)
       |> assign(:base_url, base_url)
       |> assign(:regenerating_id, nil)
+      |> assign(:regenerating_request_count, nil)
       |> assign(:new_key, nil)
 
     {:ok, socket}
@@ -34,6 +36,7 @@ defmodule DodoRouterWeb.ApiKeysLive.Index do
          |> assign(:routers, routers)
          |> assign(:new_key, %{router_id: id, key: api_key})
          |> assign(:regenerating_id, nil)
+         |> assign(:regenerating_request_count, nil)
          |> put_flash(:info, "API key regenerated for #{router.name}")}
 
       {:error, _} ->
@@ -42,11 +45,22 @@ defmodule DodoRouterWeb.ApiKeysLive.Index do
   end
 
   def handle_event("confirm_regenerate", %{"id" => id}, socket) do
-    {:noreply, assign(socket, :regenerating_id, id)}
+    # Revealed only for the one row being confirmed, so this is a single
+    # query even on a page listing many routers — not N+1 across the list.
+    router = Routers.get_router!(socket.assigns.current_user, id)
+    request_count = Logs.stats(router, hours: 24).total_requests
+
+    {:noreply,
+     socket
+     |> assign(:regenerating_id, id)
+     |> assign(:regenerating_request_count, request_count)}
   end
 
   def handle_event("cancel_regenerate", _params, socket) do
-    {:noreply, assign(socket, :regenerating_id, nil)}
+    {:noreply,
+     socket
+     |> assign(:regenerating_id, nil)
+     |> assign(:regenerating_request_count, nil)}
   end
 
   def handle_event("dismiss_key", _params, socket) do
@@ -149,22 +163,29 @@ defmodule DodoRouterWeb.ApiKeysLive.Index do
                 </div>
 
                 <%= if @regenerating_id == router.id do %>
-                  <div class="flex items-center gap-2">
-                    <span class="text-xs text-base-content/50">Are you sure?</span>
-                    <button
-                      id={"confirm-regenerate-#{router.id}"}
-                      phx-click="regenerate"
-                      phx-value-id={router.id}
-                      class="px-3 py-1.5 rounded-lg bg-error text-white text-xs font-medium hover:opacity-90 transition-opacity"
+                  <div class="flex flex-col items-end gap-1.5">
+                    <span
+                      data-usage-warning
+                      class="text-xs text-base-content/60 max-w-xs text-right"
                     >
-                      Yes, revoke
-                    </button>
-                    <button
-                      phx-click="cancel_regenerate"
-                      class="px-3 py-1.5 rounded-lg bg-secondary text-base-content/70 text-xs font-medium hover:bg-secondary/80 transition-colors"
-                    >
-                      Cancel
-                    </button>
+                      {regenerate_warning(@regenerating_request_count)}
+                    </span>
+                    <div class="flex items-center gap-2">
+                      <button
+                        id={"confirm-regenerate-#{router.id}"}
+                        phx-click="regenerate"
+                        phx-value-id={router.id}
+                        class="px-3 py-1.5 rounded-lg bg-error text-white text-xs font-medium hover:opacity-90 transition-opacity"
+                      >
+                        Yes, revoke
+                      </button>
+                      <button
+                        phx-click="cancel_regenerate"
+                        class="px-3 py-1.5 rounded-lg bg-secondary text-base-content/70 text-xs font-medium hover:bg-secondary/80 transition-colors"
+                      >
+                        Cancel
+                      </button>
+                    </div>
                   </div>
                 <% else %>
                   <button
@@ -193,5 +214,15 @@ defmodule DodoRouterWeb.ApiKeysLive.Index do
       </div>
     </Layouts.app>
     """
+  end
+
+  # States the blast radius instead of a bare "are you sure" — regenerating
+  # immediately invalidates the current key for every client using it.
+  # Zero requests in the window is the safe-rotation signal.
+  defp regenerate_warning(0), do: "No requests in the last 24h. Safe to regenerate."
+
+  defp regenerate_warning(count) do
+    "This router served #{pluralize(count, "request")} in the last 24h. " <>
+      "Regenerating immediately invalidates the current key for all of them."
   end
 end

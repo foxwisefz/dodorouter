@@ -322,4 +322,61 @@ defmodule DodoRouterWeb.ProvidersLiveTest do
       assert has_element?(live, "[data-key-status='unverified']", "unverified")
     end
   end
+
+  describe "delete confirmation states the blast radius" do
+    test "names request volume and referencing routing steps", %{conn: conn, user: user} do
+      {router, _} =
+        DodoRouter.RoutersFixtures.router_fixture(user, %{name: "Router A"})
+
+      key =
+        DodoRouter.ProvidersFixtures.provider_key_fixture(user, %{
+          "provider_slug" => "zai_standard",
+          "label" => "Prod Key"
+        })
+
+      {:ok, _step} =
+        DodoRouter.Routers.create_routing_step(router, %{
+          provider: "zai",
+          model: "glm-4.6",
+          provider_key_id: key.id
+        })
+
+      for _ <- 1..3 do
+        DodoRouter.LogsFixtures.log_fixture(router, %{
+          attempted_steps: [%{"provider_key_id" => key.id, "status" => "success"}]
+        })
+      end
+
+      {:ok, live, _html} = live(conn, ~p"/providers")
+
+      confirm =
+        live
+        |> element("button[phx-click=\"delete\"][phx-value-id=\"#{key.id}\"]")
+        |> render()
+
+      assert confirm =~ "1 routing step"
+      assert confirm =~ "Router A"
+      assert confirm =~ "3 requests in the last 24h"
+    end
+
+    test "an unused key's confirmation says so — the safe-rotation signal", %{
+      conn: conn,
+      user: user
+    } do
+      key =
+        DodoRouter.ProvidersFixtures.provider_key_fixture(user, %{
+          "provider_slug" => "zai_standard",
+          "label" => "Unused Key"
+        })
+
+      {:ok, live, _html} = live(conn, ~p"/providers")
+
+      confirm =
+        live
+        |> element("button[phx-click=\"delete\"][phx-value-id=\"#{key.id}\"]")
+        |> render()
+
+      assert confirm =~ "No requests in the last 24h and no routing steps reference it"
+    end
+  end
 end
