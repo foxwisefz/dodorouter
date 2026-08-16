@@ -50,6 +50,22 @@ defmodule DodoRouterWeb.LogLiveTest do
       assert html =~ "showing 100 of 101 requests"
     end
 
+    test "colors latency against the router's own p95 baseline", %{conn: conn, user: user} do
+      {router, _api_key} = RoutersFixtures.router_fixture(user)
+
+      for _ <- 1..20 do
+        LogsFixtures.log_fixture(router, %{latency_ms: 100})
+      end
+
+      LogsFixtures.log_fixture(router, %{latency_ms: 10_000})
+
+      {:ok, live, _html} = live(conn, ~p"/logs?router_id=#{router.id}")
+
+      html = render(live)
+      assert html =~ ~s(data-latency-band="slow")
+      assert (html |> String.split(~s(data-latency-band="slow")) |> length()) == 2
+    end
+
     test "shows empty state when no logs", %{conn: conn, user: user} do
       {_router, _api_key} = RoutersFixtures.router_fixture(user)
 

@@ -23,6 +23,7 @@ defmodule DodoRouterWeb.LogLive.Index do
       |> assign(:replay_counts, %{})
       |> assign(:log_count, 0)
       |> assign(:log_shown_count, 0)
+      |> assign(:latency_percentiles, nil)
       |> stream(:logs, [])
 
     {:ok, socket}
@@ -66,6 +67,14 @@ defmodule DodoRouterWeb.LogLive.Index do
 
         logs = Logs.list_logs(router, list_opts)
         count = Logs.count_logs(router, list_opts)
+
+        # Percentiles are per-router; the all-routers view has no single
+        # baseline to compare against, so latency coloring is skipped there.
+        # Recomputed only here (mount/param change), not on every
+        # :log_created, to avoid hammering the DB with a percentile query
+        # per incoming request — a bit of staleness is an acceptable trade.
+        latency_percentiles = Logs.latency_percentiles(router)
+
         # Subscribe to this router
         if connected?(socket) && old_router_id != router_id do
           Logs.subscribe_to_logs(router_id)
@@ -79,6 +88,7 @@ defmodule DodoRouterWeb.LogLive.Index do
         |> assign(:replay_counts, Logs.replay_counts(Enum.map(logs, & &1.id)))
         |> assign(:log_count, count)
         |> assign(:log_shown_count, length(logs))
+        |> assign(:latency_percentiles, latency_percentiles)
         |> stream(:logs, logs, reset: true)
       else
         # Show all logs across all routers
@@ -98,6 +108,7 @@ defmodule DodoRouterWeb.LogLive.Index do
         |> assign(:replay_counts, Logs.replay_counts(Enum.map(logs, & &1.id)))
         |> assign(:log_count, count)
         |> assign(:log_shown_count, length(logs))
+        |> assign(:latency_percentiles, nil)
         |> stream(:logs, logs, reset: true)
       end
 
@@ -167,17 +178,19 @@ defmodule DodoRouterWeb.LogLive.Index do
     favorites_only = socket.assigns[:favorites_only]
     opts = [limit: 100, favorites_only: favorites_only]
 
-    {logs, count} =
+    {logs, count, latency_percentiles} =
       if socket.assigns.selected_router_id do
         router = Routers.get_router!(user, socket.assigns.selected_router_id)
-        {Logs.list_logs(router, opts), Logs.count_logs(router, opts)}
+        {Logs.list_logs(router, opts), Logs.count_logs(router, opts),
+         Logs.latency_percentiles(router)}
       else
-        {Logs.list_logs_for_user(user, opts), Logs.count_logs_for_user(user, opts)}
+        {Logs.list_logs_for_user(user, opts), Logs.count_logs_for_user(user, opts), nil}
       end
 
     socket
     |> assign(:log_count, count)
     |> assign(:log_shown_count, length(logs))
+    |> assign(:latency_percentiles, latency_percentiles)
     |> stream(:logs, logs, reset: true)
   end
 
@@ -260,7 +273,12 @@ defmodule DodoRouterWeb.LogLive.Index do
                 <th class="px-4 py-2.5 text-xs font-medium text-base-content/50 hidden md:table-cell">
                   Tokens
                 </th>
-                <th class="px-4 py-2.5 text-xs font-medium text-base-content/50">Latency</th>
+                <th
+                  class="px-4 py-2.5 text-xs font-medium text-base-content/50"
+                  title={latency_baseline_title(@latency_percentiles)}
+                >
+                  Latency
+                </th>
                 <th class="px-4 py-2.5 text-xs font-medium text-base-content/50 hidden md:table-cell">
                   Message
                 </th>
@@ -408,7 +426,13 @@ defmodule DodoRouterWeb.LogLive.Index do
                     <% end %>
                   </div>
                 </td>
-                <td class="px-4 py-2.5 text-sm font-mono text-base-content/50">
+                <td
+                  class={[
+                    "px-4 py-2.5 text-sm font-mono",
+                    latency_band_class(Map.get(log, :latency_ms), @latency_percentiles)
+                  ]}
+                  data-latency-band={latency_band(Map.get(log, :latency_ms), @latency_percentiles)}
+                >
                   {if Map.get(log, :latency_ms), do: "#{log.latency_ms}ms", else: "-"}
                 </td>
                 <td class="px-4 py-2.5 text-xs text-base-content/50 hidden md:table-cell max-w-xs truncate">
@@ -458,6 +482,38 @@ defmodule DodoRouterWeb.LogLive.Index do
   defp format_time(dt) do
     Calendar.strftime(dt, "%H:%M:%S")
   end
+
+  # Bare "340ms" doesn't say whether that's normal — banding it against the
+  # router's own p50/p95 makes an outlier visible without leaving the page.
+  defp latency_band(latency_ms, percentiles) do
+    with true <- is_integer(latency_ms) or is_float(latency_ms),
+         %{p50: p50, p95: p95} <- percentiles,
+         true <- is_number(p50) and is_number(p95) do
+      cond do
+        latency_ms > p95 -> "slow"
+        latency_ms > p50 -> "elevated"
+        true -> "normal"
+      end
+    else
+      _ -> nil
+    end
+  end
+
+  defp latency_band_class(latency_ms, percentiles) do
+    case latency_band(latency_ms, percentiles) do
+      "slow" -> "text-error"
+      "elevated" -> "text-warning"
+      _ -> "text-base-content/50"
+    end
+  end
+
+  defp latency_baseline_title(nil), do: "No latency baseline available for this view"
+
+  defp latency_baseline_title(%{p50: p50, p95: p95}) when is_number(p50) and is_number(p95) do
+    "Colored against this router's p50 #{round(p50)}ms / p95 #{round(p95)}ms (last 24h)"
+  end
+
+  defp latency_baseline_title(_), do: "Not enough data yet for a latency baseline"
 
   defp replay_badge_label(log) do
     case Map.get(log, :replay_from_index) do
