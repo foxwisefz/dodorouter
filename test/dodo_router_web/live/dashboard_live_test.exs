@@ -2,11 +2,23 @@ defmodule DodoRouterWeb.DashboardLiveTest do
   use DodoRouterWeb.ConnCase, async: true
 
   import Phoenix.LiveViewTest
+  import Ecto.Query
 
   alias DodoRouter.RoutersFixtures
   alias DodoRouter.LogsFixtures
+  alias DodoRouter.Logs.RequestLog
+  alias DodoRouter.Repo
 
   setup :register_and_log_in_user
+
+  defp backdate(log, hours) do
+    ts = DateTime.utc_now() |> DateTime.add(-hours * 3600, :second) |> DateTime.truncate(:second)
+
+    {1, _} =
+      Repo.update_all(from(l in RequestLog, where: l.id == ^log.id), set: [inserted_at: ts])
+
+    log
+  end
 
   describe "Dashboard" do
     test "shows empty state when no routers", %{conn: conn} do
@@ -93,6 +105,51 @@ defmodule DodoRouterWeb.DashboardLiveTest do
       html = render(live)
       assert html =~ "List Value"
       assert html =~ "chatgpt-5.5"
+    end
+
+    test "KPI tiles show a signed delta against the immediately preceding window", %{
+      conn: conn,
+      user: user
+    } do
+      {router, _api_key} = RoutersFixtures.router_fixture(user)
+
+      # previous 24h window (24-48h ago): the baseline to compare against
+      for _ <- 1..2 do
+        LogsFixtures.log_fixture(router, %{
+          latency_ms: 1000,
+          estimated_cost_usd: Decimal.new("0.0100")
+        })
+        |> backdate(30)
+      end
+
+      # current 24h window: more requests, more spend, slower
+      for _ <- 1..4 do
+        LogsFixtures.log_fixture(router, %{
+          latency_ms: 4000,
+          estimated_cost_usd: Decimal.new("0.0200")
+        })
+      end
+
+      {:ok, live, html} = live(conn, ~p"/dashboard")
+
+      assert has_element?(live, "#kpi-spend [data-kpi-delta]")
+      assert has_element?(live, "#kpi-requests [data-kpi-delta]")
+      assert has_element?(live, "#kpi-success [data-kpi-delta]")
+      assert has_element?(live, "#kpi-latency [data-kpi-delta]")
+      assert html =~ "vs prev 24h"
+    end
+
+    test "omits the delta rather than fabricate one when there is no prior window", %{
+      conn: conn,
+      user: user
+    } do
+      {router, _api_key} = RoutersFixtures.router_fixture(user)
+      LogsFixtures.log_fixture(router)
+
+      {:ok, live, _html} = live(conn, ~p"/dashboard")
+
+      assert has_element?(live, "#kpi-spend", "no prior data")
+      refute has_element?(live, "[data-kpi-delta]", "%")
     end
 
     test "hides cost-basis toggle when no list pricing recorded", %{conn: conn, user: user} do

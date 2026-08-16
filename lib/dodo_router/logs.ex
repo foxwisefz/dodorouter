@@ -254,14 +254,23 @@ defmodule DodoRouter.Logs do
 
   # Analytics
 
+  @doc """
+  `:offset_hours` (default 0) shifts the whole window back in time by that
+  many hours, with `:hours` still setting its length — `hours: 24,
+  offset_hours: 24` is "the 24h immediately before the current 24h window",
+  the period-over-period comparison window. Additive: existing callers that
+  don't pass it get the same unbounded-until-now query as before.
+  """
   def stats(%Router{} = router, opts \\ []) do
     hours = Keyword.get(opts, :hours, 24)
-    since = DateTime.add(DateTime.utc_now(), -hours * 3600, :second)
+    offset_hours = Keyword.get(opts, :offset_hours, 0)
+    until = DateTime.add(DateTime.utc_now(), -offset_hours * 3600, :second)
+    since = DateTime.add(until, -hours * 3600, :second)
 
     query =
       from l in RequestLog,
         where:
-          l.router_id == ^router.id and l.inserted_at >= ^since and
+          l.router_id == ^router.id and l.inserted_at >= ^since and l.inserted_at < ^until and
             l.traffic_type == "proxy",
         select: %{
           total_requests: count(l.id),
@@ -661,14 +670,20 @@ defmodule DodoRouter.Logs do
     end)
   end
 
+  @doc """
+  `:offset_hours` (default 0) shifts the window back in time — see
+  `stats/2`'s doc for the period-over-period rationale. Additive.
+  """
   def latency_percentiles(%Router{} = router, opts \\ []) do
     hours = Keyword.get(opts, :hours, 24)
-    since = DateTime.add(DateTime.utc_now(), -hours * 3600, :second)
+    offset_hours = Keyword.get(opts, :offset_hours, 0)
+    until = DateTime.add(DateTime.utc_now(), -offset_hours * 3600, :second)
+    since = DateTime.add(until, -hours * 3600, :second)
 
     query =
       from l in RequestLog,
         where:
-          l.router_id == ^router.id and l.inserted_at >= ^since and
+          l.router_id == ^router.id and l.inserted_at >= ^since and l.inserted_at < ^until and
             l.traffic_type == "proxy" and not is_nil(l.latency_ms),
         select: %{
           p50: fragment("percentile_cont(0.5) WITHIN GROUP (ORDER BY ?)", l.latency_ms),

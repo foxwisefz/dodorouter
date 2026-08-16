@@ -142,14 +142,23 @@ defmodule DodoRouterWeb.DashboardLive do
 
     provider_colors = provider_color_map(spend_ts.series, by_provider)
 
+    stats = Logs.stats(router, hours: hours)
+    latency_percentiles = Logs.latency_percentiles(router, hours: hours)
+    # Period-over-period comparison window: same length, immediately before
+    # the current one (e.g. the 24h before the current 24h).
+    prev_stats = Logs.stats(router, hours: hours, offset_hours: hours)
+    prev_latency_percentiles = Logs.latency_percentiles(router, hours: hours, offset_hours: hours)
+
     socket
-    |> assign(:stats, Logs.stats(router, hours: hours))
+    |> assign(:stats, stats)
+    |> assign(:prev_stats, prev_stats)
+    |> assign(:prev_latency_percentiles, prev_latency_percentiles)
     |> assign(
       :stats_by_provider,
       Enum.sort_by(by_provider, &decimal_float(total_cost(&1, basis)), :desc)
     )
     |> assign_recent_sessions(router, hours)
-    |> assign(:latency_percentiles, Logs.latency_percentiles(router, hours: hours))
+    |> assign(:latency_percentiles, latency_percentiles)
     |> assign(:cache_stats, Logs.cache_stats(router, hours: hours))
     |> assign(:spend_by_model, Logs.spend_by_model(router, hours: hours))
     |> assign(:bucket_labels, Enum.map(timeseries, &bucket_label(&1.bucket, bucket)))
@@ -387,6 +396,7 @@ defmodule DodoRouterWeb.DashboardLive do
                 value={Charts.format_usd(stats_cost(@stats, @cost_basis))}
                 subtext={spend_subtext(@stats, @cost_basis)}
                 spark={Enum.map(@timeseries, &decimal_float(bucket_cost(&1, @cost_basis)))}
+                delta={spend_delta(@stats, @prev_stats, @cost_basis, @range)}
               />
               <Charts.stat_tile
                 id="kpi-requests"
@@ -394,6 +404,7 @@ defmodule DodoRouterWeb.DashboardLive do
                 value={Charts.format_compact(@stats.total_requests)}
                 subtext={"#{Charts.format_compact(@stats.successful_requests)} ok · #{Charts.format_compact(@stats.error_requests)} failed"}
                 spark={Enum.map(@timeseries, & &1.total)}
+                delta={requests_delta(@stats, @prev_stats, @range)}
               />
               <Charts.stat_tile
                 id="kpi-success"
@@ -405,12 +416,14 @@ defmodule DodoRouterWeb.DashboardLive do
                     do: "#{@stats.fallback_requests} recovered by fallback",
                     else: "No fallbacks needed"
                 }
+                delta={success_rate_delta(@stats, @prev_stats, @range)}
               />
               <Charts.stat_tile
                 id="kpi-latency"
                 label="p95 Latency"
                 value={Charts.format_ms(@latency_percentiles.p95)}
                 subtext={"p50 #{Charts.format_ms(@latency_percentiles.p50)}"}
+                delta={latency_delta(@latency_percentiles, @prev_latency_percentiles, @range)}
               />
               <Charts.stat_tile
                 id="kpi-tokens"
@@ -957,5 +970,96 @@ defmodule DodoRouterWeb.DashboardLive do
 
   defp router_color(idx) do
     Enum.at(@router_colors, rem(idx, length(@router_colors)))
+  end
+
+  # ---- period-over-period KPI deltas ----
+  #
+  # Each tile compares against the immediately preceding window of the same
+  # length. "Up" isn't inherently good or bad — spend up is a caution
+  # (:bad polarity), success rate up is positive (:good) — so polarity is
+  # picked per metric rather than assumed from direction alone. A zero-sample
+  # previous window never gets a fabricated percentage; it renders
+  # "no prior data" instead.
+
+  defp range_label(range), do: (@ranges[range] || %{})[:label] || range
+
+  defp no_prior_delta, do: %{text: "no prior data", direction: :flat, polarity: :neutral}
+
+  defp spend_delta(_stats, %{total_requests: 0}, _basis, _range), do: no_prior_delta()
+
+  defp spend_delta(stats, prev_stats, basis, range) do
+    pct_delta(
+      decimal_float(stats_cost(stats, basis)),
+      decimal_float(stats_cost(prev_stats, basis)),
+      range,
+      :spend
+    )
+  end
+
+  defp requests_delta(_stats, %{total_requests: 0}, _range), do: no_prior_delta()
+
+  defp requests_delta(stats, prev_stats, range) do
+    pct_delta(stats.total_requests, prev_stats.total_requests, range, :neutral)
+  end
+
+  # Percentage-*point* delta, not percentage — "success rate up 5%" from an
+  # 90% base reads as either +5pp or +5.6% depending on which is meant; pp
+  # is unambiguous and is what the label states.
+  defp success_rate_delta(%{total_requests: 0}, _prev_stats, _range), do: no_prior_delta()
+  defp success_rate_delta(_stats, %{total_requests: 0}, _range), do: no_prior_delta()
+
+  defp success_rate_delta(stats, prev_stats, range) do
+    cur = stats.successful_requests / stats.total_requests * 100
+    prev = prev_stats.successful_requests / prev_stats.total_requests * 100
+    diff = cur - prev
+    direction = trend_direction(diff, 0.05)
+    polarity = resolve_polarity(:success_rate, direction)
+    text = "#{signed(diff, 1)}pp vs prev #{range_label(range)}"
+    %{text: text, direction: direction, polarity: polarity}
+  end
+
+  # ms delta, not percent — a p95 that moves from 40ms to 80ms is "+100%"
+  # and "+40ms"; the latter is the number an operator can act on directly.
+  defp latency_delta(%{p95: nil}, _prev, _range), do: no_prior_delta()
+  defp latency_delta(_latency, %{p95: nil}, _range), do: no_prior_delta()
+
+  defp latency_delta(%{p95: cur}, %{p95: prev}, range) do
+    diff_ms = round(cur - prev)
+    direction = trend_direction(diff_ms, 0)
+    polarity = resolve_polarity(:latency, direction)
+    text = "#{signed(diff_ms, 0)}ms vs prev #{range_label(range)}"
+    %{text: text, direction: direction, polarity: polarity}
+  end
+
+  defp pct_delta(cur, prev, range, polarity_kind) when is_number(prev) and prev > 0 do
+    pct = (cur - prev) / prev * 100
+    direction = trend_direction(pct, 0.5)
+    polarity = resolve_polarity(polarity_kind, direction)
+    text = "#{signed(pct, 1)}% vs prev #{range_label(range)}"
+    %{text: text, direction: direction, polarity: polarity}
+  end
+
+  defp pct_delta(_cur, _prev, _range, _polarity_kind), do: no_prior_delta()
+
+  defp trend_direction(diff, epsilon) do
+    cond do
+      diff > epsilon -> :up
+      diff < -epsilon -> :down
+      true -> :flat
+    end
+  end
+
+  defp resolve_polarity(:spend, :up), do: :bad
+  defp resolve_polarity(:spend, :down), do: :good
+  defp resolve_polarity(:success_rate, :up), do: :good
+  defp resolve_polarity(:success_rate, :down), do: :bad
+  defp resolve_polarity(:latency, :up), do: :bad
+  defp resolve_polarity(:latency, :down), do: :good
+  defp resolve_polarity(_kind, _direction), do: :neutral
+
+  defp signed(n, decimals) do
+    rounded = Float.round(n * 1.0, decimals)
+    sign = if rounded >= 0, do: "+", else: ""
+    if decimals == 0, do: "#{sign}#{trunc(rounded)}", else: "#{sign}#{rounded}"
   end
 end
