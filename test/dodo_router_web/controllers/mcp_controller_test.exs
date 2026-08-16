@@ -978,6 +978,30 @@ defmodule DodoRouterWeb.MCPControllerTest do
       assert payload["truncated"] == true
     end
 
+    test "send_feedback mails the admins with the account attached", %{
+      conn: conn,
+      token: token,
+      user: user
+    } do
+      body =
+        json_response(
+          call_tool(conn, token, "send_feedback", %{"message" => "get_eval is perfect now"}),
+          200
+        )
+
+      assert body["result"]["isError"] == false
+      assert tool_json(body)["delivered"] == true
+
+      # assert_receive scans past the fixture's own login email.
+      assert_receive {:email, %Swoosh.Email{to: [{"", "hgezim@dodorouter.com"}]} = email}
+      assert email.subject =~ user.email
+      assert email.text_body =~ "get_eval is perfect now"
+      assert email.reply_to == {"", user.email}
+
+      body = json_response(call_tool(conn, token, "send_feedback", %{"message" => "  "}), 200)
+      assert body["result"]["isError"]
+    end
+
     test "an unknown tool names the way to find the real ones", %{conn: conn, token: token} do
       body = json_response(call_tool(conn, token, "delete_everything"), 200)
 

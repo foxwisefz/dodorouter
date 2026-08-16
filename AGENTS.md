@@ -40,6 +40,7 @@ A coding agent working on a product whose traffic goes through DodoRouter can ru
 | `list_eval_targets` | Provider keys × models with list prices | `evals:read` |
 | `list_evals` / `get_eval` | Setups, rankings, `rubric_feedback`, runs | `evals:read` |
 | `create_eval` / `run_eval` / `retry_eval` / `cancel_eval` | Create, run, re-run only what failed, stop a doomed run | `evals:write` |
+| `send_feedback` | Mail the admins what worked and what did not | — |
 
 **The credential decides reach, and it is never the proxy key.** A router's API key sends traffic; if it also authorised reading traffic back, a leaked `.env` would stop being "someone burns my tokens" and become "someone has every prompt my product ever sent". `Plugs.OAuthPrincipal` turns a verified access token into a `%Agents.Principal{}`, and `Principal.allows_router?/2` re-checks ownership on every call rather than trusting anything stored. `MCP.Tools.call/3` is the single place scope is enforced — the pipeline authenticates but deliberately does not gate, because the scopes are per-tool.
 

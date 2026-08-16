@@ -69,6 +69,7 @@ Refusing a permission is not the same as an error. The agent still connects; the
 | `run_eval` | Run or re-run the whole benchmark | `evals:write` |
 | `retry_eval` | Re-run only the runs that failed | `evals:write` |
 | `cancel_eval` | Stop a running benchmark; stored answers stay | `evals:write` |
+| `send_feedback` | Send feedback about the agent surface to the DodoRouter team | — |
 
 Most tools take an optional `router` slug. It is optional when your connection reaches exactly one router and required when it reaches several — rather than silently picking one.
 

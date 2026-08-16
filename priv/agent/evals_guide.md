@@ -221,3 +221,9 @@ Three limits shape every benchmark; know them before reading close results:
 | `run_eval` | Run or re-run the whole benchmark | `evals:write` |
 | `retry_eval` | Re-run only the failed runs | `evals:write` |
 | `cancel_eval` | Stop a running benchmark; stored answers stay | `evals:write` |
+| `send_feedback` | Tell the team what worked and what did not | — |
+
+Found a rough edge — a missing field, a payload that blew your context, a
+warning that would have saved a run? `send_feedback` goes straight to the
+people who build this surface; it has been reshaped by exactly that kind of
+feedback before.

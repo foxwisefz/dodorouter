@@ -228,6 +228,27 @@ defmodule DodoRouter.MCP.Tools do
       }
     },
     %{
+      name: "send_feedback",
+      title: "Send feedback to the DodoRouter team",
+      description:
+        "Tell the people who build this surface what worked and what did not — a missing " <>
+          "field, a payload that blew your context, a warning that would have saved a run. " <>
+          "Goes straight to the admins with your account attached; no scope required. " <>
+          "This surface has been reshaped by exactly this kind of feedback before.",
+      scopes: [],
+      schema: %{
+        "type" => "object",
+        "required" => ["message"],
+        "properties" => %{
+          "message" => %{
+            "type" => "string",
+            "maxLength" => 5000,
+            "description" => "What happened and what you expected. Plain text."
+          }
+        }
+      }
+    },
+    %{
       name: "cancel_eval",
       title: "Cancel a running benchmark",
       description:
@@ -556,6 +577,27 @@ defmodule DodoRouter.MCP.Tools do
              "answer, so running would only spend the judge's quota. Create a new evaluation " <>
              "with from_eval_id and working candidates (list_eval_targets reports key health)."}
       end
+    end
+  end
+
+  defp run("send_feedback", principal, args) do
+    message = args["message"]
+
+    cond do
+      not is_binary(message) or String.trim(message) == "" ->
+        {:error, "message is required — say what happened and what you expected."}
+
+      String.length(message) > 5000 ->
+        {:error, "message is over 5,000 characters — send the essence, not the transcript."}
+
+      true ->
+        case Agents.FeedbackNotifier.deliver_feedback(principal.user.email, message) do
+          {:ok, _} ->
+            {:ok, %{delivered: true, note: "Thank you — this lands directly with the team."}}
+
+          {:error, _reason} ->
+            {:error, "Could not deliver the feedback right now. Please try again later."}
+        end
     end
   end
 
