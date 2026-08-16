@@ -75,6 +75,9 @@ defmodule DodoRouter.Proxy.Adapters.TestProvider do
   # snapshot it resolved to, the way real providers do. FallbackChain's
   # put_new lets the provider's own claim win.
   @alias_model "alias-model"
+  # A kimi/DeepSeek-style thinker: the message carries reasoning_content,
+  # which cross-format egresses have no representation for.
+  @reasoning_model "reasoning-model"
   @call_table :dodo_test_provider_calls
 
   @impl Adapter
@@ -229,6 +232,12 @@ defmodule DodoRouter.Proxy.Adapters.TestProvider do
     response =
       if step.model == @alias_model,
         do: Map.put(response, "model", "alias-model-v2"),
+        else: response
+
+    response =
+      if step.model == @reasoning_model,
+        do:
+          put_in(response, ["choices", Access.at(0), "message", "reasoning_content"], "thought about it"),
         else: response
 
     {:ok, response, %{headers: [{"content-type", "application/json"} | @ratelimit_headers]}}

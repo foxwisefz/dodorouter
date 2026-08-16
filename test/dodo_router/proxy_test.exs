@@ -230,6 +230,32 @@ defmodule DodoRouter.ProxyTest do
       assert Decimal.compare(log.list_cost_usd, Decimal.new(0)) == :gt
     end
 
+    test "reasoning text the client's format cannot carry is recorded, not silently lost", ctx do
+      step = %{ctx.step | model: "reasoning-model"}
+
+      # An Anthropic-format client served by an OpenAI-family provider: the
+      # egress has no signed representation for reasoning_content, so the
+      # drop must reach the log (dodo_router-2s4).
+      assert {:ok, _resp, %{log: log}} =
+               Proxy.dispatch(ctx.router, ctx.request,
+                 steps: [step],
+                 log_mode: :sync,
+                 client_format: :anthropic
+               )
+
+      assert Enum.any?(log.fidelity_changes, fn change ->
+               change["name"] == "reasoning_content" and change["action"] == "dropped" and
+                 change["value"] =~ "thought"
+             end)
+
+      # An OpenAI-format client gets the IR verbatim — nothing is lost, so
+      # nothing may claim to be.
+      assert {:ok, _resp, %{log: log}} =
+               Proxy.dispatch(ctx.router, ctx.request, steps: [step], log_mode: :sync)
+
+      refute Enum.any?(log.fidelity_changes || [], &(&1["name"] == "reasoning_content"))
+    end
+
     test "dropped query parameters are recorded as their own fidelity channel", ctx do
       # Query params are the fourth loss channel (headers, request body,
       # response fields) — never forwarded, and until dodo_router-69m never

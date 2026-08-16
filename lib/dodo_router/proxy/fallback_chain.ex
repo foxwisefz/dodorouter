@@ -289,6 +289,8 @@ defmodule DodoRouter.Proxy.FallbackChain do
   # Runs before `Fidelity.take/0` in `run_chain/1`, so the record lands in this
   # step's buffer like every other per-step change.
   defp split_response_passthrough({:ok, response, meta}, state, adapter) when is_map(response) do
+    record_unrepresentable_ir_fields(response, state)
+
     case Map.pop(response, Adapter.response_passthrough_key()) do
       {fields, response} when is_map(fields) and map_size(fields) > 0 ->
         if Registry.request_format(adapter) == state.client_format do
@@ -308,6 +310,30 @@ defmodule DodoRouter.Proxy.FallbackChain do
   end
 
   defp split_response_passthrough(result, _state, _adapter), do: result
+
+  # The egress converters' side of channel 3 (dodo_router-2s4): they run in
+  # the controller after the log row's fidelity is harvested, so a field of
+  # the IR itself that the client's format cannot carry has to be recorded
+  # here, inside the step. Today that is exactly one field — another
+  # provider's `reasoning_content`, which neither the Anthropic nor the
+  # Responses egress can represent (an unsigned thinking block would be
+  # rejected the moment the client echoed it back). OpenAI-format clients
+  # receive the IR verbatim, so nothing is lost — and nothing is recorded.
+  defp record_unrepresentable_ir_fields(response, %{client_format: format})
+       when format in [:anthropic, :responses] do
+    case get_in(response, ["choices", Access.at(0), "message", "reasoning_content"]) do
+      reasoning when is_binary(reasoning) and reasoning != "" ->
+        Fidelity.record_dropped_response_fields(
+          %{"reasoning_content" => reasoning},
+          "the #{format} egress has no representation for another provider's reasoning text"
+        )
+
+      _ ->
+        :ok
+    end
+  end
+
+  defp record_unrepresentable_ir_fields(_response, _state), do: :ok
 
   # Fields the ingress converter had no translation for. They are lost at the
   # IR, not at the provider — so a step whose adapter speaks the format the
