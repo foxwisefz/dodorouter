@@ -85,11 +85,30 @@ defmodule DodoRouter.MCP.Tools do
         "Provider keys and the models each can serve, with list prices per million tokens. A " <>
           "candidate is a provider_key_id plus a model. Models come from the synced catalog, so " <>
           "anything a provider has retired is already absent — a model missing here is not " <>
-          "available to name. `billing` says whether a key is metered or a subscription plan.",
+          "available to name. `billing` says whether a key is metered or a subscription plan. " <>
+          "The unfiltered list spans every key × every model; `provider`, `model` and `limit` " <>
+          "narrow it, and `truncated: true` marks a capped result.",
       scopes: ["evals:read"],
       schema: %{
         "type" => "object",
-        "properties" => %{"router" => @router_arg}
+        "properties" => %{
+          "router" => @router_arg,
+          "provider" => %{
+            "type" => "string",
+            "description" => "Only keys for this provider slug (exact match, e.g. \"anthropic\")."
+          },
+          "model" => %{
+            "type" => "string",
+            "description" =>
+              "Case-insensitive substring matched against model id and display name; " <>
+                "keys left with no matching models are omitted."
+          },
+          "limit" => %{
+            "type" => "integer",
+            "minimum" => 1,
+            "description" => "Maximum number of keys to return, after filtering."
+          }
+        }
       }
     },
     %{
@@ -349,9 +368,13 @@ defmodule DodoRouter.MCP.Tools do
 
   defp run("list_eval_targets", principal, args) do
     with {:ok, _router} <- resolve_router(principal, args) do
+      # The unfiltered list is every key × every catalog model (~15KB for a
+      # normal account) — filterable because an agent picking one candidate
+      # should not have to page the whole matrix through its context.
       targets =
         principal.user
         |> Replays.list_targets()
+        |> filter_targets_by_provider(args["provider"])
         |> Enum.map(fn target ->
           %{
             provider_key_id: target.provider_key.id,
@@ -375,10 +398,43 @@ defmodule DodoRouter.MCP.Tools do
               end)
           }
         end)
+        |> filter_targets_by_model(args["model"])
 
-      {:ok, %{targets: targets}}
+      {kept, truncated?} = limit_targets(targets, args["limit"])
+
+      {:ok, %{targets: kept, truncated: truncated?}}
     end
   end
+
+  defp filter_targets_by_provider(targets, provider) when is_binary(provider) and provider != "",
+    do: Enum.filter(targets, &(&1.provider == provider))
+
+  defp filter_targets_by_provider(targets, _), do: targets
+
+  defp filter_targets_by_model(targets, substring)
+       when is_binary(substring) and substring != "" do
+    needle = String.downcase(substring)
+
+    targets
+    |> Enum.map(fn target ->
+      models =
+        Enum.filter(target.models, fn model ->
+          String.contains?(String.downcase(model.id || ""), needle) or
+            String.contains?(String.downcase(model.display_name || ""), needle)
+        end)
+
+      %{target | models: models}
+    end)
+    # A key with no matching models is noise for this query, not an answer.
+    |> Enum.reject(&(&1.models == []))
+  end
+
+  defp filter_targets_by_model(targets, _), do: targets
+
+  defp limit_targets(targets, limit) when is_integer(limit) and limit > 0,
+    do: {Enum.take(targets, limit), length(targets) > limit}
+
+  defp limit_targets(targets, _), do: {targets, false}
 
   defp run("list_evals", principal, args) do
     with {:ok, router} <- resolve_router(principal, args) do

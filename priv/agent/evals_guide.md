@@ -55,6 +55,11 @@ can serve and their list prices per million tokens. `provider_key_id` + `model`
 is what identifies a candidate; you never send a provider name, it is derived
 from the key.
 
+The unfiltered list is every key × every model. When you already know what you
+are looking for, pass `provider` (exact slug), `model` (case-insensitive
+substring) or `limit` — a capped result carries `truncated: true` so you can
+tell a short list from a complete one.
+
 Prices here are the catalog's list prices. The `avg_cost_usd` you get back after
 a run is measured from the actual call, which is the number to trust.
 

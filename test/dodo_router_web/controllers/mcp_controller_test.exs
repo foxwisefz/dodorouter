@@ -496,6 +496,64 @@ defmodule DodoRouterWeb.MCPControllerTest do
       assert by_label["plan key"]["judge_advice"] =~ "metered key for the judge"
     end
 
+    test "eval targets filter by provider, model substring and limit", %{
+      conn: conn,
+      user: user,
+      token: token
+    } do
+      DodoRouter.ProvidersFixtures.provider_key_fixture(user, %{"label" => "metered"})
+
+      DodoRouter.ProvidersFixtures.provider_key_fixture(user, %{
+        "provider_slug" => "test_provider_coding",
+        "label" => "plan key"
+      })
+
+      {:ok, _} =
+        DodoRouter.Models.create_model(%{
+          provider_slug: "test_provider",
+          model_id: "alpha-large",
+          display_name: "Alpha Large",
+          input_price_per_million: Decimal.new("1.0"),
+          output_price_per_million: Decimal.new("2.0")
+        })
+
+      {:ok, _} =
+        DodoRouter.Models.create_model(%{
+          provider_slug: "test_provider",
+          model_id: "beta-mini",
+          display_name: "Beta Mini",
+          input_price_per_million: Decimal.new("0.1"),
+          output_price_per_million: Decimal.new("0.2")
+        })
+
+      # provider filter: only test_provider keys, not the coding-plan slug
+      body =
+        json_response(
+          call_tool(conn, token, "list_eval_targets", %{"provider" => "test_provider"}),
+          200
+        )
+
+      targets = tool_json(body)["targets"]
+      assert Enum.all?(targets, &(&1["provider"] == "test_provider"))
+
+      # model substring filter: prunes model lists and drops emptied targets
+      body =
+        json_response(call_tool(conn, token, "list_eval_targets", %{"model" => "ALPHA"}), 200)
+
+      %{"targets" => filtered} = tool_json(body)
+      assert filtered != []
+
+      for target <- filtered, model <- target["models"] do
+        assert model["id"] =~ "alpha" or model["display_name"] =~ "Alpha"
+      end
+
+      # limit caps the target list and says so
+      body = json_response(call_tool(conn, token, "list_eval_targets", %{"limit" => 1}), 200)
+      payload = tool_json(body)
+      assert length(payload["targets"]) == 1
+      assert payload["truncated"] == true
+    end
+
     test "an unknown tool names the way to find the real ones", %{conn: conn, token: token} do
       body = json_response(call_tool(conn, token, "delete_everything"), 200)
 
