@@ -508,6 +508,64 @@ defmodule DodoRouterWeb.MCPControllerTest do
       assert by_label["plan key"]["judge_advice"] =~ "metered key for the judge"
     end
 
+    test "create_eval accepts prompt variants and rankings carry them", %{
+      conn: conn,
+      token: token,
+      user: user,
+      router: router
+    } do
+      key = DodoRouter.ProvidersFixtures.provider_key_fixture(user, %{"label" => "Key 1"})
+
+      log =
+        DodoRouter.LogsFixtures.log_fixture(router, %{
+          request_body:
+            Jason.encode!(%{
+              "model" => "m",
+              "messages" => [%{"role" => "user", "content" => "hi"}]
+            })
+        })
+
+      resp =
+        json_response(
+          call_tool(conn, token, "create_eval", %{
+            "request_log_id" => log.id,
+            "name" => "Prompt A/B",
+            "criteria" => "Be useful",
+            "judge" => %{"provider_key_id" => key.id, "model" => "judge-model"},
+            "candidates" => [%{"provider_key_id" => key.id, "model" => "test-model"}],
+            "prompt_variants" => [
+              %{"name" => "as-served", "system_prompt" => nil},
+              %{"name" => "terse", "system_prompt" => "Reply in one word."}
+            ],
+            "repetitions" => 1,
+            "include_incumbent" => false,
+            "run" => true
+          }),
+          200
+        )
+
+      payload = tool_json(resp)
+      assert payload["planned_runs"] == 2
+
+      # Poll until the two runs land, then read the ranking rows.
+      eval_id = payload["id"]
+
+      rankings =
+        Enum.reduce_while(1..50, nil, fn _, _ ->
+          body =
+            json_response(call_tool(conn, token, "get_eval", %{"id" => eval_id}), 200)
+
+          p = tool_json(body)
+
+          if p["running"] == false and length(p["rankings"]) == 2,
+            do: {:halt, p["rankings"]},
+            else: (Process.sleep(100) && {:cont, nil})
+        end)
+
+      assert rankings
+      assert rankings |> Enum.map(& &1["variant"]) |> Enum.sort() == ["as-served", "terse"]
+    end
+
     test "create_eval accepts a set of logs and reports the planned volume", %{
       conn: conn,
       token: token,

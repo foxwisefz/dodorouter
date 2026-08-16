@@ -70,7 +70,7 @@ Refusing a permission is not the same as an error. The agent still connects; the
 | `retry_eval` | Re-run only the runs that failed | `evals:write` |
 | `cancel_eval` | Stop a running benchmark; stored answers stay | `evals:write` |
 
-`create_eval` accepts either one `request_log_id` or a `request_log_ids` set — with a set, every candidate answers every log and the ranking aggregates across them, so the score answers "on my traffic" rather than "on this one request".
+`create_eval` accepts either one `request_log_id` or a `request_log_ids` set — with a set, every candidate answers every log and the ranking aggregates across them, so the score answers "on my traffic" rather than "on this one request". It also takes `prompt_variants` to hold the model constant and vary the system prompt: each variant patches the served request, and the ranking carries one row per model × variant under the same judge.
 | `send_feedback` | Send feedback about the agent surface to the DodoRouter team | — |
 
 Most tools take an optional `router` slug. It is optional when your connection reaches exactly one router and required when it reaches several — rather than silently picking one.

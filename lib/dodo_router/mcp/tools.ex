@@ -201,6 +201,29 @@ defmodule DodoRouter.MCP.Tools do
             "description" =>
               "Runs per candidate, 1-10. This is your variance estimate, not a quality boost. Defaults to 3."
           },
+          "prompt_variants" => %{
+            "type" => "array",
+            "maxItems" => 10,
+            "items" => %{
+              "type" => "object",
+              "required" => ["name"],
+              "properties" => %{
+                "name" => %{"type" => "string"},
+                "system_prompt" => %{
+                  "type" => ["string", "null"],
+                  "description" =>
+                    "Replaces the served request's system prompt (prepended if it had " <>
+                      "none); null means as-served, so the baseline sits in the " <>
+                      "comparison under its own name."
+                }
+              }
+            },
+            "description" =>
+              "Hold the model constant and vary the prompt: candidates x variants in one " <>
+                "benchmark, one judge, one ranking row per (model x variant). The judge " <>
+                "scores each answer against the request that run actually sent and never " <>
+                "sees variant names. Runs multiply by the variant count."
+          },
           "run" => %{"type" => "boolean", "description" => "Start the benchmark now."},
           "include_incumbent" => %{
             "type" => "boolean",
@@ -542,6 +565,7 @@ defmodule DodoRouter.MCP.Tools do
         "judge_model" => judge.model,
         "candidate_targets" => candidates,
         "source_log_ids" => Enum.map(logs, & &1.id),
+        "prompt_variants" => args["prompt_variants"] || [],
         "repetitions" => args["repetitions"] || 3
       }
 
@@ -760,6 +784,7 @@ defmodule DodoRouter.MCP.Tools do
           %{
             provider: ranking.provider,
             model: ranking.model,
+            variant: ranking.variant,
             runs: ranking.total,
             scored: ranking.successful,
             avg_score: ranking.average,
@@ -999,6 +1024,7 @@ defmodule DodoRouter.MCP.Tools do
        args
        |> Map.put_new("request_log_id", source.request_log_id)
        |> Map.put_new("request_log_ids", DodoRouter.Logs.Evaluation.source_log_ids(source))
+       |> Map.put_new("prompt_variants", source.prompt_variants || [])
        |> Map.put_new("name", source.name)
        |> Map.put_new("criteria", source.criteria)
        |> Map.put_new("good_examples", source.good_examples)

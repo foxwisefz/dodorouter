@@ -20,6 +20,11 @@ defmodule DodoRouter.Logs.Evaluation do
     # just the anchor. request_log_id stays required as the anchor
     # (= first of the set), so every router-scoping join keeps working.
     field :source_log_ids, {:array, :binary_id}, default: []
+    # Prompt variants: [%{"name" => ..., "system_prompt" => ...}]. Empty
+    # means one implicit as-served baseline. A nil system_prompt inside a
+    # variant means "as served", so a baseline can sit in the comparison
+    # under its own name. jsonb keeps room for richer patches later.
+    field :prompt_variants, {:array, :map}, default: []
     field :repetitions, :integer, default: 3
     field :benchmark_status, :string, default: "draft"
     # Batch written by the most recent benchmark execution; aggregates are
@@ -50,6 +55,7 @@ defmodule DodoRouter.Logs.Evaluation do
       :judge_model,
       :candidate_targets,
       :source_log_ids,
+      :prompt_variants,
       :repetitions,
       :judge_provider_key_id,
       :request_log_id,
@@ -68,6 +74,8 @@ defmodule DodoRouter.Logs.Evaluation do
     |> validate_number(:repetitions, greater_than_or_equal_to: 1, less_than_or_equal_to: 10)
     |> validate_length(:candidate_targets, min: 1, max: 30)
     |> validate_length(:source_log_ids, max: 20)
+    |> validate_length(:prompt_variants, max: 10)
+    |> validate_prompt_variant_shape()
     |> validate_candidate_target_shape()
     |> foreign_key_constraint(:request_log_id)
     |> foreign_key_constraint(:evaluated_by_id)
@@ -82,6 +90,46 @@ defmodule DodoRouter.Logs.Evaluation do
     case ids do
       ids when is_list(ids) and ids != [] -> ids
       _ -> [anchor]
+    end
+  end
+
+  @doc """
+  The prompt variants this evaluation fans out over. Empty reads as one
+  implicit as-served baseline (`nil`), which is exactly how every
+  pre-variant evaluation behaves.
+  """
+  def prompt_variants(%__MODULE__{prompt_variants: variants}) do
+    case variants do
+      variants when is_list(variants) and variants != [] -> variants
+      _ -> [nil]
+    end
+  end
+
+  # Two variants with one name would collapse into one ranking row and make
+  # the retry unable to recover the right patch.
+  defp validate_prompt_variant_shape(changeset) do
+    variants = get_field(changeset, :prompt_variants) || []
+
+    names = Enum.map(variants, &(is_map(&1) && &1["name"]))
+
+    cond do
+      variants == [] ->
+        changeset
+
+      Enum.any?(names, &(!is_binary(&1) or String.trim(&1) == "")) ->
+        add_error(changeset, :prompt_variants, "every variant needs a non-empty name")
+
+      length(Enum.uniq(names)) != length(names) ->
+        add_error(changeset, :prompt_variants, "variant names must be distinct")
+
+      Enum.any?(
+        variants,
+        &(not (is_nil(&1["system_prompt"]) or is_binary(&1["system_prompt"])))
+      ) ->
+        add_error(changeset, :prompt_variants, "system_prompt must be a string or null")
+
+      true ->
+        changeset
     end
   end
 

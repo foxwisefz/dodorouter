@@ -35,9 +35,11 @@ router, then list again. You cannot send that call yourself with these tools —
 the proxy endpoints take the router's **proxy API key**, a different credential
 precisely so that reading traffic and sending it are granted separately.
 
-There is no way to evaluate a prompt that was never served — the point of the
-source log is that it is real traffic, with the real system prompt, tools and
-history attached.
+A served log stays the anchor of every evaluation — real traffic, with the
+real tools and history attached. To test a prompt that was never served,
+patch the anchor with `prompt_variants` (below) rather than inventing a
+request from scratch: everything except the hypothesis under test stays
+exactly what production sent.
 
     get_log { "id": "<id from list_logs>" }
 
@@ -162,8 +164,20 @@ can re-judge them without paying for generation again.
 
 Evaluations are immutable on purpose: a score belongs to the rubric, judge and
 targets that produced it, so a changed setup is a new evaluation, never an edit.
-To test a prompt change, change the prompt in the product, make one real call,
-and evaluate that new log with the same criteria and the same judge.
+
+To A/B a prompt, don't seed new traffic — pass `prompt_variants`:
+
+    "prompt_variants": [
+      { "name": "as-served", "system_prompt": null },
+      { "name": "v2-terse", "system_prompt": "You are terse. ..." }
+    ]
+
+Each variant patches the served request's system prompt (everything else stays
+exactly what production sent), every candidate answers every variant, and the
+ranking carries one row per model × variant — same judge, same rubric, one
+comparison. The judge scores each answer against the request that run actually
+sent and never learns variant names. Runs multiply accordingly: check
+`planned_runs` before starting.
 
 You never have to re-send the rubric to vary one thing: pass `from_eval_id`
 to `create_eval` and everything — criteria, examples, judge, candidates,

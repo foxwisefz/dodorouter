@@ -46,9 +46,11 @@ defmodule DodoRouter.Replays do
     root = source |> Logs.root_of() |> Repo.preload(:router)
     effort = normalize_effort(target[:reasoning_effort])
     message_index = target[:message_index]
+    system_prompt = target[:system_prompt]
 
     with :ok <- validate_effort(effort),
-         {:ok, request} <- prepare_request(root, model, effort, message_index),
+         {:ok, request} <-
+           prepare_request(root, model, effort, message_index, system_prompt: system_prompt),
          {:ok, step} <- build_step(user, root.router_id, key_id, model, effort) do
       request_id = Ecto.UUID.generate()
 
@@ -116,9 +118,21 @@ defmodule DodoRouter.Replays do
   effort is only an opt-in default at the adapter layer, so a leftover body
   value would silently win over the user's choice.
   """
-  def prepare_request(source, target_model, reasoning_effort \\ nil, message_index \\ nil)
+  def prepare_request(
+        source,
+        target_model,
+        reasoning_effort \\ nil,
+        message_index \\ nil,
+        overrides \\ []
+      )
 
-  def prepare_request(%RequestLog{} = source, target_model, reasoning_effort, message_index) do
+  def prepare_request(
+        %RequestLog{} = source,
+        target_model,
+        reasoning_effort,
+        message_index,
+        overrides
+      ) do
     with :ok <- validate_model(target_model),
          {:ok, decoded} <- decode_body(source.request_body),
          :ok <- ensure_messages(decoded),
@@ -128,11 +142,52 @@ defmodule DodoRouter.Replays do
         decoded
         |> Map.drop(@strip_fields)
         |> drop_reasoning_params(reasoning_effort, decoded["model"], target_model)
+        |> apply_system_prompt(overrides[:system_prompt])
         |> Map.put("model", target_model)
 
       {:ok, request}
     end
   end
+
+  # Replaces the system message's content — or prepends one when the served
+  # request had none. The replay-a-real-log anchor stays: everything else
+  # about the request is exactly what was served, only the hypothesis under
+  # test changes (dodo_router-kk1).
+  defp apply_system_prompt(request, nil), do: request
+
+  defp apply_system_prompt(%{"messages" => messages} = request, prompt)
+       when is_binary(prompt) do
+    {messages, replaced?} =
+      Enum.map_reduce(messages, false, fn
+        %{"role" => "system"} = msg, false -> {Map.put(msg, "content", prompt), true}
+        msg, replaced? -> {msg, replaced?}
+      end)
+
+    messages =
+      if replaced?,
+        do: messages,
+        else: [%{"role" => "system", "content" => prompt} | messages]
+
+    Map.put(request, "messages", messages)
+  end
+
+  @doc """
+  The same patch, applied to a stored request-body JSON string — what the
+  judge scores against must be the request the run actually sent.
+  """
+  def patch_system_prompt(request_body, nil), do: request_body
+
+  def patch_system_prompt(request_body, prompt) when is_binary(request_body) do
+    case Jason.decode(request_body) do
+      {:ok, %{"messages" => _} = decoded} ->
+        Jason.encode!(apply_system_prompt(decoded, prompt))
+
+      _ ->
+        request_body
+    end
+  end
+
+  def patch_system_prompt(request_body, _prompt), do: request_body
 
   # Cut the history at the chosen user message (inclusive) so the replay
   # asks "what would this model have answered at that exchange". Runs

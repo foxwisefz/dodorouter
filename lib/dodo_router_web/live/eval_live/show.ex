@@ -532,7 +532,8 @@ defmodule DodoRouterWeb.EvalLive.Show do
           batch_runs
           |> Enum.filter(
             &(&1.candidate_provider == ranking.provider and
-                &1.candidate_model == ranking.model)
+                &1.candidate_model == ranking.model and
+                &1.variant_name == ranking.variant)
           )
           |> Enum.sort_by(&{&1.repetition, &1.inserted_at, &1.id})
 
@@ -567,9 +568,10 @@ defmodule DodoRouterWeb.EvalLive.Show do
     |> Enum.with_index()
     |> Enum.map(fn {{ranking, points}, index} ->
       %{
-        key: "#{ranking.provider}|#{ranking.model}",
+        key: "#{ranking.provider}|#{ranking.model}|#{ranking.variant}",
         provider: ranking.provider,
         model: ranking.model,
+        variant: ranking.variant,
         color: chart_color(index),
         points: Enum.map(points, &Map.put(&1, :x, chart_x(&1.slot, slots)))
       }
@@ -1175,9 +1177,9 @@ defmodule DodoRouterWeb.EvalLive.Show do
                   "series cursor-pointer",
                   pareto?(ranking, @rankings, @tradeoff_axis) && "pareto"
                 ]}
-                opacity={series_opacity(@selected_series, "#{ranking.provider}|#{ranking.model}")}
+                opacity={series_opacity(@selected_series, "#{ranking.provider}|#{ranking.model}|#{ranking.variant}")}
                 phx-click="select_series"
-                phx-value-series={"#{ranking.provider}|#{ranking.model}"}
+                phx-value-series={"#{ranking.provider}|#{ranking.model}|#{ranking.variant}"}
               >
                 <circle
                   :if={pareto?(ranking, @rankings, @tradeoff_axis)}

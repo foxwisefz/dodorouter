@@ -691,6 +691,71 @@ defmodule DodoRouter.EvaluationsTest do
     assert {:error, :already_running} = Evaluations.enqueue(user, loaded)
   end
 
+  test "prompt variants fan out and rank per (model x variant), judge seeing the patched prompt" do
+    user = AccountsFixtures.user_fixture()
+    {router, _key} = RoutersFixtures.router_fixture(user)
+    provider_key = ProvidersFixtures.provider_key_fixture(user)
+
+    log =
+      LogsFixtures.log_fixture(router, %{
+        request_body:
+          Jason.encode!(%{
+            "model" => "m",
+            "messages" => [
+              %{"role" => "system", "content" => "You are the original prompt"},
+              %{"role" => "user", "content" => "hi"}
+            ]
+          })
+      })
+
+    {:ok, evaluation} =
+      Evaluations.create_evaluation(user, log, %{
+        name: "Prompt A/B",
+        criteria: "Be correct",
+        judge_model: "judge-model",
+        judge_provider_key_id: provider_key.id,
+        prompt_variants: [
+          %{"name" => "as-served", "system_prompt" => nil},
+          %{"name" => "terse", "system_prompt" => "You are terse. Reply in one word."}
+        ],
+        candidate_targets: [
+          %{
+            "provider_key_id" => provider_key.id,
+            "provider" => "test_provider",
+            "model" => "test-model"
+          }
+        ],
+        repetitions: 1
+      })
+
+    # 1 log x 2 variants x 1 candidate x 1 repetition.
+    assert Evaluations.planned_run_count(evaluation) == 2
+
+    {:ok, _} = Evaluations.run(user, evaluation)
+
+    evaluation = Evaluations.get_evaluation!(user, evaluation.id)
+    runs = Evaluations.latest_batch_runs(evaluation)
+
+    assert runs |> Enum.map(& &1.variant_name) |> Enum.sort() == ["as-served", "terse"]
+
+    # One ranking row per (model x variant): same rubric, same judge, one
+    # comparison — the A/B people actually run daily (dodo_router-kk1).
+    rankings = Evaluations.rankings(evaluation)
+    assert length(rankings) == 2
+    assert rankings |> Enum.map(& &1.variant) |> Enum.sort() == ["as-served", "terse"]
+
+    # The variant's prompt reached the wire: the replayed request for the
+    # terse run carries the patched system message...
+    terse = Enum.find(runs, &(&1.variant_name == "terse"))
+    candidate_log = DodoRouter.Repo.get!(DodoRouter.Logs.RequestLog, terse.candidate_log_id)
+    assert candidate_log.request_body =~ "You are terse"
+    refute candidate_log.request_body =~ "original prompt"
+
+    # ...and the judge scored against the patched request, not the anchor's.
+    judge_log = DodoRouter.Repo.get!(DodoRouter.Logs.RequestLog, terse.judge_log_id)
+    assert judge_log.request_body =~ "You are terse"
+  end
+
   test "an evaluation over a set of logs runs each and aggregates one ranking" do
     user = AccountsFixtures.user_fixture()
     {router, _key} = RoutersFixtures.router_fixture(user)

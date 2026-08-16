@@ -23,6 +23,10 @@ defmodule DodoRouter.Logs.EvaluationRun do
     # Which source log this run measured. Nil means the evaluation's anchor
     # log — every run before multi-log evaluations existed.
     field :source_log_id, :binary_id
+    # Which prompt variant this run measured; nil is the as-served baseline
+    # (and every run from before variants existed). The patch itself lives
+    # on the immutable evaluation, keyed by this name.
+    field :variant_name, :string
     # What the provider's response claimed actually answered — nil when the
     # response named nothing or the row predates the column. The ranking is
     # keyed on candidate_model (what was requested); a difference here is a
@@ -92,6 +96,7 @@ defmodule DodoRouter.Logs.EvaluationRun do
       :rubric_gaps,
       :raw_judge_response,
       :source_log_id,
+      :variant_name,
       :candidate_served_model,
       :error,
       :error_category,

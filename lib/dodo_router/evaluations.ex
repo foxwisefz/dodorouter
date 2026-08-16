@@ -301,9 +301,10 @@ defmodule DodoRouter.Evaluations do
 
     jobs =
       for {_id, source_log} <- source_logs,
+          variant <- Evaluation.prompt_variants(evaluation),
           target <- evaluation.candidate_targets,
           repetition <- 1..evaluation.repetitions,
-          do: {source_log, target, repetition}
+          do: {source_log, variant, target, repetition}
 
     # Keys the providers told us are exhausted while this batch was running.
     # A billing-cycle limit does not clear in the seconds between runs, so
@@ -314,13 +315,13 @@ defmodule DodoRouter.Evaluations do
     results =
       jobs
       |> Task.async_stream(
-        fn {source_log, target, repetition} ->
+        fn {source_log, variant, target, repetition} ->
           result =
             if :ets.member(exhausted, target["provider_key_id"]) do
-              skip_run(evaluation, source_log, target, repetition, batch_id)
+              skip_run(evaluation, source_log, variant, target, repetition, batch_id)
             else
               user
-              |> safe_run_candidate(evaluation, source_log, target, repetition, batch_id)
+              |> safe_run_candidate(evaluation, source_log, variant, target, repetition, batch_id)
               |> note_exhaustion(exhausted, target)
             end
 
@@ -415,10 +416,11 @@ defmodule DodoRouter.Evaluations do
   # came back exhausted. Recorded rather than skipped silently: the batch
   # still planned this measurement, and a missing row would read as though
   # it was never asked for.
-  defp skip_run(evaluation, source_log, target, repetition, batch_id) do
+  defp skip_run(evaluation, source_log, variant, target, repetition, batch_id) do
     {:ok, run} =
       create_run(evaluation, %{
         source_log_id: source_log.id,
+        variant_name: variant && variant["name"],
         candidate_provider_key_id: target["provider_key_id"],
         candidate_provider: target["provider"],
         candidate_model: target["model"],
@@ -563,18 +565,22 @@ defmodule DodoRouter.Evaluations do
     output = run.candidate_output
     judge_only? = judge_retryable?(run)
     source_log = retry_source_log(user, evaluation, run)
+    variant = run_variant(evaluation, run)
 
     archive_attempt!(run)
     run = update_run!(run, %{status: "running", error: nil, failure_stage: nil})
 
     if judge_only? do
+      source_log = variant_patched_source(source_log, variant && variant["system_prompt"])
       judge_candidate(user, evaluation, source_log, run, output, started_at)
     else
-      target = %{
-        "provider_key_id" => run.candidate_provider_key_id,
-        "provider" => run.candidate_provider,
-        "model" => run.candidate_model
-      }
+      target =
+        %{
+          "provider_key_id" => run.candidate_provider_key_id,
+          "provider" => run.candidate_provider,
+          "model" => run.candidate_model
+        }
+        |> put_variant(variant)
 
       generate_and_judge(user, evaluation, source_log, run, target, started_at)
     end
@@ -587,6 +593,23 @@ defmodule DodoRouter.Evaluations do
 
   defp retry_source_log(user, _evaluation, %EvaluationRun{source_log_id: id}),
     do: Logs.get_log!(user, id)
+
+  # The patch a run measured, recovered by name — evaluations are immutable,
+  # so the lookup cannot drift.
+  defp run_variant(_evaluation, %EvaluationRun{variant_name: nil}), do: nil
+
+  defp run_variant(evaluation, %EvaluationRun{variant_name: name}) do
+    Enum.find(evaluation.prompt_variants || [], &(&1["name"] == name))
+  end
+
+  defp put_variant(target, nil), do: target
+  defp put_variant(target, variant), do: Map.put(target, "system_prompt", variant["system_prompt"])
+
+  defp variant_patched_source(source_log, nil), do: source_log
+
+  defp variant_patched_source(source_log, system_prompt) do
+    %{source_log | request_body: Replays.patch_system_prompt(source_log.request_body, system_prompt)}
+  end
 
   # A copy of the attempt as it stands, stamped with when it was replaced and
   # by which run. The copy carries no batch_id: it is not part of any batch's
@@ -631,8 +654,8 @@ defmodule DodoRouter.Evaluations do
     |> Repo.insert!()
   end
 
-  defp safe_run_candidate(user, evaluation, source_log, target, repetition, batch_id) do
-    run_candidate(user, evaluation, source_log, target, repetition, batch_id)
+  defp safe_run_candidate(user, evaluation, source_log, variant, target, repetition, batch_id) do
+    run_candidate(user, evaluation, source_log, variant, target, repetition, batch_id)
   rescue
     exception ->
       {:error,
@@ -649,11 +672,12 @@ defmodule DodoRouter.Evaluations do
 
   @doc """
   How many runs one benchmark execution of this evaluation performs:
-  `source logs x candidates x repetitions`. Knowable — and stated — before
-  anything is spent.
+  `source logs x variants x candidates x repetitions`. Knowable — and
+  stated — before anything is spent.
   """
   def planned_run_count(%Evaluation{} = evaluation) do
     length(Evaluation.source_log_ids(evaluation)) *
+      length(Evaluation.prompt_variants(evaluation)) *
       length(evaluation.candidate_targets) *
       evaluation.repetitions
   end
@@ -999,12 +1023,14 @@ defmodule DodoRouter.Evaluations do
     end
   end
 
-  defp run_candidate(user, evaluation, source_log, target, repetition, batch_id) do
+  defp run_candidate(user, evaluation, source_log, variant, target, repetition, batch_id) do
     started_at = System.monotonic_time(:millisecond)
     candidate_key = Providers.get_provider_key(user, target["provider_key_id"])
+    target = put_variant(target, variant)
 
     case create_run(evaluation, %{
            source_log_id: source_log.id,
+           variant_name: variant && variant["name"],
            candidate_provider_key_id: candidate_key && candidate_key.id,
            candidate_provider_key_label: candidate_key && candidate_key.label,
            candidate_provider: target["provider"],
@@ -1048,9 +1074,14 @@ defmodule DodoRouter.Evaluations do
       Replays.replay(user, source_log, %{
         provider_key_id: target["provider_key_id"],
         model: target["model"],
+        system_prompt: target["system_prompt"],
         traffic_type: "evaluation_candidate"
       })
     end
+
+    # What the judge scores against must be the request the run actually
+    # sent — for a variant run, the patched prompt, not the anchor's.
+    source_log = variant_patched_source(source_log, target["system_prompt"])
 
     case with_rate_limit_backoff(replay) do
       {:ok, candidate_log} ->
@@ -1330,8 +1361,8 @@ defmodule DodoRouter.Evaluations do
 
   def rankings(runs) when is_list(runs) do
     runs
-    |> Enum.group_by(&{&1.candidate_provider, &1.candidate_model})
-    |> Enum.map(fn {{provider, model}, target_runs} ->
+    |> Enum.group_by(&{&1.candidate_provider, &1.candidate_model, &1.variant_name})
+    |> Enum.map(fn {{provider, model, variant}, target_runs} ->
       completed = Enum.filter(target_runs, &(&1.status == "completed" and is_integer(&1.score)))
       scores = Enum.map(completed, & &1.score)
       latencies = Enum.map(completed, & &1.candidate_latency_ms) |> Enum.reject(&is_nil/1)
@@ -1339,6 +1370,9 @@ defmodule DodoRouter.Evaluations do
       %{
         provider: provider,
         model: model,
+        # nil for the as-served baseline and for every pre-variant run — a
+        # single-variant evaluation ranks exactly as it always did.
+        variant: variant,
         total: length(target_runs),
         successful: length(completed),
         average: average(scores),
