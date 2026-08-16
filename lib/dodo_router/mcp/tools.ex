@@ -267,13 +267,25 @@ defmodule DodoRouter.MCP.Tools do
 
       Read rubric_feedback before trusting the scores: if the judge often said the criteria were too thin to decide, the numbers are noise dressed up as data. A gap between two models smaller than their score_stddev is not a result.
 
-      A failed run is not always a failed model. `failure_stage` says which half broke: "judge" means the answer was generated and paid for and only the scoring call failed — retry_eval re-scores it for free — while "candidate" means the model never answered. `retryable` counts both. `blockers` reports what is already known to be broken before spending anything: a key seen refusing, or a candidate model the provider has retired.
+      A failed run is not always a failed model. `failure_stage` says which half broke: "judge" means the answer was generated and paid for and only the scoring call failed — retry_eval re-scores it for free — while "candidate" means the model never answered. `retryable` counts both. `blockers` reports what is already known to be broken before spending anything: a key seen refusing, or a candidate model the provider has retired; it is omitted while the benchmark is running, since the keys were checked at start and a poll should stay cheap.
+
+      The default payload is built for polling: status, summary, rankings, rubric feedback and retry counts. Pass include: ["runs"] for the per-run detail (up to 2,000 chars of output_preview per run — a full batch can be large) and include: ["criteria"] for the rubric text.
       """,
       scopes: ["evals:read"],
       schema: %{
         "type" => "object",
         "required" => ["id"],
-        "properties" => %{"router" => @router_arg, "id" => %{"type" => "string"}}
+        "properties" => %{
+          "router" => @router_arg,
+          "id" => %{"type" => "string"},
+          "include" => %{
+            "type" => "array",
+            "items" => %{"type" => "string", "enum" => ["runs", "criteria"]},
+            "description" =>
+              "Extra sections beyond the polling default: \"runs\" for per-run detail " <>
+                "with output previews and log ids, \"criteria\" for the rubric text."
+          }
+        }
       }
     }
   ]
@@ -577,7 +589,7 @@ defmodule DodoRouter.MCP.Tools do
   defp run("get_eval", principal, args) do
     with {:ok, router} <- resolve_router(principal, args),
          {:ok, evaluation} <- fetch_eval(principal, router, args["id"]) do
-      {:ok, eval_payload(principal, evaluation.id),
+      {:ok, eval_payload(principal, evaluation.id, include: args["include"]),
        %{
          target_type: "evaluation",
          target_id: evaluation.id,
@@ -646,13 +658,19 @@ defmodule DodoRouter.MCP.Tools do
 
   ## Payloads
 
-  defp eval_payload(principal, id) do
+  # The default payload is a polling payload: get_eval blew a client's
+  # tool-result limit twice when candidates x repetitions x 2,000-char
+  # previews rode along on every 2-second poll (dodo_router-m4o). `runs`
+  # and `criteria` come only via include:, and preflight is skipped while
+  # the benchmark is running — the keys were checked at start.
+  defp eval_payload(principal, id, opts \\ []) do
     evaluation = Evaluations.get_evaluation!(principal.user, id)
     runs = Evaluations.latest_batch_runs(evaluation)
-    bodies? = Principal.allows?(principal, "logs:read_bodies")
     shared_key_label = shared_judge_key_label(evaluation)
+    running? = Evaluations.benchmark_running?(evaluation)
+    include = opts |> Keyword.get(:include) |> List.wrap()
 
-    %{
+    payload = %{
       id: evaluation.id,
       # Judging and generating through one account is how a benchmark rate
       # limits itself: every repetition of every target spends the same quota
@@ -662,9 +680,8 @@ defmodule DodoRouter.MCP.Tools do
       shared_judge_key_label: shared_key_label,
       warnings: shared_key_warnings(shared_key_label),
       name: evaluation.name,
-      criteria: evaluation.criteria,
       status: evaluation.benchmark_status,
-      running: Evaluations.benchmark_running?(evaluation),
+      running: running?,
       repetitions: evaluation.repetitions,
       request_log_id: evaluation.request_log_id,
       summary:
@@ -689,13 +706,43 @@ defmodule DodoRouter.MCP.Tools do
       # Failed runs worth repeating, split by what has to be redone. A judge
       # retry reuses the stored answer; a candidate retry calls the provider
       # again. Feed these to retry_eval rather than re-running everything.
-      retryable: Evaluations.retryable_counts(evaluation),
-      # Problems knowable before spending anything: a key the proxy has seen
-      # refuse, or a model the provider retired.
-      blockers: blockers_payload(Evaluations.preflight(principal.user, evaluation)),
-      runs:
-        Enum.map(runs, fn run ->
-          %{
+      retryable: Evaluations.retryable_counts(evaluation)
+    }
+
+    payload
+    |> maybe_put_blockers(principal, evaluation, running?)
+    |> maybe_put_criteria(evaluation, "criteria" in include)
+    |> maybe_put_runs(principal, runs, "runs" in include)
+  end
+
+  # Problems knowable before spending anything: a key the proxy has seen
+  # refuse, or a model the provider retired. Skipped while running — a
+  # poll should not re-do key-health work the start already did.
+  defp maybe_put_blockers(payload, _principal, _evaluation, true), do: payload
+
+  defp maybe_put_blockers(payload, principal, evaluation, false) do
+    Map.put(
+      payload,
+      :blockers,
+      blockers_payload(Evaluations.preflight(principal.user, evaluation))
+    )
+  end
+
+  defp maybe_put_criteria(payload, _evaluation, false), do: payload
+
+  defp maybe_put_criteria(payload, evaluation, true),
+    do: Map.put(payload, :criteria, evaluation.criteria)
+
+  defp maybe_put_runs(payload, _principal, _runs, false), do: payload
+
+  defp maybe_put_runs(payload, principal, runs, true) do
+    bodies? = Principal.allows?(principal, "logs:read_bodies")
+
+    Map.put(
+      payload,
+      :runs,
+      Enum.map(runs, fn run ->
+        %{
             status: run.status,
             model: run.candidate_model,
             score: run.score,
@@ -724,8 +771,8 @@ defmodule DodoRouter.MCP.Tools do
             candidate_log_id: run.candidate_log_id,
             output_preview: body_or_marker(bodies?, truncate(run.candidate_output))
           }
-        end)
-    }
+      end)
+    )
   end
 
   defp blockers_payload(%{judge: judge, candidates: candidates}) do

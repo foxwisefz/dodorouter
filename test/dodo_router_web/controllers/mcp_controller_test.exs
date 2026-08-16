@@ -300,7 +300,11 @@ defmodule DodoRouterWeb.MCPControllerTest do
 
       {:ok, _} = DodoRouter.Evaluations.run(user, evaluation)
 
-      body = json_response(call_tool(conn, token, "get_eval", %{"id" => evaluation.id}), 200)
+      body =
+        json_response(
+          call_tool(conn, token, "get_eval", %{"id" => evaluation.id, "include" => ["runs"]}),
+          200
+        )
       payload = tool_json(body)
 
       # The stage is what tells an agent this is recoverable at all.
@@ -360,7 +364,11 @@ defmodule DodoRouterWeb.MCPControllerTest do
 
       {:ok, _} = DodoRouter.Evaluations.run(user, evaluation)
 
-      body = json_response(call_tool(conn, token, "get_eval", %{"id" => evaluation.id}), 200)
+      body =
+        json_response(
+          call_tool(conn, token, "get_eval", %{"id" => evaluation.id, "include" => ["runs"]}),
+          200
+        )
       payload = tool_json(body)
 
       assert [run] = payload["runs"]
@@ -496,6 +504,63 @@ defmodule DodoRouterWeb.MCPControllerTest do
       # refused for being outside its vendor's coding environment.
       assert by_label["plan key"]["billing"] == "subscription"
       assert by_label["plan key"]["judge_advice"] =~ "metered key for the judge"
+    end
+
+    test "get_eval is light by default and expands on request", %{
+      conn: conn,
+      token: token,
+      user: user,
+      router: router
+    } do
+      key = DodoRouter.ProvidersFixtures.provider_key_fixture(user, %{"label" => "Key 1"})
+
+      log =
+        DodoRouter.LogsFixtures.log_fixture(router, %{
+          request_body:
+            Jason.encode!(%{
+              "model" => "m",
+              "messages" => [%{"role" => "user", "content" => "hi"}]
+            })
+        })
+
+      {:ok, evaluation} =
+        DodoRouter.Evaluations.create_evaluation(user, log, %{
+          name: "Poll me",
+          criteria: "A very long rubric that should not ride every poll",
+          judge_model: "judge-model",
+          judge_provider_key_id: key.id,
+          candidate_targets: [
+            %{"provider_key_id" => key.id, "provider" => "test_provider", "model" => "test-model"}
+          ],
+          repetitions: 1
+        })
+
+      {:ok, _} = DodoRouter.Evaluations.run(user, evaluation)
+
+      # Polling payload: status, summary and rankings — not 50 runs with
+      # 2,000-char previews, and not the criteria re-sent every 2 seconds.
+      body = json_response(call_tool(conn, token, "get_eval", %{"id" => evaluation.id}), 200)
+      payload = tool_json(body)
+
+      assert payload["status"]
+      assert payload["summary"]
+      assert payload["rankings"]
+      refute Map.has_key?(payload, "runs")
+      refute Map.has_key?(payload, "criteria")
+
+      # And everything is one include away.
+      body =
+        json_response(
+          call_tool(conn, token, "get_eval", %{
+            "id" => evaluation.id,
+            "include" => ["runs", "criteria"]
+          }),
+          200
+        )
+
+      payload = tool_json(body)
+      assert [_ | _] = payload["runs"]
+      assert payload["criteria"] =~ "long rubric"
     end
 
     test "cancel_eval stops a running benchmark and refuses when idle", %{

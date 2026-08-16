@@ -114,7 +114,16 @@ Notes that change the result:
 
     get_eval { "id": "<id>" }
 
-Poll until `running` is false. Then:
+Poll until `running` is false. The default payload is built for exactly that
+polling: status, `summary`, `rankings`, `rubric_feedback` and `retryable` —
+not the full run detail. When you want more, ask:
+
+    get_eval { "id": "<id>", "include": ["runs", "criteria"] }
+
+`runs` carries up to 2,000 characters of `output_preview` per run — a full
+batch can be large, so request it once at the end rather than on every poll.
+`blockers` is likewise omitted while the benchmark is running (the keys were
+checked at start). Then:
 
 - `rankings` — one row per model: `avg_score`, `score_stddev`, `avg_latency_ms`,
   `avg_cost_usd`. This is the quality-versus-price table.
@@ -123,9 +132,10 @@ Poll until `running` is false. Then:
   often the judge said your criteria were too thin to decide, and what it said
   was missing. If `flagged` is high, fix `criteria` and create a new evaluation;
   the scores you have are noise dressed as numbers.
-- `runs` — every individual run: score, `criterion_scores`, `issues` the judge
-  raised, `output_preview`, and `candidate_log_id` / `judge_log_id`. Pass those
-  ids to `get_log` for the full text of an answer or of the judge's reasoning.
+- `runs` (with `include: ["runs"]`) — every individual run: score,
+  `criterion_scores`, `issues` the judge raised, `output_preview`, and
+  `candidate_log_id` / `judge_log_id`. Pass those ids to `get_log` for the
+  full text of an answer or of the judge's reasoning.
 
 A `status` of `failed` on a run is not a low score — it is a call that never
 produced a comparable answer. `error` says why in prose; `error_category` says
