@@ -127,6 +127,8 @@ defmodule DodoRouter.MCP.Tools do
       Include the model you use today as a candidate — a score only means something next to another score from the same rubric and judge. Write criteria that can fail: name the facts that must be right, the format, the length, and what must not appear. Set run=true to start it immediately.
 
       Pick a judge on a metered API key, not a subscription/coding-plan key. Plan credentials are issued for a vendor's own coding environment and may refuse or throttle calls made from anywhere else — as a candidate that costs you one data point, but as the judge it means no scores at all. list_eval_targets reports `billing` per key.
+
+      Avoid putting the judge on the same provider key as a candidate: judging and generating through one account spends the same quota twice, and a rate-limited judge scores nothing. The result carries a warning (`shared_judge_key_label` / `warnings`) when this is the case.
       """,
       scopes: ["evals:write"],
       schema: %{
@@ -540,15 +542,45 @@ defmodule DodoRouter.MCP.Tools do
     end
   end
 
+  # Mirrors the web UI's shared_key_label/1 (eval_live/show.ex): the judge's
+  # key label when any candidate generates through the same key, else nil.
+  defp shared_judge_key_label(evaluation) do
+    shared? =
+      Enum.any?(evaluation.candidate_targets || [], fn target ->
+        target["provider_key_id"] == evaluation.judge_provider_key_id
+      end)
+
+    if shared? and evaluation.judge_provider_key, do: evaluation.judge_provider_key.label
+  end
+
+  defp shared_key_warnings(nil), do: []
+
+  defp shared_key_warnings(label) do
+    [
+      "The judge and at least one candidate share provider key \"#{label}\". Judging and " <>
+        "generating through one account spends the same quota twice — if the judge gets " <>
+        "rate-limited, answers are generated and paid for but never scored. Prefer a judge " <>
+        "on a different (metered) key; list_eval_targets shows what is available."
+    ]
+  end
+
   ## Payloads
 
   defp eval_payload(principal, id) do
     evaluation = Evaluations.get_evaluation!(principal.user, id)
     runs = Evaluations.latest_batch_runs(evaluation)
     bodies? = Principal.allows?(principal, "logs:read_bodies")
+    shared_key_label = shared_judge_key_label(evaluation)
 
     %{
       id: evaluation.id,
+      # Judging and generating through one account is how a benchmark rate
+      # limits itself: every repetition of every target spends the same quota
+      # twice, and a rate-limited judge scores nothing. Knowable at creation,
+      # so it is said at creation (the web UI has warned since show.ex grew
+      # shared_key_label/1; this is the MCP parity — dodo_router-jzf).
+      shared_judge_key_label: shared_key_label,
+      warnings: shared_key_warnings(shared_key_label),
       name: evaluation.name,
       criteria: evaluation.criteria,
       status: evaluation.benchmark_status,

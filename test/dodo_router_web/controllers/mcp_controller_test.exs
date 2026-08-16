@@ -496,6 +496,49 @@ defmodule DodoRouterWeb.MCPControllerTest do
       assert by_label["plan key"]["judge_advice"] =~ "metered key for the judge"
     end
 
+    test "create_eval warns when the judge shares a provider key with a candidate", %{
+      conn: conn,
+      token: token,
+      user: user,
+      router: router
+    } do
+      key = DodoRouter.ProvidersFixtures.provider_key_fixture(user, %{"label" => "Shared Key"})
+      other = DodoRouter.ProvidersFixtures.provider_key_fixture(user, %{"label" => "Solo Key"})
+
+      log =
+        DodoRouter.LogsFixtures.log_fixture(router, %{
+          request_body:
+            Jason.encode!(%{
+              "model" => "m",
+              "messages" => [%{"role" => "user", "content" => "hi"}]
+            })
+        })
+
+      args = fn judge_key ->
+        %{
+          "request_log_id" => log.id,
+          "name" => "Shared key check",
+          "criteria" => "Be useful",
+          "judge" => %{"provider_key_id" => judge_key.id, "model" => "judge-model"},
+          "candidates" => [
+            %{"provider_key_id" => key.id, "model" => "test-model"}
+          ]
+        }
+      end
+
+      # Judging and generating through one account spends the same quota
+      # twice — knowable at creation, so it is said at creation.
+      body = json_response(call_tool(conn, token, "create_eval", args.(key)), 200)
+      payload = tool_json(body)
+      assert payload["shared_judge_key_label"] == "Shared Key"
+      assert Enum.any?(payload["warnings"], &(&1 =~ "quota"))
+
+      body = json_response(call_tool(conn, token, "create_eval", args.(other)), 200)
+      payload = tool_json(body)
+      assert payload["shared_judge_key_label"] == nil
+      assert payload["warnings"] in [nil, []]
+    end
+
     test "eval targets filter by provider, model substring and limit", %{
       conn: conn,
       user: user,

@@ -94,6 +94,10 @@ Notes that change the result:
 - **The judge is a model and it costs money.** Use a strong one — its job is
   harder than the candidates'. It is never told which model produced which
   answer.
+- **Keep the judge off the candidates' provider key.** Judging and generating
+  through one account spends the same quota twice, and a rate-limited judge
+  scores nothing while every answer is still paid for. When they do share a
+  key, the result says so (`shared_judge_key_label` and a `warnings` entry).
 - `run: true` starts the benchmark immediately. Omit it to create the evaluation
   and start it later with `run_eval`.
 
