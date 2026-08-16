@@ -7,6 +7,7 @@ defmodule DodoRouter.Proxy do
   alias DodoRouter.Routers.Router
   alias DodoRouter.Proxy.{Adapter, FallbackChain, Fidelity, Idempotency}
   alias DodoRouter.Logs
+  alias DodoRouter.Logs.TokenAttribution
   alias DodoRouter.Redact
 
   @doc """
@@ -299,7 +300,16 @@ defmodule DodoRouter.Proxy do
       replayed_from_id: Keyword.get(opts, :replayed_from_id),
       replay_from_index: Keyword.get(opts, :replay_from_index),
       traffic_type: Keyword.get(opts, :traffic_type, "proxy"),
-      idempotency_key: Keyword.get(opts, :idempotency_key)
+      idempotency_key: Keyword.get(opts, :idempotency_key),
+      # Computed from the request still in memory — the full body, not the
+      # truncated copy that gets stored — against the billed input total.
+      token_attribution:
+        TokenAttribution.attribute(
+          request,
+          usage.prompt_tokens,
+          usage.cache_read_tokens,
+          usage.cache_write_tokens
+        )
     }
 
     # :sync callers (e.g. replay) need the persisted row back before returning

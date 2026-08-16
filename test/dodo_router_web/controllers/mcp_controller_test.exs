@@ -1041,6 +1041,64 @@ defmodule DodoRouterWeb.MCPControllerTest do
       assert pending["cost_usd"] == nil
     end
 
+    test "token attribution rides get_log and rolls up on get_session", %{
+      conn: conn,
+      token: token,
+      router: router
+    } do
+      attribution = fn tokens ->
+        %{
+          "version" => 1,
+          "basis_tokens" => tokens,
+          "total_chars" => tokens * 4,
+          "cache_frontier" => nil,
+          "buckets" => %{
+            "system" => %{"chars" => 0, "allocated_tokens" => 0, "cached_tokens" => 0},
+            "tools" => %{"chars" => 0, "allocated_tokens" => 0, "cached_tokens" => 0},
+            "history" => %{
+              "chars" => tokens * 2,
+              "allocated_tokens" => div(tokens, 2),
+              "cached_tokens" => 0
+            },
+            "tool_results" => %{
+              "chars" => tokens * 2,
+              "allocated_tokens" => tokens - div(tokens, 2),
+              "cached_tokens" => 0,
+              "by_tool" => %{"Read" => tokens - div(tokens, 2)}
+            },
+            "file_contents" => %{"chars" => 0, "allocated_tokens" => 0, "cached_tokens" => 0}
+          }
+        }
+      end
+
+      log =
+        DodoRouter.LogsFixtures.log_fixture(router, %{
+          session_id: "q-1",
+          token_attribution: attribution.(100)
+        })
+
+      DodoRouter.LogsFixtures.log_fixture(router, %{
+        session_id: "q-1",
+        token_attribution: attribution.(50)
+      })
+
+      fetched =
+        tool_json(json_response(call_tool(conn, token, "get_log", %{"id" => log.id}), 200))
+
+      assert fetched["token_attribution"]["basis_tokens"] == 100
+      assert fetched["token_attribution"]["buckets"]["tool_results"]["by_tool"]["Read"] == 50
+
+      session =
+        tool_json(
+          json_response(call_tool(conn, token, "get_session", %{"session_id" => "q-1"}), 200)
+        )
+
+      rollup = session["token_attribution"]
+      assert rollup["rows"] == 2
+      assert rollup["basis_tokens"] == 150
+      assert rollup["buckets"]["tool_results"]["by_tool"]["Read"] == 75
+    end
+
     test "list_logs drills into a session with an honest total", %{
       conn: conn,
       token: token,

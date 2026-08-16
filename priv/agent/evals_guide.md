@@ -296,6 +296,15 @@ and quality questions without a benchmark:
   is still in flight — an id with no requests yet returns zeros, never an
   error — so poll it freely.
 - `list_sessions` — recent sessions with the same per-session figures.
+- Both `get_log` and `get_session` carry `token_attribution`: input tokens
+  bucketed by what the context was made of (system prompt, tool
+  definitions, history, tool results — split `by_tool` — and pasted file
+  contents) and how much of each sat in the cacheable prefix. "Tool
+  results are 60% of this question's tokens, mostly one Read, and they sit
+  after the cache breakpoint" is the most actionable sentence in context
+  engineering. The tokens are allocated pro-rata against the billed total
+  (no provider tokenizer is public), so trust the shares; treat per-bucket
+  absolutes as estimates.
 - `get_spend { "hours": 24 }` — spend grouped by served model.
 - `get_cache_stats { "hours": 24 }` — prompt-cache hit rate and token
   volumes. A falling hit rate on an agent workload usually means something

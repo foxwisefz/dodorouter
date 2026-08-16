@@ -7,6 +7,7 @@ defmodule DodoRouter.Logs do
   alias DodoRouter.Repo
   alias DodoRouter.Logs.CacheRegression
   alias DodoRouter.Logs.RequestLog
+  alias DodoRouter.Logs.TokenAttribution
   alias DodoRouter.Routers.Router
   alias DodoRouter.Accounts.User
   alias DodoRouter.Usage
@@ -906,6 +907,23 @@ defmodule DodoRouter.Logs do
       where: l.router_id == ^router.id and l.session_id == ^session_id
     )
     |> Repo.update_all(set: [session_name: session_name])
+  end
+
+  @doc """
+  The session's input tokens bucketed by context segment — stored per-log
+  attributions summed, so this reads kilobytes of jsonb, never re-parses
+  bodies. nil when no row in the session carries one.
+  """
+  def session_token_attribution(%Router{} = router, session_id) do
+    from(l in RequestLog,
+      where:
+        l.router_id == ^router.id and l.session_id == ^session_id and
+          not is_nil(l.token_attribution),
+      order_by: [asc: l.inserted_at],
+      select: l.token_attribution
+    )
+    |> Repo.all()
+    |> TokenAttribution.merge()
   end
 
   @doc """

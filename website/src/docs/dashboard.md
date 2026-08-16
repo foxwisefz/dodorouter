@@ -33,6 +33,8 @@ What coding agents connected over [MCP](/docs/agent-access/) have been doing wit
 
 Every request, live-streamed in as it happens. Filter by router or favorites. Each log opens into full detail: conversation view, raw request/response JSON, per-attempt fallback trace, timing, cost, and a **Replay** action that reruns the same conversation against a different model and diffs the two results (inline diff, side-by-side, or raw JSON).
 
+The log page also shows a **Context breakdown**: input tokens bucketed by what the context was made of — system prompt, tool definitions, history, tool results (split per tool), pasted file contents — and how much of each sat in the cacheable prefix. "Tool results are 60% of this request's tokens, mostly one `Read`, and they sit after the cache breakpoint" is the sentence that tells you what to trim. Shares are allocated pro-rata against the billed total (no provider publishes its tokenizer), so trust the percentages and treat per-bucket absolutes as estimates. The same breakdown rides `get_log` and, summed per session, `get_session` on [agent access](/docs/agent-access/).
+
 ## Sessions & Recordings
 
 Reached from a router's page. [Sessions](/docs/concepts/#sessions) group requests by your `x-session-id` header; [Recordings](/docs/concepts/#recordings) are explicit start/stop capture windows started from the dashboard or the [recordings API](/docs/api/#endpoints). Both give you a scoped log list with their own stat tiles (requests, tokens, avg latency, success rate).

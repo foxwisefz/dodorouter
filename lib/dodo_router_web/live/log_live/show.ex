@@ -552,6 +552,41 @@ defmodule DodoRouterWeb.LogLive.Show do
               </div>
             </div>
 
+            <%!-- What the input tokens were made of. Shares are pro-rata
+               allocations of the billed total (no provider tokenizer is
+               public), so the percentages are the trustworthy part. --%>
+            <div :if={attribution_rows(@log) != []} data-group="context-breakdown">
+              <div class="text-[10px] uppercase tracking-wider text-base-content/40 font-semibold mb-1">
+                Context breakdown
+              </div>
+              <div id="token-attribution" class="space-y-1 text-xs">
+                <div :for={row <- attribution_rows(@log)} class="space-y-0.5">
+                  <div class="flex justify-between">
+                    <span class="text-base-content/60">{row.label}</span>
+                    <span class="font-mono">
+                      {row.pct}% <span class="text-base-content/40">· ~{row.tokens}</span>
+                      <span
+                        :if={row.cached_pct > 0}
+                        class="text-success"
+                        title="Share of this segment sitting in the cacheable prefix"
+                      >
+                        {row.cached_pct}% cached
+                      </span>
+                    </span>
+                  </div>
+                  <div class="h-1 rounded-full bg-base-300/60 overflow-hidden">
+                    <div class="h-full rounded-full bg-primary/70" style={"width: #{row.pct}%"}></div>
+                  </div>
+                  <div
+                    :if={row.by_tool != []}
+                    class="text-[10px] text-base-content/45 text-right"
+                  >
+                    {Enum.map_join(row.by_tool, " · ", fn {tool, tokens} -> "#{tool} ~#{tokens}" end)}
+                  </div>
+                </div>
+              </div>
+            </div>
+
             <%!-- Where it came from: the session this request belongs to
                (and, via that link, the router) — everything about the
                client side of the request rather than what the provider did
@@ -1832,6 +1867,36 @@ defmodule DodoRouterWeb.LogLive.Show do
       pct -> "#{trunc(pct)}%"
     end
   end
+
+  @attribution_labels [
+    {"system", "System prompt"},
+    {"tools", "Tool definitions"},
+    {"history", "History"},
+    {"tool_results", "Tool results"},
+    {"file_contents", "File contents"}
+  ]
+
+  # Non-empty buckets, largest first, with shares of the billed total.
+  defp attribution_rows(%{token_attribution: %{"buckets" => buckets, "basis_tokens" => basis}})
+       when is_integer(basis) and basis > 0 do
+    for {key, label} <- @attribution_labels,
+        bucket = buckets[key],
+        is_map(bucket),
+        (bucket["allocated_tokens"] || 0) > 0 do
+      tokens = bucket["allocated_tokens"]
+
+      %{
+        label: label,
+        tokens: tokens,
+        pct: round(tokens / basis * 100),
+        cached_pct: round((bucket["cached_tokens"] || 0) / tokens * 100),
+        by_tool: bucket |> Map.get("by_tool", %{}) |> Enum.sort_by(fn {_t, n} -> -n end)
+      }
+    end
+    |> Enum.sort_by(&(-&1.tokens))
+  end
+
+  defp attribution_rows(_log), do: []
 
   defp new_input(%{prompt_tokens: nil}), do: "—"
 

@@ -116,7 +116,9 @@ defmodule DodoRouter.MCP.Tools do
           "for writing \"this question cost $1.40\" back onto your own records. Answers " <>
           "consistently while the session is still in flight: the numbers cover what has " <>
           "been served so far, and an id with no requests yet returns zeros, never an " <>
-          "error. Drill down with list_logs {session_id}.",
+          "error. token_attribution says what the session's input tokens were made of — " <>
+          "\"tool results are 60%, mostly one Read\" is the number that tells you what to " <>
+          "fix. Drill down with list_logs {session_id}.",
       scopes: ["logs:read"],
       schema: %{
         "type" => "object",
@@ -209,7 +211,12 @@ defmodule DodoRouter.MCP.Tools do
       name: "get_log",
       title: "Get one request",
       description:
-        "One request in full. Prompt and response text requires the logs:read_bodies scope; without it those fields come back marked as withheld rather than missing.",
+        "One request in full. Prompt and response text requires the logs:read_bodies scope; " <>
+          "without it those fields come back marked as withheld rather than missing. " <>
+          "token_attribution buckets the input tokens by what the context was made of " <>
+          "(system / tools / history / tool_results with a by_tool split / file_contents) " <>
+          "and by cache position — allocated pro-rata against the billed total, so shares " <>
+          "are trustworthy; per-bucket absolutes are estimates, not tokenizer output.",
       scopes: ["logs:read"],
       schema: %{
         "type" => "object",
@@ -728,7 +735,11 @@ defmodule DodoRouter.MCP.Tools do
          first_request: stats.first_request,
          last_request: stats.last_request,
          cost_usd: money(stats.total_cost_usd),
-         list_cost_usd: money(stats.total_list_cost_usd)
+         list_cost_usd: money(stats.total_list_cost_usd),
+         # What the session's input tokens were made of, summed across its
+         # requests — "tool results are 60% of this question's tokens" is
+         # the number that tells you what to fix.
+         token_attribution: Logs.session_token_attribution(router, session_id)
        }, %{target_type: "session", target_id: session_id}}
     end
   end
@@ -830,7 +841,12 @@ defmodule DodoRouter.MCP.Tools do
        |> Map.merge(%{
          request_body: body_or_marker(bodies?, log.request_body),
          response_body: body_or_marker(bodies?, log.response_body),
-         truncation_flags: log.truncation_flags
+         truncation_flags: log.truncation_flags,
+         # Input tokens bucketed by what the context is made of (system /
+         # tools / history / tool_results with by_tool / file_contents) and
+         # by cache position. Pro-rata allocation against the billed total,
+         # not tokenizer output. nil on rows predating the feature.
+         token_attribution: log.token_attribution
        }), %{returned_bodies: bodies?, target_type: "request_log", target_id: log.id}}
     end
   end
