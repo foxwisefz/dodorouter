@@ -516,6 +516,17 @@ defmodule DodoRouter.MCP.Tools do
            "Not started: the judge's key #{blocker.label} is #{blocker.status}. Every answer " <>
              "would be generated and paid for, then discarded unscored. Pick another judge key " <>
              "(list_eval_targets reports key health) and create a new evaluation."}
+
+        {:error, {:candidates_unusable, blockers}} ->
+          named =
+            Enum.map_join(blockers, "; ", fn b ->
+              "#{b[:label] || b[:key_id]} / #{b[:model] || "?"} is #{b.status}"
+            end)
+
+          {:error,
+           "Not started: every candidate is blocked — #{named}. Nothing could produce an " <>
+             "answer, so running would only spend the judge's quota. Create a new evaluation " <>
+             "with from_eval_id and working candidates (list_eval_targets reports key health)."}
       end
     end
   end

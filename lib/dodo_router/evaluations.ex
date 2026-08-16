@@ -451,8 +451,20 @@ defmodule DodoRouter.Evaluations do
           detail: key.last_error_detail
         }
 
-      _ ->
+      %ProviderKey{} ->
         nil
+
+      # Deletion is FK-restricted now, but rows written before the
+      # restriction can still name a key that no longer exists — and a
+      # missing key used to fall through to "no blocker", grinding through
+      # every doomed run before anything said so (dodo_router-7kq).
+      nil ->
+        %{
+          key_id: key_id,
+          label: nil,
+          status: "missing",
+          detail: "This provider key is no longer configured."
+        }
     end
   end
 
@@ -613,6 +625,7 @@ defmodule DodoRouter.Evaluations do
 
   def enqueue(%User{} = user, %Evaluation{} = evaluation, opts \\ []) do
     evaluation = get_evaluation!(user, evaluation.id)
+    preflight = preflight(user, evaluation)
 
     cond do
       benchmark_running?(evaluation) ->
@@ -621,8 +634,15 @@ defmodule DodoRouter.Evaluations do
       # A judge that cannot authenticate loses every score in the batch, not
       # one data point: each candidate is still generated and paid for, then
       # thrown away unscored. Refusing costs nothing and says why.
-      blocker = preflight(user, evaluation).judge ->
+      blocker = preflight.judge ->
         {:error, {:judge_key_unusable, blocker}}
+
+      # One blocked candidate is one lost data point and the run proceeds;
+      # when EVERY candidate is blocked, starting would only spend the
+      # judge's quota on nothing.
+      preflight.candidates != [] and
+          length(preflight.candidates) >= length(evaluation.candidate_targets) ->
+        {:error, {:candidates_unusable, preflight.candidates}}
 
       true ->
         # A repetitions override persists on the evaluation — "run it again,

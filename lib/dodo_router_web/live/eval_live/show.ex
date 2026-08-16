@@ -168,6 +168,19 @@ defmodule DodoRouterWeb.EvalLive.Show do
             "Pick another judge key first."
         )
 
+      {:error, {:candidates_unusable, blockers}} ->
+        named =
+          Enum.map_join(blockers, ", ", fn b ->
+            "#{b[:label] || "a removed key"} (#{humanize_status(b.status)})"
+          end)
+
+        put_flash(
+          socket,
+          :error,
+          "Not starting: every candidate is blocked — #{named}. Nothing could produce an " <>
+            "answer, so running would only spend the judge's quota."
+        )
+
       {:error, %Ecto.Changeset{}} ->
         put_flash(socket, :error, "Repetitions must be between 1 and 10")
 

@@ -691,6 +691,54 @@ defmodule DodoRouter.EvaluationsTest do
     assert {:error, :already_running} = Evaluations.enqueue(user, loaded)
   end
 
+  test "preflight names a candidate key that no longer resolves, and enqueue refuses when nothing could run" do
+    user = AccountsFixtures.user_fixture()
+    {router, _key} = RoutersFixtures.router_fixture(user)
+    provider_key = ProvidersFixtures.provider_key_fixture(user)
+
+    log =
+      LogsFixtures.log_fixture(router, %{
+        request_body:
+          Jason.encode!(%{"model" => "m", "messages" => [%{"role" => "user", "content" => "hi"}]})
+      })
+
+    {:ok, evaluation} =
+      Evaluations.create_evaluation(user, log, %{
+        name: "Ghost key",
+        criteria: "Be correct",
+        judge_model: "judge-model",
+        judge_provider_key_id: provider_key.id,
+        candidate_targets: [
+          %{
+            "provider_key_id" => provider_key.id,
+            "provider" => "test_provider",
+            "model" => "test-model"
+          }
+        ],
+        repetitions: 1
+      })
+
+    # Simulate a pre-FK-restriction row whose stored key id no longer
+    # resolves: 18 doomed runs used to grind through before anything said so.
+    ghost_id = Ecto.UUID.generate()
+
+    evaluation
+    |> Ecto.Changeset.change(
+      candidate_targets: [
+        %{"provider_key_id" => ghost_id, "provider" => "test_provider", "model" => "test-model"}
+      ]
+    )
+    |> DodoRouter.Repo.update!()
+
+    preflight = Evaluations.preflight(user, Evaluations.get_evaluation!(user, evaluation.id))
+    assert [%{status: "missing", key_id: ^ghost_id}] = preflight.candidates
+
+    # Every candidate is doomed, so starting would only burn the judge's
+    # quota on nothing — refused with the blockers named.
+    assert {:error, {:candidates_unusable, [%{status: "missing"}]}} =
+             Evaluations.enqueue(user, evaluation)
+  end
+
   test "enqueue can override repetitions for this and future runs" do
     user = AccountsFixtures.user_fixture()
     {router, _key} = RoutersFixtures.router_fixture(user)
