@@ -260,6 +260,41 @@ defmodule DodoRouter.Proxy.Adapters.AnthropicTest do
       end)
     end
 
+    test "reframed chunks name the model that is actually serving" do
+      # Deck Ops fell back to the requested model for provenance because the
+      # reframed stream's chunks carried no model at all — silently wrong
+      # exactly when a fallback step fired (dodo_router-bnn). message_start
+      # names the resolved model; every chunk after it must repeat it, the
+      # way real OpenAI chunks do.
+      events = [
+        %{
+          "type" => "message_start",
+          "message" => %{
+            "id" => "msg_01",
+            "model" => "claude-opus-4-8-20260115",
+            "usage" => %{"input_tokens" => 10}
+          }
+        },
+        %{
+          "type" => "content_block_delta",
+          "index" => 0,
+          "delta" => %{"type" => "text_delta", "text" => "hi"}
+        },
+        %{
+          "type" => "message_delta",
+          "delta" => %{"stop_reason" => "end_turn"},
+          "usage" => %{"output_tokens" => 3}
+        }
+      ]
+
+      acc = Anthropic.initial_stream_acc()
+      {_acc, chunks} = Anthropic.process_anthropic_events(acc, events)
+
+      models = parse_chunks(chunks) |> Enum.map(& &1["model"])
+      assert models != []
+      assert Enum.all?(models, &(&1 == "claude-opus-4-8-20260115"))
+    end
+
     test "forwards tool_use blocks as OpenAI tool_call delta chunks" do
       acc = Anthropic.initial_stream_acc()
       {_acc, chunks} = Anthropic.process_anthropic_events(acc, @tool_use_events)

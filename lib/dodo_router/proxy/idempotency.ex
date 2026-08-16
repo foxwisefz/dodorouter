@@ -198,9 +198,24 @@ defmodule DodoRouter.Proxy.Idempotency do
          when status in ["success", "fallback"] and is_binary(body) <- log,
          {:ok, %{} = response} <- Jason.decode(body),
          false <- Map.has_key?(response, "_truncation_flags") do
-      {:ok, response, log}
+      {:ok, ensure_model(response, log), log}
     else
       _ -> :not_replayable
+    end
+  end
+
+  # Bodies logged before model-stamping existed carry no model; the log row
+  # always knew what served it, so a replay must say so too rather than
+  # re-serving the old blank (dodo_router-bnn).
+  defp ensure_model(response, log) do
+    case response["model"] do
+      model when is_binary(model) and model != "" ->
+        response
+
+      _blank ->
+        if is_binary(log.final_model) and log.final_model != "",
+          do: Map.put(response, "model", log.final_model),
+          else: response
     end
   end
 end

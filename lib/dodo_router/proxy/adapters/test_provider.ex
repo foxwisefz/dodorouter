@@ -75,6 +75,9 @@ defmodule DodoRouter.Proxy.Adapters.TestProvider do
   # snapshot it resolved to, the way real providers do. FallbackChain's
   # put_new lets the provider's own claim win.
   @alias_model "alias-model"
+  # Claims "" as its served model, like a misbehaving OpenAI-compatible
+  # backend (dodo_router-bnn).
+  @empty_model_model "empty-model-model"
   # A kimi/DeepSeek-style thinker: the message carries reasoning_content,
   # which cross-format egresses have no representation for.
   @reasoning_model "reasoning-model"
@@ -233,6 +236,14 @@ defmodule DodoRouter.Proxy.Adapters.TestProvider do
     response =
       if step.model == @alias_model,
         do: Map.put(response, "model", "alias-model-v2"),
+        else: response
+
+    # A provider that claims "" as its model — the blank answer that made
+    # clients fall back to the requested model for provenance. put_new-style
+    # stamping cannot fix this row, which is the point (dodo_router-bnn).
+    response =
+      if step.model == @empty_model_model,
+        do: Map.put(response, "model", ""),
         else: response
 
     response =

@@ -240,6 +240,24 @@ defmodule DodoRouterWeb.IdempotencyTest do
     assert second.idempotent_replay_of_id == nil
   end
 
+  test "a stored body from before model-stamping replays with the log's final_model", %{
+    router: router,
+    api_key: api_key
+  } do
+    assert chat(router, api_key, body("hello"), [{"idempotency-key", "k-nomodel"}])
+           |> json_response(200)
+
+    [original] = logs(router)
+
+    # Rows logged before stamp_serving_model existed carry no model at all.
+    doctored = original.response_body |> Jason.decode!() |> Map.delete("model") |> Jason.encode!()
+    original |> Ecto.Changeset.change(response_body: doctored) |> Repo.update!()
+
+    replayed = chat(router, api_key, body("hello"), [{"idempotency-key", "k-nomodel"}])
+    assert get_resp_header(replayed, "idempotent-replayed") == ["true"]
+    assert json_response(replayed, 200)["model"] == original.final_model
+  end
+
   describe "Anthropic endpoint" do
     defp messages(router, api_key, payload, headers) do
       Enum.reduce(headers, build_conn(), fn {name, value}, conn ->

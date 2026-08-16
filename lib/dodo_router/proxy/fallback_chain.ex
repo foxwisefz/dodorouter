@@ -476,7 +476,14 @@ defmodule DodoRouter.Proxy.FallbackChain do
   # `put_new` so a provider that reports its own resolved model (an alias
   # expanding to a dated snapshot, say) still wins.
   defp stamp_serving_model(response, step) when is_map(response) do
-    Map.put_new(response, "model", step.model)
+    case response["model"] do
+      # A provider naming its own resolved model (an alias expanding to a
+      # dated snapshot) wins — but a blank claim is not a claim. "" made
+      # clients fall back to the requested model and persist wrong
+      # provenance exactly when a fallback step fired (dodo_router-bnn).
+      model when is_binary(model) and model != "" -> response
+      _blank -> Map.put(response, "model", step.model)
+    end
   end
 
   defp stamp_serving_model(response, _step), do: response

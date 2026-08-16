@@ -871,6 +871,11 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
       # delta, so the egress still has it in hand when it emits its own
       # `message_start` — see `process_anthropic_events/2`.
       message_id: nil,
+      # The resolved model off `message_start`, repeated on every reframed
+      # chunk — chunks without one made OpenAI-format clients fall back to
+      # the requested model for provenance, silently wrong exactly when a
+      # fallback step fired (dodo_router-bnn).
+      model: nil,
       # Native fields off `message_delta` that the OpenAI chunk shape has no
       # place for — `context_management` applied edits, `stop_details` behind a
       # refusal, the `stop_sequence` that actually matched. Collected here
@@ -929,7 +934,12 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
         # Its usage carries the input-side figures (`input_tokens`, cache
         # read/write) that `message_delta` may never repeat.
         "message_start" ->
-          acc = %{acc | message_id: get_in(event, ["message", "id"])}
+          acc = %{
+            acc
+            | message_id: get_in(event, ["message", "id"]),
+              model: get_in(event, ["message", "model"])
+          }
+
           {seed_usage_from_message_start(acc, get_in(event, ["message", "usage"])), chunks}
 
         "content_block_start" ->
@@ -950,7 +960,7 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
               }
 
               chunk =
-                build_openai_stream_chunk(%{
+                build_openai_stream_chunk(new_acc, %{
                   "tool_calls" => [Map.put(tool_call, "index", tool_idx)]
                 })
 
@@ -966,7 +976,7 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
           case delta["type"] do
             "text_delta" ->
               new_acc = %{acc | content: acc.content <> (delta["text"] || "")}
-              chunk = build_openai_stream_chunk(%{"content" => delta["text"]})
+              chunk = build_openai_stream_chunk(new_acc, %{"content" => delta["text"]})
               {new_acc, chunks ++ [chunk]}
 
             "input_json_delta" ->
@@ -980,7 +990,7 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
                     end)
 
                   chunk =
-                    build_openai_stream_chunk(%{
+                    build_openai_stream_chunk(acc, %{
                       "tool_calls" => [
                         %{"index" => tool_idx, "function" => %{"arguments" => partial}}
                       ]
@@ -1092,10 +1102,20 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
     Map.merge(top, delta)
   end
 
-  defp build_openai_stream_chunk(delta) do
+  # Every reframed chunk names the model that is actually serving — the
+  # resolved one off `message_start` — the way real OpenAI chunks do. A
+  # chunk without one made clients fall back to the requested model for
+  # provenance, silently wrong exactly when a fallback fired.
+  defp build_openai_stream_chunk(acc, delta) do
     chunk = %{
       "choices" => [%{"index" => 0, "delta" => delta}]
     }
+
+    chunk =
+      case acc.model do
+        model when is_binary(model) and model != "" -> Map.put(chunk, "model", model)
+        _blank -> chunk
+      end
 
     "data: #{Jason.encode!(chunk)}\n\n"
   end
@@ -1128,6 +1148,14 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
       "choices" => [%{"index" => 0, "message" => message, "finish_reason" => finish_reason}],
       "_meta" => meta
     }
+
+    # The resolved model off message_start — the provider's own claim, which
+    # outranks the step's requested string when the chain stamps the response.
+    response =
+      case acc.model do
+        model when is_binary(model) and model != "" -> Map.put(response, "model", model)
+        _blank -> response
+      end
 
     response = if acc.usage, do: Map.put(response, "usage", acc.usage), else: response
 
