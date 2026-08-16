@@ -18,6 +18,22 @@ defmodule DodoRouterWeb.RouterLiveTest do
       assert html =~ router.slug
     end
 
+    test "cards show 24h request count, error rate and a sparkline", %{conn: conn, user: user} do
+      {router, _api_key} = RoutersFixtures.router_fixture(user, %{name: "Busy Router"})
+
+      for _ <- 1..3 do
+        DodoRouter.LogsFixtures.log_fixture(router, %{status: "success"})
+      end
+
+      DodoRouter.LogsFixtures.log_fixture(router, %{status: "error"})
+
+      {:ok, _live, html} = live(conn, ~p"/routers")
+
+      assert html =~ ~s(data-router-requests="4")
+      assert html =~ ~s(data-router-errors="1")
+      assert html =~ "last 24h"
+    end
+
     test "shows empty state when no routers", %{conn: conn} do
       {:ok, _live, html} = live(conn, ~p"/routers")
 

@@ -406,6 +406,25 @@ defmodule DodoRouterWeb.ProvidersLive.Index do
     |> start_async({:verify_key, key.id}, fn -> KeyVerifier.verify(key) end)
   end
 
+  # Ambient signal per row (dodo_router-f6v.4): a key nobody has called and
+  # one serving thousands a day otherwise render identically. Spend is
+  # deliberately not shown here — `estimated_cost_usd` lives on the log, not
+  # the key, and attribution across a fallback chain is ambiguous; a wrong
+  # number is worse than none, so request count only.
+  attr :usage, :map, default: nil
+
+  defp key_usage_note(assigns) do
+    ~H"""
+    <span
+      :if={@usage && @usage.request_count_24h > 0}
+      data-key-requests-24h={@usage.request_count_24h}
+      class="text-xs text-base-content/40 ml-1.5"
+    >
+      {@usage.request_count_24h} req · last 24h
+    </span>
+    """
+  end
+
   attr :key, :map, required: true
   attr :verifying, :any, required: true
 
@@ -694,6 +713,7 @@ defmodule DodoRouterWeb.ProvidersLive.Index do
                                 {Providers.compact_key_hint(key.key_hint)}
                               </span>
                             </button>
+                            <.key_usage_note usage={Map.get(@key_usage, key.id)} />
                           </div>
                           <button
                             phx-click="delete"

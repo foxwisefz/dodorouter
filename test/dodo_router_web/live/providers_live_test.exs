@@ -379,4 +379,27 @@ defmodule DodoRouterWeb.ProvidersLiveTest do
       assert confirm =~ "No requests in the last 24h and no routing steps reference it"
     end
   end
+
+  describe "key rows show ambient usage" do
+    test "each row states its 24h request count", %{conn: conn, user: user} do
+      {router, _} = DodoRouter.RoutersFixtures.router_fixture(user)
+
+      key =
+        DodoRouter.ProvidersFixtures.provider_key_fixture(user, %{
+          "provider_slug" => "zai_standard",
+          "label" => "Busy Key"
+        })
+
+      for _ <- 1..2 do
+        DodoRouter.LogsFixtures.log_fixture(router, %{
+          attempted_steps: [%{"provider_key_id" => key.id, "status" => "success"}]
+        })
+      end
+
+      {:ok, _live, html} = live(conn, ~p"/providers")
+
+      assert html =~ ~s(data-key-requests-24h="2")
+      assert html =~ "last 24h"
+    end
+  end
 end

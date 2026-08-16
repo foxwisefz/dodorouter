@@ -51,6 +51,30 @@ defmodule DodoRouterWeb.ApiKeysLiveTest do
       assert html =~ "5 requests in the last 24h"
     end
 
+    test "rows show 24h volume and when the key was last used", %{conn: conn, user: user} do
+      {router, _api_key} = RoutersFixtures.router_fixture(user)
+
+      for _ <- 1..3 do
+        DodoRouter.LogsFixtures.log_fixture(router)
+      end
+
+      {:ok, _live, html} = live(conn, ~p"/api-keys")
+
+      assert html =~ ~s(data-router-requests-24h="3")
+      assert html =~ "last 24h"
+      assert html =~ "Last used"
+    end
+
+    test "an unused router's row says so, not silently zero", %{conn: conn, user: user} do
+      {router, _api_key} = RoutersFixtures.router_fixture(user)
+
+      {:ok, _live, html} = live(conn, ~p"/api-keys")
+
+      assert html =~ ~s(id="endpoint-#{router.id}")
+      assert html =~ ~s(data-router-requests-24h="0")
+      assert html =~ "Never used"
+    end
+
     test "confirming regenerate on an idle router signals it's safe", %{
       conn: conn,
       user: user

@@ -14,6 +14,7 @@ defmodule DodoRouterWeb.ApiKeysLive.Index do
       |> assign(:page_title, "API Keys")
       |> assign(:routers, routers)
       |> assign(:base_url, base_url)
+      |> assign(:router_usage, Logs.usage_summary_for_routers(Enum.map(routers, & &1.id)))
       |> assign(:regenerating_id, nil)
       |> assign(:regenerating_request_count, nil)
       |> assign(:new_key, nil)
@@ -159,6 +160,7 @@ defmodule DodoRouterWeb.ApiKeysLive.Index do
                         {router.api_key_prefix}•••••••
                       </code>
                     </p>
+                    <.router_usage_note usage={Map.get(@router_usage, router.id)} />
                   </div>
                 </div>
 
@@ -214,6 +216,38 @@ defmodule DodoRouterWeb.ApiKeysLive.Index do
       </div>
     </Layouts.app>
     """
+  end
+
+  # Ambient signal per row (dodo_router-f6v.4): a key sitting idle for weeks
+  # and one taking live traffic otherwise render identically. Batched once
+  # at mount via Logs.usage_summary_for_routers/2 — not one query per row.
+  attr :usage, :map, default: nil
+
+  defp router_usage_note(assigns) do
+    ~H"""
+    <p
+      class="text-xs text-base-content/40 mt-0.5"
+      data-router-requests-24h={(@usage && @usage.request_count_24h) || 0}
+    >
+      <%= if @usage && @usage.last_request_at do %>
+        Last used {relative_time(@usage.last_request_at)} ·
+        {pluralize(@usage.request_count_24h, "request")} in the last 24h
+      <% else %>
+        Never used
+      <% end %>
+    </p>
+    """
+  end
+
+  defp relative_time(%DateTime{} = dt) do
+    diff = DateTime.diff(DateTime.utc_now(), dt, :second)
+
+    cond do
+      diff < 60 -> "just now"
+      diff < 3600 -> "#{div(diff, 60)}m ago"
+      diff < 86_400 -> "#{div(diff, 3600)}h ago"
+      true -> "#{div(diff, 86_400)}d ago"
+    end
   end
 
   # States the blast radius instead of a bare "are you sure" — regenerating

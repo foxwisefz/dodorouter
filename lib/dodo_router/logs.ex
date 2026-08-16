@@ -400,6 +400,89 @@ defmodule DodoRouter.Logs do
   end
 
   @doc """
+  Last-used timestamp and 24h request volume for every router in
+  `router_ids` at once — the ambient signal for the API keys list
+  (dodo_router-f6v.4), which otherwise names a key with no indication of
+  whether it is live or dormant. One grouped query for the whole list.
+
+  Returns `%{router_id => %{last_request_at:, request_count_24h:}}`.
+  `last_request_at` is unrestricted by the window (the whole point is
+  showing a key untouched for weeks, not just quiet in the last day);
+  `request_count_24h` matches the window `Logs.stats/2` uses elsewhere.
+  """
+  def usage_summary_for_routers(router_ids, opts \\ [])
+  def usage_summary_for_routers([], _opts), do: %{}
+
+  def usage_summary_for_routers(router_ids, opts) do
+    hours = Keyword.get(opts, :hours, 24)
+    since = DateTime.add(DateTime.utc_now(), -hours * 3600, :second)
+
+    from(l in RequestLog,
+      where: l.router_id in ^router_ids and l.traffic_type == "proxy",
+      group_by: l.router_id,
+      select: %{
+        router_id: l.router_id,
+        last_request_at: max(l.inserted_at),
+        request_count_24h:
+          count(fragment("CASE WHEN ? >= ? THEN 1 END", l.inserted_at, ^since))
+      }
+    )
+    |> Repo.all()
+    |> Map.new(&{&1.router_id, Map.take(&1, [:last_request_at, :request_count_24h])})
+  end
+
+  @doc """
+  Request count, error count and an hourly sparkline for every router in
+  `router_ids` at once — the ambient-awareness fix for the router list
+  (dodo_router-f6v.4), where a router serving 40k req/day and one never
+  called otherwise render identically. One grouped query for the whole
+  list, not one per card.
+
+  Returns `%{router_id => %{request_count:, error_count:, hourly: [n, ...]}}`,
+  `hourly` oldest-first with one entry per hour in the window (default 24h),
+  zero-filled for hours with no traffic.
+  """
+  def activity_summary_for_routers(router_ids, opts \\ [])
+  def activity_summary_for_routers([], _opts), do: %{}
+
+  def activity_summary_for_routers(router_ids, opts) do
+    hours = Keyword.get(opts, :hours, 24)
+    since = DateTime.add(DateTime.utc_now(), -hours * 3600, :second)
+
+    rows =
+      from(l in RequestLog,
+        where:
+          l.router_id in ^router_ids and l.inserted_at >= ^since and
+            l.traffic_type == "proxy",
+        group_by: [l.router_id, fragment("date_trunc('hour', ?)", l.inserted_at)],
+        select: %{
+          router_id: l.router_id,
+          bucket: fragment("date_trunc('hour', ?)", l.inserted_at),
+          total: count(l.id),
+          errors: count(fragment("CASE WHEN ? = 'error' THEN 1 END", l.status))
+        }
+      )
+      |> Repo.all()
+
+    buckets = bucket_range(truncate_to_bucket(since, :hour), :hour)
+    by_router = Enum.group_by(rows, & &1.router_id)
+
+    Map.new(router_ids, fn router_id ->
+      router_rows = Map.get(by_router, router_id, [])
+      by_bucket = Map.new(router_rows, &{normalize_bucket(&1.bucket), &1})
+
+      hourly = for b <- buckets, do: Map.get(by_bucket, b, %{total: 0}).total
+
+      {router_id,
+       %{
+         request_count: Enum.sum(Enum.map(router_rows, & &1.total)),
+         error_count: Enum.sum(Enum.map(router_rows, & &1.errors)),
+         hourly: hourly
+       }}
+    end)
+  end
+
+  @doc """
   Bucketed spend broken down by final provider, pivoted for stacked charts.
 
   Returns `%{buckets: [DateTime], series: [%{provider, values, list_values}]}`

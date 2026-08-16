@@ -1,12 +1,20 @@
 defmodule DodoRouterWeb.RouterLive.Index do
   use DodoRouterWeb, :live_view
 
+  alias DodoRouter.Logs
   alias DodoRouter.Routers
   alias DodoRouter.Routers.Router
 
   @impl true
   def mount(_params, _session, socket) do
-    {:ok, stream(socket, :routers, Routers.list_routers(socket.assigns.current_user))}
+    routers = Routers.list_routers(socket.assigns.current_user)
+
+    socket =
+      socket
+      |> assign(:activity, Logs.activity_summary_for_routers(Enum.map(routers, & &1.id)))
+      |> stream(:routers, routers)
+
+    {:ok, socket}
   end
 
   @impl true
@@ -209,6 +217,8 @@ defmodule DodoRouterWeb.RouterLive.Index do
               </span>
             </div>
 
+            <.router_activity activity={Map.get(@activity, router.id)} />
+
             <div class="flex justify-end">
               <.link navigate={~p"/routers/#{router}"} class="btn btn-primary btn-sm">
                 Open
@@ -245,6 +255,72 @@ defmodule DodoRouterWeb.RouterLive.Index do
         </div>
       </div>
     </Layouts.app>
+    """
+  end
+
+  # A router serving 40k req/day and one never called used to render
+  # identically — request count, error rate and an hourly sparkline for the
+  # same 24h window, ambient rather than a dashboard (dodo_router-f6v.4).
+  attr :activity, :map, default: nil
+
+  defp router_activity(assigns) do
+    ~H"""
+    <div
+      :if={@activity && @activity.request_count > 0}
+      class="flex items-center gap-2 mb-4 text-xs text-base-content/50"
+      data-router-requests={@activity.request_count}
+      data-router-errors={@activity.error_count}
+    >
+      {sparkline_svg(@activity.hourly)}
+      <span>{@activity.request_count} req · last 24h</span>
+      <span :if={@activity.error_count > 0} class="text-error font-medium">
+        {error_rate_pct(@activity)}% errors
+      </span>
+    </div>
+    <div
+      :if={!@activity || @activity.request_count == 0}
+      class="mb-4 text-xs text-base-content/30"
+      data-router-requests="0"
+      data-router-errors="0"
+    >
+      No requests in the last 24h
+    </div>
+    """
+  end
+
+  defp error_rate_pct(%{request_count: 0}), do: 0
+
+  defp error_rate_pct(%{request_count: total, error_count: errors}),
+    do: round(errors / total * 100)
+
+  # A tiny inline polyline — no chart library needed for 24 points.
+  defp sparkline_svg(hourly) do
+    max = Enum.max([1 | hourly])
+    width = 60
+    height = 16
+    step = if length(hourly) > 1, do: width / (length(hourly) - 1), else: 0
+
+    points =
+      hourly
+      |> Enum.with_index()
+      |> Enum.map_join(" ", fn {v, i} ->
+        x = Float.round(i * step, 1)
+        y = Float.round(height - v / max * height, 1)
+        "#{x},#{y}"
+      end)
+
+    assigns = %{points: points, width: width, height: height}
+
+    ~H"""
+    <svg viewBox={"0 0 #{@width} #{@height}"} width={@width} height={@height} class="shrink-0">
+      <polyline
+        points={@points}
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.5"
+        class="text-primary/60"
+      />
+    </svg>
     """
   end
 end
