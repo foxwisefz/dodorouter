@@ -6,7 +6,7 @@ defmodule DodoRouter.Evaluations do
   alias DodoRouter.Accounts.User
   alias DodoRouter.Logs.{Evaluation, EvaluationRun}
   alias DodoRouter.Providers.ProviderKey
-  alias DodoRouter.{Providers, Proxy, Redact, Replays, Repo}
+  alias DodoRouter.{Logs, Providers, Proxy, Redact, Replays, Repo}
 
   # v2: dropped the pass/fail verdict — scores and their distributions
   # carry the comparison; a binary threshold added noise, not signal.
@@ -291,10 +291,19 @@ defmodule DodoRouter.Evaluations do
     evaluation =
       evaluation |> Ecto.Changeset.change(last_batch_id: batch_id) |> Repo.update!()
 
+    # One measurement per (source log x candidate x repetition). The logs
+    # are fetched once up front — a missing/foreign one fails the batch here
+    # rather than half-way through spending.
+    source_logs =
+      for id <- Evaluation.source_log_ids(evaluation),
+          into: %{},
+          do: {id, Logs.get_log!(user, id)}
+
     jobs =
-      for target <- evaluation.candidate_targets,
+      for {_id, source_log} <- source_logs,
+          target <- evaluation.candidate_targets,
           repetition <- 1..evaluation.repetitions,
-          do: {target, repetition}
+          do: {source_log, target, repetition}
 
     # Keys the providers told us are exhausted while this batch was running.
     # A billing-cycle limit does not clear in the seconds between runs, so
@@ -305,13 +314,13 @@ defmodule DodoRouter.Evaluations do
     results =
       jobs
       |> Task.async_stream(
-        fn {target, repetition} ->
+        fn {source_log, target, repetition} ->
           result =
             if :ets.member(exhausted, target["provider_key_id"]) do
-              skip_run(evaluation, target, repetition, batch_id)
+              skip_run(evaluation, source_log, target, repetition, batch_id)
             else
               user
-              |> safe_run_candidate(evaluation, target, repetition, batch_id)
+              |> safe_run_candidate(evaluation, source_log, target, repetition, batch_id)
               |> note_exhaustion(exhausted, target)
             end
 
@@ -406,9 +415,10 @@ defmodule DodoRouter.Evaluations do
   # came back exhausted. Recorded rather than skipped silently: the batch
   # still planned this measurement, and a missing row would read as though
   # it was never asked for.
-  defp skip_run(evaluation, target, repetition, batch_id) do
+  defp skip_run(evaluation, source_log, target, repetition, batch_id) do
     {:ok, run} =
       create_run(evaluation, %{
+        source_log_id: source_log.id,
         candidate_provider_key_id: target["provider_key_id"],
         candidate_provider: target["provider"],
         candidate_model: target["model"],
@@ -552,12 +562,13 @@ defmodule DodoRouter.Evaluations do
     started_at = System.monotonic_time(:millisecond)
     output = run.candidate_output
     judge_only? = judge_retryable?(run)
+    source_log = retry_source_log(user, evaluation, run)
 
     archive_attempt!(run)
     run = update_run!(run, %{status: "running", error: nil, failure_stage: nil})
 
     if judge_only? do
-      judge_candidate(user, evaluation, run, output, started_at)
+      judge_candidate(user, evaluation, source_log, run, output, started_at)
     else
       target = %{
         "provider_key_id" => run.candidate_provider_key_id,
@@ -565,9 +576,17 @@ defmodule DodoRouter.Evaluations do
         "model" => run.candidate_model
       }
 
-      generate_and_judge(user, evaluation, run, target, started_at)
+      generate_and_judge(user, evaluation, source_log, run, target, started_at)
     end
   end
+
+  # A retry must replay the run's own source log; nil means the row predates
+  # multi-log evaluations and the anchor is the honest answer.
+  defp retry_source_log(_user, evaluation, %EvaluationRun{source_log_id: nil}),
+    do: evaluation.request_log
+
+  defp retry_source_log(user, _evaluation, %EvaluationRun{source_log_id: id}),
+    do: Logs.get_log!(user, id)
 
   # A copy of the attempt as it stands, stamped with when it was replaced and
   # by which run. The copy carries no batch_id: it is not part of any batch's
@@ -612,8 +631,8 @@ defmodule DodoRouter.Evaluations do
     |> Repo.insert!()
   end
 
-  defp safe_run_candidate(user, evaluation, target, repetition, batch_id) do
-    run_candidate(user, evaluation, target, repetition, batch_id)
+  defp safe_run_candidate(user, evaluation, source_log, target, repetition, batch_id) do
+    run_candidate(user, evaluation, source_log, target, repetition, batch_id)
   rescue
     exception ->
       {:error,
@@ -623,6 +642,22 @@ defmodule DodoRouter.Evaluations do
     kind, reason -> {:error, {:candidate_crashed, kind, reason}}
   end
 
+  # logs x candidates x repetitions explodes quietly; the cap keeps one
+  # enqueue from buying more than anyone meant to. Matches the implicit
+  # single-log ceiling (30 candidates x 10 reps) exactly.
+  @max_planned_runs Application.compile_env(:dodo_router, :max_planned_eval_runs, 300)
+
+  @doc """
+  How many runs one benchmark execution of this evaluation performs:
+  `source logs x candidates x repetitions`. Knowable — and stated — before
+  anything is spent.
+  """
+  def planned_run_count(%Evaluation{} = evaluation) do
+    length(Evaluation.source_log_ids(evaluation)) *
+      length(evaluation.candidate_targets) *
+      evaluation.repetitions
+  end
+
   def enqueue(%User{} = user, %Evaluation{} = evaluation, opts \\ []) do
     evaluation = get_evaluation!(user, evaluation.id)
     preflight = preflight(user, evaluation)
@@ -630,6 +665,9 @@ defmodule DodoRouter.Evaluations do
     cond do
       benchmark_running?(evaluation) ->
         {:error, :already_running}
+
+      planned_run_count(evaluation) > @max_planned_runs ->
+        {:error, {:too_many_runs, planned_run_count(evaluation), @max_planned_runs}}
 
       # A judge that cannot authenticate loses every score in the batch, not
       # one data point: each candidate is still generated and paid for, then
@@ -961,11 +999,12 @@ defmodule DodoRouter.Evaluations do
     end
   end
 
-  defp run_candidate(user, evaluation, target, repetition, batch_id) do
+  defp run_candidate(user, evaluation, source_log, target, repetition, batch_id) do
     started_at = System.monotonic_time(:millisecond)
     candidate_key = Providers.get_provider_key(user, target["provider_key_id"])
 
     case create_run(evaluation, %{
+           source_log_id: source_log.id,
            candidate_provider_key_id: candidate_key && candidate_key.id,
            candidate_provider_key_label: candidate_key && candidate_key.label,
            candidate_provider: target["provider"],
@@ -975,7 +1014,7 @@ defmodule DodoRouter.Evaluations do
          }) do
       {:ok, run} ->
         with_run_failure_guard(run, fn ->
-          generate_and_judge(user, evaluation, run, target, started_at)
+          generate_and_judge(user, evaluation, source_log, run, target, started_at)
         end)
 
       {:error, changeset} ->
@@ -1004,9 +1043,9 @@ defmodule DodoRouter.Evaluations do
        })}
   end
 
-  defp generate_and_judge(user, evaluation, run, target, started_at) do
+  defp generate_and_judge(user, evaluation, source_log, run, target, started_at) do
     replay = fn ->
-      Replays.replay(user, evaluation.request_log, %{
+      Replays.replay(user, source_log, %{
         provider_key_id: target["provider_key_id"],
         model: target["model"],
         traffic_type: "evaluation_candidate"
@@ -1059,7 +1098,7 @@ defmodule DodoRouter.Evaluations do
                 candidate_output: candidate_content
               })
 
-            judge_candidate(user, evaluation, run, candidate_content, started_at)
+            judge_candidate(user, evaluation, source_log, run, candidate_content, started_at)
         end
 
       {:error, reason} ->
@@ -1108,7 +1147,7 @@ defmodule DodoRouter.Evaluations do
     end
   end
 
-  defp judge_candidate(user, evaluation, run, candidate_content, started_at) do
+  defp judge_candidate(user, evaluation, source_log, run, candidate_content, started_at) do
     case Replays.build_step(
            user,
            evaluation.request_log.router_id,
@@ -1125,7 +1164,7 @@ defmodule DodoRouter.Evaluations do
             judge_provider_key_label: step.provider_key.label
           })
 
-        request = judge_request(evaluation, candidate_content)
+        request = judge_request(evaluation, source_log, candidate_content)
 
         dispatch = fn ->
           Proxy.dispatch(evaluation.request_log.router, request,
@@ -1396,7 +1435,13 @@ defmodule DodoRouter.Evaluations do
   end
 
   @doc false
-  def judge_request(evaluation, candidate_content) do
+  def judge_request(evaluation, candidate_content),
+    do: judge_request(evaluation, evaluation.request_log, candidate_content)
+
+  @doc false
+  # The judge scores against the request the run actually replayed — with a
+  # set of source logs that is the run's own log, not the anchor.
+  def judge_request(evaluation, source_log, candidate_content) do
     %{
       "model" => evaluation.judge_model,
       "response_format" => %{"type" => "json_object"},
@@ -1408,7 +1453,7 @@ defmodule DodoRouter.Evaluations do
         },
         %{
           "role" => "user",
-          "content" => judge_prompt(evaluation, evaluation.request_log, candidate_content)
+          "content" => judge_prompt(evaluation, source_log, candidate_content)
         }
       ]
     }

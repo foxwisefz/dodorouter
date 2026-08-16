@@ -195,6 +195,13 @@ defmodule DodoRouterWeb.EvalLive.Show do
             "Pick another judge key first."
         )
 
+      {:error, {:too_many_runs, planned, max}} ->
+        put_flash(
+          socket,
+          :error,
+          "Not starting: #{planned} runs planned (logs × candidates × repetitions); the cap is #{max}."
+        )
+
       {:error, {:candidates_unusable, blockers}} ->
         named =
           Enum.map_join(blockers, ", ", fn b ->

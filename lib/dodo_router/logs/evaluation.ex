@@ -16,6 +16,10 @@ defmodule DodoRouter.Logs.Evaluation do
     field :bad_examples, :string
     field :judge_model, :string
     field :candidate_targets, {:array, :map}, default: []
+    # The set of source logs a multi-log evaluation replays; empty means
+    # just the anchor. request_log_id stays required as the anchor
+    # (= first of the set), so every router-scoping join keeps working.
+    field :source_log_ids, {:array, :binary_id}, default: []
     field :repetitions, :integer, default: 3
     field :benchmark_status, :string, default: "draft"
     # Batch written by the most recent benchmark execution; aggregates are
@@ -45,6 +49,7 @@ defmodule DodoRouter.Logs.Evaluation do
       :bad_examples,
       :judge_model,
       :candidate_targets,
+      :source_log_ids,
       :repetitions,
       :judge_provider_key_id,
       :request_log_id,
@@ -62,10 +67,22 @@ defmodule DodoRouter.Logs.Evaluation do
     |> validate_length(:criteria, max: 10_000)
     |> validate_number(:repetitions, greater_than_or_equal_to: 1, less_than_or_equal_to: 10)
     |> validate_length(:candidate_targets, min: 1, max: 30)
+    |> validate_length(:source_log_ids, max: 20)
     |> validate_candidate_target_shape()
     |> foreign_key_constraint(:request_log_id)
     |> foreign_key_constraint(:evaluated_by_id)
     |> foreign_key_constraint(:judge_provider_key_id)
+  end
+
+  @doc """
+  The full set of source logs this evaluation replays. Rows from before
+  multi-log evaluations (or created single-log) read as just the anchor.
+  """
+  def source_log_ids(%__MODULE__{source_log_ids: ids, request_log_id: anchor}) do
+    case ids do
+      ids when is_list(ids) and ids != [] -> ids
+      _ -> [anchor]
+    end
   end
 
   defp validate_candidate_target_shape(changeset) do

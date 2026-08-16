@@ -20,6 +20,9 @@ defmodule DodoRouter.Logs.EvaluationRun do
     # What the judge found missing/ambiguous in the rubric itself.
     field :rubric_gaps, {:array, :string}, default: []
     field :raw_judge_response, :string
+    # Which source log this run measured. Nil means the evaluation's anchor
+    # log — every run before multi-log evaluations existed.
+    field :source_log_id, :binary_id
     # What the provider's response claimed actually answered — nil when the
     # response named nothing or the row predates the column. The ranking is
     # keyed on candidate_model (what was requested); a difference here is a
@@ -88,6 +91,7 @@ defmodule DodoRouter.Logs.EvaluationRun do
       :reasoning,
       :rubric_gaps,
       :raw_judge_response,
+      :source_log_id,
       :candidate_served_model,
       :error,
       :error_category,

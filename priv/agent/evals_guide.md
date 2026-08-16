@@ -193,9 +193,13 @@ Three limits shape every benchmark; know them before reading close results:
 
 - **Compare within one evaluation, not across two.** Different judges, different
   rubrics and different source requests are different scales.
-- **One source log is one task.** A model that wins on one support reply has not
-  been shown to win on your traffic. Repeat over several logs that cover the
-  shapes your product actually sees before you switch anything.
+- **One source log is one task.** A model that wins on one support reply has
+  not been shown to win on your traffic. Pass `request_log_ids` with several
+  logs that cover the shapes your product actually sees — one benchmark, one
+  judge, one ranking aggregated across all of them — before you switch
+  anything. Every candidate answers every log, so runs =
+  logs × candidates × repetitions; `planned_runs` in the result states the
+  volume before you start it.
 - **`cost_usd` can be $0** on a plan/subscription key, because nothing was
   metered. `list_cost_usd` is what the same tokens would have cost at API list
   price, and is the comparable number when mixing key types.

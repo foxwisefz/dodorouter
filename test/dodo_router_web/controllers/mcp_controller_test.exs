@@ -508,6 +508,59 @@ defmodule DodoRouterWeb.MCPControllerTest do
       assert by_label["plan key"]["judge_advice"] =~ "metered key for the judge"
     end
 
+    test "create_eval accepts a set of logs and reports the planned volume", %{
+      conn: conn,
+      token: token,
+      user: user,
+      router: router
+    } do
+      key = DodoRouter.ProvidersFixtures.provider_key_fixture(user, %{"label" => "Key 1"})
+
+      body = fn text ->
+        Jason.encode!(%{"model" => "m", "messages" => [%{"role" => "user", "content" => text}]})
+      end
+
+      log1 = DodoRouter.LogsFixtures.log_fixture(router, %{request_body: body.("one")})
+      log2 = DodoRouter.LogsFixtures.log_fixture(router, %{request_body: body.("two")})
+
+      resp =
+        json_response(
+          call_tool(conn, token, "create_eval", %{
+            "request_log_ids" => [log1.id, log2.id],
+            "name" => "On my traffic",
+            "criteria" => "Be useful",
+            "judge" => %{"provider_key_id" => key.id, "model" => "judge-model"},
+            "candidates" => [
+              %{"provider_key_id" => key.id, "model" => "test-model"}
+            ],
+            "repetitions" => 2,
+            "include_incumbent" => false
+          }),
+          200
+        )
+
+      payload = tool_json(resp)
+      assert Enum.sort(payload["source_log_ids"]) == Enum.sort([log1.id, log2.id])
+      # 2 logs x 1 candidate x 2 repetitions — stated before it is spent.
+      assert payload["planned_runs"] == 4
+
+      # A foreign or missing log in the set is refused up front, named.
+      resp =
+        json_response(
+          call_tool(conn, token, "create_eval", %{
+            "request_log_ids" => [log1.id, Ecto.UUID.generate()],
+            "name" => "Bad set",
+            "criteria" => "Be useful",
+            "judge" => %{"provider_key_id" => key.id, "model" => "judge-model"},
+            "candidates" => [%{"provider_key_id" => key.id, "model" => "test-model"}]
+          }),
+          200
+        )
+
+      assert resp["result"]["isError"]
+      assert hd(resp["result"]["content"])["text"] =~ "Log "
+    end
+
     test "superseded attempts are one include away", %{
       conn: conn,
       token: token,

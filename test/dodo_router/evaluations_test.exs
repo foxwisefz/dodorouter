@@ -691,6 +691,53 @@ defmodule DodoRouter.EvaluationsTest do
     assert {:error, :already_running} = Evaluations.enqueue(user, loaded)
   end
 
+  test "an evaluation over a set of logs runs each and aggregates one ranking" do
+    user = AccountsFixtures.user_fixture()
+    {router, _key} = RoutersFixtures.router_fixture(user)
+    provider_key = ProvidersFixtures.provider_key_fixture(user)
+
+    body = fn text ->
+      Jason.encode!(%{"model" => "m", "messages" => [%{"role" => "user", "content" => text}]})
+    end
+
+    log1 = LogsFixtures.log_fixture(router, %{request_body: body.("first real request")})
+    log2 = LogsFixtures.log_fixture(router, %{request_body: body.("second real request")})
+
+    {:ok, evaluation} =
+      Evaluations.create_evaluation(user, log1, %{
+        name: "On my traffic",
+        criteria: "Be correct",
+        judge_model: "judge-model",
+        judge_provider_key_id: provider_key.id,
+        source_log_ids: [log1.id, log2.id],
+        candidate_targets: [
+          %{
+            "provider_key_id" => provider_key.id,
+            "provider" => "test_provider",
+            "model" => "test-model"
+          }
+        ],
+        repetitions: 1
+      })
+
+    {:ok, _} = Evaluations.run(user, evaluation)
+
+    evaluation = Evaluations.get_evaluation!(user, evaluation.id)
+    runs = Evaluations.latest_batch_runs(evaluation)
+
+    # One run per source log, each stamped with the log it measured.
+    assert length(runs) == 2
+    assert runs |> Enum.map(& &1.source_log_id) |> Enum.sort() == Enum.sort([log1.id, log2.id])
+
+    # One ranking row: the score answers "on my traffic", not "on this one
+    # request" — the aggregation is the whole point (dodo_router-3hr).
+    assert [ranking] = Evaluations.rankings(evaluation)
+    assert ranking.total == 2
+
+    # The planned volume is knowable before spending.
+    assert Evaluations.planned_run_count(evaluation) == 2
+  end
+
   test "backoff honors a Retry-After header from the rate-limited attempt" do
     result =
       {:error, :all_providers_failed,

@@ -137,6 +137,7 @@ defmodule DodoRouter.MCP.Tools do
         # missing field over from the source evaluation.
         "anyOf" => [
           %{"required" => ["request_log_id", "name", "criteria", "judge", "candidates"]},
+          %{"required" => ["request_log_ids", "name", "criteria", "judge", "candidates"]},
           %{"required" => ["from_eval_id"]}
         ],
         "properties" => %{
@@ -152,6 +153,17 @@ defmodule DodoRouter.MCP.Tools do
           "request_log_id" => %{
             "type" => "string",
             "description" => "An evaluable log from list_logs."
+          },
+          "request_log_ids" => %{
+            "type" => "array",
+            "items" => %{"type" => "string"},
+            "minItems" => 1,
+            "maxItems" => 20,
+            "description" =>
+              "Evaluate a SET of logs in one benchmark: every candidate answers every log, " <>
+                "and the ranking aggregates across them — the score answers \"on my " <>
+                "traffic\", not \"on this one request\". Runs = logs x candidates x " <>
+                "repetitions, so mind the volume. Takes precedence over request_log_id."
           },
           "name" => %{"type" => "string"},
           "criteria" => %{
@@ -514,8 +526,9 @@ defmodule DodoRouter.MCP.Tools do
   defp run("create_eval", principal, args) do
     with {:ok, router} <- resolve_router(principal, args),
          {:ok, args} <- expand_from_eval(principal, router, args),
-         {:ok, log} <- fetch_log(principal, router, args["request_log_id"]),
-         :ok <- evaluable(log),
+         {:ok, source_ids} <- source_log_ids(args),
+         {:ok, logs} <- fetch_evaluable_logs(principal, router, source_ids),
+         [log | _] = logs,
          {:ok, judge} <- judge_target(principal, args["judge"]),
          {:ok, candidates} <- candidate_targets(principal, args["candidates"]) do
       candidates = maybe_add_incumbent(principal, log, candidates, args["include_incumbent"])
@@ -528,6 +541,7 @@ defmodule DodoRouter.MCP.Tools do
         "judge_provider_key_id" => judge.provider_key_id,
         "judge_model" => judge.model,
         "candidate_targets" => candidates,
+        "source_log_ids" => Enum.map(logs, & &1.id),
         "repetitions" => args["repetitions"] || 3
       }
 
@@ -565,6 +579,11 @@ defmodule DodoRouter.MCP.Tools do
            "Not started: the judge's key #{blocker.label} is #{blocker.status}. Every answer " <>
              "would be generated and paid for, then discarded unscored. Pick another judge key " <>
              "(list_eval_targets reports key health) and create a new evaluation."}
+
+        {:error, {:too_many_runs, planned, max}} ->
+          {:error,
+           "Not started: this evaluation would perform #{planned} runs " <>
+             "(logs x candidates x repetitions); the cap is #{max}. Reduce one dimension."}
 
         {:error, {:candidates_unusable, blockers}} ->
           named =
@@ -727,6 +746,10 @@ defmodule DodoRouter.MCP.Tools do
       running: running?,
       repetitions: evaluation.repetitions,
       request_log_id: evaluation.request_log_id,
+      source_log_ids: DodoRouter.Logs.Evaluation.source_log_ids(evaluation),
+      # logs x candidates x repetitions — the volume one run_eval buys,
+      # stated before it is spent.
+      planned_runs: Evaluations.planned_run_count(evaluation),
       summary:
         evaluation
         |> Evaluations.summary()
@@ -937,6 +960,33 @@ defmodule DodoRouter.MCP.Tools do
   defp judge_target(_principal, _judge),
     do: {:error, "judge must be an object with provider_key_id and model."}
 
+  # One benchmark over a set of logs answers "on my traffic"; the single-log
+  # form stays as the common case (dodo_router-3hr).
+  defp source_log_ids(%{"request_log_ids" => ids}) when is_list(ids) and ids != [] do
+    if length(ids) <= 20,
+      do: {:ok, Enum.uniq(ids)},
+      else: {:error, "request_log_ids is capped at 20 logs per evaluation."}
+  end
+
+  defp source_log_ids(%{"request_log_id" => id}) when is_binary(id), do: {:ok, [id]}
+
+  defp source_log_ids(_args),
+    do: {:error, "Provide request_log_id, request_log_ids, or from_eval_id."}
+
+  # Every log of the set is checked the way the single log always was:
+  # owned, on this router, and replayable — refused up front with the log
+  # named, not minutes into the spend.
+  defp fetch_evaluable_logs(principal, router, ids) do
+    Enum.reduce_while(ids, {:ok, []}, fn id, {:ok, acc} ->
+      with {:ok, log} <- fetch_log(principal, router, id),
+           :ok <- evaluable(log) do
+        {:cont, {:ok, acc ++ [log]}}
+      else
+        {:error, message} -> {:halt, {:error, "Log #{id}: #{message}"}}
+      end
+    end)
+  end
+
   # Evaluations are immutable on purpose — a changed rubric is a different
   # benchmark. from_eval_id keeps that while sparing the caller from
   # re-sending kilobytes of identical rubric: every field of the source
@@ -948,6 +998,7 @@ defmodule DodoRouter.MCP.Tools do
       {:ok,
        args
        |> Map.put_new("request_log_id", source.request_log_id)
+       |> Map.put_new("request_log_ids", DodoRouter.Logs.Evaluation.source_log_ids(source))
        |> Map.put_new("name", source.name)
        |> Map.put_new("criteria", source.criteria)
        |> Map.put_new("good_examples", source.good_examples)
