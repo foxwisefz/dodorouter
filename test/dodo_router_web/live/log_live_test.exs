@@ -63,7 +63,7 @@ defmodule DodoRouterWeb.LogLiveTest do
 
       html = render(live)
       assert html =~ ~s(data-latency-band="slow")
-      assert (html |> String.split(~s(data-latency-band="slow")) |> length()) == 2
+      assert html |> String.split(~s(data-latency-band="slow")) |> length() == 2
     end
 
     test "shows empty state when no logs", %{conn: conn, user: user} do
@@ -341,6 +341,56 @@ defmodule DodoRouterWeb.LogLiveTest do
       {:ok, _live, html2} = live(conn, ~p"/logs/#{slow_upload.request_id}")
       assert html2 =~ "Upload"
       assert html2 =~ "Wait"
+    end
+
+    test "timing renders as a single proportional bar with numbers behind a details toggle", %{
+      conn: conn,
+      user: user
+    } do
+      {router, _api_key} = RoutersFixtures.router_fixture(user)
+
+      log =
+        LogsFixtures.log_fixture(router, %{
+          latency_ms: 7000,
+          attempted_steps: [%{"latency_ms" => 6800}],
+          ttfb_ms: 2600,
+          upload_ms: 400,
+          provider_processing_ms: 1800
+        })
+
+      {:ok, live, html} = live(conn, ~p"/logs/#{log.request_id}")
+
+      assert has_element?(live, "#timing-bar")
+      assert has_element?(live, "[data-timing-segment='upload']")
+      assert has_element?(live, "[data-timing-segment='wait']")
+      assert has_element?(live, "[data-timing-segment='processing']")
+      assert has_element?(live, "[data-timing-segment='overhead']")
+
+      # numbers still available, behind an expand rather than always stacked
+      assert html =~ "<details"
+      assert html =~ "Breakdown"
+      assert html =~ "Provider"
+      assert html =~ "Overhead"
+    end
+
+    test "timing bar renders with only unattributed/overhead when finer fields are missing (old rows)",
+         %{conn: conn, user: user} do
+      {router, _api_key} = RoutersFixtures.router_fixture(user)
+
+      log =
+        LogsFixtures.log_fixture(router, %{
+          latency_ms: 5000,
+          ttfb_ms: nil,
+          upload_ms: nil,
+          provider_processing_ms: nil
+        })
+
+      {:ok, live, _html} = live(conn, ~p"/logs/#{log.request_id}")
+
+      assert has_element?(live, "#timing-bar")
+      refute has_element?(live, "[data-timing-segment='upload']")
+      refute has_element?(live, "[data-timing-segment='wait']")
+      refute has_element?(live, "[data-timing-segment='processing']")
     end
 
     test "model reasoning is viewable but collapsed", %{conn: conn, user: user} do

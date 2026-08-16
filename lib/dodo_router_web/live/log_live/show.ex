@@ -8,6 +8,7 @@ defmodule DodoRouterWeb.LogLive.Show do
   alias DodoRouter.Proxy.Adapter.Registry
   alias DodoRouter.Proxy.Fidelity
   alias DodoRouter.Usage
+  alias DodoRouterWeb.Components.Charts
   alias DodoRouterWeb.MarkdownRenderer
 
   import DodoRouterWeb.PromptComponents
@@ -263,43 +264,65 @@ defmodule DodoRouterWeb.LogLive.Show do
               <div class="text-[10px] uppercase tracking-wider text-base-content/40 font-semibold mb-1">
                 Timing
               </div>
-              <div class="space-y-1 text-xs">
-                <div class="flex justify-between">
-                  <span class="text-base-content/60">Total</span>
-                  <span class="font-mono">{fmt_ms(@log.latency_ms)}</span>
-                </div>
-                <div class="flex justify-between">
-                  <span class="text-base-content/60">Provider</span>
-                  <span class="font-mono">{fmt_ms(provider_time(@log))}</span>
-                </div>
-                <div class="flex justify-between">
-                  <span class="text-base-content/60">Overhead</span>
-                  <span class="font-mono">{fmt_ms(overhead_time(@log))}</span>
-                </div>
-                <div :if={@log.ttfb_ms} class="flex justify-between">
-                  <span class="text-base-content/60">TTFB</span>
-                  <span class="font-mono">{fmt_ms(@log.ttfb_ms)}</span>
-                </div>
-                <%!-- Upload/Wait only earn a row when upload actually took time;
-                   otherwise Wait just repeats TTFB --%>
-                <div :if={@log.upload_ms && @log.upload_ms > 0} class="flex justify-between">
-                  <span class="text-base-content/60">Upload</span>
-                  <span class="font-mono">{fmt_ms(@log.upload_ms)}</span>
-                </div>
-                <div
-                  :if={@log.ttfb_ms && @log.upload_ms && @log.upload_ms > 0}
-                  class="flex justify-between"
-                >
-                  <span class="text-base-content/60" title="TTFB minus upload">Wait</span>
-                  <span class="font-mono">{fmt_ms(wait_time(@log))}</span>
-                </div>
-                <%= if @log.provider_processing_ms do %>
-                  <div class="flex justify-between">
-                    <span class="text-base-content/60">Proc</span>
-                    <span class="font-mono">{@log.provider_processing_ms}ms</span>
-                  </div>
-                <% end %>
+              <div class="flex justify-between text-xs mb-1">
+                <span class="text-base-content/60">Total</span>
+                <span class="font-mono">{fmt_ms(@log.latency_ms)}</span>
               </div>
+              <%!-- One stacked bar answers "where did the time go" without
+                 mental subtraction. Segments are a non-overlapping partition
+                 that always sums to Total by construction: Upload + Wait +
+                 Provider processing + Unattributed together equal
+                 `provider_time/1` (the sum of every attempted step's own
+                 latency), and Overhead is `total - provider_time`. TTFB is
+                 deliberately not a segment — it's Upload + Wait, so plotting
+                 it too would double-count. "Unattributed" absorbs whatever
+                 provider_time isn't explained by upload/wait/proc (retried
+                 attempts before the winning one, or old rows missing the
+                 finer-grained fields), so old rows still render an honest,
+                 if coarser, bar instead of one that silently omits time. --%>
+              <Charts.share_bar
+                id="timing-bar"
+                segments={timing_segments(@log)}
+                tip_suffix="of total time"
+              />
+              <details class="mt-1.5 text-xs">
+                <summary class="cursor-pointer text-base-content/60 select-none">
+                  Breakdown
+                </summary>
+                <div class="space-y-1 mt-1.5">
+                  <div class="flex justify-between">
+                    <span class="text-base-content/60">Provider</span>
+                    <span class="font-mono">{fmt_ms(provider_time(@log))}</span>
+                  </div>
+                  <div class="flex justify-between">
+                    <span class="text-base-content/60">Overhead</span>
+                    <span class="font-mono">{fmt_ms(overhead_time(@log))}</span>
+                  </div>
+                  <div :if={@log.ttfb_ms} class="flex justify-between">
+                    <span class="text-base-content/60">TTFB</span>
+                    <span class="font-mono">{fmt_ms(@log.ttfb_ms)}</span>
+                  </div>
+                  <%!-- Upload/Wait only earn a row when upload actually took time;
+                     otherwise Wait just repeats TTFB --%>
+                  <div :if={@log.upload_ms && @log.upload_ms > 0} class="flex justify-between">
+                    <span class="text-base-content/60">Upload</span>
+                    <span class="font-mono">{fmt_ms(@log.upload_ms)}</span>
+                  </div>
+                  <div
+                    :if={@log.ttfb_ms && @log.upload_ms && @log.upload_ms > 0}
+                    class="flex justify-between"
+                  >
+                    <span class="text-base-content/60" title="TTFB minus upload">Wait</span>
+                    <span class="font-mono">{fmt_ms(wait_time(@log))}</span>
+                  </div>
+                  <%= if @log.provider_processing_ms do %>
+                    <div class="flex justify-between">
+                      <span class="text-base-content/60">Proc</span>
+                      <span class="font-mono">{@log.provider_processing_ms}ms</span>
+                    </div>
+                  <% end %>
+                </div>
+              </details>
             </div>
             
     <!-- Model -->
@@ -1611,6 +1634,84 @@ defmodule DodoRouterWeb.LogLive.Show do
   end
 
   defp wait_time(_), do: "-"
+
+  # Non-overlapping partition of `latency_ms` for the timing share bar — see
+  # the comment above the <Charts.share_bar> call for why this split (and not
+  # a bar built straight from Total/Provider/TTFB/Upload/Wait/Proc) is the one
+  # that's actually safe to plot: those fields overlap each other, this
+  # doesn't.
+  #
+  # `overhead = total - provider_time` is exact by construction (that's what
+  # `overhead_time/1` already computes). The remaining budget — `available`
+  # below — is handed out to Upload, Wait and Provider-processing *in that
+  # order, clamped to what's left*, rather than by clamping each to itself
+  # and letting "Unattributed" mop up: on an old row where `attempted_steps`
+  # is missing (so `provider_time` under-counts) but `ttfb_ms`/`upload_ms`
+  # are present, upload+wait+proc can exceed `provider_time`, and naively
+  # summing all five segments would then overshoot Total. Clamping
+  # sequentially guarantees the five segments always sum to exactly
+  # `latency_ms`, so the bar's proportions are never a lie — a row missing
+  # the finer fields just renders honestly with more of the time folded into
+  # "Unattributed" (or, if attempted_steps is missing too, into "Overhead").
+  defp timing_segments(log) do
+    total = log.latency_ms || 0
+    overhead = max(overhead_time(log), 0)
+    available = max(total - overhead, 0)
+
+    upload = min(log.upload_ms || 0, available)
+    remaining = available - upload
+
+    wait =
+      case log do
+        %{ttfb_ms: ttfb} when is_integer(ttfb) ->
+          min(max(ttfb - (log.upload_ms || 0), 0), remaining)
+
+        _ ->
+          0
+      end
+
+    remaining = remaining - wait
+    proc = min(log.provider_processing_ms || 0, remaining)
+    unattributed = remaining - proc
+
+    [
+      %{
+        key: "upload",
+        name: "Upload",
+        value: upload,
+        display: fmt_ms(upload),
+        color: Charts.series_color(0)
+      },
+      %{
+        key: "wait",
+        name: "Wait",
+        value: wait,
+        display: fmt_ms(wait),
+        color: Charts.series_color(1)
+      },
+      %{
+        key: "processing",
+        name: "Provider processing",
+        value: proc,
+        display: fmt_ms(proc),
+        color: Charts.series_color(2)
+      },
+      %{
+        key: "unattributed",
+        name: "Unattributed",
+        value: unattributed,
+        display: fmt_ms(unattributed),
+        color: Charts.series_color(3)
+      },
+      %{
+        key: "overhead",
+        name: "Proxy overhead",
+        value: overhead,
+        display: fmt_ms(overhead),
+        color: Charts.series_color(4)
+      }
+    ]
+  end
 
   defp format_bytes(nil), do: "-"
   defp format_bytes(bytes) when bytes < 1024, do: "#{bytes} B"

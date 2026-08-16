@@ -303,7 +303,14 @@ defmodule DodoRouterWeb.Components.Charts do
   Identity is carried by the legend/table the caller renders alongside.
   """
   attr :id, :string, required: true
-  attr :segments, :list, required: true, doc: "%{name, value, display, color}"
+
+  attr :segments, :list,
+    required: true,
+    doc: "%{name, value, display, color, key (optional, for data-timing-segment/test hooks)}"
+
+  attr :tip_suffix, :string,
+    default: "of spend",
+    doc: "trailing words in the hover tooltip, e.g. \"of spend\" or \"of total time\""
 
   def share_bar(assigns) do
     total = assigns.segments |> Enum.map(& &1.value) |> Enum.sum()
@@ -317,7 +324,8 @@ defmodule DodoRouterWeb.Components.Charts do
           :if={seg.value > 0}
           class="viz-slot h-full min-w-[3px]"
           tabindex="0"
-          data-viz-tip={share_tip(seg, @total)}
+          data-viz-tip={share_tip(seg, @total, @tip_suffix)}
+          data-timing-segment={Map.get(seg, :key)}
           style={"flex-grow: #{seg.value}; flex-basis: 0"}
         >
           <div class="viz-seg h-full w-full" style={"background: #{seg.color}"}></div>
@@ -578,12 +586,12 @@ defmodule DodoRouterWeb.Components.Charts do
     Jason.encode!(%{title: row.name, rows: rows})
   end
 
-  defp share_tip(seg, total) do
+  defp share_tip(seg, total, suffix) do
     pct = Float.round(seg.value / total * 100, 1)
 
     Jason.encode!(%{
       title: seg.name,
-      rows: [%{label: "#{pct}% of spend", value: seg.display, color: seg.color}]
+      rows: [%{label: "#{pct}% #{suffix}", value: seg.display, color: seg.color}]
     })
   end
 end
