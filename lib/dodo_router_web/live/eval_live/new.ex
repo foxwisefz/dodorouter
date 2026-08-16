@@ -325,6 +325,20 @@ defmodule DodoRouterWeb.EvalLive.New do
       |> prepare_params(socket.assigns.target_lookup)
       |> add_sources(socket.assigns.recording, socket.assigns.source_logs)
 
+    if params["comparison_mode"] == "next_action" and
+         Enum.any?(socket.assigns.source_logs, &Evaluations.next_action_blocker/1) do
+      {:noreply,
+       put_flash(
+         socket,
+         :error,
+         "Next-action mode compares against the recorded response, and at least one source request has none on record. Use rubric mode for this set."
+       )}
+    else
+      save_evaluation(socket, params)
+    end
+  end
+
+  defp save_evaluation(socket, params) do
     case Evaluations.create_evaluation(socket.assigns.current_user, socket.assigns.log, params) do
       {:ok, evaluation} ->
         # Enqueue here, from the explicit save action: a run flag in the
@@ -571,6 +585,20 @@ defmodule DodoRouterWeb.EvalLive.New do
             >
               <p class="text-xs font-semibold uppercase tracking-wider text-primary">Step 2</p>
               <h2 class="mb-4 text-lg font-semibold">Judge rubric</h2>
+              <.input
+                field={@form[:comparison_mode]}
+                type="select"
+                label="Judge framing"
+                options={[
+                  {"Rubric — score each answer against the criteria", "rubric"},
+                  {"Next action — compare each answer to what production actually did", "next_action"}
+                ]}
+              />
+              <p class="mb-3 text-xs text-base-content/45">
+                Next action is the per-decision test for recorded agent traffic: same frozen
+                history, two next moves, the judge states which is better. It needs each source
+                request's served response on record.
+              </p>
               <.input
                 field={@form[:criteria]}
                 type="textarea"

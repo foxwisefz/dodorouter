@@ -190,6 +190,7 @@ defmodule DodoRouter.Proxy.Adapters.TestProvider do
 
   @judgement %{
     "score" => 82,
+    "preference" => "better",
     "summary" => "Answers the question directly",
     "reasoning" => "Checked each criterion against the reply.",
     "criterion_scores" => %{"accuracy" => 90, "brevity" => 74},

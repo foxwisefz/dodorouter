@@ -442,6 +442,7 @@ defmodule DodoRouterWeb.EvalLive.Show do
     |> assign(:selected_group, group)
     |> assign(:summary, Evaluations.summary(batch_runs))
     |> assign(:rankings, rankings)
+    |> assign(:has_decisions, Enum.any?(rankings, & &1.decisions))
     |> assign(:chart_series, chart_series(batch_runs, rankings))
     |> assign(:rubric_feedback, Evaluations.rubric_feedback(batch_runs))
     |> assign(:retryable, Evaluations.retryable_counts(evaluation))
@@ -736,6 +737,14 @@ defmodule DodoRouterWeb.EvalLive.Show do
   end
 
   defp any_succeeded?(batch), do: Enum.any?(batch.runs, &(&1.status != "failed"))
+
+  # Base columns plus the two conditional ones (weakest request, vs
+  # production), so the expanded/empty rows always span the real width.
+  defp rankings_colspan(source_count, has_decisions) do
+    base = 9
+    base = if source_count > 1, do: base + 1, else: base
+    if has_decisions, do: base + 1, else: base
+  end
 
   defp ranking_key(ranking), do: "#{ranking.provider}|#{ranking.model}|#{ranking.variant}"
 
@@ -1462,6 +1471,12 @@ defmodule DodoRouterWeb.EvalLive.Show do
                   <th>Provider</th>
                   <th>Model</th>
                   <th>Avg score</th>
+                  <th
+                    :if={@has_decisions}
+                    title="Of the decisions the judge compared, how often this candidate's next move was at least as good as what production actually did"
+                  >
+                    Vs production
+                  </th>
                   <th>Std dev</th>
                   <th>Range</th>
                   <th>Runs</th>
@@ -1484,6 +1499,15 @@ defmodule DodoRouterWeb.EvalLive.Show do
                     <td><span class="badge badge-info badge-soft">{ranking.provider}</span></td>
                     <td class="font-mono text-xs">{ranking.model}</td>
                     <td class="font-semibold text-success">{ranking.average || "—"}</td>
+                    <td :if={@has_decisions}>
+                      <span :if={ranking.decisions} class="font-semibold">
+                        {ranking.decisions.preferred_pct}%
+                        <span class="font-normal text-xs text-base-content/45">
+                          ({ranking.decisions.better}▲ {ranking.decisions.equivalent}= {ranking.decisions.worse}▼)
+                        </span>
+                      </span>
+                      <span :if={is_nil(ranking.decisions)}>—</span>
+                    </td>
                     <td class={deviation_class(ranking.stddev)}>{ranking.stddev}</td>
                     <td>{ranking.min || "—"}–{ranking.max || "—"}</td>
                     <td>{ranking.successful}/{ranking.total}</td>
@@ -1532,7 +1556,7 @@ defmodule DodoRouterWeb.EvalLive.Show do
                     id={"sources-#{ranking_dom_id(ranking)}"}
                     class="bg-base-200/30"
                   >
-                    <td colspan={if @source_count > 1, do: "10", else: "9"} class="px-6 py-3">
+                    <td colspan={rankings_colspan(@source_count, @has_decisions)} class="px-6 py-3">
                       <p class="mb-2 text-xs font-medium text-base-content/50">
                         Per source request, weakest first
                       </p>
@@ -1564,7 +1588,7 @@ defmodule DodoRouterWeb.EvalLive.Show do
                 <% end %>
                 <tr :if={@rankings == []}>
                   <td
-                    colspan={if @source_count > 1, do: "10", else: "9"}
+                    colspan={rankings_colspan(@source_count, @has_decisions)}
                     class="py-10 text-center text-base-content/40"
                   >
                     No completed model runs yet.

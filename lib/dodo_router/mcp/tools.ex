@@ -253,6 +253,20 @@ defmodule DodoRouter.MCP.Tools do
                 "scores each answer against the request that run actually sent and never " <>
                 "sees variant names. Runs multiply by the variant count."
           },
+          "comparison_mode" => %{
+            "type" => "string",
+            "enum" => ["rubric", "next_action"],
+            "description" =>
+              "How the judge frames its verdict. \"rubric\" (default) scores each answer " <>
+                "against the criteria alone. \"next_action\" is the per-decision preference " <>
+                "test for recorded agent trajectories: each source log's request already " <>
+                "carries the full frozen history (every real tool result), the candidate " <>
+                "proposes ONE next action, and the judge compares it against what production " <>
+                "actually did at that turn — better / equivalent / worse — without simulating " <>
+                "anything after it. Rankings then carry a decisions rollup (\"candidate makes " <>
+                "the better-or-equal move in N% of decisions\"). Requires every source log to " <>
+                "have a stored, extractable response."
+          },
           "run" => %{"type" => "boolean", "description" => "Start the benchmark now."},
           "include_incumbent" => %{
             "type" => "boolean",
@@ -612,6 +626,7 @@ defmodule DodoRouter.MCP.Tools do
          {:ok, args} <- expand_from_eval(principal, router, args),
          {:ok, logs, recording} <- resolve_source_logs(principal, router, args),
          [log | _] = logs,
+         :ok <- check_next_action_sources(args["comparison_mode"], logs),
          {:ok, judge} <- judge_target(principal, args["judge"]),
          {:ok, candidates} <- candidate_targets(principal, args["candidates"]) do
       candidates = maybe_add_incumbents(principal, logs, candidates, args["include_incumbent"])
@@ -627,6 +642,7 @@ defmodule DodoRouter.MCP.Tools do
         "source_log_ids" => Enum.map(logs, & &1.id),
         "recording_id" => recording && recording.id,
         "prompt_variants" => args["prompt_variants"] || [],
+        "comparison_mode" => args["comparison_mode"],
         "repetitions" => args["repetitions"] || 3
       }
 
@@ -831,6 +847,7 @@ defmodule DodoRouter.MCP.Tools do
       status: evaluation.benchmark_status,
       running: running?,
       repetitions: evaluation.repetitions,
+      comparison_mode: DodoRouter.Logs.Evaluation.comparison_mode(evaluation),
       request_log_id: evaluation.request_log_id,
       source_log_ids: DodoRouter.Logs.Evaluation.source_log_ids(evaluation),
       # Provenance: set when the source set was sampled from a recording.
@@ -857,6 +874,7 @@ defmodule DodoRouter.MCP.Tools do
             avg_cost_usd: money(ranking.avg_cost)
           }
           |> maybe_put_per_source(ranking)
+          |> maybe_put_decisions(ranking)
         end),
       rubric_feedback: Evaluations.rubric_feedback(runs),
       # Failed runs worth repeating, split by what has to be redone. A judge
@@ -880,6 +898,11 @@ defmodule DodoRouter.MCP.Tools do
       "attempts" in include
     )
   end
+
+  # next_action mode only: how often the candidate's proposed next move was
+  # at least as good as what production actually did.
+  defp maybe_put_decisions(row, %{decisions: nil}), do: row
+  defp maybe_put_decisions(row, ranking), do: Map.put(row, :decisions, ranking.decisions)
 
   # Only on multi-log benchmarks: the per-source rows answer "fine on 18 of
   # the 20 requests, catastrophic on 2", which the aggregate average hides.
@@ -1191,6 +1214,23 @@ defmodule DodoRouter.MCP.Tools do
     end
   end
 
+  # next_action mode judges the candidate against what production actually
+  # did, so a source log with no extractable recorded action would leave
+  # the judge comparing against nothing — refused up front, log named.
+  defp check_next_action_sources("next_action", logs) do
+    case Enum.find(logs, &Evaluations.next_action_blocker/1) do
+      nil ->
+        :ok
+
+      log ->
+        {:error,
+         "Log #{log.id}: its stored response has no extractable action, so next_action " <>
+           "mode has nothing to compare the candidate against."}
+    end
+  end
+
+  defp check_next_action_sources(_mode, _logs), do: :ok
+
   defp fetch_recording(principal, router, id) do
     case Recordings.get_recording(principal.user, id) do
       %{router_id: router_id} = recording when router_id == router.id ->
@@ -1241,6 +1281,7 @@ defmodule DodoRouter.MCP.Tools do
        |> Map.put_new("request_log_id", source.request_log_id)
        |> Map.put_new("request_log_ids", DodoRouter.Logs.Evaluation.source_log_ids(source))
        |> Map.put_new("prompt_variants", source.prompt_variants || [])
+       |> Map.put_new("comparison_mode", source.comparison_mode)
        |> Map.put_new("name", source.name)
        |> Map.put_new("criteria", source.criteria)
        |> Map.put_new("good_examples", source.good_examples)

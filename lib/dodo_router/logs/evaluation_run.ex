@@ -31,6 +31,10 @@ defmodule DodoRouter.Logs.EvaluationRun do
     # "monitor" marks judge-only runs a monitor sweep produced from live
     # traffic, so benchmark aggregates never mix them in.
     field :kind, :string
+    # next_action mode only: the judge's verdict on the candidate's
+    # proposed next move relative to what production actually did —
+    # "better" | "equivalent" | "worse". nil on rubric-mode runs.
+    field :preference, :string
     # What the provider's response claimed actually answered — nil when the
     # response named nothing or the row predates the column. The ranking is
     # keyed on candidate_model (what was requested); a difference here is a
@@ -102,6 +106,7 @@ defmodule DodoRouter.Logs.EvaluationRun do
       :source_log_id,
       :variant_name,
       :kind,
+      :preference,
       :candidate_served_model,
       :error,
       :error_category,

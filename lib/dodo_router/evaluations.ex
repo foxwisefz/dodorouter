@@ -1287,7 +1287,8 @@ defmodule DodoRouter.Evaluations do
             judge_provider_key_label: step.provider_key.label
           })
 
-        request = judge_request(evaluation, source_log, candidate_content)
+        mode = judge_mode(evaluation, run)
+        request = judge_request(evaluation, source_log, candidate_content, mode)
 
         dispatch = fn ->
           Proxy.dispatch(evaluation.request_log.router, request,
@@ -1313,6 +1314,23 @@ defmodule DodoRouter.Evaluations do
             }
 
             case parse_judgement(raw) do
+              # A next_action judgement without a preference is not a
+              # judgement — the preference is the datum this mode exists
+              # for. Failing the judge stage keeps it re-scoreable via
+              # retry_eval without regenerating anything.
+              {:ok, %{preference: nil}} when mode == "next_action" ->
+                {:error,
+                 update_run!(
+                   run,
+                   Map.merge(judge_attrs, %{
+                     status: "failed",
+                     failure_stage: "judge",
+                     error:
+                       "Judge did not state a preference (better/equivalent/worse) for the candidate's next action.",
+                     error_category: "judge_unparseable"
+                   })
+                 )}
+
               {:ok, judgement} ->
                 {:ok,
                  update_run!(
@@ -1324,7 +1342,10 @@ defmodule DodoRouter.Evaluations do
                      reasoning: judgement.reasoning,
                      criterion_scores: judgement.criterion_scores,
                      issues: judgement.issues,
-                     rubric_gaps: judgement.rubric_gaps
+                     rubric_gaps: judgement.rubric_gaps,
+                     # Recorded only when the judge was asked for one; a
+                     # stray field on a rubric-mode answer is not data.
+                     preference: if(mode == "next_action", do: judgement.preference)
                    })
                  )}
 
@@ -1485,10 +1506,37 @@ defmodule DodoRouter.Evaluations do
           |> Enum.map(&(&1.candidate_list_cost_usd || &1.candidate_cost_usd))
           |> Enum.reject(&is_nil/1)
           |> decimal_average(),
-        per_source: per_source_breakdown(target_runs)
+        per_source: per_source_breakdown(target_runs),
+        decisions: decisions_rollup(completed)
       }
     end)
     |> Enum.sort_by(&(&1.average || -1), :desc)
+  end
+
+  # next_action mode's own verdict: of the decisions the judge compared,
+  # how often the candidate's next move was at least as good as what
+  # production actually did. nil when no run carries a preference (every
+  # rubric-mode evaluation).
+  defp decisions_rollup(completed) do
+    preferences = for run <- completed, run.preference != nil, do: run.preference
+
+    case preferences do
+      [] ->
+        nil
+
+      preferences ->
+        counts = Enum.frequencies(preferences)
+        better = Map.get(counts, "better", 0)
+        equivalent = Map.get(counts, "equivalent", 0)
+        worse = Map.get(counts, "worse", 0)
+
+        %{
+          better: better,
+          equivalent: equivalent,
+          worse: worse,
+          preferred_pct: round((better + equivalent) / (better + equivalent + worse) * 100)
+        }
+    end
   end
 
   # The aggregate average is where "fine on 18 of the 20 requests and
@@ -2006,6 +2054,17 @@ defmodule DodoRouter.Evaluations do
   end
 
   @doc """
+  Why a log cannot anchor a next_action comparison, or nil.
+
+  The mode judges the candidate's proposal against what production
+  actually did, so a log whose stored response yields no extractable
+  action has nothing to compare against.
+  """
+  def next_action_blocker(log) do
+    if served_answer(log), do: nil, else: :no_recorded_action
+  end
+
+  @doc """
   Extracts the assistant's answer text from a stored response body, in
   either wire format — OpenAI-shaped (`choices`) or Anthropic-shaped
   (`content` blocks). nil when there is nothing judgeable.
@@ -2058,7 +2117,8 @@ defmodule DodoRouter.Evaluations do
          reasoning: if(is_binary(decoded["reasoning"]), do: decoded["reasoning"]),
          criterion_scores: normalize_scores(decoded["criterion_scores"]),
          issues: Enum.filter(decoded["issues"] || [], &is_binary/1),
-         rubric_gaps: Enum.filter(decoded["rubric_gaps"] || [], &is_binary/1)
+         rubric_gaps: Enum.filter(decoded["rubric_gaps"] || [], &is_binary/1),
+         preference: normalize_preference(decoded["preference"])
        }}
     else
       # Clamping stored 150 as 100 and a 1-5-scale 3 as 3/100 on the same
@@ -2095,9 +2155,24 @@ defmodule DodoRouter.Evaluations do
   defp create_run(evaluation, attrs) do
     %EvaluationRun{}
     |> EvaluationRun.changeset(
-      Map.merge(attrs, %{evaluation_id: evaluation.id, judge_prompt_version: @prompt_version})
+      Map.merge(attrs, %{
+        evaluation_id: evaluation.id,
+        judge_prompt_version: prompt_version(evaluation, attrs[:kind])
+      })
     )
     |> Repo.insert()
+  end
+
+  # The version names the prompt the judge actually saw: monitor runs judge
+  # in rubric mode whatever the evaluation's own framing, and next_action
+  # scores are not comparable with rubric scores of the same version number.
+  defp prompt_version(_evaluation, "monitor"), do: @prompt_version
+
+  defp prompt_version(evaluation, _kind) do
+    case Evaluation.comparison_mode(evaluation) do
+      "next_action" -> @prompt_version <> "-next-action"
+      _rubric -> @prompt_version
+    end
   end
 
   defp update_run!(run, attrs) do
@@ -2115,9 +2190,22 @@ defmodule DodoRouter.Evaluations do
     do: judge_request(evaluation, evaluation.request_log, candidate_content)
 
   @doc false
+  def judge_request(evaluation, source_log, candidate_content),
+    do:
+      judge_request(
+        evaluation,
+        source_log,
+        candidate_content,
+        Evaluation.comparison_mode(evaluation)
+      )
+
+  @doc false
   # The judge scores against the request the run actually replayed — with a
-  # set of source logs that is the run's own log, not the anchor.
-  def judge_request(evaluation, source_log, candidate_content) do
+  # set of source logs that is the run's own log, not the anchor. `mode` is
+  # passed explicitly rather than read off the evaluation because a monitor
+  # sweep judges in rubric mode regardless: comparing a live answer to the
+  # recorded action would be comparing it to itself.
+  def judge_request(evaluation, source_log, candidate_content, mode) do
     %{
       "model" => evaluation.judge_model,
       "response_format" => %{"type" => "json_object"},
@@ -2129,11 +2217,16 @@ defmodule DodoRouter.Evaluations do
         },
         %{
           "role" => "user",
-          "content" => judge_prompt(evaluation, source_log, candidate_content)
+          "content" => judge_prompt(evaluation, source_log, candidate_content, mode)
         }
       ]
     }
   end
+
+  # A monitor judges live answers for absolute quality even on a
+  # next_action evaluation — there, the recorded action IS the live answer.
+  defp judge_mode(_evaluation, %EvaluationRun{kind: "monitor"}), do: "rubric"
+  defp judge_mode(evaluation, _run), do: Evaluation.comparison_mode(evaluation)
 
   @doc false
   # Every attempt the chain made, named. This used to `inspect/1` the whole
@@ -2213,6 +2306,17 @@ defmodule DodoRouter.Evaluations do
   end
 
   defp humanize_reason(reason), do: inspect(reason)
+
+  # Anything but the three words is treated as unstated, which next_action
+  # mode turns into a judge-stage failure — not silently coerced to a tie.
+  defp normalize_preference(preference) when is_binary(preference) do
+    case preference |> String.trim() |> String.downcase() do
+      valid when valid in ["better", "equivalent", "worse"] -> valid
+      _other -> nil
+    end
+  end
+
+  defp normalize_preference(_), do: nil
 
   defp judge_parse_message(reason),
     do: "Judge response could not be scored — " <> humanize_reason(reason)
@@ -2421,7 +2525,7 @@ defmodule DodoRouter.Evaluations do
   # and self-preference bias, so neither the model name, provider envelope,
   # nor sampling params may appear in the prompt — only the conversation
   # and the candidate's message content.
-  defp judge_prompt(evaluation, source, candidate_content) do
+  defp judge_prompt(evaluation, source, candidate_content, "rubric") do
     """
     Score the assistant response from 0 to 100 against the criteria. Intent match and completeness matter most. First work through the response against each criterion in the reasoning field, then score — the score must follow from the reasoning. If the criteria or examples are too vague or incomplete to judge confidently, name what is missing in rubric_gaps (empty array if the rubric was sufficient).
     #{answer_shape(source.request_body)}
@@ -2442,6 +2546,38 @@ defmodule DodoRouter.Evaluations do
     </SOURCE_RESPONSE>
 
     Return exactly: {"reasoning": "assessment of the response against each criterion", "score": 0-100, "summary": "concise rationale", "criterion_scores": {"intent_match": 0-100, "completeness": 0-100, "appropriateness": 0-100, "accuracy": 0-100}, "issues": ["specific issue"], "rubric_gaps": ["what the criteria failed to specify, if anything"]}
+    """
+  end
+
+  # Per-decision framing: the same frozen history, two next moves. Nothing
+  # after this turn is simulated — the tool results in SOURCE_REQUEST really
+  # happened — so the judge compares exactly one decision, not a rollout.
+  defp judge_prompt(evaluation, source, candidate_content, "next_action") do
+    """
+    Two assistants received the identical conversation history in SOURCE_REQUEST and each produced a next action at this point. RECORDED_ACTION is what the production assistant actually did; CANDIDATE_ACTION is a challenger's proposal for the same turn. Nothing after this turn is simulated — every tool result in the history really happened — so judge exactly one decision: which next action better advances the task, per the criteria. Intent match and completeness matter most.
+
+    First work through BOTH actions against the criteria in the reasoning field, then decide. Score the CANDIDATE action from 0 to 100 for its own quality, and state a preference for the candidate relative to the recorded action: "better", "equivalent", or "worse". The preference must follow from the reasoning; equivalent means a real tie, not an unexamined one. If the criteria are too vague to decide confidently, name what is missing in rubric_gaps (empty array if the rubric was sufficient).
+    #{answer_shape(source.request_body)}
+    CRITERIA:
+    #{evaluation.criteria}
+
+    GOOD EXAMPLES (optional calibration):
+    #{evaluation.good_examples || "None"}
+
+    BAD EXAMPLES (optional calibration):
+    #{evaluation.bad_examples || "None"}
+
+    <SOURCE_REQUEST>
+    #{source.request_body |> source_conversation() |> truncate_middle(@judge_source_limit)}
+    </SOURCE_REQUEST>
+    <RECORDED_ACTION>
+    #{truncate_middle(served_answer(source) || "", @judge_source_limit)}
+    </RECORDED_ACTION>
+    <CANDIDATE_ACTION>
+    #{truncate_middle(candidate_content || "", @judge_source_limit)}
+    </CANDIDATE_ACTION>
+
+    Return exactly: {"reasoning": "both actions weighed against each criterion", "preference": "better" | "equivalent" | "worse", "score": 0-100, "summary": "concise rationale", "criterion_scores": {"intent_match": 0-100, "completeness": 0-100, "appropriateness": 0-100, "accuracy": 0-100}, "issues": ["specific issue with the candidate action"], "rubric_gaps": ["what the criteria failed to specify, if anything"]}
     """
   end
 

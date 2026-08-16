@@ -883,6 +883,73 @@ defmodule DodoRouterWeb.MCPControllerTest do
       assert change["reverted_at"] == nil
     end
 
+    test "create_eval runs a per-decision comparison and refuses actionless logs", %{
+      conn: conn,
+      token: token,
+      user: user,
+      router: router
+    } do
+      key = DodoRouter.ProvidersFixtures.provider_key_fixture(user, %{"label" => "Key 1"})
+
+      log =
+        DodoRouter.LogsFixtures.log_fixture(router, %{
+          request_body:
+            Jason.encode!(%{
+              "model" => "m",
+              "messages" => [%{"role" => "user", "content" => "next move?"}]
+            }),
+          response_body:
+            Jason.encode!(%{
+              "choices" => [
+                %{"message" => %{"role" => "assistant", "content" => "recorded move"}}
+              ]
+            })
+        })
+
+      resp =
+        json_response(
+          call_tool(conn, token, "create_eval", %{
+            "request_log_id" => log.id,
+            "name" => "Per-decision",
+            "criteria" => "Advance the task",
+            "comparison_mode" => "next_action",
+            "judge" => %{"provider_key_id" => key.id, "model" => "judge-model"},
+            "candidates" => [%{"provider_key_id" => key.id, "model" => "test-model"}],
+            "include_incumbent" => false
+          }),
+          200
+        )
+
+      assert tool_json(resp)["comparison_mode"] == "next_action"
+
+      # A log with no stored response has no recorded action to compare
+      # against — refused up front, named.
+      actionless =
+        DodoRouter.LogsFixtures.log_fixture(router, %{
+          request_body:
+            Jason.encode!(%{
+              "model" => "m",
+              "messages" => [%{"role" => "user", "content" => "hi"}]
+            })
+        })
+
+      resp =
+        json_response(
+          call_tool(conn, token, "create_eval", %{
+            "request_log_id" => actionless.id,
+            "name" => "No action",
+            "criteria" => "Advance the task",
+            "comparison_mode" => "next_action",
+            "judge" => %{"provider_key_id" => key.id, "model" => "judge-model"},
+            "candidates" => [%{"provider_key_id" => key.id, "model" => "test-model"}]
+          }),
+          200
+        )
+
+      assert resp["result"]["isError"]
+      assert hd(resp["result"]["content"])["text"] =~ "no extractable action"
+    end
+
     test "create_eval refuses a recording the token's user does not own", %{
       conn: conn,
       token: token,

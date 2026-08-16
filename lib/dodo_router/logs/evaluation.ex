@@ -26,6 +26,12 @@ defmodule DodoRouter.Logs.Evaluation do
     # under its own name. jsonb keeps room for richer patches later.
     field :prompt_variants, {:array, :map}, default: []
     field :repetitions, :integer, default: 3
+    # How the judge frames its verdict. nil/"rubric" scores each answer
+    # against the criteria alone; "next_action" additionally shows the
+    # judge what production actually did at that turn and asks for a
+    # preference — the per-decision comparison a recorded agent trajectory
+    # is really asking for.
+    field :comparison_mode, :string
     field :benchmark_status, :string, default: "draft"
     # Batch written by the most recent benchmark execution; aggregates are
     # scoped to it. Set programmatically, never cast from params.
@@ -64,6 +70,7 @@ defmodule DodoRouter.Logs.Evaluation do
       :source_log_ids,
       :prompt_variants,
       :repetitions,
+      :comparison_mode,
       :judge_provider_key_id,
       :request_log_id,
       :evaluated_by_id
@@ -82,6 +89,7 @@ defmodule DodoRouter.Logs.Evaluation do
     |> validate_length(:candidate_targets, min: 1, max: 30)
     |> validate_length(:source_log_ids, max: 20)
     |> validate_length(:prompt_variants, max: 10)
+    |> validate_inclusion(:comparison_mode, ~w(rubric next_action))
     |> validate_prompt_variant_shape()
     |> validate_candidate_target_shape()
     |> foreign_key_constraint(:request_log_id)
@@ -111,6 +119,10 @@ defmodule DodoRouter.Logs.Evaluation do
       _ -> [nil]
     end
   end
+
+  @doc "The judge's framing; rows from before the field existed read as rubric."
+  def comparison_mode(%__MODULE__{comparison_mode: "next_action"}), do: "next_action"
+  def comparison_mode(%__MODULE__{}), do: "rubric"
 
   # Two variants with one name would collapse into one ranking row and make
   # the retry unable to recover the right patch.

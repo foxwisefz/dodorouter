@@ -219,6 +219,21 @@ repetitions, the source log — carries over from that evaluation, with any
 argument you pass alongside overriding its copy. Swap `request_log_id` to
 point the same rubric at a new log, or `candidates` to try another model.
 
+### Per-decision replay for agent trajectories
+
+For recorded agent traffic there is a sharper question than "is the answer
+good": *at each decision point, would the candidate have made a better next
+move than production did?* Pass `comparison_mode: "next_action"`. Each
+source log's request already carries the full frozen history — every real
+tool result, because it really happened — so the candidate proposes ONE
+next action, nothing after that turn is simulated, and the judge compares
+it against the recorded action: better, equivalent, or worse. Rankings then
+carry a `decisions` rollup per candidate ("better-or-equal move in N% of
+decisions") alongside the usual scores. Combine it with `recording_id` and
+the decision points are a whole captured session. Requires every source
+log's stored response to be extractable — a log without a recorded action
+is refused by name at creation.
+
 ## Runner limits
 
 Three limits shape every benchmark; know them before reading close results:
