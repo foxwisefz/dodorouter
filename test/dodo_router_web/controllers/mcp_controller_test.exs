@@ -508,6 +508,63 @@ defmodule DodoRouterWeb.MCPControllerTest do
       assert by_label["plan key"]["judge_advice"] =~ "metered key for the judge"
     end
 
+    test "superseded attempts are one include away", %{
+      conn: conn,
+      token: token,
+      user: user,
+      router: router
+    } do
+      key = DodoRouter.ProvidersFixtures.provider_key_fixture(user, %{"label" => "Key 1"})
+
+      log =
+        DodoRouter.LogsFixtures.log_fixture(router, %{
+          request_body:
+            Jason.encode!(%{
+              "model" => "m",
+              "messages" => [%{"role" => "user", "content" => "hi"}]
+            })
+        })
+
+      {:ok, evaluation} =
+        DodoRouter.Evaluations.create_evaluation(user, log, %{
+          name: "History",
+          criteria: "Be useful",
+          judge_model: "fail-model",
+          judge_provider_key_id: key.id,
+          candidate_targets: [
+            %{"provider_key_id" => key.id, "provider" => "test_provider", "model" => "test-model"}
+          ],
+          repetitions: 1
+        })
+
+      {:ok, _} = DodoRouter.Evaluations.run(user, evaluation)
+
+      evaluation
+      |> Ecto.Changeset.change(judge_model: "judge-model")
+      |> DodoRouter.Repo.update!()
+
+      retried = json_response(call_tool(conn, token, "retry_eval", %{"id" => evaluation.id}), 200)
+      assert retried["result"]["isError"] == false
+
+      # "Did this model fail the first time too?" — answerable without the UI.
+      body =
+        json_response(
+          call_tool(conn, token, "get_eval", %{
+            "id" => evaluation.id,
+            "include" => ["attempts"]
+          }),
+          200
+        )
+
+      payload = tool_json(body)
+      assert [run] = payload["runs"]
+      assert run["status"] == "completed"
+      assert [attempt] = run["previous_attempts"]
+      assert attempt["status"] == "failed"
+      assert attempt["failure_stage"] == "judge"
+      assert attempt["superseded_at"]
+    end
+
     test "get_eval is light by default and expands on request", %{
       conn: conn,
       token: token,

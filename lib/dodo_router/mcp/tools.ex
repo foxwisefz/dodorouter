@@ -280,10 +280,11 @@ defmodule DodoRouter.MCP.Tools do
           "id" => %{"type" => "string"},
           "include" => %{
             "type" => "array",
-            "items" => %{"type" => "string", "enum" => ["runs", "criteria"]},
+            "items" => %{"type" => "string", "enum" => ["runs", "criteria", "attempts"]},
             "description" =>
               "Extra sections beyond the polling default: \"runs\" for per-run detail " <>
-                "with output previews and log ids, \"criteria\" for the rubric text."
+                "with output previews and log ids, \"criteria\" for the rubric text, " <>
+                "\"attempts\" for the superseded attempts a retry replaced (implies runs)."
           }
         }
       }
@@ -712,7 +713,14 @@ defmodule DodoRouter.MCP.Tools do
     payload
     |> maybe_put_blockers(principal, evaluation, running?)
     |> maybe_put_criteria(evaluation, "criteria" in include)
-    |> maybe_put_runs(principal, runs, "runs" in include)
+    # "attempts" implies runs: attempt history hangs off the run it was
+    # superseded by, and history without the current state answers nothing.
+    |> maybe_put_runs(
+      principal,
+      runs,
+      "runs" in include or "attempts" in include,
+      "attempts" in include
+    )
   end
 
   # Problems knowable before spending anything: a key the proxy has seen
@@ -733,9 +741,9 @@ defmodule DodoRouter.MCP.Tools do
   defp maybe_put_criteria(payload, evaluation, true),
     do: Map.put(payload, :criteria, evaluation.criteria)
 
-  defp maybe_put_runs(payload, _principal, _runs, false), do: payload
+  defp maybe_put_runs(payload, _principal, _runs, false, _attempts?), do: payload
 
-  defp maybe_put_runs(payload, principal, runs, true) do
+  defp maybe_put_runs(payload, principal, runs, true, attempts?) do
     bodies? = Principal.allows?(principal, "logs:read_bodies")
 
     Map.put(
@@ -778,6 +786,29 @@ defmodule DodoRouter.MCP.Tools do
           candidate_key_deleted: Evaluations.candidate_key_deleted?(run),
           candidate_log_id: run.candidate_log_id,
           output_preview: body_or_marker(bodies?, truncate(run.candidate_output))
+        }
+        |> maybe_put_attempts(run, attempts?)
+      end)
+    )
+  end
+
+  # The attempts a retry replaced — "did this model fail the first time
+  # too?" answered without the web UI (dodo_router-2y9). Compact on
+  # purpose: history explains the current run, it does not compete with it.
+  defp maybe_put_attempts(run_map, _run, false), do: run_map
+
+  defp maybe_put_attempts(run_map, run, true) do
+    Map.put(
+      run_map,
+      :previous_attempts,
+      Enum.map(Evaluations.previous_attempts(run), fn attempt ->
+        %{
+          status: attempt.status,
+          score: attempt.score,
+          error: attempt.error,
+          error_category: attempt.error_category,
+          failure_stage: attempt.failure_stage,
+          superseded_at: attempt.superseded_at
         }
       end)
     )

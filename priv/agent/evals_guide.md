@@ -122,8 +122,10 @@ not the full run detail. When you want more, ask:
 
 `runs` carries up to 2,000 characters of `output_preview` per run — a full
 batch can be large, so request it once at the end rather than on every poll.
-`blockers` is likewise omitted while the benchmark is running (the keys were
-checked at start). Then:
+`include: ["attempts"]` adds each run's `previous_attempts` — the attempts a
+retry replaced — which answers "did this model fail the first time too"
+(it implies `runs`). `blockers` is likewise omitted while the benchmark is
+running (the keys were checked at start). Then:
 
 - `rankings` — one row per model: `avg_score`, `score_stddev`, `avg_latency_ms`,
   `avg_cost_usd`. This is the quality-versus-price table.
