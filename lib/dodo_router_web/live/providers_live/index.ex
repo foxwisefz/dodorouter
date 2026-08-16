@@ -369,28 +369,51 @@ defmodule DodoRouterWeb.ProvidersLive.Index do
     ~H"""
     <%= cond do %>
       <% MapSet.member?(@verifying, @key.id) -> %>
-        <span class="loading loading-spinner loading-xs text-base-content/40" title="Verifying key…">
+        <span
+          data-key-status="verifying"
+          class="loading loading-spinner loading-xs text-base-content/40"
+          title="Verifying key…"
+        >
         </span>
       <% @key.status == "valid" -> %>
-        <span title={"Verified — last OK " <> relative_time(@key.last_ok_at || @key.verified_at)}>
+        <span
+          data-key-status="valid"
+          title={"Verified — last OK " <> relative_time(@key.last_ok_at || @key.verified_at)}
+        >
           <.icon name="hero-check-circle" class="size-4 text-success" />
         </span>
       <% @key.status == "invalid" -> %>
-        <span title={"Invalid since " <> relative_time(@key.last_error_at) <> " — " <> (@key.last_error_detail || "authentication failed")}>
-          <.icon name="hero-x-circle" class="size-4 text-error" />
+        <span
+          data-key-status="invalid"
+          class="inline-flex items-center gap-1 text-error"
+          title={"Invalid since " <> relative_time(@key.last_error_at) <> " — " <> (@key.last_error_detail || "authentication failed")}
+        >
+          <.icon name="hero-x-circle" class="size-4" />
+          <span class="text-xs font-medium">
+            not authenticating · {relative_time(@key.last_error_at)}
+          </span>
         </span>
       <% @key.status == "quota_exceeded" -> %>
-        <span title={"Out of credits/quota since " <> relative_time(@key.last_error_at)}>
-          <.icon name="hero-exclamation-triangle" class="size-4 text-warning" />
+        <span
+          data-key-status="quota_exceeded"
+          class="inline-flex items-center gap-1 text-warning"
+          title={"Out of credits/quota since " <> relative_time(@key.last_error_at)}
+        >
+          <.icon name="hero-exclamation-triangle" class="size-4" />
+          <span class="text-xs font-medium">
+            out of quota · {relative_time(@key.last_error_at)}
+          </span>
         </span>
       <% true -> %>
         <button
+          data-key-status="unverified"
           phx-click="reverify"
           phx-value-id={@key.id}
-          class="text-base-content/40 hover:text-base-content transition-colors"
+          class="inline-flex items-center gap-1 text-base-content/40 hover:text-base-content transition-colors"
           title="Not verified yet — click to verify"
         >
           <.icon name="hero-question-mark-circle" class="size-4" />
+          <span class="text-xs font-medium">unverified</span>
         </button>
     <% end %>
     """

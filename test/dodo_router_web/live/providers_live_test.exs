@@ -291,5 +291,35 @@ defmodule DodoRouterWeb.ProvidersLiveTest do
       assert html3 =~ "Verified"
       _ = live
     end
+
+    test "quota exhaustion is visible inline, not only on hover", %{conn: conn, user: user} do
+      key =
+        DodoRouter.ProvidersFixtures.provider_key_fixture(user, %{
+          "provider_slug" => "zai_standard"
+        })
+
+      DodoRouter.Providers.apply_health(key.id, :quota, "insufficient_quota")
+
+      {:ok, live, html} = live(conn, ~p"/providers")
+
+      # the state + age is readable without hovering — a data attribute for
+      # the state, and text matching the picker's wording ("out of quota")
+      assert has_element?(live, "[data-key-status='quota_exceeded']")
+      assert html =~ "out of quota"
+      # relative time is rendered right next to it — "just now" here since
+      # the health was just applied, but the point is it's inline, not
+      # buried in a title attribute only revealed on hover
+      assert html =~ "out of quota · just now"
+    end
+
+    test "an unverified key shows an inline label, not just an icon", %{conn: conn, user: user} do
+      DodoRouter.ProvidersFixtures.provider_key_fixture(user, %{
+        "provider_slug" => "zai_standard"
+      })
+
+      {:ok, live, _html} = live(conn, ~p"/providers")
+
+      assert has_element?(live, "[data-key-status='unverified']", "unverified")
+    end
   end
 end
