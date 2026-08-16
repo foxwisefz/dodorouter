@@ -71,6 +71,10 @@ defmodule DodoRouter.Proxy.Adapters.TestProvider do
   # A response that never reports usage, like a stream whose final usage
   # frame was missed — the cost columns must read unknown, not $0.
   @no_usage_model "no-usage-model"
+  # A provider-side alias: request this model and the response names the
+  # snapshot it resolved to, the way real providers do. FallbackChain's
+  # put_new lets the provider's own claim win.
+  @alias_model "alias-model"
   @call_table :dodo_test_provider_calls
 
   @impl Adapter
@@ -221,6 +225,11 @@ defmodule DodoRouter.Proxy.Adapters.TestProvider do
     }
 
     response = if step.model == @no_usage_model, do: Map.delete(response, "usage"), else: response
+
+    response =
+      if step.model == @alias_model,
+        do: Map.put(response, "model", "alias-model-v2"),
+        else: response
 
     {:ok, response, %{headers: [{"content-type", "application/json"} | @ratelimit_headers]}}
   end

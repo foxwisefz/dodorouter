@@ -20,6 +20,11 @@ defmodule DodoRouter.Logs.EvaluationRun do
     # What the judge found missing/ambiguous in the rubric itself.
     field :rubric_gaps, {:array, :string}, default: []
     field :raw_judge_response, :string
+    # What the provider's response claimed actually answered — nil when the
+    # response named nothing or the row predates the column. The ranking is
+    # keyed on candidate_model (what was requested); a difference here is a
+    # provider-side alias/snapshot resolution the reader deserves to see.
+    field :candidate_served_model, :string
     field :error, :string
     # Machine-readable twin of `error`: a stable token (rate_limited,
     # auth_error, provider_key_missing, empty_response, judge_unparseable,
@@ -83,6 +88,7 @@ defmodule DodoRouter.Logs.EvaluationRun do
       :reasoning,
       :rubric_gaps,
       :raw_judge_response,
+      :candidate_served_model,
       :error,
       :error_category,
       :failure_stage,

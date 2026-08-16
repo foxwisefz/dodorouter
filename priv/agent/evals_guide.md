@@ -135,7 +135,11 @@ checked at start). Then:
 - `runs` (with `include: ["runs"]`) — every individual run: score,
   `criterion_scores`, `issues` the judge raised, `output_preview`, and
   `candidate_log_id` / `judge_log_id`. Pass those ids to `get_log` for the
-  full text of an answer or of the judge's reasoning.
+  full text of an answer or of the judge's reasoning. `served_model` is what
+  the provider's response claimed actually answered; when
+  `served_model_mismatch` is true the provider resolved your requested name
+  to something else (an alias or snapshot), and the ranking row for
+  `model` is really measuring that.
 
 A `status` of `failed` on a run is not a low score — it is a call that never
 produced a comparable answer. `error` says why in prose; `error_category` says

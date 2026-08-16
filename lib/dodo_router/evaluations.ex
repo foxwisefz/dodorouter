@@ -1055,6 +1055,7 @@ defmodule DodoRouter.Evaluations do
                 candidate_latency_ms: candidate_log.latency_ms,
                 candidate_cost_usd: candidate_log.estimated_cost_usd,
                 candidate_list_cost_usd: candidate_log.list_cost_usd,
+                candidate_served_model: extract_served_model(candidate_log.response_body),
                 candidate_output: candidate_content
               })
 
@@ -1746,6 +1747,19 @@ defmodule DodoRouter.Evaluations do
   end
 
   def extract_message_content(_), do: nil
+
+  # The response's own model claim — `stamp_serving_model` uses put_new, so
+  # a provider that names the snapshot it resolved to wins over the step's
+  # requested string. This is the receipt a ranking keyed on the requested
+  # model needs (dodo_router-zfn).
+  defp extract_served_model(response_body) when is_binary(response_body) do
+    case Jason.decode(response_body) do
+      {:ok, %{"model" => model}} when is_binary(model) and model != "" -> model
+      _ -> nil
+    end
+  end
+
+  defp extract_served_model(_), do: nil
 
   defp truncate_middle(text, max) do
     length = String.length(text)

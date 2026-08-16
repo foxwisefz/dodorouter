@@ -745,6 +745,14 @@ defmodule DodoRouter.MCP.Tools do
         %{
           status: run.status,
           model: run.candidate_model,
+          # What the provider's response claimed actually answered. A
+          # mismatch is a provider-side alias/snapshot resolution — the
+          # ranking is keyed on `model`, so this is the receipt that says
+          # whether that is still the thing being measured.
+          served_model: run.candidate_served_model,
+          served_model_mismatch:
+            is_binary(run.candidate_served_model) and
+              run.candidate_served_model != run.candidate_model,
           score: run.score,
           criterion_scores: run.criterion_scores,
           summary: run.summary,
