@@ -31,6 +31,7 @@ defmodule DodoRouterWeb.RouterLive.Show do
       |> assign(:stats, Logs.stats(router))
       |> assign(:latency_percentiles, Logs.latency_percentiles(router))
       |> assign(:step_traffic, Logs.step_traffic(router))
+      |> assign(:timeseries, Logs.timeseries(router))
       |> assign(:recent_events, [])
       |> assign(:stats_timer, nil)
       |> assign(:active_requests, 0)
@@ -398,7 +399,8 @@ defmodule DodoRouterWeb.RouterLive.Show do
      socket
      |> assign(:stats, stats)
      |> assign(:latency_percentiles, Logs.latency_percentiles(router))
-     |> assign(:step_traffic, Logs.step_traffic(router))}
+     |> assign(:step_traffic, Logs.step_traffic(router))
+     |> assign(:timeseries, Logs.timeseries(router))}
   end
 
   def handle_info({:log_pending, pending}, socket) do
@@ -583,23 +585,30 @@ defmodule DodoRouterWeb.RouterLive.Show do
           
     <!-- Stats -->
           <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-8">
-            <div class="stat-card">
-              <div class="stat-label">Requests (24h)</div>
-              <div class="stat-value">{@stats.total_requests}</div>
-            </div>
-            <div class="stat-card">
-              <div class="stat-label">Success Rate</div>
-              <div class={["stat-value", success_color(@stats)]}>{success_rate(@stats)}</div>
-            </div>
-            <div class="stat-card">
-              <div class="stat-label">Tokens Used</div>
-              <div class="stat-value">{format_number(@stats.total_tokens)}</div>
-            </div>
-            <div class="stat-card">
-              <div class="stat-label">p95 Latency</div>
-              <div class="stat-value">{Charts.format_ms(@latency_percentiles.p95)}</div>
-              <div class="stat-desc">p50 {Charts.format_ms(@latency_percentiles.p50)}</div>
-            </div>
+            <Charts.stat_tile
+              id="router-requests"
+              label="Requests (24h)"
+              value={to_string(@stats.total_requests)}
+              spark={Enum.map(@timeseries, & &1.total)}
+            />
+            <Charts.stat_tile
+              id="router-success"
+              label="Success Rate"
+              value={success_rate(@stats)}
+              value_class={success_color(@stats)}
+            />
+            <Charts.stat_tile
+              id="router-tokens"
+              label="Tokens Used"
+              value={format_number(@stats.total_tokens)}
+              spark={Enum.map(@timeseries, &(&1.total_tokens || 0))}
+            />
+            <Charts.stat_tile
+              id="router-latency"
+              label="p95 Latency"
+              value={Charts.format_ms(@latency_percentiles.p95)}
+              subtext={"p50 #{Charts.format_ms(@latency_percentiles.p50)}"}
+            />
           </div>
           
     <!-- Connect -->

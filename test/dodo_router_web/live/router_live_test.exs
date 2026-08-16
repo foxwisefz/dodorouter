@@ -112,6 +112,18 @@ defmodule DodoRouterWeb.RouterLiveTest do
       refute html =~ "Avg Latency"
     end
 
+    test "KPI row renders via the shared stat_tile component", %{conn: conn, user: user} do
+      {router, _api_key} = RoutersFixtures.router_fixture(user)
+
+      {:ok, live, _html} = live(conn, ~p"/routers/#{router.id}")
+
+      assert has_element?(live, "#router-requests")
+      assert has_element?(live, "#router-success")
+      assert has_element?(live, "#router-tokens")
+      assert has_element?(live, "#router-latency")
+      refute has_element?(live, ".stat-card")
+    end
+
     test "routing steps show their share of traffic and error rate", %{
       conn: conn,
       user: user

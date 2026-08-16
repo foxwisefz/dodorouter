@@ -6,6 +6,7 @@ defmodule DodoRouterWeb.SessionLive.Show do
   alias DodoRouter.Logs.MessageNormalizer
   alias DodoRouter.Routers
   alias DodoRouter.TextDiff
+  alias DodoRouterWeb.Components.Charts
 
   @impl true
   def mount(%{"router_id" => router_id, "session_id" => session_id}, _session, socket) do
@@ -100,45 +101,40 @@ defmodule DodoRouterWeb.SessionLive.Show do
         </div>
         
     <!-- Stats -->
-        <div class="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
-          <div class="stat bg-base-100 border border-base-300 rounded-lg p-3">
-            <div class="stat-title text-xs">Requests</div>
-            <div class="stat-value text-lg">{@stats.request_count}</div>
-          </div>
-          <div class="stat bg-base-100 border border-base-300 rounded-lg p-3">
-            <div class="stat-title text-xs">Cost</div>
-            <div id="session-cost" class="stat-value text-lg">
-              {format_usd(@stats.total_cost_usd)}
-            </div>
-            <div
-              :if={would_be_cost(@stats)}
-              class="text-xs text-base-content/50 mt-0.5"
-              title="Traffic served through subscription/coding-plan keys has no marginal per-token cost. This is what the same tokens would cost at pay-as-you-go API list prices."
-            >
-              ~{format_usd(would_be_cost(@stats))} at API rates
-            </div>
-          </div>
-          <div class="stat bg-base-100 border border-base-300 rounded-lg p-3">
-            <div class="stat-title text-xs">Total Tokens</div>
-            <div class="stat-value text-lg">{@stats.total_tokens || 0}</div>
-          </div>
-          <div class="stat bg-base-100 border border-base-300 rounded-lg p-3">
-            <div class="stat-title text-xs">p95 Latency</div>
-            <div class="stat-value text-lg">{format_latency(@latency_percentiles.p95)}ms</div>
-            <div class="text-xs text-base-content/50 mt-0.5">
-              p50 {format_latency(@latency_percentiles.p50)}ms
-            </div>
-          </div>
-          <div class="stat bg-base-100 border border-base-300 rounded-lg p-3">
-            <div class="stat-title text-xs">Success Rate</div>
-            <div class="stat-value text-lg">
-              <%= if @stats.request_count > 0 do %>
-                {round((@stats.successful_requests || 0) / @stats.request_count * 100)}%
-              <% else %>
-                —
-              <% end %>
-            </div>
-          </div>
+        <div class="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6">
+          <Charts.stat_tile
+            id="session-requests"
+            label="Requests"
+            value={to_string(@stats.request_count)}
+          />
+          <Charts.stat_tile
+            id="session-cost"
+            label="Cost"
+            value={format_usd(@stats.total_cost_usd)}
+            subtext={
+              if would_be_cost(@stats), do: "~#{format_usd(would_be_cost(@stats))} at API rates"
+            }
+          />
+          <Charts.stat_tile
+            id="session-tokens"
+            label="Total Tokens"
+            value={to_string(@stats.total_tokens || 0)}
+          />
+          <Charts.stat_tile
+            id="session-latency"
+            label="p95 Latency"
+            value={"#{format_latency(@latency_percentiles.p95)}ms"}
+            subtext={"p50 #{format_latency(@latency_percentiles.p50)}ms"}
+          />
+          <Charts.stat_tile
+            id="session-success"
+            label="Success Rate"
+            value={
+              if @stats.request_count > 0,
+                do: "#{round((@stats.successful_requests || 0) / @stats.request_count * 100)}%",
+                else: "—"
+            }
+          />
         </div>
 
         <.cache_regression_notice :if={@cache_regression} finding={@cache_regression} />

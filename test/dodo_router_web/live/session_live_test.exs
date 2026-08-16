@@ -220,6 +220,20 @@ defmodule DodoRouterWeb.SessionLiveTest do
       refute html =~ "Avg Latency"
     end
 
+    test "KPI row renders via the shared stat_tile component", %{conn: conn, router: router} do
+      session_id = "stat-tile-session"
+      LogsFixtures.log_with_session(router, session_id)
+
+      {:ok, live, _html} = live(conn, ~p"/routers/#{router.id}/sessions/#{session_id}")
+
+      assert has_element?(live, "#session-requests")
+      assert has_element?(live, "#session-cost")
+      assert has_element?(live, "#session-tokens")
+      assert has_element?(live, "#session-latency")
+      assert has_element?(live, "#session-success")
+      refute has_element?(live, ".stat")
+    end
+
     test "allows editing session name", %{conn: conn, router: router} do
       session_id = "test-session"
       LogsFixtures.log_with_session(router, session_id)
