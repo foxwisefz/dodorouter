@@ -1204,9 +1204,8 @@ defmodule DodoRouter.Evaluations do
 
     with {:ok, decoded} <- Jason.decode(json),
          score when is_number(score) <- decoded["score"],
-         summary when is_binary(summary) <- decoded["summary"] do
-      score = score |> round() |> min(100) |> max(0)
-
+         summary when is_binary(summary) <- decoded["summary"],
+         {:scale, score} when score in 0..100 <- {:scale, round(score)} do
       {:ok,
        %{
          score: score,
@@ -1217,7 +1216,16 @@ defmodule DodoRouter.Evaluations do
          rubric_gaps: Enum.filter(decoded["rubric_gaps"] || [], &is_binary/1)
        }}
     else
-      _ -> {:error, "Judge returned an invalid structured response"}
+      # Clamping stored 150 as 100 and a 1-5-scale 3 as 3/100 on the same
+      # axis with no flag. Off-scale is a judge-stage failure: the answer is
+      # kept and retry_eval re-judges it for pennies (dodo_router-exh).
+      {:scale, off_scale} ->
+        {:error,
+         "Judge scored #{off_scale}, outside the 0-100 scale — the rubric may imply a " <>
+           "different scale. Restate the criteria in terms of 0-100 and re-judge."}
+
+      _ ->
+        {:error, "Judge returned an invalid structured response"}
     end
   end
 
@@ -1681,11 +1689,17 @@ defmodule DodoRouter.Evaluations do
     end
   end
 
+  # Coercing "high" to 0 claimed the judge scored that criterion zero, and
+  # clamping 400 to 100 invented a compliant number. Entries that are not
+  # 0-100 numbers are dropped — absent is honest, fabricated is not.
   defp normalize_scores(scores) when is_map(scores) do
-    Map.new(scores, fn {key, value} ->
-      normalized = if is_number(value), do: value |> round() |> min(100) |> max(0), else: 0
-      {to_string(key), normalized}
-    end)
+    for {key, value} <- scores,
+        is_number(value),
+        rounded = round(value),
+        rounded in 0..100,
+        into: %{} do
+      {to_string(key), rounded}
+    end
   end
 
   defp normalize_scores(_), do: %{}

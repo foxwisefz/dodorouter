@@ -88,6 +88,12 @@ Notes that change the result:
 - **Write criteria that can fail.** "Be helpful" scores everything in the
   eighties and tells you nothing. Name the facts that must be right, the format,
   the length, and what must not appear.
+- **Scores are 0-100, everywhere.** The judge is instructed to answer on that
+  scale and every stored score (`avg_score`, `criterion_scores`, per-run
+  `score`) lives on it. Write criteria in those terms — a rubric that implies
+  another scale ("rate 1-5") makes the judge answer off-scale, which now fails
+  the run's judge stage rather than being silently rescaled; `retry_eval`
+  re-judges cheaply after you fix the rubric.
 - **`repetitions` is your variance estimate**, not a quality boost. 3 is a
   reasonable default; the result reports `score_stddev` per model, and a gap
   between two models smaller than their spread is not a result.

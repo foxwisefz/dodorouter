@@ -143,7 +143,10 @@ defmodule DodoRouter.MCP.Tools do
           "name" => %{"type" => "string"},
           "criteria" => %{
             "type" => "string",
-            "description" => "The rubric the judge scores against."
+            "description" =>
+              "The rubric the judge scores against. Scores are on a 0-100 scale — write " <>
+                "criteria in those terms; a judge answering on another scale fails the run " <>
+                "rather than being silently rescaled."
           },
           "good_examples" => %{"type" => "string"},
           "bad_examples" => %{"type" => "string"},

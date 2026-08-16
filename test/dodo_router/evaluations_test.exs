@@ -47,16 +47,48 @@ defmodule DodoRouter.EvaluationsTest do
            }
   end
 
-  test "parses and clamps a structured judge response" do
+  test "parses a structured judge response" do
     raw = """
     ```json
-    {"score": 104, "passed": true, "summary": "Strong answer", "criterion_scores": {"accuracy": 97}, "issues": []}
+    {"score": 96, "passed": true, "summary": "Strong answer", "criterion_scores": {"accuracy": 97}, "issues": []}
     ```
     """
 
     assert {:ok, result} = Evaluations.parse_judgement(raw)
-    assert result.score == 100
+    assert result.score == 96
     assert result.criterion_scores == %{"accuracy" => 97}
+  end
+
+  test "rejects a score outside the 0-100 scale instead of clamping it" do
+    # A judge answering on another scale (1-5, 0-10, percentages over 100)
+    # must fail the judge stage — a clamp stored 150 as 100 and 3/5 as 3/100
+    # on the same axis with no flag. The re-judge via retry_eval is cheap.
+    for bad <- [104, 150, -5] do
+      assert {:error, message} =
+               Evaluations.parse_judgement(
+                 Jason.encode!(%{"score" => bad, "summary" => "off-scale"})
+               )
+
+      assert message =~ "0-100"
+    end
+
+    # In-range low scores are legitimate and pass through untouched.
+    assert {:ok, %{score: 3}} =
+             Evaluations.parse_judgement(Jason.encode!(%{"score" => 3, "summary" => "poor"}))
+  end
+
+  test "invalid criterion scores are dropped, not coerced to zero" do
+    raw =
+      Jason.encode!(%{
+        "score" => 80,
+        "summary" => "ok",
+        "criterion_scores" => %{"accuracy" => 90, "brevity" => "high", "intent" => 400}
+      })
+
+    assert {:ok, result} = Evaluations.parse_judgement(raw)
+    # "high" stored as 0 would claim the judge scored brevity zero; 400 is
+    # off-scale. Both are absent rather than fabricated.
+    assert result.criterion_scores == %{"accuracy" => 90}
   end
 
   test "rejects an unstructured judge response" do
