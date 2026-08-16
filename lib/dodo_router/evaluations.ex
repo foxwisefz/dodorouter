@@ -611,7 +611,7 @@ defmodule DodoRouter.Evaluations do
     kind, reason -> {:error, {:candidate_crashed, kind, reason}}
   end
 
-  def enqueue(%User{} = user, %Evaluation{} = evaluation) do
+  def enqueue(%User{} = user, %Evaluation{} = evaluation, opts \\ []) do
     evaluation = get_evaluation!(user, evaluation.id)
 
     cond do
@@ -625,9 +625,24 @@ defmodule DodoRouter.Evaluations do
         {:error, {:judge_key_unusable, blocker}}
 
       true ->
-        resolve_interrupted_runs(evaluation)
-        do_enqueue(user, evaluation)
+        # A repetitions override persists on the evaluation — "run it again,
+        # but 5 times" is a statement about the benchmark, not one batch —
+        # and an out-of-range value is refused before anything is spent.
+        with {:ok, evaluation} <- apply_repetitions(evaluation, opts[:repetitions]) do
+          resolve_interrupted_runs(evaluation)
+          do_enqueue(user, evaluation)
+        end
     end
+  end
+
+  defp apply_repetitions(evaluation, nil), do: {:ok, evaluation}
+
+  defp apply_repetitions(%Evaluation{repetitions: reps} = evaluation, reps), do: {:ok, evaluation}
+
+  defp apply_repetitions(evaluation, repetitions) do
+    evaluation
+    |> Evaluation.changeset(%{"repetitions" => repetitions})
+    |> Repo.update()
   end
 
   @doc """

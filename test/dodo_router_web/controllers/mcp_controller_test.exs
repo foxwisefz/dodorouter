@@ -496,6 +496,45 @@ defmodule DodoRouterWeb.MCPControllerTest do
       assert by_label["plan key"]["judge_advice"] =~ "metered key for the judge"
     end
 
+    test "run_eval can override repetitions", %{
+      conn: conn,
+      token: token,
+      user: user,
+      router: router
+    } do
+      key = DodoRouter.ProvidersFixtures.provider_key_fixture(user, %{"label" => "Key 1"})
+
+      log =
+        DodoRouter.LogsFixtures.log_fixture(router, %{
+          request_body:
+            Jason.encode!(%{
+              "model" => "m",
+              "messages" => [%{"role" => "user", "content" => "hi"}]
+            })
+        })
+
+      {:ok, evaluation} =
+        DodoRouter.Evaluations.create_evaluation(user, log, %{
+          name: "Reps via MCP",
+          criteria: "Be useful",
+          judge_model: "judge-model",
+          judge_provider_key_id: key.id,
+          candidate_targets: [
+            %{"provider_key_id" => key.id, "provider" => "test_provider", "model" => "test-model"}
+          ],
+          repetitions: 1
+        })
+
+      body =
+        json_response(
+          call_tool(conn, token, "run_eval", %{"id" => evaluation.id, "repetitions" => 4}),
+          200
+        )
+
+      assert body["result"]["isError"] == false
+      assert DodoRouter.Evaluations.get_evaluation!(user, evaluation.id).repetitions == 4
+    end
+
     test "create_eval includes the incumbent as a candidate by default", %{
       conn: conn,
       token: token,

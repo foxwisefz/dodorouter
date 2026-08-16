@@ -1405,8 +1405,22 @@ defmodule DodoRouterWeb.EvalLiveTest do
       assert has_element?(live, "#key-preflight", "out of quota")
 
       # And starting it is refused rather than half-run.
-      live |> element("#run-eval-button") |> render_click()
+      live |> form("#run-eval-form") |> render_submit()
       assert render(live) =~ "Not starting"
+    end
+
+    test "Run again accepts a repetitions override", %{
+      conn: conn,
+      user: user,
+      evaluation: evaluation
+    } do
+      {:ok, live, _html} = live(conn, ~p"/evals/#{evaluation.id}")
+
+      assert has_element?(live, "#run-repetitions")
+
+      live |> form("#run-eval-form", %{"repetitions" => "5"}) |> render_submit()
+
+      assert DodoRouter.Evaluations.get_evaluation!(user, evaluation.id).repetitions == 5
     end
 
     test "errored runs can still be hidden when only the scores matter", %{

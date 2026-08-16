@@ -200,7 +200,18 @@ defmodule DodoRouter.MCP.Tools do
       schema: %{
         "type" => "object",
         "required" => ["id"],
-        "properties" => %{"router" => @router_arg, "id" => %{"type" => "string"}}
+        "properties" => %{
+          "router" => @router_arg,
+          "id" => %{"type" => "string"},
+          "repetitions" => %{
+            "type" => "integer",
+            "minimum" => 1,
+            "maximum" => 10,
+            "description" =>
+              "Override repetitions per candidate for this and future runs; omitted keeps " <>
+                "the evaluation's current setting."
+          }
+        }
       }
     },
     %{
@@ -418,36 +429,6 @@ defmodule DodoRouter.MCP.Tools do
     end
   end
 
-  defp filter_targets_by_provider(targets, provider) when is_binary(provider) and provider != "",
-    do: Enum.filter(targets, &(&1.provider == provider))
-
-  defp filter_targets_by_provider(targets, _), do: targets
-
-  defp filter_targets_by_model(targets, substring)
-       when is_binary(substring) and substring != "" do
-    needle = String.downcase(substring)
-
-    targets
-    |> Enum.map(fn target ->
-      models =
-        Enum.filter(target.models, fn model ->
-          String.contains?(String.downcase(model.id || ""), needle) or
-            String.contains?(String.downcase(model.display_name || ""), needle)
-        end)
-
-      %{target | models: models}
-    end)
-    # A key with no matching models is noise for this query, not an answer.
-    |> Enum.reject(&(&1.models == []))
-  end
-
-  defp filter_targets_by_model(targets, _), do: targets
-
-  defp limit_targets(targets, limit) when is_integer(limit) and limit > 0,
-    do: {Enum.take(targets, limit), length(targets) > limit}
-
-  defp limit_targets(targets, _), do: {targets, false}
-
   defp run("list_evals", principal, args) do
     with {:ok, router} <- resolve_router(principal, args) do
       evaluations = Evaluations.list_for_router(principal.user, router.id, limit: 50)
@@ -503,13 +484,16 @@ defmodule DodoRouter.MCP.Tools do
   defp run("run_eval", principal, args) do
     with {:ok, router} <- resolve_router(principal, args),
          {:ok, evaluation} <- fetch_eval(principal, router, args["id"]) do
-      case Evaluations.enqueue(principal.user, evaluation) do
+      case Evaluations.enqueue(principal.user, evaluation, repetitions: args["repetitions"]) do
         :ok ->
           {:ok, eval_payload(principal, evaluation.id),
            %{target_type: "evaluation", target_id: evaluation.id}}
 
         {:error, :already_running} ->
           {:error, "That evaluation is already running. Poll get_eval instead of starting again."}
+
+        {:error, %Ecto.Changeset{} = changeset} ->
+          {:error, "Not started: #{changeset_message(changeset)}"}
 
         {:error, {:judge_key_unusable, blocker}} ->
           # Refused rather than started: every candidate would be generated
@@ -547,6 +531,36 @@ defmodule DodoRouter.MCP.Tools do
        }}
     end
   end
+
+  defp filter_targets_by_provider(targets, provider) when is_binary(provider) and provider != "",
+    do: Enum.filter(targets, &(&1.provider == provider))
+
+  defp filter_targets_by_provider(targets, _), do: targets
+
+  defp filter_targets_by_model(targets, substring)
+       when is_binary(substring) and substring != "" do
+    needle = String.downcase(substring)
+
+    targets
+    |> Enum.map(fn target ->
+      models =
+        Enum.filter(target.models, fn model ->
+          String.contains?(String.downcase(model.id || ""), needle) or
+            String.contains?(String.downcase(model.display_name || ""), needle)
+        end)
+
+      %{target | models: models}
+    end)
+    # A key with no matching models is noise for this query, not an answer.
+    |> Enum.reject(&(&1.models == []))
+  end
+
+  defp filter_targets_by_model(targets, _), do: targets
+
+  defp limit_targets(targets, limit) when is_integer(limit) and limit > 0,
+    do: {Enum.take(targets, limit), length(targets) > limit}
+
+  defp limit_targets(targets, _), do: {targets, false}
 
   defp judge_advice(provider_key) do
     if Providers.subscription_key?(provider_key) do

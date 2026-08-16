@@ -691,6 +691,47 @@ defmodule DodoRouter.EvaluationsTest do
     assert {:error, :already_running} = Evaluations.enqueue(user, loaded)
   end
 
+  test "enqueue can override repetitions for this and future runs" do
+    user = AccountsFixtures.user_fixture()
+    {router, _key} = RoutersFixtures.router_fixture(user)
+    provider_key = ProvidersFixtures.provider_key_fixture(user)
+
+    log =
+      LogsFixtures.log_fixture(router, %{
+        request_body:
+          Jason.encode!(%{"model" => "m", "messages" => [%{"role" => "user", "content" => "hi"}]})
+      })
+
+    create = fn name ->
+      {:ok, evaluation} =
+        Evaluations.create_evaluation(user, log, %{
+          name: name,
+          criteria: "Be correct",
+          judge_model: "judge-model",
+          judge_provider_key_id: provider_key.id,
+          candidate_targets: [
+            %{
+              "provider_key_id" => provider_key.id,
+              "provider" => "test_provider",
+              "model" => "test-model"
+            }
+          ],
+          repetitions: 1
+        })
+
+      evaluation
+    end
+
+    evaluation = create.("Reps override")
+    assert :ok = Evaluations.enqueue(user, evaluation, repetitions: 5)
+    assert Evaluations.get_evaluation!(user, evaluation.id).repetitions == 5
+
+    # An out-of-range override is refused before anything is spent.
+    other = create.("Reps invalid")
+    assert {:error, %Ecto.Changeset{}} = Evaluations.enqueue(user, other, repetitions: 99)
+    assert Evaluations.get_evaluation!(user, other.id).repetitions == 1
+  end
+
   test "a crash mid-run marks the run failed instead of leaving it pending" do
     user = AccountsFixtures.user_fixture()
     {router, _key} = RoutersFixtures.router_fixture(user)

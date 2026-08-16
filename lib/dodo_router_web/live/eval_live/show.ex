@@ -31,8 +31,8 @@ defmodule DodoRouterWeb.EvalLive.Show do
   end
 
   @impl true
-  def handle_event("run", _params, socket) do
-    {:noreply, start_benchmark(socket)}
+  def handle_event("run", params, socket) do
+    {:noreply, start_benchmark(socket, parse_repetitions(params["repetitions"]))}
   end
 
   def handle_event("retry_failed", _params, socket) do
@@ -130,13 +130,27 @@ defmodule DodoRouterWeb.EvalLive.Show do
      |> put_flash(:error, "Benchmark stopped: #{inspect(reason)}")}
   end
 
-  defp start_benchmark(socket) do
+  # nil means "keep the evaluation's current repetitions"; the input's
+  # min/max mirror the changeset bounds, and anything unparseable falls back
+  # to no override rather than an error nobody typed on purpose.
+  defp parse_repetitions(value) when is_binary(value) do
+    case Integer.parse(value) do
+      {n, ""} -> n
+      _ -> nil
+    end
+  end
+
+  defp parse_repetitions(_), do: nil
+
+  defp start_benchmark(socket, repetitions) do
     user = socket.assigns.current_user
     evaluation = socket.assigns.evaluation
 
-    case Evaluations.enqueue(user, evaluation) do
+    case Evaluations.enqueue(user, evaluation, repetitions: repetitions) do
       :ok ->
-        assign(socket, :running?, true)
+        socket
+        |> assign(:running?, true)
+        |> assign(:evaluation, Evaluations.get_evaluation!(user, evaluation.id))
 
       {:error, :already_running} ->
         # Silently flipping to "running" made a refused click look like an
@@ -153,6 +167,9 @@ defmodule DodoRouterWeb.EvalLive.Show do
             "Every answer would be generated and paid for, then thrown away unscored. " <>
             "Pick another judge key first."
         )
+
+      {:error, %Ecto.Changeset{}} ->
+        put_flash(socket, :error, "Repetitions must be between 1 and 10")
 
       {:error, reason} ->
         put_flash(socket, :error, "Could not start benchmark: #{inspect(reason)}")
@@ -619,16 +636,35 @@ defmodule DodoRouterWeb.EvalLive.Show do
                 do: "Retrying…",
                 else: "Retry #{@retryable.judge + @retryable.candidate} failed"}
             </button>
-            <button
-              id="run-eval-button"
-              phx-click="run"
-              disabled={@running?}
-              class="btn btn-primary gap-2"
-            >
-              <.icon name="hero-play" class="size-4" /> {if @running?,
-                do: "Benchmark running…",
-                else: "Run again"}
-            </button>
+            <form id="run-eval-form" phx-submit="run" class="flex items-center gap-2">
+              <label
+                for="run-repetitions"
+                class="text-sm text-base-content/60"
+                title="Repetitions per candidate for this run — persists as the evaluation's setting"
+              >
+                × runs
+              </label>
+              <input
+                id="run-repetitions"
+                name="repetitions"
+                type="number"
+                min="1"
+                max="10"
+                value={@evaluation.repetitions}
+                disabled={@running?}
+                class="input input-bordered input-sm w-16 text-center"
+              />
+              <button
+                id="run-eval-button"
+                type="submit"
+                disabled={@running?}
+                class="btn btn-primary gap-2"
+              >
+                <.icon name="hero-play" class="size-4" /> {if @running?,
+                  do: "Benchmark running…",
+                  else: "Run again"}
+              </button>
+            </form>
           </div>
         </div>
 

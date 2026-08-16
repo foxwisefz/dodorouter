@@ -167,13 +167,6 @@ defmodule DodoRouter.Replays do
   end
 
   @doc """
-  Builds the synthetic routing step for a replay target.
-
-  Sampling params (`temperature`, `max_tokens`, `thinking_enabled`) are left
-  nil so the replayed request body's own values pass through untouched.
-  `reasoning_effort` is set only when the user explicitly chose one.
-  """
-  @doc """
   The `%{provider_key_id, model}` that actually served a log — the incumbent
   an evaluation needs as its baseline — or `nil` when the serving key is
   unknown (legacy rows, or steps that predate provider keys).
@@ -190,6 +183,13 @@ defmodule DodoRouter.Replays do
     end
   end
 
+  @doc """
+  Builds the synthetic routing step for a replay target.
+
+  Sampling params (`temperature`, `max_tokens`, `thinking_enabled`) are left
+  nil so the replayed request body's own values pass through untouched.
+  `reasoning_effort` is set only when the user explicitly chose one.
+  """
   def build_step(%User{} = user, router_id, provider_key_id, model, reasoning_effort \\ nil) do
     case Providers.get_provider_key(user, provider_key_id) do
       nil ->
