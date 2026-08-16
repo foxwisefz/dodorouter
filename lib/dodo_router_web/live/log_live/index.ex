@@ -253,32 +253,39 @@ defmodule DodoRouterWeb.LogLive.Index do
         <div class="rounded-lg border border-base-300/50 bg-base-100 overflow-hidden">
           <table class="w-full text-left">
             <thead>
+              <%!-- Columns are grouped for the failure-reading path first:
+                 time places it, then status / provider-model / latency sit
+                 contiguous because those three co-vary when something goes
+                 wrong (which hop, on which provider, took how long) — rather
+                 than the previous production order that scattered them
+                 behind Router and Type. Everything after Latency is
+                 secondary context, not part of that read. --%>
               <tr class="border-b border-base-300/50 bg-secondary/30">
                 <th class="px-2 py-2.5 text-xs font-medium text-base-content/50 w-10">
                   <span class="sr-only">Favorite</span>
                 </th>
                 <th class="px-4 py-2.5 text-xs font-medium text-base-content/50">Time</th>
-                <th
-                  :if={!@selected_router}
-                  class="px-4 py-2.5 text-xs font-medium text-base-content/50"
-                >
-                  Router
-                </th>
                 <th class="px-4 py-2.5 text-xs font-medium text-base-content/50">Status</th>
                 <th class="px-4 py-2.5 text-xs font-medium text-base-content/50 hidden sm:table-cell">
                   Provider / Model
-                </th>
-                <th class="px-4 py-2.5 text-xs font-medium text-base-content/50 hidden md:table-cell">
-                  Type
-                </th>
-                <th class="px-4 py-2.5 text-xs font-medium text-base-content/50 hidden md:table-cell">
-                  Tokens
                 </th>
                 <th
                   class="px-4 py-2.5 text-xs font-medium text-base-content/50"
                   title={latency_baseline_title(@latency_percentiles)}
                 >
                   Latency
+                </th>
+                <th
+                  :if={!@selected_router}
+                  class="px-4 py-2.5 text-xs font-medium text-base-content/50"
+                >
+                  Router
+                </th>
+                <th class="px-4 py-2.5 text-xs font-medium text-base-content/50 hidden md:table-cell">
+                  Type
+                </th>
+                <th class="px-4 py-2.5 text-xs font-medium text-base-content/50 hidden md:table-cell">
+                  Tokens
                 </th>
                 <th class="px-4 py-2.5 text-xs font-medium text-base-content/50 hidden md:table-cell">
                   Message
@@ -332,15 +339,6 @@ defmodule DodoRouterWeb.LogLive.Index do
                 </td>
                 <td class="px-4 py-2.5 text-sm font-mono text-base-content/50">
                   {format_time(log.inserted_at)}
-                </td>
-                <td :if={!@selected_router} class="px-4 py-2.5 text-sm">
-                  <.link
-                    :if={is_struct(Map.get(log, :router), DodoRouter.Routers.Router)}
-                    navigate={~p"/routers/#{log.router}"}
-                    class="text-primary hover:underline"
-                  >
-                    {log.router.name}
-                  </.link>
                 </td>
                 <td class="px-4 py-2.5">
                   <div class="flex items-center gap-1.5">
@@ -406,6 +404,24 @@ defmodule DodoRouterWeb.LogLive.Index do
                     </div>
                   <% end %>
                 </td>
+                <td
+                  class={[
+                    "px-4 py-2.5 text-sm font-mono",
+                    latency_band_class(Map.get(log, :latency_ms), @latency_percentiles)
+                  ]}
+                  data-latency-band={latency_band(Map.get(log, :latency_ms), @latency_percentiles)}
+                >
+                  {if Map.get(log, :latency_ms), do: "#{log.latency_ms}ms", else: "-"}
+                </td>
+                <td :if={!@selected_router} class="px-4 py-2.5 text-sm">
+                  <.link
+                    :if={is_struct(Map.get(log, :router), DodoRouter.Routers.Router)}
+                    navigate={~p"/routers/#{log.router}"}
+                    class="text-primary hover:underline"
+                  >
+                    {log.router.name}
+                  </.link>
+                </td>
                 <td class="px-4 py-2.5 hidden md:table-cell">
                   <.call_type_badge type={Map.get(log, :call_type)} />
                 </td>
@@ -426,15 +442,6 @@ defmodule DodoRouterWeb.LogLive.Index do
                       </span>
                     <% end %>
                   </div>
-                </td>
-                <td
-                  class={[
-                    "px-4 py-2.5 text-sm font-mono",
-                    latency_band_class(Map.get(log, :latency_ms), @latency_percentiles)
-                  ]}
-                  data-latency-band={latency_band(Map.get(log, :latency_ms), @latency_percentiles)}
-                >
-                  {if Map.get(log, :latency_ms), do: "#{log.latency_ms}ms", else: "-"}
                 </td>
                 <td class="px-4 py-2.5 text-xs text-base-content/50 hidden md:table-cell max-w-xs truncate">
                   {message_preview(log)}

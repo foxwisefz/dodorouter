@@ -20,6 +20,36 @@ defmodule DodoRouterWeb.LogLiveTest do
       assert html =~ log.final_provider
     end
 
+    test "column headers group the failure-reading path (time, status, provider, latency) before secondary context",
+         %{conn: conn, user: user} do
+      {router, _api_key} = RoutersFixtures.router_fixture(user)
+      LogsFixtures.log_fixture(router)
+
+      {:ok, live, _html} = live(conn, ~p"/logs")
+
+      thead = live |> element("thead") |> render()
+
+      headers = [
+        "Time",
+        "Status",
+        "Provider / Model",
+        "Latency",
+        "Router",
+        "Type",
+        "Tokens",
+        "Message"
+      ]
+
+      positions =
+        Enum.map(headers, fn header ->
+          {pos, _} = :binary.match(thead, header)
+          pos
+        end)
+
+      assert positions == Enum.sort(positions),
+             "expected column headers in order #{inspect(headers)}, got positions #{inspect(positions)}"
+    end
+
     test "shows plain count when under the limit", %{conn: conn, user: user} do
       {router, _api_key} = RoutersFixtures.router_fixture(user)
       LogsFixtures.log_fixture(router)
@@ -184,6 +214,38 @@ defmodule DodoRouterWeb.LogLiveTest do
   end
 
   describe "Show" do
+    test "left rail groups boxes by task, not by data source", %{conn: conn, user: user} do
+      {router, _api_key} = RoutersFixtures.router_fixture(user)
+
+      log =
+        LogsFixtures.log_fixture(router, %{
+          session_id: "task-grouping-session",
+          attempted_steps: [
+            %{"provider" => "test_provider", "status" => "success", "latency_ms" => 100}
+          ]
+        })
+
+      {:ok, live, html} = live(conn, ~p"/logs/#{log.request_id}")
+
+      # all preserved information is present, just regrouped
+      assert has_element?(live, "[data-group='what-happened']")
+      assert has_element?(live, "[data-group='what-it-cost']")
+      assert has_element?(live, "[data-group='where-it-came-from']")
+
+      # "what happened" carries status, model/provider and the routing chain
+      assert has_element?(live, "[data-group='what-happened']", "Status")
+      assert has_element?(live, "[data-group='what-happened']", "Model")
+      assert has_element?(live, "[data-group='what-happened']", "Routing")
+
+      # "what it cost" carries usage/cache/cost
+      assert has_element?(live, "[data-group='what-it-cost']", "Cost")
+
+      # "where it came from" carries the session
+      assert has_element?(live, "[data-group='where-it-came-from']", "task-grouping-session")
+
+      assert html =~ "Left sidebar"
+    end
+
     test "subscription-covered requests say plan instead of $0.0000", %{conn: conn, user: user} do
       {router, _api_key} = RoutersFixtures.router_fixture(user)
 

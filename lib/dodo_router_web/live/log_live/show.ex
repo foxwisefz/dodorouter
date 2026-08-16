@@ -239,8 +239,15 @@ defmodule DodoRouterWeb.LogLive.Show do
         <div class="flex-1 flex flex-col lg:flex-row overflow-hidden">
           <!-- Left sidebar -->
           <div class="w-full lg:w-52 shrink-0 max-h-44 lg:max-h-none border-b lg:border-b-0 lg:border-r border-base-300/30 overflow-y-auto p-3 space-y-4 lg:space-y-4 bg-base-100/30 grid grid-cols-2 gap-x-4 lg:block">
-            <!-- Status -->
-            <div>
+            <%!-- Grouped by the task a reader has, not by where each field
+               comes from (status/timing/model/session/usage/routing were six
+               boxes ordered by data source). "What happened" answers the
+               debugging question first: did it work, what answered it, how
+               long did it take, and which hop in the chain was where the
+               time went — read top to bottom in that order. --%>
+            
+    <!-- Status -->
+            <div data-group="what-happened">
               <div class="text-[10px] uppercase tracking-wider text-base-content/40 font-semibold mb-1">
                 Status
               </div>
@@ -260,8 +267,44 @@ defmodule DodoRouterWeb.LogLive.Show do
               </div>
             </div>
             
+    <!-- Model -->
+            <div data-group="what-happened">
+              <div class="text-[10px] uppercase tracking-wider text-base-content/40 font-semibold mb-1">
+                {if @log.status == "error", do: "Model (last attempted)", else: "Model"}
+              </div>
+              <div class={[
+                "text-sm font-mono",
+                @log.status == "error" && "text-base-content/50 line-through decoration-error/40"
+              ]}>
+                {@log.final_model}
+              </div>
+              <div class="flex items-center gap-1.5 mt-1">
+                <div class="w-3.5 h-3.5 rounded flex items-center justify-center shrink-0 bg-base-200">
+                  <.provider_logo slug={normalize_slug(@log.final_provider)} class="w-2.5 h-2.5" />
+                </div>
+                <div class="text-xs text-base-content/60">{@log.final_provider}</div>
+              </div>
+              <div
+                :if={requested_model(@req_params, @log)}
+                class="mt-1 text-[11px] text-base-content/40"
+                title="Model named by the client; the routing chain decided what actually served it"
+              >
+                requested: <span class="font-mono">{requested_model(@req_params, @log)}</span>
+              </div>
+              <%= if effort = attempt_effort(List.last(@log.attempted_steps)) do %>
+                <div class="mt-1.5">
+                  <span
+                    class="px-1.5 py-0.5 rounded text-xs bg-accent/20 text-accent"
+                    title="Reasoning effort configured on the routing step at request time"
+                  >
+                    effort: {effort}
+                  </span>
+                </div>
+              <% end %>
+            </div>
+            
     <!-- Timing -->
-            <div>
+            <div data-group="what-happened">
               <div class="text-[10px] uppercase tracking-wider text-base-content/40 font-semibold mb-1">
                 Timing
               </div>
@@ -339,59 +382,84 @@ defmodule DodoRouterWeb.LogLive.Show do
                 </div>
               </details>
             </div>
-            
-    <!-- Model -->
-            <div>
-              <div class="text-[10px] uppercase tracking-wider text-base-content/40 font-semibold mb-1">
-                {if @log.status == "error", do: "Model (last attempted)", else: "Model"}
-              </div>
-              <div class={[
-                "text-sm font-mono",
-                @log.status == "error" && "text-base-content/50 line-through decoration-error/40"
-              ]}>
-                {@log.final_model}
-              </div>
-              <div class="flex items-center gap-1.5 mt-1">
-                <div class="w-3.5 h-3.5 rounded flex items-center justify-center shrink-0 bg-base-200">
-                  <.provider_logo slug={normalize_slug(@log.final_provider)} class="w-2.5 h-2.5" />
+
+            <%= if length(@log.tools_invoked) > 0 do %>
+              <div data-group="what-happened">
+                <div class="text-[10px] uppercase tracking-wider text-base-content/40 font-semibold mb-1">
+                  Tools
                 </div>
-                <div class="text-xs text-base-content/60">{@log.final_provider}</div>
-              </div>
-              <div
-                :if={requested_model(@req_params, @log)}
-                class="mt-1 text-[11px] text-base-content/40"
-                title="Model named by the client; the routing chain decided what actually served it"
-              >
-                requested: <span class="font-mono">{requested_model(@req_params, @log)}</span>
-              </div>
-              <%= if effort = attempt_effort(List.last(@log.attempted_steps)) do %>
-                <div class="mt-1.5">
+                <div class="flex flex-wrap gap-1">
                   <span
-                    class="px-1.5 py-0.5 rounded text-xs bg-accent/20 text-accent"
-                    title="Reasoning effort configured on the routing step at request time"
+                    :for={tool <- @log.tools_invoked}
+                    class="badge badge-secondary badge-sm font-mono"
                   >
-                    effort: {effort}
+                    {tool}
                   </span>
                 </div>
-              <% end %>
-            </div>
-            
-    <!-- Session -->
-            <div :if={@log.session_id}>
-              <div class="text-[10px] uppercase tracking-wider text-base-content/40 font-semibold mb-1">
-                Session
               </div>
-              <.link
-                navigate={~p"/routers/#{@log.router_id}/sessions/#{@log.session_id}"}
-                class="text-xs font-mono text-primary hover:underline break-all"
-                title="All requests in this session"
-              >
-                {@log.session_id}
-              </.link>
+            <% end %>
+            
+    <!-- Routing Chain -->
+            <div data-group="what-happened">
+              <div class="text-[10px] uppercase tracking-wider text-base-content/40 font-semibold mb-1">
+                Routing
+              </div>
+              <%!-- The slow hop is marked relative to the OTHER hops of this
+                 same request (>60% of the summed attempt latencies), not
+                 against any router-wide baseline — that's the honest
+                 comparison for a single trace, and it needs no query. --%>
+              <div class="space-y-1">
+                <%= for {attempt, dominant?} <- dominant_hop_flags(@log.attempted_steps) do %>
+                  <div
+                    phx-click="set_tab"
+                    phx-value-tab="trace"
+                    role="button"
+                    title="Open the trace"
+                    data-hop-slow={if dominant?, do: "true"}
+                    class={[
+                      "flex items-center gap-1.5 text-xs rounded px-1 -mx-1 py-0.5 cursor-pointer hover:bg-secondary/60 transition-colors",
+                      dominant? && "bg-warning/10"
+                    ]}
+                  >
+                    <%= if attempt["status"] == "success" do %>
+                      <span class="text-success">✓</span>
+                    <% else %>
+                      <span class="text-error">✗</span>
+                    <% end %>
+                    <span class="font-medium truncate">{attempt["provider"]}</span>
+                    <%= if attempt["provider_key_id"] && attempt["provider_key_slug"] do %>
+                      <.link
+                        navigate={
+                          ~p"/providers?highlight=#{attempt["provider_key_id"]}&provider=#{attempt["provider_key_slug"]}"
+                        }
+                        class="text-[10px] text-primary hover:underline truncate max-w-[80px]"
+                        title={attempt["provider_key_label"]}
+                      >
+                        {attempt["provider_key_label"]}
+                      </.link>
+                    <% end %>
+                    <span
+                      class={[
+                        "font-mono ml-auto",
+                        if(dominant?, do: "text-warning", else: "text-base-content/40")
+                      ]}
+                      title={if dominant?, do: "Dominates this request's routing chain"}
+                    >
+                      {attempt["latency_ms"]}ms
+                    </span>
+                  </div>
+                <% end %>
+              </div>
             </div>
+
+            <%!-- What it cost: tokens spent, how much of that was cache, and
+               the resulting spend against this router's own baseline —
+               previously split across "Usage" and left to imply cost was
+               just another usage number rather than the thing this box is
+               actually for. --%>
             
     <!-- Usage -->
-            <div>
+            <div data-group="what-it-cost">
               <div class="text-[10px] uppercase tracking-wider text-base-content/40 font-semibold mb-1">
                 Usage
               </div>
@@ -484,73 +552,23 @@ defmodule DodoRouterWeb.LogLive.Show do
               </div>
             </div>
 
-            <%= if length(@log.tools_invoked) > 0 do %>
-              <div>
-                <div class="text-[10px] uppercase tracking-wider text-base-content/40 font-semibold mb-1">
-                  Tools
-                </div>
-                <div class="flex flex-wrap gap-1">
-                  <span
-                    :for={tool <- @log.tools_invoked}
-                    class="badge badge-secondary badge-sm font-mono"
-                  >
-                    {tool}
-                  </span>
-                </div>
-              </div>
-            <% end %>
+            <%!-- Where it came from: the session this request belongs to
+               (and, via that link, the router) — everything about the
+               client side of the request rather than what the provider did
+               with it. --%>
             
-    <!-- Routing Chain -->
-            <div>
+    <!-- Session -->
+            <div :if={@log.session_id} data-group="where-it-came-from">
               <div class="text-[10px] uppercase tracking-wider text-base-content/40 font-semibold mb-1">
-                Routing
+                Session
               </div>
-              <%!-- The slow hop is marked relative to the OTHER hops of this
-                 same request (>60% of the summed attempt latencies), not
-                 against any router-wide baseline — that's the honest
-                 comparison for a single trace, and it needs no query. --%>
-              <div class="space-y-1">
-                <%= for {attempt, dominant?} <- dominant_hop_flags(@log.attempted_steps) do %>
-                  <div
-                    phx-click="set_tab"
-                    phx-value-tab="trace"
-                    role="button"
-                    title="Open the trace"
-                    data-hop-slow={if dominant?, do: "true"}
-                    class={[
-                      "flex items-center gap-1.5 text-xs rounded px-1 -mx-1 py-0.5 cursor-pointer hover:bg-secondary/60 transition-colors",
-                      dominant? && "bg-warning/10"
-                    ]}
-                  >
-                    <%= if attempt["status"] == "success" do %>
-                      <span class="text-success">✓</span>
-                    <% else %>
-                      <span class="text-error">✗</span>
-                    <% end %>
-                    <span class="font-medium truncate">{attempt["provider"]}</span>
-                    <%= if attempt["provider_key_id"] && attempt["provider_key_slug"] do %>
-                      <.link
-                        navigate={
-                          ~p"/providers?highlight=#{attempt["provider_key_id"]}&provider=#{attempt["provider_key_slug"]}"
-                        }
-                        class="text-[10px] text-primary hover:underline truncate max-w-[80px]"
-                        title={attempt["provider_key_label"]}
-                      >
-                        {attempt["provider_key_label"]}
-                      </.link>
-                    <% end %>
-                    <span
-                      class={[
-                        "font-mono ml-auto",
-                        if(dominant?, do: "text-warning", else: "text-base-content/40")
-                      ]}
-                      title={if dominant?, do: "Dominates this request's routing chain"}
-                    >
-                      {attempt["latency_ms"]}ms
-                    </span>
-                  </div>
-                <% end %>
-              </div>
+              <.link
+                navigate={~p"/routers/#{@log.router_id}/sessions/#{@log.session_id}"}
+                class="text-xs font-mono text-primary hover:underline break-all"
+                title="All requests in this session"
+              >
+                {@log.session_id}
+              </.link>
             </div>
           </div>
           
