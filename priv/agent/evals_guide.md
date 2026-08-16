@@ -134,6 +134,11 @@ and `retryable` whether trying again could help. `retry_eval` re-runs only the
 failed runs. Failed runs are excluded from `avg_score` but their cost is still
 in `summary.total_cost_usd`.
 
+The moment a benchmark is clearly doomed — wrong rubric, wrong candidates —
+`cancel_eval` stops it: in-flight provider calls are killed and the spending
+stops there. Answers already generated stay stored, so a later `retry_eval`
+can re-judge them without paying for generation again.
+
 ### 5. Change something, evaluate again
 
 Evaluations are immutable on purpose: a score belongs to the rubric, judge and
@@ -178,3 +183,4 @@ point the same rubric at a new log, or `candidates` to try another model.
 | `create_eval` | Create one (`run: true` to start it) | `evals:write` |
 | `run_eval` | Run or re-run the whole benchmark | `evals:write` |
 | `retry_eval` | Re-run only the failed runs | `evals:write` |
+| `cancel_eval` | Stop a running benchmark; stored answers stay | `evals:write` |

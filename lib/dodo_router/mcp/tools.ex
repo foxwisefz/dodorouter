@@ -228,6 +228,21 @@ defmodule DodoRouter.MCP.Tools do
       }
     },
     %{
+      name: "cancel_eval",
+      title: "Cancel a running benchmark",
+      description:
+        "Stop a running benchmark immediately: in-flight provider calls are killed and the " <>
+          "spending stops here. Unfinished runs are marked failed as cancelled; answers " <>
+          "already generated stay stored, so retry_eval can still re-judge them. Errors " <>
+          "when nothing is running.",
+      scopes: ["evals:write"],
+      schema: %{
+        "type" => "object",
+        "required" => ["id"],
+        "properties" => %{"router" => @router_arg, "id" => %{"type" => "string"}}
+      }
+    },
+    %{
       name: "retry_eval",
       title: "Retry only the failed runs",
       description:
@@ -527,6 +542,20 @@ defmodule DodoRouter.MCP.Tools do
            "Not started: every candidate is blocked — #{named}. Nothing could produce an " <>
              "answer, so running would only spend the judge's quota. Create a new evaluation " <>
              "with from_eval_id and working candidates (list_eval_targets reports key health)."}
+      end
+    end
+  end
+
+  defp run("cancel_eval", principal, args) do
+    with {:ok, router} <- resolve_router(principal, args),
+         {:ok, evaluation} <- fetch_eval(principal, router, args["id"]) do
+      case Evaluations.cancel_benchmark(principal.user, evaluation) do
+        :ok ->
+          {:ok, eval_payload(principal, evaluation.id),
+           %{target_type: "evaluation", target_id: evaluation.id}}
+
+        {:error, :not_running} ->
+          {:error, "Nothing is running for that evaluation — there is nothing to cancel."}
       end
     end
   end

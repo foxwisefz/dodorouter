@@ -1409,6 +1409,34 @@ defmodule DodoRouterWeb.EvalLiveTest do
       assert render(live) =~ "Not starting"
     end
 
+    test "a running benchmark can be cancelled from the page", %{
+      conn: conn,
+      user: user,
+      evaluation: evaluation
+    } do
+      evaluation
+      |> Ecto.Changeset.change(benchmark_status: "running")
+      |> DodoRouter.Repo.update!()
+
+      test_pid = self()
+
+      spawn(fn ->
+        Registry.register(DodoRouter.EvaluationRegistry, evaluation.id, nil)
+        send(test_pid, :registered)
+        Process.sleep(:infinity)
+      end)
+
+      assert_receive :registered
+
+      {:ok, live, _html} = live(conn, ~p"/evals/#{evaluation.id}")
+      assert has_element?(live, "#cancel-eval-button")
+
+      live |> element("#cancel-eval-button") |> render_click()
+
+      assert DodoRouter.Evaluations.get_evaluation!(user, evaluation.id).benchmark_status ==
+               "cancelled"
+    end
+
     test "Run again accepts a repetitions override", %{
       conn: conn,
       user: user,

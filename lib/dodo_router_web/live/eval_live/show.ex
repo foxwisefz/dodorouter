@@ -35,6 +35,20 @@ defmodule DodoRouterWeb.EvalLive.Show do
     {:noreply, start_benchmark(socket, parse_repetitions(params["repetitions"]))}
   end
 
+  def handle_event("cancel", _params, socket) do
+    case Evaluations.cancel_benchmark(socket.assigns.current_user, socket.assigns.evaluation) do
+      :ok ->
+        # The broadcast reloads the page state; the flash rides on it.
+        {:noreply, socket}
+
+      {:error, :not_running} ->
+        {:noreply,
+         socket
+         |> assign(:running?, false)
+         |> put_flash(:info, "Nothing is running — the benchmark already finished")}
+    end
+  end
+
   def handle_event("retry_failed", _params, socket) do
     user = socket.assigns.current_user
     evaluation = socket.assigns.evaluation
@@ -121,6 +135,19 @@ defmodule DodoRouterWeb.EvalLive.Show do
       Evaluations.get_evaluation!(socket.assigns.current_user, socket.assigns.evaluation.id)
 
     {:noreply, socket |> advance_retry() |> load(evaluation)}
+  end
+
+  def handle_info({:benchmark_finished, :cancelled}, socket) do
+    evaluation =
+      Evaluations.get_evaluation!(socket.assigns.current_user, socket.assigns.evaluation.id)
+
+    {:noreply,
+     socket
+     |> assign(:running?, false)
+     |> assign(:retrying?, false)
+     |> assign(:retry_progress, nil)
+     |> load(evaluation)
+     |> put_flash(:info, "Benchmark cancelled — stored answers stay and can be re-judged")}
   end
 
   def handle_info({:benchmark_finished, {:error, reason}}, socket) do
@@ -648,6 +675,15 @@ defmodule DodoRouterWeb.EvalLive.Show do
               {if @running?,
                 do: "Retrying…",
                 else: "Retry #{@retryable.judge + @retryable.candidate} failed"}
+            </button>
+            <button
+              :if={@running?}
+              id="cancel-eval-button"
+              phx-click="cancel"
+              data-confirm="Stop this benchmark? Unfinished runs are marked cancelled; answers already generated stay stored and can be re-judged."
+              class="btn btn-outline btn-error gap-2"
+            >
+              <.icon name="hero-stop" class="size-4" /> Cancel
             </button>
             <form id="run-eval-form" phx-submit="run" class="flex items-center gap-2">
               <label

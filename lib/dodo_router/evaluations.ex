@@ -859,6 +859,62 @@ defmodule DodoRouter.Evaluations do
   end
 
   @doc """
+  Stops a running benchmark: kills the registered batch task, sweeps the
+  runs it never finished the way `recover_interrupted/0` does — but saying
+  "cancelled", not "stopped" — and stamps the evaluation `cancelled`.
+
+  Answers already generated and stored stay: they were paid for, and
+  `retry_eval` can still re-judge them. `{:error, :not_running}` when there
+  is nothing to cancel, so a double-click reads as such rather than as
+  success.
+  """
+  def cancel_benchmark(%User{} = user, %Evaluation{} = evaluation) do
+    evaluation = get_evaluation!(user, evaluation.id)
+
+    case benchmark_pids(evaluation.id) do
+      [] ->
+        {:error, :not_running}
+
+      pids ->
+        # The registry entry dies with the task, so the kill is also the
+        # deregistration. Provider calls in flight die with it — that is
+        # the point: the money stops here.
+        Enum.each(pids, &Process.exit(&1, :kill))
+
+        from(r in EvaluationRun,
+          where:
+            r.evaluation_id == ^evaluation.id and
+              r.status in ["pending", "running"] and is_nil(r.superseded_at)
+        )
+        |> Repo.update_all(
+          set: [
+            status: "failed",
+            failure_stage: "candidate",
+            error: "The benchmark was cancelled before this run finished",
+            updated_at: DateTime.utc_now() |> DateTime.truncate(:second)
+          ]
+        )
+
+        write_status!(evaluation, "cancelled")
+
+        Phoenix.PubSub.broadcast(
+          DodoRouter.PubSub,
+          "evaluation:#{evaluation.id}",
+          {:benchmark_finished, :cancelled}
+        )
+
+        :ok
+    end
+  end
+
+  defp benchmark_pids(evaluation_id) do
+    case Process.whereis(DodoRouter.EvaluationRegistry) do
+      nil -> []
+      _pid -> for {pid, _} <- Registry.lookup(DodoRouter.EvaluationRegistry, evaluation_id), do: pid
+    end
+  end
+
+  @doc """
   Whether a benchmark process for this evaluation is alive right now.
 
   The registry is the source of truth: a `benchmark_status` of "running"

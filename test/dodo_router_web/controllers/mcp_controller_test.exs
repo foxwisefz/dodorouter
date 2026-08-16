@@ -496,6 +496,57 @@ defmodule DodoRouterWeb.MCPControllerTest do
       assert by_label["plan key"]["judge_advice"] =~ "metered key for the judge"
     end
 
+    test "cancel_eval stops a running benchmark and refuses when idle", %{
+      conn: conn,
+      token: token,
+      user: user,
+      router: router
+    } do
+      key = DodoRouter.ProvidersFixtures.provider_key_fixture(user, %{"label" => "Key 1"})
+
+      log =
+        DodoRouter.LogsFixtures.log_fixture(router, %{
+          request_body:
+            Jason.encode!(%{
+              "model" => "m",
+              "messages" => [%{"role" => "user", "content" => "hi"}]
+            })
+        })
+
+      {:ok, evaluation} =
+        DodoRouter.Evaluations.create_evaluation(user, log, %{
+          name: "Cancel me",
+          criteria: "Be useful",
+          judge_model: "judge-model",
+          judge_provider_key_id: key.id,
+          candidate_targets: [
+            %{"provider_key_id" => key.id, "provider" => "test_provider", "model" => "test-model"}
+          ]
+        })
+
+      evaluation
+      |> Ecto.Changeset.change(benchmark_status: "running")
+      |> DodoRouter.Repo.update!()
+
+      test_pid = self()
+
+      spawn(fn ->
+        Registry.register(DodoRouter.EvaluationRegistry, evaluation.id, nil)
+        send(test_pid, :registered)
+        Process.sleep(:infinity)
+      end)
+
+      assert_receive :registered
+
+      body = json_response(call_tool(conn, token, "cancel_eval", %{"id" => evaluation.id}), 200)
+      assert body["result"]["isError"] == false
+      assert tool_json(body)["status"] == "cancelled"
+
+      body = json_response(call_tool(conn, token, "cancel_eval", %{"id" => evaluation.id}), 200)
+      assert body["result"]["isError"]
+      assert hd(body["result"]["content"])["text"] =~ "nothing to cancel"
+    end
+
     test "create_eval clones an existing evaluation via from_eval_id with overrides", %{
       conn: conn,
       token: token,

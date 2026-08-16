@@ -691,6 +691,76 @@ defmodule DodoRouter.EvaluationsTest do
     assert {:error, :already_running} = Evaluations.enqueue(user, loaded)
   end
 
+  test "cancel_benchmark kills the live batch and sweeps the remaining runs" do
+    user = AccountsFixtures.user_fixture()
+    {router, _key} = RoutersFixtures.router_fixture(user)
+    provider_key = ProvidersFixtures.provider_key_fixture(user)
+
+    log =
+      LogsFixtures.log_fixture(router, %{
+        request_body:
+          Jason.encode!(%{"model" => "m", "messages" => [%{"role" => "user", "content" => "hi"}]})
+      })
+
+    {:ok, evaluation} =
+      Evaluations.create_evaluation(user, log, %{
+        name: "Doomed v2",
+        criteria: "Be correct",
+        judge_model: "judge-model",
+        judge_provider_key_id: provider_key.id,
+        candidate_targets: [
+          %{
+            "provider_key_id" => provider_key.id,
+            "provider" => "test_provider",
+            "model" => "test-model"
+          }
+        ],
+        repetitions: 1
+      })
+
+    batch_id = Ecto.UUID.generate()
+
+    evaluation
+    |> Ecto.Changeset.change(benchmark_status: "running", last_batch_id: batch_id)
+    |> DodoRouter.Repo.update!()
+
+    %EvaluationRun{}
+    |> EvaluationRun.changeset(%{
+      evaluation_id: evaluation.id,
+      batch_id: batch_id,
+      status: "pending"
+    })
+    |> DodoRouter.Repo.insert!()
+
+    # A stand-in for the live benchmark task, registered the way the real
+    # one registers itself. spawn/1, not Task.async/1 — the cancel kills it,
+    # and a link would take the test down with it.
+    test_pid = self()
+
+    batch_pid =
+      spawn(fn ->
+        Registry.register(DodoRouter.EvaluationRegistry, evaluation.id, nil)
+        send(test_pid, :registered)
+        Process.sleep(:infinity)
+      end)
+
+    assert_receive :registered
+    ref = Process.monitor(batch_pid)
+
+    assert :ok = Evaluations.cancel_benchmark(user, evaluation)
+    assert_receive {:DOWN, ^ref, :process, ^batch_pid, :killed}
+
+    reloaded = Evaluations.get_evaluation!(user, evaluation.id)
+    assert reloaded.benchmark_status == "cancelled"
+
+    assert [run] = Evaluations.latest_batch_runs(reloaded)
+    assert run.status == "failed"
+    assert run.error =~ "cancelled"
+
+    # Nothing left to cancel reads as such, not as success.
+    assert {:error, :not_running} = Evaluations.cancel_benchmark(user, reloaded)
+  end
+
   test "preflight names a candidate key that no longer resolves, and enqueue refuses when nothing could run" do
     user = AccountsFixtures.user_fixture()
     {router, _key} = RoutersFixtures.router_fixture(user)
