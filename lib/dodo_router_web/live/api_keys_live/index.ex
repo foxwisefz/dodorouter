@@ -230,8 +230,10 @@ defmodule DodoRouterWeb.ApiKeysLive.Index do
       data-router-requests-24h={(@usage && @usage.request_count_24h) || 0}
     >
       <%= if @usage && @usage.last_request_at do %>
-        Last used {relative_time(@usage.last_request_at)} ·
-        {pluralize(@usage.request_count_24h, "request")} in the last 24h
+        Last used {relative_time(@usage.last_request_at)} · {pluralize(
+          @usage.request_count_24h,
+          "request"
+        )} in the last 24h
       <% else %>
         Never used
       <% end %>

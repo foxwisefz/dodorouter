@@ -743,34 +743,34 @@ defmodule DodoRouter.MCP.Tools do
       :runs,
       Enum.map(runs, fn run ->
         %{
-            status: run.status,
-            model: run.candidate_model,
-            score: run.score,
-            criterion_scores: run.criterion_scores,
-            summary: run.summary,
-            issues: run.issues,
-            error: run.error,
-            # Stable token (rate_limited, provider_key_missing, crashed, …)
-            # so a client decides whether retrying helps without regexing
-            # the prose. Nil on runs recorded before it existed.
-            error_category: run.error_category,
-            # Which half failed. "judge" means the answer exists and was paid
-            # for and only the scoring call failed, so retry_eval re-scores it
-            # without generating anything; "candidate" means there is no
-            # answer to score.
-            failure_stage: run.failure_stage,
-            latency_ms: run.candidate_latency_ms,
-            cost_usd: money(run.candidate_cost_usd),
-            # The credentials that actually produced this run, which are not
-            # necessarily the ones the evaluation names now.
-            judged_by: run.judge_provider_key_label,
-            judge_key_deleted: Evaluations.judge_key_deleted?(run),
-            judge_log_id: run.judge_log_id,
-            answered_by: run.candidate_provider_key_label,
-            candidate_key_deleted: Evaluations.candidate_key_deleted?(run),
-            candidate_log_id: run.candidate_log_id,
-            output_preview: body_or_marker(bodies?, truncate(run.candidate_output))
-          }
+          status: run.status,
+          model: run.candidate_model,
+          score: run.score,
+          criterion_scores: run.criterion_scores,
+          summary: run.summary,
+          issues: run.issues,
+          error: run.error,
+          # Stable token (rate_limited, provider_key_missing, crashed, …)
+          # so a client decides whether retrying helps without regexing
+          # the prose. Nil on runs recorded before it existed.
+          error_category: run.error_category,
+          # Which half failed. "judge" means the answer exists and was paid
+          # for and only the scoring call failed, so retry_eval re-scores it
+          # without generating anything; "candidate" means there is no
+          # answer to score.
+          failure_stage: run.failure_stage,
+          latency_ms: run.candidate_latency_ms,
+          cost_usd: money(run.candidate_cost_usd),
+          # The credentials that actually produced this run, which are not
+          # necessarily the ones the evaluation names now.
+          judged_by: run.judge_provider_key_label,
+          judge_key_deleted: Evaluations.judge_key_deleted?(run),
+          judge_log_id: run.judge_log_id,
+          answered_by: run.candidate_provider_key_label,
+          candidate_key_deleted: Evaluations.candidate_key_deleted?(run),
+          candidate_log_id: run.candidate_log_id,
+          output_preview: body_or_marker(bodies?, truncate(run.candidate_output))
+        }
       end)
     )
   end

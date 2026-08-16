@@ -305,6 +305,7 @@ defmodule DodoRouterWeb.MCPControllerTest do
           call_tool(conn, token, "get_eval", %{"id" => evaluation.id, "include" => ["runs"]}),
           200
         )
+
       payload = tool_json(body)
 
       # The stage is what tells an agent this is recoverable at all.
@@ -369,6 +370,7 @@ defmodule DodoRouterWeb.MCPControllerTest do
           call_tool(conn, token, "get_eval", %{"id" => evaluation.id, "include" => ["runs"]}),
           200
         )
+
       payload = tool_json(body)
 
       assert [run] = payload["runs"]

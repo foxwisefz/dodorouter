@@ -911,8 +911,11 @@ defmodule DodoRouter.Evaluations do
 
   defp benchmark_pids(evaluation_id) do
     case Process.whereis(DodoRouter.EvaluationRegistry) do
-      nil -> []
-      _pid -> for {pid, _} <- Registry.lookup(DodoRouter.EvaluationRegistry, evaluation_id), do: pid
+      nil ->
+        []
+
+      _pid ->
+        for {pid, _} <- Registry.lookup(DodoRouter.EvaluationRegistry, evaluation_id), do: pid
     end
   end
 
@@ -1089,7 +1092,10 @@ defmodule DodoRouter.Evaluations do
   defp category_from_reason(:provider_key_not_found), do: "provider_key_missing"
   defp category_from_reason({:error, reason}), do: category_from_reason(reason)
   defp category_from_reason({:error, reason, _details}), do: category_from_reason(reason)
-  defp category_from_reason(reason) when is_atom(reason) and not is_nil(reason), do: to_string(reason)
+
+  defp category_from_reason(reason) when is_atom(reason) and not is_nil(reason),
+    do: to_string(reason)
+
   defp category_from_reason(_), do: "unknown"
 
   # A failed replay still logged the attempts; the last one's `error` field

@@ -181,6 +181,7 @@ defmodule DodoRouterWeb.LogLive.Index do
     {logs, count, latency_percentiles} =
       if socket.assigns.selected_router_id do
         router = Routers.get_router!(user, socket.assigns.selected_router_id)
+
         {Logs.list_logs(router, opts), Logs.count_logs(router, opts),
          Logs.latency_percentiles(router)}
       else
