@@ -213,6 +213,15 @@ comparison. The judge scores each answer against the request that run actually
 sent and never learns variant names. Runs multiply accordingly: check
 `planned_runs` before starting.
 
+A variant can also carry `message_patches` — `{index, content}` replacements
+for individual messages of the served request. This is how you test a context
+transform rather than a prompt: compress a tool-result message offline, send
+the compressed text as the patch, hold the model constant, and the benchmark
+answers whether reasoning survived the compression. Indexes are 0-based into
+the request as served; a patch that points at no message is refused at
+creation with the log named. You compute the transform — the router never
+executes your code, it only replays the request you describe.
+
 You never have to re-send the rubric to vary one thing: pass `from_eval_id`
 to `create_eval` and everything — criteria, examples, judge, candidates,
 repetitions, the source log — carries over from that evaluation, with any

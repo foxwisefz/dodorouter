@@ -47,10 +47,14 @@ defmodule DodoRouter.Replays do
     effort = normalize_effort(target[:reasoning_effort])
     message_index = target[:message_index]
     system_prompt = target[:system_prompt]
+    message_patches = target[:message_patches]
 
     with :ok <- validate_effort(effort),
          {:ok, request} <-
-           prepare_request(root, model, effort, message_index, system_prompt: system_prompt),
+           prepare_request(root, model, effort, message_index,
+             system_prompt: system_prompt,
+             message_patches: message_patches
+           ),
          {:ok, step} <- build_step(user, root.router_id, key_id, model, effort) do
       request_id = Ecto.UUID.generate()
 
@@ -137,7 +141,11 @@ defmodule DodoRouter.Replays do
          {:ok, decoded} <- decode_body(source.request_body),
          :ok <- ensure_messages(decoded),
          {:ok, decoded} <- truncate_at(decoded, message_index),
-         :ok <- ensure_not_truncated(decoded) do
+         :ok <- ensure_not_truncated(decoded),
+         # Patches apply before the system-prompt override: their indexes
+         # refer to the messages array as served, and apply_system_prompt
+         # may prepend a message, which would shift every index by one.
+         {:ok, decoded} <- apply_message_patches(decoded, overrides[:message_patches]) do
       request =
         decoded
         |> Map.drop(@strip_fields)
@@ -148,6 +156,69 @@ defmodule DodoRouter.Replays do
       {:ok, request}
     end
   end
+
+  # Replaces the content of the message at each patched index — the
+  # mechanism behind context-transform experiments ("does compressing tool
+  # output preserve reasoning?"): same frozen history, one bit flipped, no
+  # world drift. The transform is computed by the caller; the router never
+  # executes client code. An index with no message behind it is an error,
+  # not a skip — a benchmark that silently measured the unpatched request
+  # would be confidently wrong.
+  defp apply_message_patches(decoded, nil), do: {:ok, decoded}
+  defp apply_message_patches(decoded, []), do: {:ok, decoded}
+
+  defp apply_message_patches(%{"messages" => messages} = decoded, patches)
+       when is_list(patches) do
+    count = length(messages)
+
+    if Enum.all?(patches, &valid_patch?(&1, count)) do
+      messages =
+        Enum.reduce(patches, messages, fn patch, acc ->
+          index = patch["index"] || patch[:index]
+          content = if Map.has_key?(patch, "content"), do: patch["content"], else: patch[:content]
+          List.update_at(acc, index, &Map.put(&1, "content", content))
+        end)
+
+      {:ok, Map.put(decoded, "messages", messages)}
+    else
+      {:error, :invalid_message_patch}
+    end
+  end
+
+  defp apply_message_patches(_decoded, _patches), do: {:error, :invalid_message_patch}
+
+  defp valid_patch?(patch, count) when is_map(patch) do
+    index = patch["index"] || patch[:index]
+    content = if Map.has_key?(patch, "content"), do: patch["content"], else: patch[:content]
+
+    is_integer(index) and index >= 0 and index < count and
+      (is_binary(content) or is_list(content))
+  end
+
+  defp valid_patch?(_patch, _count), do: false
+
+  @doc """
+  Applies message patches to a stored request body — the judge-side twin of
+  `patch_system_prompt/2`, so what the judge reads is what the run sent.
+  Returns the body unchanged when there is nothing to patch or the body
+  cannot be decoded; an invalid patch already failed the run before any
+  judge saw it.
+  """
+  def patch_messages(request_body, patches)
+      when is_binary(request_body) and is_list(patches) and patches != [] do
+    case Jason.decode(request_body) do
+      {:ok, %{"messages" => _} = decoded} ->
+        case apply_message_patches(decoded, patches) do
+          {:ok, patched} -> Jason.encode!(patched)
+          {:error, _} -> request_body
+        end
+
+      _ ->
+        request_body
+    end
+  end
+
+  def patch_messages(request_body, _patches), do: request_body
 
   # Replaces the system message's content — or prepends one when the served
   # request had none. The replay-a-real-log anchor stays: everything else

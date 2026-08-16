@@ -950,6 +950,47 @@ defmodule DodoRouterWeb.MCPControllerTest do
       assert hd(resp["result"]["content"])["text"] =~ "no extractable action"
     end
 
+    test "create_eval refuses a message patch that misses the log's messages", %{
+      conn: conn,
+      token: token,
+      user: user,
+      router: router
+    } do
+      key = DodoRouter.ProvidersFixtures.provider_key_fixture(user, %{"label" => "Key 1"})
+
+      log =
+        DodoRouter.LogsFixtures.log_fixture(router, %{
+          request_body:
+            Jason.encode!(%{
+              "model" => "m",
+              "messages" => [%{"role" => "user", "content" => "only one message"}]
+            })
+        })
+
+      resp =
+        json_response(
+          call_tool(conn, token, "create_eval", %{
+            "request_log_id" => log.id,
+            "name" => "Bad patch",
+            "criteria" => "Be useful",
+            "prompt_variants" => [
+              %{
+                "name" => "compressed",
+                "message_patches" => [%{"index" => 5, "content" => "x"}]
+              }
+            ],
+            "judge" => %{"provider_key_id" => key.id, "model" => "judge-model"},
+            "candidates" => [%{"provider_key_id" => key.id, "model" => "test-model"}]
+          }),
+          200
+        )
+
+      assert resp["result"]["isError"]
+      text = hd(resp["result"]["content"])["text"]
+      assert text =~ "cannot patch log"
+      assert text =~ log.id
+    end
+
     test "create_eval refuses a recording the token's user does not own", %{
       conn: conn,
       token: token,

@@ -244,6 +244,25 @@ defmodule DodoRouter.MCP.Tools do
                     "Replaces the served request's system prompt (prepended if it had " <>
                       "none); null means as-served, so the baseline sits in the " <>
                       "comparison under its own name."
+                },
+                "message_patches" => %{
+                  "type" => "array",
+                  "items" => %{
+                    "type" => "object",
+                    "required" => ["index", "content"],
+                    "properties" => %{
+                      "index" => %{"type" => "integer", "minimum" => 0},
+                      "content" => %{"type" => ["string", "array"]}
+                    }
+                  },
+                  "description" =>
+                    "Replaces the content of the message at each 0-based index of the " <>
+                      "served request — e.g. swap a tool-result message for a compressed " <>
+                      "version and measure whether reasoning survives. Compute the " <>
+                      "transform yourself and send the result; the router never runs " <>
+                      "client code. Indexes refer to the request as served (before any " <>
+                      "system_prompt prepend); an index with no message behind it is " <>
+                      "refused at creation, named. Same frozen history, one bit flipped."
                 }
               }
             },
@@ -627,6 +646,7 @@ defmodule DodoRouter.MCP.Tools do
          {:ok, logs, recording} <- resolve_source_logs(principal, router, args),
          [log | _] = logs,
          :ok <- check_next_action_sources(args["comparison_mode"], logs),
+         :ok <- check_message_patches(args["prompt_variants"], logs),
          {:ok, judge} <- judge_target(principal, args["judge"]),
          {:ok, candidates} <- candidate_targets(principal, args["candidates"]) do
       candidates = maybe_add_incumbents(principal, logs, candidates, args["include_incumbent"])
@@ -1230,6 +1250,32 @@ defmodule DodoRouter.MCP.Tools do
   end
 
   defp check_next_action_sources(_mode, _logs), do: :ok
+
+  # A patch whose index points past a log's messages would fail minutes
+  # into the spend — dry-run every (variant x log) pair up front and name
+  # the mismatch, same principle as the evaluability check.
+  defp check_message_patches(variants, logs) when is_list(variants) do
+    pairs =
+      for variant <- variants,
+          patches = variant["message_patches"],
+          is_list(patches) and patches != [],
+          log <- logs,
+          do: {variant, patches, log}
+
+    Enum.find_value(pairs, :ok, fn {variant, patches, log} ->
+      case Replays.prepare_request(log, "replay-probe", nil, nil, message_patches: patches) do
+        {:ok, _request} ->
+          nil
+
+        {:error, reason} ->
+          {:error,
+           "Variant #{inspect(variant["name"])} cannot patch log #{log.id}: #{reason}. " <>
+             "Patch indexes are 0-based into that log's messages array as served."}
+      end
+    end)
+  end
+
+  defp check_message_patches(_variants, _logs), do: :ok
 
   defp fetch_recording(principal, router, id) do
     case Recordings.get_recording(principal.user, id) do

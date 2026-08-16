@@ -147,10 +147,38 @@ defmodule DodoRouter.Logs.Evaluation do
       ) ->
         add_error(changeset, :prompt_variants, "system_prompt must be a string or null")
 
+      Enum.any?(variants, &(not valid_message_patches?(&1["message_patches"]))) ->
+        add_error(
+          changeset,
+          :prompt_variants,
+          "message_patches must be a list of {index, content} with distinct non-negative " <>
+            "integer indexes and string-or-array content"
+        )
+
       true ->
         changeset
     end
   end
+
+  # Whether an index actually points at a message is only knowable per
+  # source log, so range is checked at replay time; the shape — and the
+  # "two patches to one message would make the run irreproducible" rule —
+  # is knowable here.
+  defp valid_message_patches?(nil), do: true
+
+  defp valid_message_patches?(patches) when is_list(patches) do
+    indexes = Enum.map(patches, &(is_map(&1) && &1["index"]))
+
+    Enum.all?(patches, fn
+      %{"index" => index, "content" => content} ->
+        is_integer(index) and index >= 0 and (is_binary(content) or is_list(content))
+
+      _other ->
+        false
+    end) and length(Enum.uniq(indexes)) == length(indexes)
+  end
+
+  defp valid_message_patches?(_patches), do: false
 
   defp validate_candidate_target_shape(changeset) do
     validate_change(changeset, :candidate_targets, fn :candidate_targets, targets ->

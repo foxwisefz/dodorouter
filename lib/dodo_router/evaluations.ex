@@ -658,7 +658,7 @@ defmodule DodoRouter.Evaluations do
     run = update_run!(run, %{status: "running", error: nil, failure_stage: nil})
 
     if judge_only? do
-      source_log = variant_patched_source(source_log, variant && variant["system_prompt"])
+      source_log = variant_patched_source(source_log, variant)
       judge_candidate(user, evaluation, source_log, run, output, started_at)
     else
       target =
@@ -691,17 +691,30 @@ defmodule DodoRouter.Evaluations do
 
   defp put_variant(target, nil), do: target
 
-  defp put_variant(target, variant),
-    do: Map.put(target, "system_prompt", variant["system_prompt"])
+  defp put_variant(target, variant) do
+    target
+    |> Map.put("system_prompt", variant["system_prompt"])
+    |> Map.put("message_patches", variant["message_patches"])
+  end
 
+  # What the judge reads must be the request the run actually sent: message
+  # patches first (their indexes refer to the array as served), then the
+  # system-prompt override — the same order the replay applied them.
   defp variant_patched_source(source_log, nil), do: source_log
 
-  defp variant_patched_source(source_log, system_prompt) do
-    %{
-      source_log
-      | request_body: Replays.patch_system_prompt(source_log.request_body, system_prompt)
-    }
+  defp variant_patched_source(source_log, variant) when is_map(variant) do
+    body =
+      source_log.request_body
+      |> patch_body_messages(variant["message_patches"])
+      |> Replays.patch_system_prompt(variant["system_prompt"])
+
+    %{source_log | request_body: body}
   end
+
+  defp patch_body_messages(body, patches) when is_list(patches) and patches != [],
+    do: Replays.patch_messages(body, patches)
+
+  defp patch_body_messages(body, _patches), do: body
 
   # A copy of the attempt as it stands, stamped with when it was replaced and
   # by which run. The copy carries no batch_id: it is not part of any batch's
@@ -1167,13 +1180,15 @@ defmodule DodoRouter.Evaluations do
         provider_key_id: target["provider_key_id"],
         model: target["model"],
         system_prompt: target["system_prompt"],
+        message_patches: target["message_patches"],
         traffic_type: "evaluation_candidate"
       })
     end
 
     # What the judge scores against must be the request the run actually
-    # sent — for a variant run, the patched prompt, not the anchor's.
-    source_log = variant_patched_source(source_log, target["system_prompt"])
+    # sent — for a variant run, the patched request, not the anchor's.
+    source_log =
+      variant_patched_source(source_log, Map.take(target, ["system_prompt", "message_patches"]))
 
     case with_rate_limit_backoff(replay) do
       {:ok, candidate_log} ->
