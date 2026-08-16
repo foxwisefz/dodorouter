@@ -139,7 +139,12 @@ retry replaced — which answers "did this model fail the first time too"
 running (the keys were checked at start). Then:
 
 - `rankings` — one row per model: `avg_score`, `score_stddev`, `avg_latency_ms`,
-  `avg_cost_usd`. This is the quality-versus-price table.
+  `avg_cost_usd`. This is the quality-versus-price table. On a multi-log
+  benchmark each row also carries `per_source` — the same aggregates per
+  source log, sorted worst-first. Read it before switching: the aggregate
+  average hides a candidate that is fine on 18 of 20 requests and
+  catastrophic on 2, and a weak row's `source_log_id` fed to `get_log`
+  shows you exactly which request breaks it.
 - `summary` — totals for the batch, including what the whole benchmark cost.
 - `rubric_feedback` — **read this before you trust the scores.** It reports how
   often the judge said your criteria were too thin to decide, and what it said

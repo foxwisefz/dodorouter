@@ -352,6 +352,8 @@ defmodule DodoRouter.MCP.Tools do
 
       Read rubric_feedback before trusting the scores: if the judge often said the criteria were too thin to decide, the numbers are noise dressed up as data. A gap between two models smaller than their score_stddev is not a result.
 
+      On a multi-log benchmark each ranking row also carries per_source — the same aggregates per source log, sorted worst-first. Read it before switching models: an average hides a candidate that is fine on 18 of 20 requests and catastrophic on 2. Pass a weak row's source_log_id to get_log to see which request breaks it.
+
       A failed run is not always a failed model. `failure_stage` says which half broke: "judge" means the answer was generated and paid for and only the scoring call failed — retry_eval re-scores it for free — while "candidate" means the model never answered. `retryable` counts both. `blockers` reports what is already known to be broken before spending anything: a key seen refusing, or a candidate model the provider has retired; it is omitted while the benchmark is running, since the keys were checked at start and a poll should stay cheap.
 
       The default payload is built for polling: status, summary, rankings, rubric feedback and retry counts. Pass include: ["runs"] for the per-run detail (up to 2,000 chars of output_preview per run — a full batch can be large) and include: ["criteria"] for the rubric text.
@@ -847,6 +849,7 @@ defmodule DodoRouter.MCP.Tools do
             avg_latency_ms: ranking.avg_latency,
             avg_cost_usd: money(ranking.avg_cost)
           }
+          |> maybe_put_per_source(ranking)
         end),
       rubric_feedback: Evaluations.rubric_feedback(runs),
       # Failed runs worth repeating, split by what has to be redone. A judge
@@ -865,6 +868,28 @@ defmodule DodoRouter.MCP.Tools do
       runs,
       "runs" in include or "attempts" in include,
       "attempts" in include
+    )
+  end
+
+  # Only on multi-log benchmarks: the per-source rows answer "fine on 18 of
+  # the 20 requests, catastrophic on 2", which the aggregate average hides.
+  # Absent (not empty) on single-source benchmarks, where the aggregate
+  # already is the per-source answer.
+  defp maybe_put_per_source(row, %{per_source: []}), do: row
+
+  defp maybe_put_per_source(row, ranking) do
+    Map.put(
+      row,
+      :per_source,
+      Enum.map(ranking.per_source, fn source ->
+        %{
+          source_log_id: source.source_log_id,
+          avg_score: source.average,
+          min_score: source.min,
+          scored: source.successful,
+          runs: source.total
+        }
+      end)
     )
   end
 

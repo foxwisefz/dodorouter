@@ -673,6 +673,61 @@ defmodule DodoRouterWeb.MCPControllerTest do
       assert payload["recording_id"] == recording.id
     end
 
+    test "multi-log rankings carry a per-source breakdown, worst first", %{
+      conn: conn,
+      token: token,
+      user: user,
+      router: router
+    } do
+      key = DodoRouter.ProvidersFixtures.provider_key_fixture(user, %{"label" => "Key 1"})
+
+      body = fn text ->
+        Jason.encode!(%{"model" => "m", "messages" => [%{"role" => "user", "content" => text}]})
+      end
+
+      log1 = DodoRouter.LogsFixtures.log_fixture(router, %{request_body: body.("one")})
+      log2 = DodoRouter.LogsFixtures.log_fixture(router, %{request_body: body.("two")})
+
+      {:ok, evaluation} =
+        DodoRouter.Evaluations.create_evaluation(user, log1, %{
+          name: "Per-source",
+          criteria: "Be useful",
+          judge_model: "judge-model",
+          judge_provider_key_id: key.id,
+          candidate_targets: [
+            %{"provider_key_id" => key.id, "provider" => "test_provider", "model" => "test-model"}
+          ],
+          source_log_ids: [log1.id, log2.id]
+        })
+
+      for {source_log, score} <- [{log1, 90}, {log2, 30}] do
+        %DodoRouter.Logs.EvaluationRun{}
+        |> DodoRouter.Logs.EvaluationRun.changeset(%{
+          evaluation_id: evaluation.id,
+          status: "completed",
+          score: score,
+          candidate_provider: "test_provider",
+          candidate_model: "test-model",
+          source_log_id: source_log.id
+        })
+        |> DodoRouter.Repo.insert!()
+      end
+
+      payload =
+        tool_json(
+          json_response(call_tool(conn, token, "get_eval", %{"id" => evaluation.id}), 200)
+        )
+
+      assert [%{"model" => "test-model", "per_source" => per_source}] = payload["rankings"]
+
+      assert [
+               %{"source_log_id" => worst_id, "avg_score" => 30},
+               %{"avg_score" => 90}
+             ] = per_source
+
+      assert worst_id == log2.id
+    end
+
     test "create_eval refuses a recording the token's user does not own", %{
       conn: conn,
       token: token,

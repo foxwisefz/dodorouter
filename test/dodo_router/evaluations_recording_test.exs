@@ -120,6 +120,58 @@ defmodule DodoRouter.EvaluationsRecordingTest do
     end
   end
 
+  describe "per-source rankings" do
+    alias DodoRouter.Logs.EvaluationRun
+
+    defp run(model, source_log_id, attrs) do
+      struct!(
+        %EvaluationRun{
+          status: "completed",
+          candidate_provider: "test_provider",
+          candidate_model: model,
+          source_log_id: source_log_id
+        },
+        attrs
+      )
+    end
+
+    test "each ranking row breaks down per source log, worst first" do
+      log_a = Ecto.UUID.generate()
+      log_b = Ecto.UUID.generate()
+      log_c = Ecto.UUID.generate()
+
+      runs = [
+        # Fine on A and B, catastrophic on C — the aggregate hides this.
+        run("cheap-model", log_a, score: 90),
+        run("cheap-model", log_a, score: 94),
+        run("cheap-model", log_b, score: 88),
+        run("cheap-model", log_c, score: 20),
+        run("cheap-model", log_c, status: "failed", score: nil)
+      ]
+
+      assert [%{model: "cheap-model", per_source: per_source}] = Evaluations.rankings(runs)
+
+      assert [
+               %{source_log_id: ^log_c, average: 20, min: 20, successful: 1, total: 2},
+               %{source_log_id: ^log_b, average: 88},
+               %{source_log_id: ^log_a, average: 92}
+             ] = per_source
+
+      # A source where every run failed sorts ahead of any scored one.
+      runs = runs ++ [run("cheap-model", Ecto.UUID.generate(), status: "failed", score: nil)]
+      assert [%{per_source: [worst | _]}] = Evaluations.rankings(runs)
+      assert worst.average == nil
+      assert worst.total == 1
+    end
+
+    test "single-source benchmarks carry no breakdown" do
+      log = Ecto.UUID.generate()
+      runs = [run("m", log, score: 80), run("m", log, score: 90)]
+
+      assert [%{per_source: []}] = Evaluations.rankings(runs)
+    end
+  end
+
   describe "Recordings.get_recording/2" do
     test "resolves only the owner's recording" do
       user = AccountsFixtures.user_fixture()

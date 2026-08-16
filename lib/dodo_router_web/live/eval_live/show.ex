@@ -22,6 +22,7 @@ defmodule DodoRouterWeb.EvalLive.Show do
         {:ok,
          socket
          |> assign(:show_errored, MapSet.new())
+         |> assign(:expanded_rankings, MapSet.new())
          |> assign(:selected_batch, nil)
          |> assign(:criteria_expanded, false)
          |> assign(:retrying?, false)
@@ -96,6 +97,17 @@ defmodule DodoRouterWeb.EvalLive.Show do
 
   def handle_event("toggle_criteria", _params, socket) do
     {:noreply, assign(socket, :criteria_expanded, not socket.assigns.criteria_expanded)}
+  end
+
+  def handle_event("toggle_ranking_sources", %{"key" => key}, socket) do
+    expanded = socket.assigns.expanded_rankings
+
+    expanded =
+      if MapSet.member?(expanded, key),
+        do: MapSet.delete(expanded, key),
+        else: MapSet.put(expanded, key)
+
+    {:noreply, assign(socket, :expanded_rankings, expanded)}
   end
 
   def handle_event("select_series", %{"series" => key}, socket) do
@@ -631,6 +643,19 @@ defmodule DodoRouterWeb.EvalLive.Show do
   end
 
   defp any_succeeded?(batch), do: Enum.any?(batch.runs, &(&1.status != "failed"))
+
+  defp ranking_key(ranking), do: "#{ranking.provider}|#{ranking.model}|#{ranking.variant}"
+
+  # Model ids can carry characters a DOM id cannot; the key stays readable
+  # for the event, the id just has to be stable and unique.
+  defp ranking_dom_id(ranking),
+    do: ranking |> ranking_key() |> :erlang.phash2() |> Integer.to_string()
+
+  # The weakest source's average — or the fact that it never scored at all,
+  # which is the louder signal.
+  defp worst_source_label(%{per_source: [worst | _]}) do
+    worst.average || "unscored"
+  end
 
   @impl true
   def render(assigns) do
@@ -1270,21 +1295,88 @@ defmodule DodoRouterWeb.EvalLive.Show do
                   <th title="Average generation cost per run at pay-as-you-go API list prices">
                     Avg cost
                   </th>
+                  <th
+                    :if={@source_count > 1}
+                    title="This model's average on the source request it handled worst — an aggregate average hides a model that is fine on most requests and catastrophic on a few"
+                  >
+                    Weakest request
+                  </th>
                 </tr>
               </thead>
               <tbody>
-                <tr :for={ranking <- @rankings}>
-                  <td><span class="badge badge-info badge-soft">{ranking.provider}</span></td>
-                  <td class="font-mono text-xs">{ranking.model}</td>
-                  <td class="font-semibold text-success">{ranking.average || "—"}</td>
-                  <td class={deviation_class(ranking.stddev)}>{ranking.stddev}</td>
-                  <td>{ranking.min || "—"}–{ranking.max || "—"}</td>
-                  <td>{ranking.successful}/{ranking.total}</td>
-                  <td>{duration(ranking.avg_latency)}</td>
-                  <td class="font-mono text-xs">{money(ranking.avg_cost)}</td>
-                </tr>
+                <%= for ranking <- @rankings do %>
+                  <tr>
+                    <td><span class="badge badge-info badge-soft">{ranking.provider}</span></td>
+                    <td class="font-mono text-xs">{ranking.model}</td>
+                    <td class="font-semibold text-success">{ranking.average || "—"}</td>
+                    <td class={deviation_class(ranking.stddev)}>{ranking.stddev}</td>
+                    <td>{ranking.min || "—"}–{ranking.max || "—"}</td>
+                    <td>{ranking.successful}/{ranking.total}</td>
+                    <td>{duration(ranking.avg_latency)}</td>
+                    <td class="font-mono text-xs">{money(ranking.avg_cost)}</td>
+                    <td :if={@source_count > 1}>
+                      <button
+                        :if={ranking.per_source != []}
+                        type="button"
+                        id={"toggle-sources-#{ranking_dom_id(ranking)}"}
+                        phx-click="toggle_ranking_sources"
+                        phx-value-key={ranking_key(ranking)}
+                        class="btn btn-ghost btn-xs gap-1.5"
+                        title="Per-request breakdown"
+                      >
+                        {worst_source_label(ranking)}
+                        <.icon
+                          name={
+                            if MapSet.member?(@expanded_rankings, ranking_key(ranking)),
+                              do: "hero-chevron-up",
+                              else: "hero-chevron-down"
+                          }
+                          class="size-3.5"
+                        />
+                      </button>
+                      <span :if={ranking.per_source == []}>—</span>
+                    </td>
+                  </tr>
+                  <tr
+                    :if={MapSet.member?(@expanded_rankings, ranking_key(ranking))}
+                    id={"sources-#{ranking_dom_id(ranking)}"}
+                    class="bg-base-200/30"
+                  >
+                    <td colspan={if @source_count > 1, do: "9", else: "8"} class="px-6 py-3">
+                      <p class="mb-2 text-xs font-medium text-base-content/50">
+                        Per source request, weakest first
+                      </p>
+                      <div class="grid gap-1.5">
+                        <div
+                          :for={source <- ranking.per_source}
+                          class="flex flex-wrap items-center gap-4 text-xs"
+                        >
+                          <.link
+                            navigate={~p"/logs/#{source.source_log_id || @evaluation.request_log_id}"}
+                            class="font-mono text-primary hover:underline"
+                          >
+                            {String.slice(source.source_log_id || @evaluation.request_log_id, 0, 8)}
+                          </.link>
+                          <span class={[
+                            "font-semibold",
+                            if(source.average, do: "text-success", else: "text-error")
+                          ]}>
+                            {source.average || "no score"}
+                          </span>
+                          <span class="text-base-content/45">min {source.min || "—"}</span>
+                          <span class="text-base-content/45">
+                            {source.successful}/{source.total} scored
+                          </span>
+                        </div>
+                      </div>
+                    </td>
+                  </tr>
+                <% end %>
                 <tr :if={@rankings == []}>
-                  <td colspan="8" class="py-10 text-center text-base-content/40">
+                  <td
+                    colspan={if @source_count > 1, do: "9", else: "8"}
+                    class="py-10 text-center text-base-content/40"
+                  >
                     No completed model runs yet.
                   </td>
                 </tr>

@@ -1660,6 +1660,60 @@ defmodule DodoRouterWeb.EvalLiveTest do
     assert length(evaluation.runs) == 2
   end
 
+  test "multi-log rankings expose the weakest request and expand per source", %{
+    conn: conn,
+    user: user
+  } do
+    {router, _api_key} = RoutersFixtures.router_fixture(user)
+    provider_key = ProvidersFixtures.provider_key_fixture(user)
+
+    body = fn text ->
+      Jason.encode!(%{"model" => "m", "messages" => [%{"role" => "user", "content" => text}]})
+    end
+
+    log1 = LogsFixtures.log_fixture(router, %{request_body: body.("one")})
+    log2 = LogsFixtures.log_fixture(router, %{request_body: body.("two")})
+
+    {:ok, evaluation} =
+      Evaluations.create_evaluation(user, log1, %{
+        name: "Per-source UI",
+        criteria: "Be useful",
+        judge_model: "judge-model",
+        judge_provider_key_id: provider_key.id,
+        candidate_targets: [
+          %{
+            "provider_key_id" => provider_key.id,
+            "provider" => "test_provider",
+            "model" => "test-model"
+          }
+        ],
+        source_log_ids: [log1.id, log2.id]
+      })
+
+    for {source_log, score} <- [{log1, 90}, {log2, 30}] do
+      %EvaluationRun{}
+      |> EvaluationRun.changeset(%{
+        evaluation_id: evaluation.id,
+        status: "completed",
+        score: score,
+        candidate_provider: "test_provider",
+        candidate_model: "test-model",
+        source_log_id: source_log.id
+      })
+      |> Repo.insert!()
+    end
+
+    {:ok, live, html} = live(conn, ~p"/evals/#{evaluation.id}")
+
+    # The weakest request's average is visible without expanding anything.
+    assert html =~ "Weakest request"
+    assert has_element?(live, "button[phx-click='toggle_ranking_sources']", "30")
+
+    html = live |> element("button[phx-click='toggle_ranking_sources']") |> render_click()
+    assert html =~ "Per source request, weakest first"
+    assert html =~ String.slice(log2.id, 0, 8)
+  end
+
   test "a recording with nothing replayable bounces back with the reason", %{
     conn: conn,
     user: user

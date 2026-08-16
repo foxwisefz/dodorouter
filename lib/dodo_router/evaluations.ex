@@ -1472,10 +1472,43 @@ defmodule DodoRouter.Evaluations do
           completed
           |> Enum.map(&(&1.candidate_list_cost_usd || &1.candidate_cost_usd))
           |> Enum.reject(&is_nil/1)
-          |> decimal_average()
+          |> decimal_average(),
+        per_source: per_source_breakdown(target_runs)
       }
     end)
     |> Enum.sort_by(&(&1.average || -1), :desc)
+  end
+
+  # The aggregate average is where "fine on 18 of the 20 requests and
+  # catastrophic on 2" goes to hide — exactly the question a benchmark over
+  # a recording is asked. One row per source log, worst first (a source
+  # with no completed run at all sorts ahead of any scored one: nothing to
+  # average is the strongest failure signal). Empty on single-source
+  # benchmarks, where the aggregate already is the per-source answer.
+  defp per_source_breakdown(target_runs) do
+    case Enum.uniq_by(target_runs, & &1.source_log_id) do
+      [_single] ->
+        []
+
+      _many ->
+        target_runs
+        |> Enum.group_by(& &1.source_log_id)
+        |> Enum.map(fn {source_log_id, source_runs} ->
+          scores =
+            for run <- source_runs,
+                run.status == "completed" and is_integer(run.score),
+                do: run.score
+
+          %{
+            source_log_id: source_log_id,
+            average: average(scores),
+            min: if(scores == [], do: nil, else: Enum.min(scores)),
+            successful: length(scores),
+            total: length(source_runs)
+          }
+        end)
+        |> Enum.sort_by(&(&1.average || -1))
+    end
   end
 
   defp decimal_average([]), do: nil
