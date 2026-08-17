@@ -46,15 +46,11 @@ defmodule DodoRouter.Repo.Migrations.ScrubStoredRunErrors do
     WHERE length(error) > 2000
     """
 
-    # Three request logs from before outbound headers were redacted on the
-    # write path still hold a raw key in attempted_steps.
-    execute """
-    UPDATE request_logs
-    SET attempted_steps = regexp_replace(
-      attempted_steps::text, 'Bearer sk-[A-Za-z0-9\\-_]{6,}', 'Bearer [REDACTED]', 'g'
-    )::jsonb
-    WHERE attempted_steps::text ~ 'Bearer sk-[A-Za-z0-9\\-_]{6,}'
-    """
+    # A fourth statement scrubbing three old request_logs rows lived here and
+    # sank the deploy: the attempted_steps::text detoast over the whole table
+    # (~300k rows, megabyte agent bodies) blew the deploy job's 15-minute
+    # timeout, rolling this entire migration back with it. Those rows are
+    # handled out-of-band, not in a migration.
   end
 
   # Irreversible on purpose: the point was to destroy the secrets.
