@@ -5,7 +5,10 @@ defmodule DodoRouter.MixProject do
     [
       app: :dodo_router,
       version: "0.1.75",
-      elixir: "~> 1.15",
+      # 1.18, not 1.15: `attesto_mcp` requires it, and the `attesto` libraries
+      # under it call the `JSON` module that 1.18 introduced. Claiming 1.15
+      # let CI pin an Elixir the app cannot actually run on.
+      elixir: "~> 1.18",
       elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
       aliases: aliases(),

@@ -34,11 +34,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Must match build-release.yml. CI testing an older Elixir than the one
+      # that builds the release does not make CI stricter — it makes it wrong:
+      # `attesto_mcp` and the `attesto` libraries under it call the `JSON`
+      # module, which only exists from Elixir 1.18, so every MCP test failed
+      # here with `function JSON.encode!/1 is undefined` while passing
+      # everywhere the release is actually built.
       - name: Set up Elixir
         uses: erlef/setup-beam@v1
         with:
-          elixir-version: "1.17"
-          otp-version: "27"
+          elixir-version: "1.18.4"
+          otp-version: "27.3.4.14"
 
       - name: Restore dependencies cache
         uses: actions/cache@v4

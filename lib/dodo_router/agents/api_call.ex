@@ -32,7 +32,10 @@ defmodule DodoRouter.Agents.ApiCall do
     field :tool, :string
     field :scopes, {:array, :string}, default: []
     field :target_type, :string
-    field :target_id, :binary_id
+    # A string, not a binary_id: `target_type` already says the id space is
+    # not one table's. Sessions are named by the client ("question-7"), so a
+    # uuid column dropped every get_session row on the floor.
+    field :target_id, :string
     field :outcome, :string
     field :http_status, :integer
     field :error, :string
@@ -86,6 +89,10 @@ defmodule DodoRouter.Agents.ApiCall do
     |> update_change(:operation, &truncate(&1, 250))
     |> update_change(:principal_name, &truncate(&1, 250))
     |> update_change(:tool, &truncate(&1, 250))
+    # `target_id` is text rather than varchar, so nothing rejects it — but a
+    # session id is client-supplied and unbounded, and an audit row is not
+    # where a caller's megabyte belongs.
+    |> update_change(:target_id, &truncate(&1, 250))
   end
 
   def outcomes, do: @outcomes

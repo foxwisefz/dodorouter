@@ -450,8 +450,7 @@ defmodule DodoRouterWeb.MCPControllerTest do
 
     test "a missing scope is an isError result, not a transport failure", %{
       conn: conn,
-      user: user,
-      router: router
+      user: user
     } do
       limited = AuthZFixtures.access_token(user, scopes: ["logs:read"])
 
@@ -1754,6 +1753,24 @@ defmodule DodoRouterWeb.MCPControllerTest do
       assert call.target_type == "request_log"
       assert call.target_id == log.id
       assert call.returned_bodies
+    end
+
+    test "a session target is recorded, though its id is not a UUID", %{
+      conn: conn,
+      user: user,
+      token: token
+    } do
+      # Session ids are whatever the client named them — `question-7`, not a
+      # uuid. A target_id column that only accepts uuids silently threw away
+      # every get_session row, and the rescue in Agents.record_call/1 turned
+      # that into a log line no test was reading. The tool most likely to be
+      # called on a live agent's own traffic was the one with no audit trail.
+      call_tool(conn, token, "get_session", %{"session_id" => "question-7"})
+
+      assert [call] = Agents.list_calls(user)
+      assert call.tool == "get_session"
+      assert call.target_type == "session"
+      assert call.target_id == "question-7"
     end
 
     test "records a refused call with no credential", %{conn: conn} do
