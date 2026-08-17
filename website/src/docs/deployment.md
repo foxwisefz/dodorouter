@@ -2,7 +2,7 @@
 title: Deployment
 description: Elixir release boot sequence, migrations, and health checks for production.
 section: Operations
-order: 17
+order: 18
 ---
 
 # Deployment

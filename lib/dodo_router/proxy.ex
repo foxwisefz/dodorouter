@@ -5,17 +5,115 @@ defmodule DodoRouter.Proxy do
 
   alias DodoRouter.Routers
   alias DodoRouter.Routers.Router
-  alias DodoRouter.Proxy.{Adapter, FallbackChain, Fidelity}
+  alias DodoRouter.Proxy.{Adapter, FallbackChain, Fidelity, Idempotency}
   alias DodoRouter.Logs
+  alias DodoRouter.Logs.TokenAttribution
   alias DodoRouter.Redact
 
   @doc """
   Dispatches a request through the router's routing chain.
 
   Returns `{:ok, response}` or `{:error, reason}`.
+
+  With an `:idempotency_key` opt (set by the controllers from the client's
+  `Idempotency-Key` header), a repeat of an already-served request returns
+  the stored response at zero upstream cost — see
+  `DodoRouter.Proxy.Idempotency` for the exact semantics. Server-initiated
+  dispatches (replays, evaluations, monitors) never pass the opt.
   """
   def dispatch(%Router{} = router, request, opts \\ []) do
     request_id = Keyword.get(opts, :request_id, Ecto.UUID.generate())
+    opts = Keyword.put(opts, :request_id, request_id)
+
+    case Keyword.get(opts, :idempotency_key) do
+      nil ->
+        do_dispatch(router, request, request_id, opts)
+
+      key ->
+        dispatch_idempotent(router, request, key, request_id, opts)
+    end
+  end
+
+  defp dispatch_idempotent(router, request, key, request_id, opts) do
+    case Idempotency.begin(router.id, key, request, request_id) do
+      {:proceed, :reserved} ->
+        result =
+          try do
+            do_dispatch(router, request, request_id, opts)
+          catch
+            # A crashed dispatch must not wedge the key until the grace
+            # period — release it so the client's retry executes fresh.
+            kind, reason ->
+              Idempotency.abandon(router.id, key, request_id)
+              :erlang.raise(kind, reason, __STACKTRACE__)
+          end
+
+        case result do
+          {:ok, _response, _meta} -> Idempotency.commit(router.id, key, request_id)
+          _error -> Idempotency.abandon(router.id, key, request_id)
+        end
+
+        result
+
+      {:replay, response, original} ->
+        log_idempotent_replay(router, request, original, request_id, opts, key)
+
+        {:ok, response,
+         %{
+           provider_ms: 0,
+           log: nil,
+           response_headers: nil,
+           response_passthrough: nil,
+           idempotent_replay: true
+         }}
+
+      {:error, :in_progress} ->
+        {:error, :idempotency_in_progress}
+
+      {:error, :mismatch} ->
+        {:error, :idempotency_key_mismatch}
+    end
+  end
+
+  # The replay is a served request and audit says every one is a row — but a
+  # zero-cost, zero-token row linked to the original, so spend analytics
+  # count the answer once while request analytics stay truthful.
+  defp log_idempotent_replay(router, request, original, request_id, opts, key) do
+    session = Keyword.get(opts, :session, %{})
+    {truncated_req, req_flags} = truncate_body(request)
+
+    Logs.create_log_async(%{
+      router_id: router.id,
+      request_id: request_id,
+      status: "success",
+      http_status: 200,
+      attempted_steps: [],
+      final_provider: original.final_provider,
+      final_model: original.final_model,
+      call_type: original.call_type,
+      prompt_tokens: 0,
+      completion_tokens: 0,
+      total_tokens: 0,
+      latency_ms: 0,
+      request_body: Jason.encode!(truncated_req),
+      # The answer lives once, on the original row this links to.
+      response_body: "null",
+      truncation_flags: req_flags,
+      session_id: session[:session_id],
+      session_name: session[:session_name],
+      recording_id: Keyword.get(opts, :recording_id),
+      estimated_cost_usd: Decimal.new(0),
+      list_cost_usd: Decimal.new(0),
+      request_headers: encode_redacted_headers(Keyword.get(opts, :client_headers, [])),
+      traffic_type: "proxy",
+      idempotency_key: key,
+      idempotent_replay_of_id: original.id
+    })
+
+    :ok
+  end
+
+  defp do_dispatch(%Router{} = router, request, request_id, opts) do
     start_time = System.monotonic_time(:millisecond)
     streaming = Keyword.get(opts, :stream, false)
     client_headers = Keyword.get(opts, :client_headers, [])
@@ -119,6 +217,20 @@ defmodule DodoRouter.Proxy do
     dispatch(router, request, Keyword.merge(opts, stream: true, send_chunk: send_chunk))
   end
 
+  # What the provider actually answered, not a blanket 502. A retired model
+  # answered 404 and the attempt recorded it faithfully, while the log said
+  # 502 — so the row claimed a gateway problem for a request the provider
+  # had understood perfectly and refused. 502 remains the fallback for a
+  # failure with no HTTP status at all (a timeout, a dropped connection).
+  defp logged_status(%{status: :error}, last_step) do
+    case last_step[:http_status] || last_step["http_status"] do
+      status when is_integer(status) -> status
+      _ -> 502
+    end
+  end
+
+  defp logged_status(_result, _last_step), do: 200
+
   defp log_request(router, request, result, request_id, start_time, opts) do
     session = Keyword.get(opts, :session, %{})
     recording_id = Keyword.get(opts, :recording_id)
@@ -158,7 +270,7 @@ defmodule DodoRouter.Proxy do
       router_id: router.id,
       request_id: request_id,
       status: to_string(result.status),
-      http_status: if(result.status == :error, do: 502, else: 200),
+      http_status: logged_status(result, last_step),
       attempted_steps: stringify_keys(truncate_step_responses(result.attempted_steps)),
       final_provider: last_step[:provider],
       final_model: last_step[:model],
@@ -187,7 +299,17 @@ defmodule DodoRouter.Proxy do
       response_headers: encode_redacted_headers(result.response_headers),
       replayed_from_id: Keyword.get(opts, :replayed_from_id),
       replay_from_index: Keyword.get(opts, :replay_from_index),
-      traffic_type: Keyword.get(opts, :traffic_type, "proxy")
+      traffic_type: Keyword.get(opts, :traffic_type, "proxy"),
+      idempotency_key: Keyword.get(opts, :idempotency_key),
+      # Computed from the request still in memory — the full body, not the
+      # truncated copy that gets stored — against the billed input total.
+      token_attribution:
+        TokenAttribution.attribute(
+          request,
+          usage.prompt_tokens,
+          usage.cache_read_tokens,
+          usage.cache_write_tokens
+        )
     }
 
     # :sync callers (e.g. replay) need the persisted row back before returning
@@ -220,9 +342,14 @@ defmodule DodoRouter.Proxy do
         Keyword.get(opts, :dropped_request_fields_detail)
       )
 
+    # The fourth loss channel: query parameters never travel upstream, and
+    # until dodo_router-69m nothing recorded that they existed.
+    query =
+      Fidelity.dropped_query_param_changes(Keyword.get(opts, :dropped_query_params, %{}))
+
     per_step = Enum.flat_map(attempted_steps, &(&1[:fidelity_changes] || []))
 
-    ingress ++ per_step
+    ingress ++ query ++ per_step
   end
 
   @doc false
@@ -573,6 +700,17 @@ defmodule DodoRouter.Proxy do
   # coincide for metered keys; they diverge on plan/subscription keys where
   # the marginal cost is zero but the comparison number is not.
   defp calculate_costs(nil, _usage), do: %{estimated: nil, list: nil}
+
+  # No token counts at all means unknown, and unknown must not price as
+  # $0 — a log that silently claims it was free wins every cost
+  # comparison it appears in (dodo_router-4pi).
+  defp calculate_costs(_last_step, %{
+         prompt_tokens: nil,
+         completion_tokens: nil,
+         cache_read_tokens: nil,
+         cache_write_tokens: nil
+       }),
+       do: %{estimated: nil, list: nil}
 
   defp calculate_costs(last_step, usage) do
     key_slug = last_step[:provider_key_slug]

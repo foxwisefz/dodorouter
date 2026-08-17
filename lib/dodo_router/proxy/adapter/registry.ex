@@ -80,7 +80,9 @@ defmodule DodoRouter.Proxy.Adapter.Registry do
           # that happens to correlate today, and a provider moving its route
           # must not silently change what we forward.
           request_format: unquote(opts[:request_format] || :openai),
-          models: unquote(opts[:models]),
+          # Only for providers with nothing upstream to sync; models.dev is
+          # the source for everyone else.
+          models: unquote(opts[:models] || []),
           color: unquote(opts[:color]),
           short_description: unquote(opts[:short_description]),
           # Optional per-key-slug descriptions; falls back to short_description
@@ -160,12 +162,24 @@ defmodule DodoRouter.Proxy.Adapter.Registry do
 
   @doc """
   Returns display info for a provider key slug.
+
+  The name is the **key slug's** name, not the adapter's: a provider's
+  pay-as-you-go API and its flat-rate coding plan share an adapter but are
+  different credentials, with different quotas and base URLs. Falling back
+  to the adapter's `display_name` for both is what rendered two distinct
+  keys in a picker as the same string, with no way to tell them apart.
+
+  `provider_info/0` has always honoured `key_display_names`; these two
+  disagreeing meant one key read differently depending on the page.
   """
   @spec display_info(String.t()) :: %{name: String.t(), provider: String.t()}
   def display_info(key_slug) do
     Enum.find_value(all_adapters(), fn {_slug, config} ->
       if key_slug in config.key_slugs do
-        %{name: config.display_name, provider: config.slug}
+        %{
+          name: Map.get(config.key_display_names || %{}, key_slug, config.display_name),
+          provider: config.slug
+        }
       end
     end) || %{name: "Unknown", provider: nil}
   end
@@ -176,8 +190,8 @@ defmodule DodoRouter.Proxy.Adapter.Registry do
   @spec available_models(String.t()) :: [String.t()]
   def available_models(provider_slug) do
     case Map.get(all_adapters(), provider_slug) do
-      %{models: models} -> models
-      nil -> []
+      %{models: models} when is_list(models) -> models
+      _ -> []
     end
   end
 

@@ -87,6 +87,65 @@ defmodule DodoRouterWeb.SessionLiveTest do
         live(conn, ~p"/routers/#{other_router.id}/sessions")
       end
     end
+
+    test "page 1 shows a working Next link and no Prev link when more pages exist", %{
+      conn: conn,
+      router: router
+    } do
+      for i <- 1..21 do
+        LogsFixtures.log_with_session(router, "session-#{i}")
+      end
+
+      {:ok, live, _html} = live(conn, ~p"/routers/#{router.id}/sessions")
+
+      refute has_element?(live, "#sessions-prev-page")
+      assert has_element?(live, "#sessions-next-page")
+    end
+
+    test "page 2 shows a Prev link", %{conn: conn, router: router} do
+      for i <- 1..21 do
+        LogsFixtures.log_with_session(router, "session-#{i}")
+      end
+
+      {:ok, live, _html} = live(conn, ~p"/routers/#{router.id}/sessions?page=2")
+
+      assert has_element?(live, "#sessions-prev-page")
+    end
+
+    test "receiving a log_created event on page 2 keeps the user on page 2", %{
+      conn: conn,
+      router: router
+    } do
+      for i <- 1..21 do
+        LogsFixtures.log_with_session(router, "session-#{i}")
+      end
+
+      {:ok, live, _html} = live(conn, ~p"/routers/#{router.id}/sessions?page=2")
+
+      assert live |> element("span", "Page 2") |> has_element?()
+
+      send(live.pid, {:log_created, %{}})
+
+      html = render(live)
+      assert html =~ "Page 2"
+      # Page 2 should still show only per_page (20) worth of sessions, not
+      # every session in the router.
+      session_rows = Regex.scan(~r/session-\d+/, html) |> List.flatten() |> Enum.uniq()
+      assert length(session_rows) <= 20
+    end
+
+    test "header shows total session count, not just the current page size", %{
+      conn: conn,
+      router: router
+    } do
+      for i <- 1..21 do
+        LogsFixtures.log_with_session(router, "session-#{i}")
+      end
+
+      {:ok, _live, html} = live(conn, ~p"/routers/#{router.id}/sessions")
+
+      assert html =~ "21 sessions"
+    end
   end
 
   describe "Show" do
@@ -144,6 +203,35 @@ defmodule DodoRouterWeb.SessionLiveTest do
       assert has_element?(live, "#session-cost", "$0")
       assert html =~ "~$12.00"
       assert html =~ "at API rates"
+    end
+
+    test "latency stat shows p95 with p50 subtext, not a bare mean", %{conn: conn, router: router} do
+      session_id = "latency-session"
+
+      for _ <- 1..20 do
+        LogsFixtures.log_with_session(router, session_id, %{latency_ms: 100})
+      end
+
+      LogsFixtures.log_with_session(router, session_id, %{latency_ms: 10_000})
+
+      {:ok, _live, html} = live(conn, ~p"/routers/#{router.id}/sessions/#{session_id}")
+
+      assert html =~ "p95 Latency"
+      refute html =~ "Avg Latency"
+    end
+
+    test "KPI row renders via the shared stat_tile component", %{conn: conn, router: router} do
+      session_id = "stat-tile-session"
+      LogsFixtures.log_with_session(router, session_id)
+
+      {:ok, live, _html} = live(conn, ~p"/routers/#{router.id}/sessions/#{session_id}")
+
+      assert has_element?(live, "#session-requests")
+      assert has_element?(live, "#session-cost")
+      assert has_element?(live, "#session-tokens")
+      assert has_element?(live, "#session-latency")
+      assert has_element?(live, "#session-success")
+      refute has_element?(live, ".stat")
     end
 
     test "allows editing session name", %{conn: conn, router: router} do

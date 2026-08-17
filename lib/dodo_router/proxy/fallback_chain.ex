@@ -37,6 +37,29 @@ defmodule DodoRouter.Proxy.FallbackChain do
   def execute(request, steps, router_id, opts \\ []) do
     stream = Keyword.get(opts, :stream, false)
     send_chunk = Keyword.get(opts, :send_chunk, fn _ -> :ok end)
+
+    # Streaming passthrough is only offered while the wire is untouched: once
+    # any step has streamed content, a later step must reframe into the
+    # message already underway rather than open a second native one. Tracked
+    # in the process because adapters run inline in this process and the flag
+    # has to flip the moment the first chunk goes out.
+    Process.delete(:__chain_wire_touched__)
+
+    # Eval replays wait for the answer they are paying to measure; live
+    # traffic fails over. Set unconditionally so a reused process never
+    # carries the previous dispatch's deadline.
+    Adapter.put_receive_timeout(Keyword.get(opts, :traffic_type))
+
+    send_chunk =
+      if stream do
+        fn data ->
+          Process.put(:__chain_wire_touched__, true)
+          send_chunk.(data)
+        end
+      else
+        send_chunk
+      end
+
     on_step_start = Keyword.get(opts, :on_step_start, fn _ -> :ok end)
     client_headers = Keyword.get(opts, :client_headers, [])
     request_id = Keyword.get(opts, :request_id)
@@ -249,7 +272,10 @@ defmodule DodoRouter.Proxy.FallbackChain do
     if is_nil(api_key) do
       {:error, :auth_error, %{status: nil, body: "Missing API key for #{step.provider}"}}
     else
-      request = apply_passthrough(state, adapter)
+      request =
+        state
+        |> apply_passthrough(adapter)
+        |> apply_stream_passthrough(state, adapter)
 
       if state.stream do
         adapter.stream(request, step, api_key, state.send_chunk, state.client_headers)
@@ -268,6 +294,8 @@ defmodule DodoRouter.Proxy.FallbackChain do
   # Runs before `Fidelity.take/0` in `run_chain/1`, so the record lands in this
   # step's buffer like every other per-step change.
   defp split_response_passthrough({:ok, response, meta}, state, adapter) when is_map(response) do
+    record_unrepresentable_ir_fields(response, state)
+
     case Map.pop(response, Adapter.response_passthrough_key()) do
       {fields, response} when is_map(fields) and map_size(fields) > 0 ->
         if Registry.request_format(adapter) == state.client_format do
@@ -287,6 +315,30 @@ defmodule DodoRouter.Proxy.FallbackChain do
   end
 
   defp split_response_passthrough(result, _state, _adapter), do: result
+
+  # The egress converters' side of channel 3 (dodo_router-2s4): they run in
+  # the controller after the log row's fidelity is harvested, so a field of
+  # the IR itself that the client's format cannot carry has to be recorded
+  # here, inside the step. Today that is exactly one field — another
+  # provider's `reasoning_content`, which neither the Anthropic nor the
+  # Responses egress can represent (an unsigned thinking block would be
+  # rejected the moment the client echoed it back). OpenAI-format clients
+  # receive the IR verbatim, so nothing is lost — and nothing is recorded.
+  defp record_unrepresentable_ir_fields(response, %{client_format: format})
+       when format in [:anthropic, :responses] do
+    case get_in(response, ["choices", Access.at(0), "message", "reasoning_content"]) do
+      reasoning when is_binary(reasoning) and reasoning != "" ->
+        Fidelity.record_dropped_response_fields(
+          %{"reasoning_content" => reasoning},
+          "the #{format} egress has no representation for another provider's reasoning text"
+        )
+
+      _ ->
+        :ok
+    end
+  end
+
+  defp record_unrepresentable_ir_fields(_response, _state), do: :ok
 
   # Fields the ingress converter had no translation for. They are lost at the
   # IR, not at the provider — so a step whose adapter speaks the format the
@@ -314,6 +366,23 @@ defmodule DodoRouter.Proxy.FallbackChain do
   end
 
   defp apply_passthrough(state, _adapter), do: state.request
+
+  # An Anthropic client on an Anthropic step gets the provider's native SSE
+  # events relayed verbatim — thinking blocks, signatures and server-tool
+  # blocks have no representation in the OpenAI reframing (dodo_router-m9w).
+  # Only while the wire is untouched: a fallback step after content has
+  # streamed must join the message already underway, so it reframes as before.
+  # Only the Anthropic adapter implements this today, hence the explicit
+  # `:anthropic` rather than bare format equality.
+  defp apply_stream_passthrough(request, state, adapter) do
+    if state.stream and state.client_format == :anthropic and
+         Registry.request_format(adapter) == :anthropic and
+         Process.get(:__chain_wire_touched__) != true do
+      Map.put(request, Adapter.stream_passthrough_key(), true)
+    else
+      request
+    end
+  end
 
   defp adapter_for(provider) do
     Registry.adapter_for(provider)
@@ -412,7 +481,14 @@ defmodule DodoRouter.Proxy.FallbackChain do
   # `put_new` so a provider that reports its own resolved model (an alias
   # expanding to a dated snapshot, say) still wins.
   defp stamp_serving_model(response, step) when is_map(response) do
-    Map.put_new(response, "model", step.model)
+    case response["model"] do
+      # A provider naming its own resolved model (an alias expanding to a
+      # dated snapshot) wins — but a blank claim is not a claim. "" made
+      # clients fall back to the requested model and persist wrong
+      # provenance exactly when a fallback step fired (dodo_router-bnn).
+      model when is_binary(model) and model != "" -> response
+      _blank -> Map.put(response, "model", step.model)
+    end
   end
 
   defp stamp_serving_model(response, _step), do: response

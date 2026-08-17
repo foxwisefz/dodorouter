@@ -32,13 +32,9 @@ defmodule DodoRouterWeb.SessionLive.Index do
 
   @impl true
   def handle_info({:log_created, _log}, socket) do
-    # Refresh sessions list when new logs come in
-    sessions = Logs.list_sessions(socket.assigns.router, limit: 50)
-
-    {:noreply,
-     socket
-     |> assign(:sessions, sessions)
-     |> assign_cache_verdicts(sessions)}
+    # Refresh the current page when new logs come in, keeping the reader on
+    # whatever page they're on rather than snapping them back to page 1.
+    {:noreply, refetch_sessions(socket)}
   end
 
   def handle_info(_msg, socket), do: {:noreply, socket}
@@ -46,78 +42,98 @@ defmodule DodoRouterWeb.SessionLive.Index do
   @impl true
   def render(assigns) do
     ~H"""
-    <div>
-      <div class="flex items-center justify-between mb-6">
-        <div class="flex items-center gap-2">
-          <.link
-            navigate={~p"/routers/#{@router.id}"}
-            class="btn btn-ghost btn-sm btn-circle"
-            title={"Back to #{@router.name}"}
-          >
-            ←
-          </.link>
-          <div>
-            <h1 class="text-2xl font-bold">Sessions</h1>
-            <p class="text-sm text-base-content/50">{@router.name}</p>
-          </div>
-        </div>
-        <span class="text-sm text-base-content/60">{pluralize(length(@sessions), "session")}</span>
-      </div>
-
-      <div class="space-y-3">
-        <%= for session <- @sessions do %>
-          <a
-            href={~p"/routers/#{@router.id}/sessions/#{session.session_id}"}
-            class="block bg-base-100 border border-base-300 rounded-xl p-4 hover:border-primary transition-colors"
-          >
-            <div class="flex items-center justify-between">
-              <div>
-                <div class="font-mono text-sm text-primary">
-                  {session.session_id}
-                </div>
-                <%= if session.session_name do %>
-                  <div class="text-sm text-base-content/70 mt-1">
-                    {session.session_name}
-                  </div>
-                <% end %>
-                <div
-                  :if={regressed?(@cache_verdicts, session)}
-                  class="flex items-center gap-1.5 mt-1.5 text-xs font-medium text-warning"
-                  title="The cached prefix stopped hitting partway through this session — open it to see where."
-                >
-                  <.icon name="hero-exclamation-triangle" class="size-3.5" /> Cache stopped hitting
-                </div>
-              </div>
-              <div class="text-right text-sm text-base-content/60">
-                <div>{pluralize(session.request_count, "request")}</div>
-                <.session_cost session={session} />
-                <div>{Calendar.strftime(session.last_activity, "%b %d, %H:%M")}</div>
-              </div>
+    <Layouts.app flash={@flash} current_scope={@current_scope}>
+      <div>
+        <div class="flex items-center justify-between mb-6">
+          <div class="flex items-center gap-2">
+            <.link
+              navigate={~p"/routers/#{@router.id}"}
+              class="btn btn-ghost btn-sm btn-circle"
+              title={"Back to #{@router.name}"}
+            >
+              ←
+            </.link>
+            <div>
+              <h1 class="text-2xl font-bold">Sessions</h1>
+              <p class="text-sm text-base-content/50">{@router.name}</p>
             </div>
-          </a>
-        <% end %>
+          </div>
+          <span class="text-sm text-base-content/60">
+            <%= if @session_count > length(@sessions) do %>
+              showing {length(@sessions)} of {pluralize(@session_count, "session")}
+            <% else %>
+              {pluralize(@session_count, "session")}
+            <% end %>
+          </span>
+        </div>
 
-        <%= if Enum.empty?(@sessions) do %>
-          <div class="text-center py-12 text-base-content/50">
-            No sessions yet. Send requests with an
-            <code class="bg-base-200 px-1 rounded">X-Session-Id</code>
-            header to create one.
+        <div class="space-y-3">
+          <%= for session <- @sessions do %>
+            <a
+              href={~p"/routers/#{@router.id}/sessions/#{session.session_id}"}
+              class="block bg-base-100 border border-base-300 rounded-xl p-4 hover:border-primary transition-colors"
+            >
+              <div class="flex items-center justify-between">
+                <div>
+                  <div class="font-mono text-sm text-primary">
+                    {session.session_id}
+                  </div>
+                  <%= if session.session_name do %>
+                    <div class="text-sm text-base-content/70 mt-1">
+                      {session.session_name}
+                    </div>
+                  <% end %>
+                  <div
+                    :if={regressed?(@cache_verdicts, session)}
+                    class="flex items-center gap-1.5 mt-1.5 text-xs font-medium text-warning"
+                    title="The cached prefix stopped hitting partway through this session — open it to see where."
+                  >
+                    <.icon name="hero-exclamation-triangle" class="size-3.5" /> Cache stopped hitting
+                  </div>
+                </div>
+                <div class="text-right text-sm text-base-content/60">
+                  <div>{pluralize(session.request_count, "request")}</div>
+                  <.session_cost session={session} />
+                  <div>{Calendar.strftime(session.last_activity, "%b %d, %H:%M")}</div>
+                </div>
+              </div>
+            </a>
+          <% end %>
+
+          <%= if Enum.empty?(@sessions) do %>
+            <div class="text-center py-12 text-base-content/50">
+              No sessions yet. Send requests with an
+              <code class="bg-base-200 px-1 rounded">X-Session-Id</code>
+              header to create one.
+            </div>
+          <% end %>
+        </div>
+
+        <%= if @page > 1 or length(@sessions) == @per_page do %>
+          <div class="flex justify-center mt-6 gap-2">
+            <%= if @page > 1 do %>
+              <a
+                id="sessions-prev-page"
+                href={~p"/routers/#{@router.id}/sessions?page=#{@page - 1}"}
+                class="btn btn-sm btn-ghost"
+              >
+                ← Prev
+              </a>
+            <% end %>
+            <span class="btn btn-sm btn-disabled">Page {@page}</span>
+            <%= if length(@sessions) == @per_page do %>
+              <a
+                id="sessions-next-page"
+                href={~p"/routers/#{@router.id}/sessions?page=#{@page + 1}"}
+                class="btn btn-sm btn-ghost"
+              >
+                Next →
+              </a>
+            <% end %>
           </div>
         <% end %>
       </div>
-
-      <%= if @page > 1 do %>
-        <div class="flex justify-center mt-6 gap-2">
-          <a href={~p"/routers/#{@router.id}/sessions?page=#{@page - 1}"} class="btn btn-sm btn-ghost">
-            ← Prev
-          </a>
-          <span class="btn btn-sm btn-disabled">Page {@page}</span>
-          <a href={~p"/routers/#{@router.id}/sessions?page=#{@page + 1}"} class="btn btn-sm btn-ghost">
-            Next →
-          </a>
-        </div>
-      <% end %>
-    </div>
+    </Layouts.app>
     """
   end
 
@@ -158,16 +174,27 @@ defmodule DodoRouterWeb.SessionLive.Index do
     page = String.to_integer(params["page"] || "1")
     per_page = 20
 
+    socket
+    |> assign(:page, page)
+    |> assign(:per_page, per_page)
+    |> refetch_sessions()
+  end
+
+  # Refetches the current page of sessions using the page/per_page already on
+  # the socket, so a mid-session refresh (e.g. from :log_created) doesn't
+  # bounce the reader back to page 1 or hand them every session in the router.
+  defp refetch_sessions(socket) do
+    %{page: page, per_page: per_page, router: router} = socket.assigns
+
     sessions =
-      Logs.list_sessions(socket.assigns.router,
+      Logs.list_sessions(router,
         limit: per_page,
         offset: (page - 1) * per_page
       )
 
     socket
     |> assign(:sessions, sessions)
-    |> assign(:page, page)
-    |> assign(:per_page, per_page)
+    |> assign(:session_count, Logs.count_sessions(router))
     |> assign_cache_verdicts(sessions)
   end
 

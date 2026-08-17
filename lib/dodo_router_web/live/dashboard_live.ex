@@ -142,14 +142,23 @@ defmodule DodoRouterWeb.DashboardLive do
 
     provider_colors = provider_color_map(spend_ts.series, by_provider)
 
+    stats = Logs.stats(router, hours: hours)
+    latency_percentiles = Logs.latency_percentiles(router, hours: hours)
+    # Period-over-period comparison window: same length, immediately before
+    # the current one (e.g. the 24h before the current 24h).
+    prev_stats = Logs.stats(router, hours: hours, offset_hours: hours)
+    prev_latency_percentiles = Logs.latency_percentiles(router, hours: hours, offset_hours: hours)
+
     socket
-    |> assign(:stats, Logs.stats(router, hours: hours))
+    |> assign(:stats, stats)
+    |> assign(:prev_stats, prev_stats)
+    |> assign(:prev_latency_percentiles, prev_latency_percentiles)
     |> assign(
       :stats_by_provider,
       Enum.sort_by(by_provider, &decimal_float(total_cost(&1, basis)), :desc)
     )
     |> assign_recent_sessions(router, hours)
-    |> assign(:latency_percentiles, Logs.latency_percentiles(router, hours: hours))
+    |> assign(:latency_percentiles, latency_percentiles)
     |> assign(:cache_stats, Logs.cache_stats(router, hours: hours))
     |> assign(:spend_by_model, Logs.spend_by_model(router, hours: hours))
     |> assign(:bucket_labels, Enum.map(timeseries, &bucket_label(&1.bucket, bucket)))
@@ -281,394 +290,412 @@ defmodule DodoRouterWeb.DashboardLive do
     assigns = assign(assigns, :range_order, @range_order)
 
     ~H"""
-    <div>
-      <div class="mb-6">
-        <div class="flex items-center gap-3 mb-1">
-          <h1 class="text-lg font-semibold text-base-content">Router Overview</h1>
-          <div
-            :if={@selected_router}
-            class="flex items-center gap-1.5 rounded-full bg-green-50 px-2.5 py-0.5"
-          >
-            <span class="h-1.5 w-1.5 rounded-full bg-success"></span>
-            <span class="text-xs font-semibold text-success">Live</span>
-          </div>
-        </div>
-        <p :if={@selected_router} class="text-sm text-base-content/50">
-          {@selected_router.name}
-        </p>
-      </div>
-
-      <%= if length(@routers) > 0 do %>
-        <div class="flex items-center gap-2 mb-4 overflow-x-auto pb-1">
-          <%= for {router, idx} <- Enum.with_index(@routers) do %>
-            <% color = router_color(idx) %>
-            <button
-              phx-click="select_router"
-              phx-value-router_id={router.id}
-              class={[
-                "flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-all duration-150 shrink-0",
-                @selected_router && router.id == @selected_router.id &&
-                  "bg-accent text-accent-content shadow-sm",
-                (!@selected_router || router.id != @selected_router.id) &&
-                  "bg-base-100 border border-base-300/50 text-base-content/70 hover:bg-secondary hover:border-base-300"
-              ]}
-            >
-              <span class={[
-                "flex h-5 w-5 items-center justify-center rounded text-xs font-bold shrink-0",
-                color == "blue" && "bg-blue-100 text-blue-700",
-                color == "purple" && "bg-purple-100 text-purple-700",
-                color == "amber" && "bg-amber-100 text-amber-700",
-                color == "rose" && "bg-rose-100 text-rose-700",
-                color == "emerald" && "bg-emerald-100 text-emerald-700",
-                color == "sky" && "bg-sky-100 text-sky-700",
-                color == "orange" && "bg-orange-100 text-orange-700",
-                color == "indigo" && "bg-indigo-100 text-indigo-700"
-              ]}>
-                {String.upcase(String.first(router.name))}
-              </span>
-              <span class="truncate max-w-[120px]">{router.name}</span>
-            </button>
-          <% end %>
-        </div>
-      <% end %>
-
-      <%= if @selected_router && @stats do %>
-        <div class="flex items-center justify-between mb-4">
-          <div
-            id="range-picker"
-            class="inline-flex items-center rounded-lg border border-base-300/50 bg-base-100 p-0.5"
-          >
-            <button
-              :for={range <- @range_order}
-              phx-click="select_range"
-              phx-value-range={range}
-              class={[
-                "rounded-md px-3 py-1 text-xs font-semibold transition-colors",
-                @range == range && "bg-accent text-accent-content shadow-sm",
-                @range != range && "text-base-content/60 hover:text-base-content"
-              ]}
-            >
-              {range}
-            </button>
-          </div>
-          <div class="flex items-center gap-3">
+    <Layouts.app flash={@flash} current_scope={@current_scope}>
+      <div>
+        <div class="mb-6">
+          <div class="flex items-center gap-3 mb-1">
+            <h1 class="text-lg font-semibold text-base-content">Router Overview</h1>
             <div
-              :if={has_list_pricing?(@stats)}
-              id="cost-basis-picker"
+              :if={@selected_router}
+              class="flex items-center gap-1.5 rounded-full bg-green-50 px-2.5 py-0.5"
+            >
+              <span class="h-1.5 w-1.5 rounded-full bg-success"></span>
+              <span class="text-xs font-semibold text-success">Live</span>
+            </div>
+          </div>
+          <p :if={@selected_router} class="text-sm text-base-content/50">
+            {@selected_router.name}
+          </p>
+        </div>
+
+        <%= if length(@routers) > 0 do %>
+          <div class="flex items-center gap-2 mb-4 overflow-x-auto pb-1">
+            <%= for {router, idx} <- Enum.with_index(@routers) do %>
+              <% color = router_color(idx) %>
+              <button
+                phx-click="select_router"
+                phx-value-router_id={router.id}
+                class={[
+                  "flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-all duration-150 shrink-0",
+                  @selected_router && router.id == @selected_router.id &&
+                    "bg-accent text-accent-content shadow-sm",
+                  (!@selected_router || router.id != @selected_router.id) &&
+                    "bg-base-100 border border-base-300/50 text-base-content/70 hover:bg-secondary hover:border-base-300"
+                ]}
+              >
+                <span class={[
+                  "flex h-5 w-5 items-center justify-center rounded text-xs font-bold shrink-0",
+                  color == "blue" && "bg-blue-100 text-blue-700",
+                  color == "purple" && "bg-purple-100 text-purple-700",
+                  color == "amber" && "bg-amber-100 text-amber-700",
+                  color == "rose" && "bg-rose-100 text-rose-700",
+                  color == "emerald" && "bg-emerald-100 text-emerald-700",
+                  color == "sky" && "bg-sky-100 text-sky-700",
+                  color == "orange" && "bg-orange-100 text-orange-700",
+                  color == "indigo" && "bg-indigo-100 text-indigo-700"
+                ]}>
+                  {String.upcase(String.first(router.name))}
+                </span>
+                <span class="truncate max-w-[120px]">{router.name}</span>
+              </button>
+            <% end %>
+          </div>
+        <% end %>
+
+        <%= if @selected_router && @stats do %>
+          <div class="flex items-center justify-between mb-4">
+            <div
+              id="range-picker"
               class="inline-flex items-center rounded-lg border border-base-300/50 bg-base-100 p-0.5"
             >
               <button
-                :for={{basis, label} <- [{"actual", "Actual"}, {"list", "List price"}]}
-                phx-click="cost_basis"
-                phx-value-basis={basis}
-                title="Actual: what plan/API traffic really cost. List price: what the same tokens would cost at pay-as-you-go rates."
+                :for={range <- @range_order}
+                phx-click="select_range"
+                phx-value-range={range}
                 class={[
                   "rounded-md px-3 py-1 text-xs font-semibold transition-colors",
-                  @cost_basis == basis && "bg-accent text-accent-content shadow-sm",
-                  @cost_basis != basis && "text-base-content/60 hover:text-base-content"
+                  @range == range && "bg-accent text-accent-content shadow-sm",
+                  @range != range && "text-base-content/60 hover:text-base-content"
                 ]}
               >
-                {label}
+                {range}
               </button>
             </div>
-            <p class="text-xs text-base-content/40">{range_subtitle(@range)}</p>
-          </div>
-        </div>
-
-        <div class={[
-          "transition-opacity duration-200",
-          @loading && "opacity-50"
-        ]}>
-          <div class="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3 mb-4">
-            <Charts.stat_tile
-              id="kpi-spend"
-              label={if @cost_basis == "list", do: "List Value", else: "Total Spend"}
-              value={Charts.format_usd(stats_cost(@stats, @cost_basis))}
-              subtext={spend_subtext(@stats, @cost_basis)}
-              spark={Enum.map(@timeseries, &decimal_float(bucket_cost(&1, @cost_basis)))}
-            />
-            <Charts.stat_tile
-              id="kpi-requests"
-              label="Requests"
-              value={Charts.format_compact(@stats.total_requests)}
-              subtext={"#{Charts.format_compact(@stats.successful_requests)} ok · #{Charts.format_compact(@stats.error_requests)} failed"}
-              spark={Enum.map(@timeseries, & &1.total)}
-            />
-            <Charts.stat_tile
-              id="kpi-success"
-              label="Success Rate"
-              value={success_rate(@stats)}
-              value_class={success_color(@stats)}
-              subtext={
-                if @stats.fallback_requests > 0,
-                  do: "#{@stats.fallback_requests} recovered by fallback",
-                  else: "No fallbacks needed"
-              }
-            />
-            <Charts.stat_tile
-              id="kpi-latency"
-              label="p95 Latency"
-              value={Charts.format_ms(@latency_percentiles.p95)}
-              subtext={"p50 #{Charts.format_ms(@latency_percentiles.p50)}"}
-            />
-            <Charts.stat_tile
-              id="kpi-tokens"
-              label="Total Tokens"
-              value={Charts.format_compact(@stats.total_tokens)}
-              subtext={"#{Charts.format_compact(@stats.prompt_tokens)} in / #{Charts.format_compact(@stats.completion_tokens)} out"}
-            />
-            <Charts.stat_tile
-              id="kpi-cache"
-              label="Cache Hit Rate"
-              value={if @cache_stats.hit_rate > 0, do: "#{@cache_stats.hit_rate}%", else: "-"}
-              subtext={
-                if @cache_stats.cache_read_tokens > 0,
-                  do: "#{Charts.format_compact(@cache_stats.cache_read_tokens)} tokens from cache",
-                  else: "No cache data"
-              }
-            />
-          </div>
-
-          <div class="rounded-lg border border-base-300/50 bg-base-100 p-4 mb-4">
-            <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
-              <div>
-                <p class="text-sm font-semibold text-base-content">Spend</p>
-                <p class="text-xs text-base-content/40">
-                  {if @cost_basis == "list", do: "List price", else: "Actual spend"} by provider, {String.downcase(
-                    range_subtitle(@range)
-                  )}
-                </p>
+            <div class="flex items-center gap-3">
+              <div
+                :if={has_list_pricing?(@stats)}
+                id="cost-basis-picker"
+                class="inline-flex items-center rounded-lg border border-base-300/50 bg-base-100 p-0.5"
+              >
+                <button
+                  :for={{basis, label} <- [{"actual", "Actual"}, {"list", "List price"}]}
+                  phx-click="cost_basis"
+                  phx-value-basis={basis}
+                  title="Actual: what plan/API traffic really cost. List price: what the same tokens would cost at pay-as-you-go rates."
+                  class={[
+                    "rounded-md px-3 py-1 text-xs font-semibold transition-colors",
+                    @cost_basis == basis && "bg-accent text-accent-content shadow-sm",
+                    @cost_basis != basis && "text-base-content/60 hover:text-base-content"
+                  ]}
+                >
+                  {label}
+                </button>
               </div>
-              <div class="flex items-center gap-3">
-                <Charts.legend :if={length(@spend_series) > 1} series={@spend_series} />
-                <div class="inline-flex items-center rounded-lg border border-base-300/50 p-0.5">
-                  <button
-                    :for={{view, label} <- [{"chart", "Chart"}, {"table", "Table"}]}
-                    phx-click="spend_view"
-                    phx-value-view={view}
-                    class={[
-                      "rounded-md px-2 py-0.5 text-xs font-medium transition-colors",
-                      @spend_view == view && "bg-secondary text-base-content",
-                      @spend_view != view && "text-base-content/50 hover:text-base-content"
-                    ]}
-                  >
-                    {label}
-                  </button>
+              <p class="text-xs text-base-content/40">{range_subtitle(@range)}</p>
+            </div>
+          </div>
+
+          <div class={[
+            "transition-opacity duration-200",
+            @loading && "opacity-50"
+          ]}>
+            <div class="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3 mb-4">
+              <Charts.stat_tile
+                id="kpi-spend"
+                label={if @cost_basis == "list", do: "List Value", else: "Total Spend"}
+                value={Charts.format_usd(stats_cost(@stats, @cost_basis))}
+                subtext={spend_subtext(@stats, @cost_basis)}
+                spark={Enum.map(@timeseries, &decimal_float(bucket_cost(&1, @cost_basis)))}
+                delta={spend_delta(@stats, @prev_stats, @cost_basis, @range)}
+              />
+              <Charts.stat_tile
+                id="kpi-requests"
+                label="Requests"
+                value={Charts.format_compact(@stats.total_requests)}
+                subtext={"#{Charts.format_compact(@stats.successful_requests)} ok · #{Charts.format_compact(@stats.error_requests)} failed"}
+                spark={Enum.map(@timeseries, & &1.total)}
+                delta={requests_delta(@stats, @prev_stats, @range)}
+              />
+              <Charts.stat_tile
+                id="kpi-success"
+                label="Success Rate"
+                value={success_rate(@stats)}
+                value_class={success_color(@stats)}
+                subtext={
+                  if @stats.fallback_requests > 0,
+                    do: "#{@stats.fallback_requests} recovered by fallback",
+                    else: "No fallbacks needed"
+                }
+                delta={success_rate_delta(@stats, @prev_stats, @range)}
+              />
+              <Charts.stat_tile
+                id="kpi-latency"
+                label="p95 Latency"
+                value={Charts.format_ms(@latency_percentiles.p95)}
+                subtext={"p50 #{Charts.format_ms(@latency_percentiles.p50)}"}
+                delta={latency_delta(@latency_percentiles, @prev_latency_percentiles, @range)}
+              />
+              <Charts.stat_tile
+                id="kpi-tokens"
+                label="Total Tokens"
+                value={Charts.format_compact(@stats.total_tokens)}
+                subtext={"#{Charts.format_compact(@stats.prompt_tokens)} in / #{Charts.format_compact(@stats.completion_tokens)} out"}
+              />
+              <Charts.stat_tile
+                id="kpi-cache"
+                label="Cache Hit Rate"
+                value={if @cache_stats.hit_rate > 0, do: "#{@cache_stats.hit_rate}%", else: "-"}
+                subtext={
+                  if @cache_stats.cache_read_tokens > 0,
+                    do: "#{Charts.format_compact(@cache_stats.cache_read_tokens)} tokens from cache",
+                    else: "No cache data"
+                }
+              />
+            </div>
+
+            <div class="rounded-lg border border-base-300/50 bg-base-100 p-4 mb-4">
+              <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
+                <div>
+                  <p class="text-sm font-semibold text-base-content">Spend</p>
+                  <p class="text-xs text-base-content/40">
+                    {if @cost_basis == "list", do: "List price", else: "Actual spend"} by provider, {String.downcase(
+                      range_subtitle(@range)
+                    )}
+                  </p>
+                </div>
+                <div class="flex items-center gap-3">
+                  <Charts.legend :if={length(@spend_series) > 1} series={@spend_series} />
+                  <div class="inline-flex items-center rounded-lg border border-base-300/50 p-0.5">
+                    <button
+                      :for={{view, label} <- [{"chart", "Chart"}, {"table", "Table"}]}
+                      phx-click="spend_view"
+                      phx-value-view={view}
+                      class={[
+                        "rounded-md px-2 py-0.5 text-xs font-medium transition-colors",
+                        @spend_view == view && "bg-secondary text-base-content",
+                        @spend_view != view && "text-base-content/50 hover:text-base-content"
+                      ]}
+                    >
+                      {label}
+                    </button>
+                  </div>
                 </div>
               </div>
+              <%= if @spend_view == "chart" do %>
+                <Charts.column_chart
+                  id="spend-chart"
+                  labels={@bucket_labels}
+                  series={@spend_series}
+                  unit={:usd}
+                  height={210}
+                  empty_label="No spend recorded in this range"
+                />
+              <% else %>
+                <div class="max-h-64 overflow-y-auto">
+                  <table class="w-full text-left text-sm">
+                    <thead class="sticky top-0 bg-base-100">
+                      <tr class="border-b border-base-300/50">
+                        <th class="py-1.5 pr-4 text-xs font-medium text-base-content/50">Time</th>
+                        <th
+                          :for={s <- @spend_series}
+                          class="py-1.5 pr-4 text-xs font-medium text-base-content/50"
+                        >
+                          {s.name}
+                        </th>
+                        <th class="py-1.5 text-xs font-medium text-base-content/50">Total</th>
+                      </tr>
+                    </thead>
+                    <tbody class="divide-y divide-base-300/30">
+                      <tr :for={{label, idx} <- Enum.with_index(@bucket_labels)}>
+                        <td class="py-1.5 pr-4 font-mono text-xs text-base-content/50">{label}</td>
+                        <td :for={s <- @spend_series} class="py-1.5 pr-4 tabular-nums text-xs">
+                          {Charts.format_usd(Enum.at(s.values, idx))}
+                        </td>
+                        <td class="py-1.5 tabular-nums text-xs font-semibold">
+                          {Charts.format_usd(
+                            Enum.sum(Enum.map(@spend_series, &(Enum.at(&1.values, idx) || 0)))
+                          )}
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              <% end %>
             </div>
-            <%= if @spend_view == "chart" do %>
-              <Charts.column_chart
-                id="spend-chart"
-                labels={@bucket_labels}
-                series={@spend_series}
-                unit={:usd}
-                height={210}
-                empty_label="No spend recorded in this range"
-              />
-            <% else %>
-              <div class="max-h-64 overflow-y-auto">
-                <table class="w-full text-left text-sm">
-                  <thead class="sticky top-0 bg-base-100">
+
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-3 mb-4">
+              <div class="rounded-lg border border-base-300/50 bg-base-100 p-4">
+                <div class="flex items-center justify-between mb-3">
+                  <div>
+                    <p class="text-sm font-semibold text-base-content">Requests</p>
+                    <p class="text-xs text-base-content/40">By outcome</p>
+                  </div>
+                  <Charts.legend series={status_series(@timeseries)} />
+                </div>
+                <Charts.column_chart
+                  id="requests-chart"
+                  labels={@bucket_labels}
+                  series={status_series(@timeseries)}
+                  unit={:count}
+                  height={170}
+                />
+              </div>
+
+              <div class="rounded-lg border border-base-300/50 bg-base-100 p-4">
+                <div class="flex items-center justify-between mb-3">
+                  <div>
+                    <p class="text-sm font-semibold text-base-content">Latency</p>
+                    <p class="text-xs text-base-content/40">Percentiles per bucket</p>
+                  </div>
+                  <Charts.legend series={@latency_series} kind={:line} />
+                </div>
+                <Charts.line_chart
+                  id="latency-chart"
+                  labels={@bucket_labels}
+                  series={@latency_series}
+                  unit={:ms}
+                  height={170}
+                />
+              </div>
+            </div>
+
+            <div class="grid grid-cols-1 lg:grid-cols-5 gap-3 mb-4">
+              <div class="rounded-lg border border-base-300/50 bg-base-100 p-4 lg:col-span-2">
+                <div class="mb-3">
+                  <p class="text-sm font-semibold text-base-content">Spend by Model</p>
+                  <p class="text-xs text-base-content/40">Top models by cost</p>
+                </div>
+                <Charts.hbar_list
+                  id="model-spend"
+                  rows={model_rows(@spend_by_model, @cost_basis)}
+                  empty_label="No model spend in this range"
+                />
+              </div>
+
+              <div class="rounded-lg border border-base-300/50 bg-base-100 p-4 lg:col-span-3">
+                <div class="mb-3">
+                  <p class="text-sm font-semibold text-base-content">Providers</p>
+                  <p class="text-xs text-base-content/40">Share of spend and reliability</p>
+                </div>
+                <Charts.share_bar id="provider-share" segments={provider_segments(assigns)} />
+                <table class="mt-3 w-full text-left text-sm">
+                  <thead>
                     <tr class="border-b border-base-300/50">
-                      <th class="py-1.5 pr-4 text-xs font-medium text-base-content/50">Time</th>
-                      <th
-                        :for={s <- @spend_series}
-                        class="py-1.5 pr-4 text-xs font-medium text-base-content/50"
-                      >
-                        {s.name}
+                      <th class="py-1.5 pr-3 text-xs font-medium text-base-content/50">Provider</th>
+                      <th class="py-1.5 pr-3 text-xs font-medium text-base-content/50">Spend</th>
+                      <th class="py-1.5 pr-3 text-xs font-medium text-base-content/50">Requests</th>
+                      <th class="py-1.5 pr-3 text-xs font-medium text-base-content/50">Errors</th>
+                      <th class="py-1.5 pr-3 text-xs font-medium text-base-content/50 hidden sm:table-cell">
+                        Tokens
                       </th>
-                      <th class="py-1.5 text-xs font-medium text-base-content/50">Total</th>
+                      <th class="py-1.5 text-xs font-medium text-base-content/50 hidden md:table-cell">
+                        Avg Latency
+                      </th>
                     </tr>
                   </thead>
                   <tbody class="divide-y divide-base-300/30">
-                    <tr :for={{label, idx} <- Enum.with_index(@bucket_labels)}>
-                      <td class="py-1.5 pr-4 font-mono text-xs text-base-content/50">{label}</td>
-                      <td :for={s <- @spend_series} class="py-1.5 pr-4 tabular-nums text-xs">
-                        {Charts.format_usd(Enum.at(s.values, idx))}
+                    <tr :for={p <- @stats_by_provider}>
+                      <td class="py-2 pr-3">
+                        <div class="flex items-center gap-2">
+                          <span
+                            class="h-2.5 w-2.5 shrink-0 rounded-sm"
+                            style={"background: #{@provider_colors[p.provider]}"}
+                          >
+                          </span>
+                          <div class="flex h-4 w-4 shrink-0 items-center justify-center rounded bg-base-200">
+                            <.provider_logo slug={normalize_slug(p.provider)} class="h-3 w-3" />
+                          </div>
+                          <span class="font-medium text-base-content">{p.provider}</span>
+                        </div>
                       </td>
-                      <td class="py-1.5 tabular-nums text-xs font-semibold">
-                        {Charts.format_usd(
-                          Enum.sum(Enum.map(@spend_series, &(Enum.at(&1.values, idx) || 0)))
-                        )}
+                      <td class="py-2 pr-3 tabular-nums font-semibold">
+                        {Charts.format_usd(total_cost(p, @cost_basis))}
+                      </td>
+                      <td class="py-2 pr-3 tabular-nums text-base-content/70">
+                        {Charts.format_compact(p.total_requests)}
+                      </td>
+                      <td class={[
+                        "py-2 pr-3 tabular-nums",
+                        p.error_requests > 0 && "text-error font-medium",
+                        p.error_requests == 0 && "text-base-content/40"
+                      ]}>
+                        {p.error_requests}
+                      </td>
+                      <td class="py-2 pr-3 tabular-nums text-base-content/70 hidden sm:table-cell">
+                        {Charts.format_compact(p.total_tokens)}
+                      </td>
+                      <td class="py-2 tabular-nums text-base-content/70 hidden md:table-cell">
+                        {Charts.format_ms(p.avg_latency_ms)}
+                      </td>
+                    </tr>
+                    <tr :if={@stats_by_provider == []}>
+                      <td colspan="6" class="py-6 text-center text-xs text-base-content/40">
+                        No provider traffic in this range
                       </td>
                     </tr>
                   </tbody>
                 </table>
               </div>
-            <% end %>
-          </div>
+            </div>
 
-          <div class="grid grid-cols-1 lg:grid-cols-2 gap-3 mb-4">
-            <div class="rounded-lg border border-base-300/50 bg-base-100 p-4">
-              <div class="flex items-center justify-between mb-3">
-                <div>
-                  <p class="text-sm font-semibold text-base-content">Requests</p>
-                  <p class="text-xs text-base-content/40">By outcome</p>
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-3">
+              <div class="rounded-lg border border-base-300/50 bg-base-100 overflow-hidden lg:col-span-2">
+                <div class="flex items-center justify-between border-b border-base-300/50 px-4 py-2.5">
+                  <p class="text-sm font-semibold text-base-content">Recent Requests</p>
+                  <div class="flex items-center gap-3">
+                    <span class="flex items-center gap-1.5 text-xs text-base-content/40">
+                      <span class="h-1.5 w-1.5 rounded-full bg-accent animate-soft-pulse"></span>
+                      Streaming
+                    </span>
+                    <.link
+                      navigate={~p"/logs?router_id=#{@selected_router.id}"}
+                      class="text-xs text-primary hover:underline"
+                    >
+                      View all
+                    </.link>
+                  </div>
                 </div>
-                <Charts.legend series={status_series(@timeseries)} />
-              </div>
-              <Charts.column_chart
-                id="requests-chart"
-                labels={@bucket_labels}
-                series={status_series(@timeseries)}
-                unit={:count}
-                height={170}
-              />
-            </div>
-
-            <div class="rounded-lg border border-base-300/50 bg-base-100 p-4">
-              <div class="flex items-center justify-between mb-3">
-                <div>
-                  <p class="text-sm font-semibold text-base-content">Latency</p>
-                  <p class="text-xs text-base-content/40">Percentiles per bucket</p>
-                </div>
-                <Charts.legend series={@latency_series} kind={:line} />
-              </div>
-              <Charts.line_chart
-                id="latency-chart"
-                labels={@bucket_labels}
-                series={@latency_series}
-                unit={:ms}
-                height={170}
-              />
-            </div>
-          </div>
-
-          <div class="grid grid-cols-1 lg:grid-cols-5 gap-3 mb-4">
-            <div class="rounded-lg border border-base-300/50 bg-base-100 p-4 lg:col-span-2">
-              <div class="mb-3">
-                <p class="text-sm font-semibold text-base-content">Spend by Model</p>
-                <p class="text-xs text-base-content/40">Top models by cost</p>
-              </div>
-              <Charts.hbar_list
-                id="model-spend"
-                rows={model_rows(@spend_by_model, @cost_basis)}
-                empty_label="No model spend in this range"
-              />
-            </div>
-
-            <div class="rounded-lg border border-base-300/50 bg-base-100 p-4 lg:col-span-3">
-              <div class="mb-3">
-                <p class="text-sm font-semibold text-base-content">Providers</p>
-                <p class="text-xs text-base-content/40">Share of spend and reliability</p>
-              </div>
-              <Charts.share_bar id="provider-share" segments={provider_segments(assigns)} />
-              <table class="mt-3 w-full text-left text-sm">
-                <thead>
-                  <tr class="border-b border-base-300/50">
-                    <th class="py-1.5 pr-3 text-xs font-medium text-base-content/50">Provider</th>
-                    <th class="py-1.5 pr-3 text-xs font-medium text-base-content/50">Spend</th>
-                    <th class="py-1.5 pr-3 text-xs font-medium text-base-content/50">Requests</th>
-                    <th class="py-1.5 pr-3 text-xs font-medium text-base-content/50">Errors</th>
-                    <th class="py-1.5 pr-3 text-xs font-medium text-base-content/50 hidden sm:table-cell">
-                      Tokens
-                    </th>
-                    <th class="py-1.5 text-xs font-medium text-base-content/50 hidden md:table-cell">
-                      Avg Latency
-                    </th>
-                  </tr>
-                </thead>
-                <tbody class="divide-y divide-base-300/30">
-                  <tr :for={p <- @stats_by_provider}>
-                    <td class="py-2 pr-3">
-                      <div class="flex items-center gap-2">
-                        <span
-                          class="h-2.5 w-2.5 shrink-0 rounded-sm"
-                          style={"background: #{@provider_colors[p.provider]}"}
-                        >
-                        </span>
-                        <div class="flex h-4 w-4 shrink-0 items-center justify-center rounded bg-base-200">
-                          <.provider_logo slug={normalize_slug(p.provider)} class="h-3 w-3" />
-                        </div>
-                        <span class="font-medium text-base-content">{p.provider}</span>
-                      </div>
-                    </td>
-                    <td class="py-2 pr-3 tabular-nums font-semibold">
-                      {Charts.format_usd(total_cost(p, @cost_basis))}
-                    </td>
-                    <td class="py-2 pr-3 tabular-nums text-base-content/70">
-                      {Charts.format_compact(p.total_requests)}
-                    </td>
-                    <td class={[
-                      "py-2 pr-3 tabular-nums",
-                      p.error_requests > 0 && "text-error font-medium",
-                      p.error_requests == 0 && "text-base-content/40"
-                    ]}>
-                      {p.error_requests}
-                    </td>
-                    <td class="py-2 pr-3 tabular-nums text-base-content/70 hidden sm:table-cell">
-                      {Charts.format_compact(p.total_tokens)}
-                    </td>
-                    <td class="py-2 tabular-nums text-base-content/70 hidden md:table-cell">
-                      {Charts.format_ms(p.avg_latency_ms)}
-                    </td>
-                  </tr>
-                  <tr :if={@stats_by_provider == []}>
-                    <td colspan="6" class="py-6 text-center text-xs text-base-content/40">
-                      No provider traffic in this range
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-          <div class="grid grid-cols-1 lg:grid-cols-3 gap-3">
-            <div class="rounded-lg border border-base-300/50 bg-base-100 overflow-hidden lg:col-span-2">
-              <div class="flex items-center justify-between border-b border-base-300/50 px-4 py-2.5">
-                <p class="text-sm font-semibold text-base-content">Recent Requests</p>
-                <div class="flex items-center gap-3">
-                  <span class="flex items-center gap-1.5 text-xs text-base-content/40">
-                    <span class="h-1.5 w-1.5 rounded-full bg-accent animate-soft-pulse"></span>
-                    Streaming
-                  </span>
-                  <.link
-                    navigate={~p"/logs?router_id=#{@selected_router.id}"}
-                    class="text-xs text-primary hover:underline"
-                  >
-                    View all
-                  </.link>
-                </div>
-              </div>
-              <table class="w-full text-left">
-                <thead>
-                  <tr class="border-b border-base-300/50 bg-secondary/30">
-                    <th class="px-4 py-2 text-xs font-medium text-base-content/50">Time</th>
-                    <th class="px-4 py-2 text-xs font-medium text-base-content/50">Status</th>
-                    <th class="px-4 py-2 text-xs font-medium text-base-content/50 hidden sm:table-cell">
-                      Provider / Model
-                    </th>
-                    <th class="px-4 py-2 text-xs font-medium text-base-content/50 hidden md:table-cell">
-                      Cost
-                    </th>
-                    <th class="px-4 py-2 text-xs font-medium text-base-content/50">Latency</th>
-                  </tr>
-                </thead>
-                <tbody class="divide-y divide-base-300/30">
-                  <%= for log <- @recent_logs do %>
-                    <tr class="hover:bg-secondary/20 transition-colors">
-                      <td class="px-4 py-2 text-sm font-mono text-base-content/50">
-                        {format_time(log.inserted_at)}
-                      </td>
-                      <td class="px-4 py-2">
-                        <span class={[
-                          "rounded-full px-2 py-0.5 text-xs font-semibold",
-                          log.status == "success" && "bg-green-50 text-success",
-                          log.status == "fallback" && "bg-amber-50 text-warning",
-                          log.status == "error" && "bg-red-50 text-error",
-                          log.status == "pending" && "bg-secondary text-base-content/50"
-                        ]}>
-                          {log.status}
-                        </span>
-                      </td>
-                      <td class="px-4 py-2 text-sm hidden sm:table-cell">
-                        <%= if is_list(Map.get(log, :attempted_steps)) and length(log.attempted_steps) > 1 do %>
-                          <div class="flex items-center gap-1">
-                            <span class="line-through text-base-content/30">
-                              {List.first(log.attempted_steps)["provider"]}
-                            </span>
-                            <span class="text-base-content/30 mx-1">&rarr;</span>
+                <table class="w-full text-left">
+                  <thead>
+                    <tr class="border-b border-base-300/50 bg-secondary/30">
+                      <th class="px-4 py-2 text-xs font-medium text-base-content/50">Time</th>
+                      <th class="px-4 py-2 text-xs font-medium text-base-content/50">Status</th>
+                      <th class="px-4 py-2 text-xs font-medium text-base-content/50 hidden sm:table-cell">
+                        Provider / Model
+                      </th>
+                      <th class="px-4 py-2 text-xs font-medium text-base-content/50 hidden md:table-cell">
+                        Cost
+                      </th>
+                      <th class="px-4 py-2 text-xs font-medium text-base-content/50">Latency</th>
+                    </tr>
+                  </thead>
+                  <tbody class="divide-y divide-base-300/30">
+                    <%= for log <- @recent_logs do %>
+                      <tr class="hover:bg-secondary/20 transition-colors">
+                        <td class="px-4 py-2 text-sm font-mono text-base-content/50">
+                          {format_time(log.inserted_at)}
+                        </td>
+                        <td class="px-4 py-2">
+                          <span class={[
+                            "rounded-full px-2 py-0.5 text-xs font-semibold",
+                            log.status == "success" && "bg-green-50 text-success",
+                            log.status == "fallback" && "bg-amber-50 text-warning",
+                            log.status == "error" && "bg-red-50 text-error",
+                            log.status == "pending" && "bg-secondary text-base-content/50"
+                          ]}>
+                            {log.status}
+                          </span>
+                        </td>
+                        <td class="px-4 py-2 text-sm hidden sm:table-cell">
+                          <%= if is_list(Map.get(log, :attempted_steps)) and length(log.attempted_steps) > 1 do %>
+                            <div class="flex items-center gap-1">
+                              <span class="line-through text-base-content/30">
+                                {List.first(log.attempted_steps)["provider"]}
+                              </span>
+                              <span class="text-base-content/30 mx-1">&rarr;</span>
+                              <div class="flex items-center gap-1.5">
+                                <div class="w-3.5 h-3.5 rounded flex items-center justify-center shrink-0 bg-base-200">
+                                  <.provider_logo
+                                    slug={normalize_slug(log.final_provider)}
+                                    class="w-2.5 h-2.5"
+                                  />
+                                </div>
+                                <span class="font-medium text-base-content">
+                                  {log.final_provider} / {log.final_model}
+                                </span>
+                              </div>
+                            </div>
+                          <% else %>
                             <div class="flex items-center gap-1.5">
                               <div class="w-3.5 h-3.5 rounded flex items-center justify-center shrink-0 bg-base-200">
                                 <.provider_logo
@@ -676,192 +703,183 @@ defmodule DodoRouterWeb.DashboardLive do
                                   class="w-2.5 h-2.5"
                                 />
                               </div>
-                              <span class="font-medium text-base-content">
-                                {log.final_provider} / {log.final_model}
-                              </span>
+                              <span class="font-medium text-base-content">{log.final_provider}</span>
+                              <span class="text-base-content/40"> / </span>
+                              <span class="text-base-content/60">{log.final_model}</span>
                             </div>
-                          </div>
-                        <% else %>
-                          <div class="flex items-center gap-1.5">
-                            <div class="w-3.5 h-3.5 rounded flex items-center justify-center shrink-0 bg-base-200">
-                              <.provider_logo
-                                slug={normalize_slug(log.final_provider)}
-                                class="w-2.5 h-2.5"
-                              />
-                            </div>
-                            <span class="font-medium text-base-content">{log.final_provider}</span>
-                            <span class="text-base-content/40"> / </span>
-                            <span class="text-base-content/60">{log.final_model}</span>
-                          </div>
-                        <% end %>
-                      </td>
-                      <td class="px-4 py-2 text-sm font-mono text-base-content/50 hidden md:table-cell">
-                        {if log_cost(log, @cost_basis),
-                          do: Charts.format_usd(log_cost(log, @cost_basis)),
-                          else: "-"}
-                      </td>
-                      <td class="px-4 py-2 text-sm font-mono text-base-content/50">
-                        {if Map.get(log, :latency_ms), do: "#{log.latency_ms}ms", else: "-"}
+                          <% end %>
+                        </td>
+                        <td class="px-4 py-2 text-sm font-mono text-base-content/50 hidden md:table-cell">
+                          {if log_cost(log, @cost_basis),
+                            do: Charts.format_usd(log_cost(log, @cost_basis)),
+                            else: "-"}
+                        </td>
+                        <td class="px-4 py-2 text-sm font-mono text-base-content/50">
+                          {if Map.get(log, :latency_ms), do: "#{log.latency_ms}ms", else: "-"}
+                        </td>
+                      </tr>
+                    <% end %>
+                    <tr :if={Enum.empty?(@recent_logs)}>
+                      <td colspan="5" class="px-4 py-8 text-center text-sm text-base-content/40">
+                        No requests yet
                       </td>
                     </tr>
-                  <% end %>
-                  <tr :if={Enum.empty?(@recent_logs)}>
-                    <td colspan="5" class="px-4 py-8 text-center text-sm text-base-content/40">
-                      No requests yet
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-
-            <div class="rounded-lg border border-base-300/50 bg-base-100 p-4">
-              <div class="flex items-center justify-between mb-2">
-                <p class="text-sm font-semibold text-base-content">Routing Chain</p>
-                <p class="text-xs text-base-content/40">
-                  {pluralize(length(@selected_router_steps), "step")}
-                </p>
+                  </tbody>
+                </table>
               </div>
-              <div class="space-y-1.5">
-                <%= for {step, idx} <- Enum.with_index(@selected_router_steps) do %>
-                  <div class={[
-                    "flex items-center justify-between rounded-lg px-2.5 py-2",
-                    idx == 0 && "bg-accent/5 border-l-2 border-accent",
-                    idx > 0 && "bg-secondary/50"
-                  ]}>
-                    <div class="flex items-center gap-2 min-w-0">
-                      <div class="w-5 h-5 rounded flex items-center justify-center shrink-0 bg-base-200">
-                        <.provider_logo
-                          slug={Registry.to_key_slug(step.provider, step.plan_type || "standard")}
-                          class="w-3.5 h-3.5"
-                        />
+
+              <div class="rounded-lg border border-base-300/50 bg-base-100 p-4">
+                <div class="flex items-center justify-between mb-2">
+                  <p class="text-sm font-semibold text-base-content">Routing Chain</p>
+                  <p class="text-xs text-base-content/40">
+                    {pluralize(length(@selected_router_steps), "step")}
+                  </p>
+                </div>
+                <div class="space-y-1.5">
+                  <%= for {step, idx} <- Enum.with_index(@selected_router_steps) do %>
+                    <div class={[
+                      "flex items-center justify-between rounded-lg px-2.5 py-2",
+                      idx == 0 && "bg-accent/5 border-l-2 border-accent",
+                      idx > 0 && "bg-secondary/50"
+                    ]}>
+                      <div class="flex items-center gap-2 min-w-0">
+                        <div class="w-5 h-5 rounded flex items-center justify-center shrink-0 bg-base-200">
+                          <.provider_logo
+                            slug={Registry.to_key_slug(step.provider, step.plan_type || "standard")}
+                            class="w-3.5 h-3.5"
+                          />
+                        </div>
+                        <span class="text-sm font-medium text-base-content truncate">
+                          {step.provider} / {step.model}
+                        </span>
                       </div>
-                      <span class="text-sm font-medium text-base-content truncate">
-                        {step.provider} / {step.model}
+                      <span class={[
+                        "rounded-full px-2 py-0.5 text-xs font-semibold shrink-0",
+                        idx == 0 && "bg-green-50 text-success",
+                        idx == 1 && "bg-amber-50 text-warning",
+                        idx >= 2 && "bg-red-50 text-error"
+                      ]}>
+                        <%= cond do %>
+                          <% idx == 0 -> %>
+                            Primary
+                          <% idx == 1 -> %>
+                            Fallback
+                          <% true -> %>
+                            Last Resort
+                        <% end %>
                       </span>
                     </div>
-                    <span class={[
-                      "rounded-full px-2 py-0.5 text-xs font-semibold shrink-0",
-                      idx == 0 && "bg-green-50 text-success",
-                      idx == 1 && "bg-amber-50 text-warning",
-                      idx >= 2 && "bg-red-50 text-error"
-                    ]}>
-                      <%= cond do %>
-                        <% idx == 0 -> %>
-                          Primary
-                        <% idx == 1 -> %>
-                          Fallback
-                        <% true -> %>
-                          Last Resort
-                      <% end %>
-                    </span>
-                  </div>
-                <% end %>
-                <p :if={Enum.empty?(@selected_router_steps)} class="text-sm text-base-content/40 py-2">
-                  No routing steps configured
+                  <% end %>
+                  <p
+                    :if={Enum.empty?(@selected_router_steps)}
+                    class="text-sm text-base-content/40 py-2"
+                  >
+                    No routing steps configured
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div
+              id="recent-sessions"
+              class="mt-4 rounded-lg border border-base-300/50 bg-base-100 overflow-hidden"
+            >
+              <div class="flex items-center justify-between border-b border-base-300/50 px-4 py-2.5">
+                <p class="text-sm font-semibold text-base-content">Recent Sessions</p>
+                <.link
+                  navigate={~p"/routers/#{@selected_router.id}/sessions"}
+                  class="text-xs text-primary hover:underline"
+                >
+                  View all
+                </.link>
+              </div>
+              <%= if @recent_sessions != [] do %>
+                <table class="w-full text-left">
+                  <thead>
+                    <tr class="border-b border-base-300/50 bg-secondary/30">
+                      <th class="px-4 py-2 text-xs font-medium text-base-content/50">Session</th>
+                      <th class="px-4 py-2 text-xs font-medium text-base-content/50">Requests</th>
+                      <th class="px-4 py-2 text-xs font-medium text-base-content/50 hidden sm:table-cell">
+                        Tokens
+                      </th>
+                      <th class="px-4 py-2 text-xs font-medium text-base-content/50">Spend</th>
+                      <th class="px-4 py-2 text-xs font-medium text-base-content/50 hidden md:table-cell">
+                        Avg Latency
+                      </th>
+                      <th class="px-4 py-2 text-xs font-medium text-base-content/50">Last Active</th>
+                    </tr>
+                  </thead>
+                  <tbody class="divide-y divide-base-300/30">
+                    <tr :for={s <- @recent_sessions} class="hover:bg-secondary/20 transition-colors">
+                      <td class="px-4 py-2 text-sm">
+                        <.link
+                          navigate={~p"/routers/#{@selected_router.id}/sessions/#{s.session_id}"}
+                          class="font-medium text-base-content hover:text-primary"
+                        >
+                          {session_label(s)}
+                        </.link>
+                      </td>
+                      <td class="px-4 py-2 text-sm tabular-nums text-base-content/70">
+                        {s.request_count}
+                      </td>
+                      <td class="px-4 py-2 text-sm tabular-nums text-base-content/70 hidden sm:table-cell">
+                        {Charts.format_compact(s.total_tokens)}
+                      </td>
+                      <td class="px-4 py-2 text-sm tabular-nums font-semibold">
+                        {Charts.format_usd(total_cost(s, @cost_basis))}
+                      </td>
+                      <td class="px-4 py-2 text-sm tabular-nums text-base-content/70 hidden md:table-cell">
+                        {Charts.format_ms(s.avg_latency_ms)}
+                      </td>
+                      <td class="px-4 py-2 text-sm font-mono text-base-content/50">
+                        {format_session_time(s.last_activity)}
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              <% else %>
+                <p class="px-4 py-6 text-center text-sm text-base-content/40">
+                  {if @sessions_configured,
+                    do: "No session activity in this range",
+                    else: "No sessions yet"}
+                </p>
+              <% end %>
+              <div
+                :if={!@sessions_configured}
+                id="sessions-config-hint"
+                class="border-t border-base-300/50 bg-secondary/20 px-4 py-3"
+              >
+                <p class="text-xs text-base-content/50">
+                  <span class="font-medium text-base-content/70">Tip:</span>
+                  group related requests into sessions by sending a
+                  <code class="rounded bg-base-200 px-1 py-0.5 font-mono text-[11px]">
+                    {@selected_router.session_header || "x-session-id"}
+                  </code>
+                  header with each proxy request — add
+                  <code class="rounded bg-base-200 px-1 py-0.5 font-mono text-[11px]">
+                    {session_name_header(@selected_router.session_header || "x-session-id")}
+                  </code>
+                  to give it a readable name. The header name is configurable in the router's settings.
                 </p>
               </div>
             </div>
           </div>
-
-          <div
-            id="recent-sessions"
-            class="mt-4 rounded-lg border border-base-300/50 bg-base-100 overflow-hidden"
-          >
-            <div class="flex items-center justify-between border-b border-base-300/50 px-4 py-2.5">
-              <p class="text-sm font-semibold text-base-content">Recent Sessions</p>
-              <.link
-                navigate={~p"/routers/#{@selected_router.id}/sessions"}
-                class="text-xs text-primary hover:underline"
-              >
-                View all
-              </.link>
-            </div>
-            <%= if @recent_sessions != [] do %>
-              <table class="w-full text-left">
-                <thead>
-                  <tr class="border-b border-base-300/50 bg-secondary/30">
-                    <th class="px-4 py-2 text-xs font-medium text-base-content/50">Session</th>
-                    <th class="px-4 py-2 text-xs font-medium text-base-content/50">Requests</th>
-                    <th class="px-4 py-2 text-xs font-medium text-base-content/50 hidden sm:table-cell">
-                      Tokens
-                    </th>
-                    <th class="px-4 py-2 text-xs font-medium text-base-content/50">Spend</th>
-                    <th class="px-4 py-2 text-xs font-medium text-base-content/50 hidden md:table-cell">
-                      Avg Latency
-                    </th>
-                    <th class="px-4 py-2 text-xs font-medium text-base-content/50">Last Active</th>
-                  </tr>
-                </thead>
-                <tbody class="divide-y divide-base-300/30">
-                  <tr :for={s <- @recent_sessions} class="hover:bg-secondary/20 transition-colors">
-                    <td class="px-4 py-2 text-sm">
-                      <.link
-                        navigate={~p"/routers/#{@selected_router.id}/sessions/#{s.session_id}"}
-                        class="font-medium text-base-content hover:text-primary"
-                      >
-                        {session_label(s)}
-                      </.link>
-                    </td>
-                    <td class="px-4 py-2 text-sm tabular-nums text-base-content/70">
-                      {s.request_count}
-                    </td>
-                    <td class="px-4 py-2 text-sm tabular-nums text-base-content/70 hidden sm:table-cell">
-                      {Charts.format_compact(s.total_tokens)}
-                    </td>
-                    <td class="px-4 py-2 text-sm tabular-nums font-semibold">
-                      {Charts.format_usd(total_cost(s, @cost_basis))}
-                    </td>
-                    <td class="px-4 py-2 text-sm tabular-nums text-base-content/70 hidden md:table-cell">
-                      {Charts.format_ms(s.avg_latency_ms)}
-                    </td>
-                    <td class="px-4 py-2 text-sm font-mono text-base-content/50">
-                      {format_session_time(s.last_activity)}
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
-            <% else %>
-              <p class="px-4 py-6 text-center text-sm text-base-content/40">
-                {if @sessions_configured,
-                  do: "No session activity in this range",
-                  else: "No sessions yet"}
+        <% else %>
+          <div class="rounded-lg border border-base-300/50 bg-base-100 p-8 text-center">
+            <div class="max-w-md mx-auto">
+              <div class="w-16 h-16 mx-auto mb-6 rounded-lg bg-secondary flex items-center justify-center">
+                <.icon name="hero-bolt" class="size-8 text-accent" />
+              </div>
+              <h2 class="text-xl font-semibold mb-2 font-display">Welcome to DodoRouter</h2>
+              <p class="text-base-content/50 mb-6">
+                Create your first router to start routing LLM requests with automatic fallbacks.
               </p>
-            <% end %>
-            <div
-              :if={!@sessions_configured}
-              id="sessions-config-hint"
-              class="border-t border-base-300/50 bg-secondary/20 px-4 py-3"
-            >
-              <p class="text-xs text-base-content/50">
-                <span class="font-medium text-base-content/70">Tip:</span>
-                group related requests into sessions by sending a
-                <code class="rounded bg-base-200 px-1 py-0.5 font-mono text-[11px]">
-                  {@selected_router.session_header || "x-session-id"}
-                </code>
-                header with each proxy request — add
-                <code class="rounded bg-base-200 px-1 py-0.5 font-mono text-[11px]">
-                  {session_name_header(@selected_router.session_header || "x-session-id")}
-                </code>
-                to give it a readable name. The header name is configurable in the router's settings.
-              </p>
+              <a href={~p"/routers/new"} class="btn btn-primary">Create Router</a>
             </div>
           </div>
-        </div>
-      <% else %>
-        <div class="rounded-lg border border-base-300/50 bg-base-100 p-8 text-center">
-          <div class="max-w-md mx-auto">
-            <div class="w-16 h-16 mx-auto mb-6 rounded-lg bg-secondary flex items-center justify-center">
-              <.icon name="hero-bolt" class="size-8 text-accent" />
-            </div>
-            <h2 class="text-xl font-semibold mb-2 font-display">Welcome to DodoRouter</h2>
-            <p class="text-base-content/50 mb-6">
-              Create your first router to start routing LLM requests with automatic fallbacks.
-            </p>
-            <a href={~p"/routers/new"} class="btn btn-primary">Create Router</a>
-          </div>
-        </div>
-      <% end %>
-    </div>
+        <% end %>
+      </div>
+    </Layouts.app>
     """
   end
 
@@ -952,5 +970,96 @@ defmodule DodoRouterWeb.DashboardLive do
 
   defp router_color(idx) do
     Enum.at(@router_colors, rem(idx, length(@router_colors)))
+  end
+
+  # ---- period-over-period KPI deltas ----
+  #
+  # Each tile compares against the immediately preceding window of the same
+  # length. "Up" isn't inherently good or bad — spend up is a caution
+  # (:bad polarity), success rate up is positive (:good) — so polarity is
+  # picked per metric rather than assumed from direction alone. A zero-sample
+  # previous window never gets a fabricated percentage; it renders
+  # "no prior data" instead.
+
+  defp range_label(range), do: (@ranges[range] || %{})[:label] || range
+
+  defp no_prior_delta, do: %{text: "no prior data", direction: :flat, polarity: :neutral}
+
+  defp spend_delta(_stats, %{total_requests: 0}, _basis, _range), do: no_prior_delta()
+
+  defp spend_delta(stats, prev_stats, basis, range) do
+    pct_delta(
+      decimal_float(stats_cost(stats, basis)),
+      decimal_float(stats_cost(prev_stats, basis)),
+      range,
+      :spend
+    )
+  end
+
+  defp requests_delta(_stats, %{total_requests: 0}, _range), do: no_prior_delta()
+
+  defp requests_delta(stats, prev_stats, range) do
+    pct_delta(stats.total_requests, prev_stats.total_requests, range, :neutral)
+  end
+
+  # Percentage-*point* delta, not percentage — "success rate up 5%" from an
+  # 90% base reads as either +5pp or +5.6% depending on which is meant; pp
+  # is unambiguous and is what the label states.
+  defp success_rate_delta(%{total_requests: 0}, _prev_stats, _range), do: no_prior_delta()
+  defp success_rate_delta(_stats, %{total_requests: 0}, _range), do: no_prior_delta()
+
+  defp success_rate_delta(stats, prev_stats, range) do
+    cur = stats.successful_requests / stats.total_requests * 100
+    prev = prev_stats.successful_requests / prev_stats.total_requests * 100
+    diff = cur - prev
+    direction = trend_direction(diff, 0.05)
+    polarity = resolve_polarity(:success_rate, direction)
+    text = "#{signed(diff, 1)}pp vs prev #{range_label(range)}"
+    %{text: text, direction: direction, polarity: polarity}
+  end
+
+  # ms delta, not percent — a p95 that moves from 40ms to 80ms is "+100%"
+  # and "+40ms"; the latter is the number an operator can act on directly.
+  defp latency_delta(%{p95: nil}, _prev, _range), do: no_prior_delta()
+  defp latency_delta(_latency, %{p95: nil}, _range), do: no_prior_delta()
+
+  defp latency_delta(%{p95: cur}, %{p95: prev}, range) do
+    diff_ms = round(cur - prev)
+    direction = trend_direction(diff_ms, 0)
+    polarity = resolve_polarity(:latency, direction)
+    text = "#{signed(diff_ms, 0)}ms vs prev #{range_label(range)}"
+    %{text: text, direction: direction, polarity: polarity}
+  end
+
+  defp pct_delta(cur, prev, range, polarity_kind) when is_number(prev) and prev > 0 do
+    pct = (cur - prev) / prev * 100
+    direction = trend_direction(pct, 0.5)
+    polarity = resolve_polarity(polarity_kind, direction)
+    text = "#{signed(pct, 1)}% vs prev #{range_label(range)}"
+    %{text: text, direction: direction, polarity: polarity}
+  end
+
+  defp pct_delta(_cur, _prev, _range, _polarity_kind), do: no_prior_delta()
+
+  defp trend_direction(diff, epsilon) do
+    cond do
+      diff > epsilon -> :up
+      diff < -epsilon -> :down
+      true -> :flat
+    end
+  end
+
+  defp resolve_polarity(:spend, :up), do: :bad
+  defp resolve_polarity(:spend, :down), do: :good
+  defp resolve_polarity(:success_rate, :up), do: :good
+  defp resolve_polarity(:success_rate, :down), do: :bad
+  defp resolve_polarity(:latency, :up), do: :bad
+  defp resolve_polarity(:latency, :down), do: :good
+  defp resolve_polarity(_kind, _direction), do: :neutral
+
+  defp signed(n, decimals) do
+    rounded = Float.round(n * 1.0, decimals)
+    sign = if rounded >= 0, do: "+", else: ""
+    if decimals == 0, do: "#{sign}#{trunc(rounded)}", else: "#{sign}#{rounded}"
   end
 end

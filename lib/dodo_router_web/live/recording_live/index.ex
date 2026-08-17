@@ -90,167 +90,170 @@ defmodule DodoRouterWeb.RecordingLive.Index do
   @impl true
   def render(assigns) do
     ~H"""
-    <div>
-      <div class="flex items-center justify-between mb-6">
-        <div class="flex items-center gap-2">
-          <.link
-            navigate={~p"/routers/#{@router.id}"}
-            class="btn btn-ghost btn-sm btn-circle"
-            title={"Back to #{@router.name}"}
-          >
-            ←
-          </.link>
-          <div>
-            <h1 class="text-2xl font-bold">Recordings</h1>
-            <p class="text-sm text-base-content/50">{@router.name}</p>
-          </div>
-        </div>
-        <div class="flex items-center gap-3">
-          <span class="text-sm text-base-content/60">
-            {pluralize(length(@recordings), "recording")}
-          </span>
-          <%= if @active_recording do %>
-            <button
-              phx-click="stop_recording"
-              class="btn btn-sm btn-error gap-2"
+    <Layouts.app flash={@flash} current_scope={@current_scope}>
+      <div>
+        <div class="flex items-center justify-between mb-6">
+          <div class="flex items-center gap-2">
+            <.link
+              navigate={~p"/routers/#{@router.id}"}
+              class="btn btn-ghost btn-sm btn-circle"
+              title={"Back to #{@router.name}"}
             >
-              <span class="w-2 h-2 rounded-full bg-error-content animate-pulse"></span> Stop Recording
-            </button>
-          <% else %>
-            <button
-              phx-click="toggle_start_form"
-              class="btn btn-sm btn-primary gap-2"
-            >
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                class="h-4 w-4"
-                fill="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <circle cx="12" cy="12" r="8" />
-              </svg>
-              Start Recording
-            </button>
-          <% end %>
-        </div>
-      </div>
-      
-    <!-- Start Recording Form -->
-      <div :if={@show_start_form} class="card-bordered p-4 mb-6 bg-primary/5 border-primary/30">
-        <form phx-submit="start_recording" class="flex items-end gap-3">
-          <div class="flex-1">
-            <label class="block text-sm font-medium text-base-content/70 mb-1">
-              Recording Name (optional)
-            </label>
-            <input
-              type="text"
-              name="recording[name]"
-              value={@recording_name}
-              placeholder="e.g., debug-session-1"
-              class="w-full py-2 px-3 bg-base-100 border border-base-300 rounded-lg"
-              autofocus
-            />
-          </div>
-          <button type="submit" class="btn btn-primary">Start</button>
-          <button type="button" phx-click="toggle_start_form" class="btn btn-ghost">Cancel</button>
-        </form>
-      </div>
-      
-    <!-- Active Recording Banner -->
-      <div :if={@active_recording} class="card-bordered p-4 mb-6 bg-success/10 border-success/30">
-        <div class="flex items-center justify-between">
-          <div class="flex items-center gap-3">
-            <span class="w-3 h-3 rounded-full bg-success animate-pulse"></span>
+              ←
+            </.link>
             <div>
-              <span class="font-medium">Recording in progress</span>
-              <span :if={@active_recording.name} class="text-base-content/70 ml-2">
-                — {@active_recording.name}
-              </span>
+              <h1 class="text-2xl font-bold">Recordings</h1>
+              <p class="text-sm text-base-content/50">{@router.name}</p>
             </div>
           </div>
-          <div class="text-sm text-base-content/60">
-            Started {Calendar.strftime(@active_recording.started_at, "%H:%M:%S")}
+          <div class="flex items-center gap-3">
+            <span class="text-sm text-base-content/60">
+              {pluralize(length(@recordings), "recording")}
+            </span>
+            <%= if @active_recording do %>
+              <button
+                phx-click="stop_recording"
+                class="btn btn-sm btn-error gap-2"
+              >
+                <span class="w-2 h-2 rounded-full bg-error-content animate-pulse"></span>
+                Stop Recording
+              </button>
+            <% else %>
+              <button
+                phx-click="toggle_start_form"
+                class="btn btn-sm btn-primary gap-2"
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  class="h-4 w-4"
+                  fill="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <circle cx="12" cy="12" r="8" />
+                </svg>
+                Start Recording
+              </button>
+            <% end %>
           </div>
         </div>
-      </div>
-
-      <div class="space-y-3">
-        <%= for recording <- @recordings do %>
-          <a
-            href={~p"/routers/#{@router.id}/recordings/#{recording.id}"}
-            class="block bg-base-100 border border-base-300 rounded-xl p-4 hover:border-primary transition-colors"
-          >
-            <div class="flex items-center justify-between">
+        
+    <!-- Start Recording Form -->
+        <div :if={@show_start_form} class="card-bordered p-4 mb-6 bg-primary/5 border-primary/30">
+          <form phx-submit="start_recording" class="flex items-end gap-3">
+            <div class="flex-1">
+              <label class="block text-sm font-medium text-base-content/70 mb-1">
+                Recording Name (optional)
+              </label>
+              <input
+                type="text"
+                name="recording[name]"
+                value={@recording_name}
+                placeholder="e.g., debug-session-1"
+                class="w-full py-2 px-3 bg-base-100 border border-base-300 rounded-lg"
+                autofocus
+              />
+            </div>
+            <button type="submit" class="btn btn-primary">Start</button>
+            <button type="button" phx-click="toggle_start_form" class="btn btn-ghost">Cancel</button>
+          </form>
+        </div>
+        
+    <!-- Active Recording Banner -->
+        <div :if={@active_recording} class="card-bordered p-4 mb-6 bg-success/10 border-success/30">
+          <div class="flex items-center justify-between">
+            <div class="flex items-center gap-3">
+              <span class="w-3 h-3 rounded-full bg-success animate-pulse"></span>
               <div>
-                <div class="flex items-center gap-2">
-                  <span class={[
-                    "px-2 py-0.5 rounded text-xs font-medium",
-                    if(recording.status == "recording",
-                      do: "bg-success/20 text-success",
-                      else: "bg-base-300/50 text-base-content/50"
-                    )
-                  ]}>
-                    {recording.status}
-                  </span>
-                  <span
-                    :if={recording.name}
-                    class="font-medium text-base-content/90"
-                  >
-                    {recording.name}
-                  </span>
-                  <span :if={is_nil(recording.name)} class="font-mono text-sm text-base-content/50">
-                    {recording.id}
-                  </span>
-                </div>
-                <div class="text-sm text-base-content/60 mt-1">
-                  {Calendar.strftime(recording.started_at, "%b %d, %H:%M")}
-                  <%= if recording.stopped_at do %>
-                    <span class="mx-1">→</span>
-                    {Calendar.strftime(recording.stopped_at, "%b %d, %H:%M")}
-                    <span class="ml-2 text-base-content/40">
-                      ({format_duration(recording.started_at, recording.stopped_at)})
-                    </span>
-                  <% end %>
-                </div>
+                <span class="font-medium">Recording in progress</span>
+                <span :if={@active_recording.name} class="text-base-content/70 ml-2">
+                  — {@active_recording.name}
+                </span>
               </div>
-              <.link
-                href={
+            </div>
+            <div class="text-sm text-base-content/60">
+              Started {Calendar.strftime(@active_recording.started_at, "%H:%M:%S")}
+            </div>
+          </div>
+        </div>
+
+        <div class="space-y-3">
+          <%= for recording <- @recordings do %>
+            <a
+              href={~p"/routers/#{@router.id}/recordings/#{recording.id}"}
+              class="block bg-base-100 border border-base-300 rounded-xl p-4 hover:border-primary transition-colors"
+            >
+              <div class="flex items-center justify-between">
+                <div>
+                  <div class="flex items-center gap-2">
+                    <span class={[
+                      "px-2 py-0.5 rounded text-xs font-medium",
+                      if(recording.status == "recording",
+                        do: "bg-success/20 text-success",
+                        else: "bg-base-300/50 text-base-content/50"
+                      )
+                    ]}>
+                      {recording.status}
+                    </span>
+                    <span
+                      :if={recording.name}
+                      class="font-medium text-base-content/90"
+                    >
+                      {recording.name}
+                    </span>
+                    <span :if={is_nil(recording.name)} class="font-mono text-sm text-base-content/50">
+                      {recording.id}
+                    </span>
+                  </div>
+                  <div class="text-sm text-base-content/60 mt-1">
+                    {Calendar.strftime(recording.started_at, "%b %d, %H:%M")}
+                    <%= if recording.stopped_at do %>
+                      <span class="mx-1">→</span>
+                      {Calendar.strftime(recording.stopped_at, "%b %d, %H:%M")}
+                      <span class="ml-2 text-base-content/40">
+                        ({format_duration(recording.started_at, recording.stopped_at)})
+                      </span>
+                    <% end %>
+                  </div>
+                </div>
+                <.link
+                  href={
                   ~p"/routers/#{@router.id}/recordings/#{recording.id}" <>
                     "?return_to=" <> URI.encode_www_form("/routers/#{@router.id}/recordings")
                 }
-                class="text-sm text-primary hover:underline"
-              >
-                View
-              </.link>
-            </div>
-          </a>
-        <% end %>
+                  class="text-sm text-primary hover:underline"
+                >
+                  View
+                </.link>
+              </div>
+            </a>
+          <% end %>
 
-        <%= if Enum.empty?(@recordings) do %>
-          <div class="text-center py-12 text-base-content/50">
-            No recordings yet. Click "Start Recording" above to begin capturing requests.
+          <%= if Enum.empty?(@recordings) do %>
+            <div class="text-center py-12 text-base-content/50">
+              No recordings yet. Click "Start Recording" above to begin capturing requests.
+            </div>
+          <% end %>
+        </div>
+
+        <%= if @page > 1 do %>
+          <div class="flex justify-center mt-6 gap-2">
+            <a
+              href={~p"/routers/#{@router.id}/recordings?page=#{@page - 1}"}
+              class="btn btn-sm btn-ghost"
+            >
+              Prev
+            </a>
+            <span class="btn btn-sm btn-disabled">Page {@page}</span>
+            <a
+              href={~p"/routers/#{@router.id}/recordings?page=#{@page + 1}"}
+              class="btn btn-sm btn-ghost"
+            >
+              Next
+            </a>
           </div>
         <% end %>
       </div>
-
-      <%= if @page > 1 do %>
-        <div class="flex justify-center mt-6 gap-2">
-          <a
-            href={~p"/routers/#{@router.id}/recordings?page=#{@page - 1}"}
-            class="btn btn-sm btn-ghost"
-          >
-            Prev
-          </a>
-          <span class="btn btn-sm btn-disabled">Page {@page}</span>
-          <a
-            href={~p"/routers/#{@router.id}/recordings?page=#{@page + 1}"}
-            class="btn btn-sm btn-ghost"
-          >
-            Next
-          </a>
-        </div>
-      <% end %>
-    </div>
+    </Layouts.app>
     """
   end
 

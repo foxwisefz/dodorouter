@@ -260,6 +260,41 @@ defmodule DodoRouter.Proxy.Adapters.AnthropicTest do
       end)
     end
 
+    test "reframed chunks name the model that is actually serving" do
+      # Deck Ops fell back to the requested model for provenance because the
+      # reframed stream's chunks carried no model at all — silently wrong
+      # exactly when a fallback step fired (dodo_router-bnn). message_start
+      # names the resolved model; every chunk after it must repeat it, the
+      # way real OpenAI chunks do.
+      events = [
+        %{
+          "type" => "message_start",
+          "message" => %{
+            "id" => "msg_01",
+            "model" => "claude-opus-4-8-20260115",
+            "usage" => %{"input_tokens" => 10}
+          }
+        },
+        %{
+          "type" => "content_block_delta",
+          "index" => 0,
+          "delta" => %{"type" => "text_delta", "text" => "hi"}
+        },
+        %{
+          "type" => "message_delta",
+          "delta" => %{"stop_reason" => "end_turn"},
+          "usage" => %{"output_tokens" => 3}
+        }
+      ]
+
+      acc = Anthropic.initial_stream_acc()
+      {_acc, chunks} = Anthropic.process_anthropic_events(acc, events)
+
+      models = parse_chunks(chunks) |> Enum.map(& &1["model"])
+      assert models != []
+      assert Enum.all?(models, &(&1 == "claude-opus-4-8-20260115"))
+    end
+
     test "forwards tool_use blocks as OpenAI tool_call delta chunks" do
       acc = Anthropic.initial_stream_acc()
       {_acc, chunks} = Anthropic.process_anthropic_events(acc, @tool_use_events)
@@ -534,12 +569,11 @@ defmodule DodoRouter.Proxy.Adapters.AnthropicTest do
       assert body["thinking"]["budget_tokens"] == 999
     end
 
-    test "omits a client thinking.type=disabled block instead of forwarding it" do
-      # Claude 5 models reject an explicit disable ("thinking.type.disabled is
-      # not supported for this model"); omission is the portable spelling —
-      # no thinking on older models, adaptive default on newer ones. This bit
-      # fallbacks: kimi/zai (on_off format) accept disabled, so the request
-      # only blew up when the chain fell back to an Anthropic step.
+    test "forwards a client thinking.type=disabled block as sent" do
+      # Probed live 2026-08-16 (dodo_router-cit): Sonnet 5 accepts an explicit
+      # disable, and omission would leave the adaptive default in charge —
+      # thinking ON for the very request that turned it off. Only Fable 5
+      # rejects disabled; that case is covered in its own describe.
       request = %{
         "messages" => [%{"role" => "user", "content" => "hi"}],
         "thinking" => %{"type" => "disabled"}
@@ -548,10 +582,12 @@ defmodule DodoRouter.Proxy.Adapters.AnthropicTest do
       step = %RoutingStep{model: "claude-sonnet-5"}
       body = Anthropic.build_anthropic_request(request, step)
 
-      refute Map.has_key?(body, "thinking")
+      assert body["thinking"] == %{"type" => "disabled"}
     end
 
-    test "client thinking.type=disabled also suppresses step-level effort injection" do
+    test "client thinking.type=disabled still suppresses step-level effort injection" do
+      # The :anthropic effort injection sets thinking.type=adaptive, which
+      # would silently override the client's disable.
       request = %{
         "messages" => [%{"role" => "user", "content" => "hi"}],
         "thinking" => %{"type" => "disabled"}
@@ -560,7 +596,8 @@ defmodule DodoRouter.Proxy.Adapters.AnthropicTest do
       step = %RoutingStep{model: "claude-sonnet-5", reasoning_effort: "high"}
       body = Anthropic.build_anthropic_request(request, step)
 
-      refute Map.has_key?(body, "thinking")
+      assert body["thinking"] == %{"type" => "disabled"}
+      refute get_in(body, ["output_config", "effort"])
     end
   end
 
@@ -691,7 +728,9 @@ defmodule DodoRouter.Proxy.Adapters.AnthropicTest do
       assert body["model"] == "claude-sonnet-5"
     end
 
-    test "drops a client thinking.type=disabled block (rejected by Claude 5 models)" do
+    test "keeps a client thinking.type=disabled block on models that accept it" do
+      # The count must describe the request dispatch would actually send —
+      # and dispatch now forwards the disable everywhere but Fable 5.
       params = %{
         "model" => "claude-sonnet-5",
         "messages" => [],
@@ -699,7 +738,7 @@ defmodule DodoRouter.Proxy.Adapters.AnthropicTest do
       }
 
       body = Anthropic.build_count_tokens_request(params, %RoutingStep{model: "claude-sonnet-5"})
-      refute Map.has_key?(body, "thinking")
+      assert body["thinking"] == %{"type" => "disabled"}
     end
   end
 
@@ -794,6 +833,233 @@ defmodule DodoRouter.Proxy.Adapters.AnthropicTest do
       [msg] = body["messages"]
 
       assert msg["content"] == [native]
+    end
+  end
+
+  describe "client thinking.type=disabled (dodo_router-cit)" do
+    # Probed live 2026-08-16 with a subscription token presenting as Claude
+    # Code: Opus 5 / Sonnet 5 / Opus 4.8 all accept an explicit disable, and on
+    # the Claude 5 models omission turns thinking ON (adaptive default) — the
+    # very thing the client turned off. Only Fable 5 rejects disabled outright
+    # at any effort, so only there is omission the honest spelling.
+    @disabled %{"type" => "disabled"}
+
+    defp disabled_request do
+      %{
+        "messages" => [%{"role" => "user", "content" => "hi"}],
+        "thinking" => @disabled
+      }
+    end
+
+    test "forwarded verbatim on models that accept it" do
+      for model <- ["claude-opus-5", "claude-sonnet-5", "claude-opus-4-8-20260115"] do
+        body =
+          Anthropic.build_anthropic_request(disabled_request(), %RoutingStep{model: model})
+
+        assert body["thinking"] == @disabled, "expected disabled forwarded on #{model}"
+      end
+    end
+
+    test "still not overridden by the step's reasoning_effort default" do
+      body =
+        Anthropic.build_anthropic_request(disabled_request(), %RoutingStep{
+          model: "claude-opus-5",
+          reasoning_effort: "high"
+        })
+
+      assert body["thinking"] == @disabled
+      refute get_in(body, ["output_config", "effort"])
+    end
+
+    test "omitted on Fable 5, with the drop recorded rather than silent" do
+      DodoRouter.Proxy.Fidelity.reset()
+
+      body =
+        Anthropic.build_anthropic_request(disabled_request(), %RoutingStep{
+          model: "claude-fable-5"
+        })
+
+      refute Map.has_key?(body, "thinking")
+
+      assert [change] = DodoRouter.Proxy.Fidelity.take().changes
+      assert change["name"] == "thinking"
+      assert change["action"] == "dropped"
+    end
+
+    test "count_tokens mirrors the request-path translation per model" do
+      params = %{"messages" => [], "thinking" => @disabled}
+
+      kept =
+        Anthropic.build_count_tokens_request(params, %RoutingStep{model: "claude-opus-5"})
+
+      assert kept["thinking"] == @disabled
+
+      dropped =
+        Anthropic.build_count_tokens_request(params, %RoutingStep{model: "claude-fable-5"})
+
+      refute Map.has_key?(dropped, "thinking")
+    end
+  end
+
+  describe "streaming passthrough (Anthropic client on an Anthropic step)" do
+    # The native stream a thinking-enabled Claude model actually sends:
+    # thinking block first (with its signature), then text. Reframing loses
+    # both the thinking block and its position; passthrough must preserve
+    # them byte-for-byte or the client cannot echo them back to continue.
+    @native_events [
+      %{
+        "type" => "message_start",
+        "message" => %{
+          "id" => "msg_01real",
+          "type" => "message",
+          "role" => "assistant",
+          "model" => "claude-fable-5",
+          "content" => [],
+          "usage" => %{"input_tokens" => 12, "cache_read_input_tokens" => 4}
+        }
+      },
+      %{
+        "type" => "content_block_start",
+        "index" => 0,
+        "content_block" => %{"type" => "thinking", "thinking" => ""}
+      },
+      %{
+        "type" => "content_block_delta",
+        "index" => 0,
+        "delta" => %{"type" => "thinking_delta", "thinking" => "pondering"}
+      },
+      %{
+        "type" => "content_block_delta",
+        "index" => 0,
+        "delta" => %{"type" => "signature_delta", "signature" => "sig_abc123"}
+      },
+      %{"type" => "content_block_stop", "index" => 0},
+      %{
+        "type" => "content_block_start",
+        "index" => 1,
+        "content_block" => %{"type" => "text", "text" => ""}
+      },
+      %{
+        "type" => "content_block_delta",
+        "index" => 1,
+        "delta" => %{"type" => "text_delta", "text" => "Hello"}
+      },
+      %{"type" => "content_block_stop", "index" => 1},
+      %{
+        "type" => "message_delta",
+        "delta" => %{"stop_reason" => "end_turn", "stop_sequence" => nil},
+        "usage" => %{"output_tokens" => 9}
+      },
+      %{"type" => "message_stop"}
+    ]
+
+    defp decode_wire(wire_chunks) do
+      Enum.map(wire_chunks, fn chunk ->
+        assert [_, type, json] = Regex.run(~r/\Aevent: (\S+)\ndata: (.*)\n\n\z/s, chunk)
+        {type, Jason.decode!(json)}
+      end)
+    end
+
+    test "every native event is relayed verbatim, in order" do
+      {_acc, wire} =
+        Anthropic.passthrough_anthropic_events(Anthropic.initial_stream_acc(), @native_events)
+
+      decoded = decode_wire(wire)
+
+      assert Enum.map(decoded, &elem(&1, 0)) == Enum.map(@native_events, & &1["type"])
+      assert Enum.map(decoded, &elem(&1, 1)) == @native_events
+    end
+
+    test "the thinking block and its signature survive intact, before the text block" do
+      {_acc, wire} =
+        Anthropic.passthrough_anthropic_events(Anthropic.initial_stream_acc(), @native_events)
+
+      decoded = decode_wire(wire)
+
+      thinking_start =
+        Enum.find_index(decoded, fn {_t, e} ->
+          e["type"] == "content_block_start" and e["content_block"]["type"] == "thinking"
+        end)
+
+      text_start =
+        Enum.find_index(decoded, fn {_t, e} ->
+          e["type"] == "content_block_start" and e["content_block"]["type"] == "text"
+        end)
+
+      assert thinking_start < text_start
+
+      assert {_, %{"delta" => %{"signature" => "sig_abc123"}}} =
+               Enum.find(decoded, fn {_t, e} -> e["delta"]["type"] == "signature_delta" end)
+    end
+
+    test "no [DONE] sentinel — message_stop is the native terminator" do
+      {_acc, wire} =
+        Anthropic.passthrough_anthropic_events(Anthropic.initial_stream_acc(), @native_events)
+
+      refute Enum.any?(wire, &String.contains?(&1, "[DONE]"))
+      assert List.last(wire) =~ "message_stop"
+    end
+
+    test "accumulation for logging still happens: id, text, usage" do
+      {acc, _wire} =
+        Anthropic.passthrough_anthropic_events(Anthropic.initial_stream_acc(), @native_events)
+
+      assert acc.message_id == "msg_01real"
+      assert acc.content == "Hello"
+      assert acc.stop_reason == "end_turn"
+      assert acc.usage["completion_tokens"] == 9
+      # input tokens arrive on message_start, not message_delta — losing them
+      # is how a streamed row ends up with null prompt tokens.
+      assert acc.usage["prompt_tokens"] == 12
+      assert acc.usage["cache_read_tokens"] == 4
+    end
+
+    test "redacted_thinking and server-tool blocks are relayed too" do
+      events = [
+        %{
+          "type" => "content_block_start",
+          "index" => 0,
+          "content_block" => %{"type" => "redacted_thinking", "data" => "opaque"}
+        },
+        %{
+          "type" => "content_block_start",
+          "index" => 1,
+          "content_block" => %{
+            "type" => "server_tool_use",
+            "id" => "srvtoolu_01",
+            "name" => "web_search"
+          }
+        }
+      ]
+
+      {_acc, wire} =
+        Anthropic.passthrough_anthropic_events(Anthropic.initial_stream_acc(), events)
+
+      decoded = decode_wire(wire)
+      assert Enum.map(decoded, &elem(&1, 1)) == events
+    end
+  end
+
+  describe "parse_anthropic_sse/2" do
+    test "a message_delta sharing a frame with message_stop is not discarded" do
+      data =
+        "data: " <>
+          Jason.encode!(%{
+            "type" => "message_delta",
+            "delta" => %{"stop_reason" => "end_turn"},
+            "usage" => %{"output_tokens" => 7}
+          }) <>
+          "\n\ndata: " <> Jason.encode!(%{"type" => "message_stop"}) <> "\n\n"
+
+      assert {{:events_then_done, events}, ""} = Anthropic.parse_anthropic_sse(data, "")
+      assert Enum.map(events, & &1["type"]) == ["message_delta", "message_stop"]
+    end
+
+    test "message_stop alone still terminates" do
+      data = "data: " <> Jason.encode!(%{"type" => "message_stop"}) <> "\n\n"
+
+      assert {{:events_then_done, [%{"type" => "message_stop"}]}, ""} =
+               Anthropic.parse_anthropic_sse(data, "")
     end
   end
 end

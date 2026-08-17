@@ -113,6 +113,72 @@ defmodule DodoRouter.LogsTest do
     end
   end
 
+  describe "list_logs/2 and count_logs/2 failures filter" do
+    test "returns only error and fallback statuses, respecting :from" do
+      {router, _api_key} = RoutersFixtures.router_fixture()
+
+      error_log = LogsFixtures.log_fixture(router, %{status: "error"})
+      fallback_log = LogsFixtures.log_fixture(router, %{status: "fallback"})
+      LogsFixtures.log_fixture(router, %{status: "success"})
+
+      old_error =
+        insert_log_at(router, DateTime.add(DateTime.utc_now(), -48 * 3600, :second), %{
+          status: "error"
+        })
+
+      logs = Logs.list_logs(router, failures_only: true)
+      ids = Enum.map(logs, & &1.id)
+
+      assert error_log.id in ids
+      assert fallback_log.id in ids
+      assert old_error.id in ids
+      assert length(logs) == 3
+      assert Logs.count_logs(router, failures_only: true) == 3
+
+      since = DateTime.add(DateTime.utc_now(), -24 * 3600, :second)
+      windowed_logs = Logs.list_logs(router, failures_only: true, from: since)
+      windowed_ids = Enum.map(windowed_logs, & &1.id)
+
+      assert error_log.id in windowed_ids
+      assert fallback_log.id in windowed_ids
+      refute old_error.id in windowed_ids
+      assert length(windowed_logs) == 2
+      assert Logs.count_logs(router, failures_only: true, from: since) == 2
+    end
+  end
+
+  describe "list_logs_for_user/2 and count_logs_for_user/2 failures filter" do
+    test "returns only error and fallback statuses, respecting :from" do
+      user = AccountsFixtures.user_fixture()
+      {router, _api_key} = RoutersFixtures.router_fixture(user)
+
+      error_log = LogsFixtures.log_fixture(router, %{status: "error"})
+      LogsFixtures.log_fixture(router, %{status: "success"})
+
+      old_fallback =
+        insert_log_at(router, DateTime.add(DateTime.utc_now(), -48 * 3600, :second), %{
+          status: "fallback"
+        })
+
+      logs = Logs.list_logs_for_user(user, failures_only: true)
+      ids = Enum.map(logs, & &1.id)
+
+      assert error_log.id in ids
+      assert old_fallback.id in ids
+      assert length(logs) == 2
+      assert Logs.count_logs_for_user(user, failures_only: true) == 2
+
+      since = DateTime.add(DateTime.utc_now(), -24 * 3600, :second)
+      windowed_logs = Logs.list_logs_for_user(user, failures_only: true, from: since)
+      windowed_ids = Enum.map(windowed_logs, & &1.id)
+
+      assert error_log.id in windowed_ids
+      refute old_fallback.id in windowed_ids
+      assert length(windowed_logs) == 1
+      assert Logs.count_logs_for_user(user, failures_only: true, from: since) == 1
+    end
+  end
+
   describe "list_sessions/2" do
     test "groups logs by session_id" do
       {router, _api_key} = RoutersFixtures.router_fixture()

@@ -7,6 +7,7 @@ defmodule DodoRouter.Logs do
   alias DodoRouter.Repo
   alias DodoRouter.Logs.CacheRegression
   alias DodoRouter.Logs.RequestLog
+  alias DodoRouter.Logs.TokenAttribution
   alias DodoRouter.Routers.Router
   alias DodoRouter.Accounts.User
   alias DodoRouter.Usage
@@ -71,7 +72,50 @@ defmodule DodoRouter.Logs do
     |> maybe_filter_call_type(opts[:call_type])
     |> maybe_filter_date_range(opts[:from], opts[:to])
     |> maybe_filter_favorite(opts[:favorites_only])
+    |> maybe_filter_failures(opts[:failures_only])
+    |> maybe_filter_session(opts[:session_id])
+    |> maybe_filter_recording(opts[:recording_id])
     |> Repo.all()
+  end
+
+  @doc """
+  Counts logs matching the same filters as `list_logs/2`, without the
+  limit/offset — the honest denominator behind a possibly-truncated list.
+  """
+  def count_logs(%Router{} = router, opts \\ []) do
+    from(l in RequestLog,
+      where: l.router_id == ^router.id and l.traffic_type == "proxy"
+    )
+    |> maybe_filter_status(opts[:status])
+    |> maybe_filter_provider(opts[:provider])
+    |> maybe_filter_model(opts[:model])
+    |> maybe_filter_call_type(opts[:call_type])
+    |> maybe_filter_date_range(opts[:from], opts[:to])
+    |> maybe_filter_favorite(opts[:favorites_only])
+    |> maybe_filter_failures(opts[:failures_only])
+    |> maybe_filter_session(opts[:session_id])
+    |> maybe_filter_recording(opts[:recording_id])
+    |> Repo.aggregate(:count)
+  end
+
+  @doc """
+  Counts logs matching the same filters as `list_logs_for_user/2`, without
+  the limit/offset — the honest denominator behind a possibly-truncated list.
+  """
+  def count_logs_for_user(%User{} = user, opts \\ []) do
+    from(l in RequestLog,
+      join: r in Router,
+      on: l.router_id == r.id,
+      where: r.user_id == ^user.id and l.traffic_type == "proxy"
+    )
+    |> maybe_filter_status(opts[:status])
+    |> maybe_filter_provider(opts[:provider])
+    |> maybe_filter_model(opts[:model])
+    |> maybe_filter_call_type(opts[:call_type])
+    |> maybe_filter_date_range(opts[:from], opts[:to])
+    |> maybe_filter_favorite(opts[:favorites_only])
+    |> maybe_filter_failures(opts[:failures_only])
+    |> Repo.aggregate(:count)
   end
 
   def list_logs_for_user(%User{} = user, opts \\ []) do
@@ -93,6 +137,7 @@ defmodule DodoRouter.Logs do
     |> maybe_filter_call_type(opts[:call_type])
     |> maybe_filter_date_range(opts[:from], opts[:to])
     |> maybe_filter_favorite(opts[:favorites_only])
+    |> maybe_filter_failures(opts[:failures_only])
     |> Repo.all()
   end
 
@@ -218,14 +263,23 @@ defmodule DodoRouter.Logs do
 
   # Analytics
 
+  @doc """
+  `:offset_hours` (default 0) shifts the whole window back in time by that
+  many hours, with `:hours` still setting its length — `hours: 24,
+  offset_hours: 24` is "the 24h immediately before the current 24h window",
+  the period-over-period comparison window. Additive: existing callers that
+  don't pass it get the same unbounded-until-now query as before.
+  """
   def stats(%Router{} = router, opts \\ []) do
     hours = Keyword.get(opts, :hours, 24)
-    since = DateTime.add(DateTime.utc_now(), -hours * 3600, :second)
+    offset_hours = Keyword.get(opts, :offset_hours, 0)
+    until = DateTime.add(DateTime.utc_now(), -offset_hours * 3600, :second)
+    since = DateTime.add(until, -hours * 3600, :second)
 
     query =
       from l in RequestLog,
         where:
-          l.router_id == ^router.id and l.inserted_at >= ^since and
+          l.router_id == ^router.id and l.inserted_at >= ^since and l.inserted_at < ^until and
             l.traffic_type == "proxy",
         select: %{
           total_requests: count(l.id),
@@ -244,6 +298,50 @@ defmodule DodoRouter.Logs do
         }
 
     Repo.one(query) || empty_stats()
+  end
+
+  @doc """
+  Per-routing-step traffic for a router — the share of served requests and
+  the error rate the routing-chain UI needs, since a chain where step 1
+  serves 100% and one where step 1 500s every request otherwise render
+  identically.
+
+  `attempted_steps` is jsonb, not a foreign key, so this is a raw query over
+  `jsonb_array_elements` (same pattern as `Providers.usage_summary_for_keys/2`)
+  grouped by the `step_id` each attempt recorded, rather than `final_provider`
+  (which only names whichever step actually served the response, not every
+  step attempted along the way).
+
+  Returns `%{step_id => %{served: n, errors: n}}`. A step with no attempts in
+  the window is simply absent from the map — the caller renders that as "no
+  traffic", not zero traffic (a step that errors 100% of the time still has
+  attempts).
+  """
+  def step_traffic(%Router{} = router, opts \\ []) do
+    hours = Keyword.get(opts, :hours, 24)
+    since = DateTime.add(DateTime.utc_now(), -hours * 3600, :second)
+
+    {:ok, %{rows: rows}} =
+      Ecto.Adapters.SQL.query(
+        Repo,
+        """
+        SELECT
+          step->>'step_id' AS step_id,
+          count(*) FILTER (WHERE step->>'status' = 'success') AS served,
+          count(*) FILTER (WHERE step->>'status' = 'error') AS errors
+        FROM request_logs l, jsonb_array_elements(l.attempted_steps) AS step
+        WHERE l.router_id::text = $1
+          AND l.inserted_at >= $2
+          AND l.traffic_type = 'proxy'
+          AND step->>'step_id' IS NOT NULL
+        GROUP BY step->>'step_id'
+        """,
+        [router.id, since]
+      )
+
+    Map.new(rows, fn [step_id, served, errors] ->
+      {Ecto.UUID.cast!(step_id), %{served: served, errors: errors}}
+    end)
   end
 
   def stats_by_provider(%Router{} = router, opts \\ []) do
@@ -317,6 +415,88 @@ defmodule DodoRouter.Logs do
       |> Map.get(bucket_start, empty)
       |> Map.put(:bucket, bucket_start)
     end
+  end
+
+  @doc """
+  Last-used timestamp and 24h request volume for every router in
+  `router_ids` at once — the ambient signal for the API keys list
+  (dodo_router-f6v.4), which otherwise names a key with no indication of
+  whether it is live or dormant. One grouped query for the whole list.
+
+  Returns `%{router_id => %{last_request_at:, request_count_24h:}}`.
+  `last_request_at` is unrestricted by the window (the whole point is
+  showing a key untouched for weeks, not just quiet in the last day);
+  `request_count_24h` matches the window `Logs.stats/2` uses elsewhere.
+  """
+  def usage_summary_for_routers(router_ids, opts \\ [])
+  def usage_summary_for_routers([], _opts), do: %{}
+
+  def usage_summary_for_routers(router_ids, opts) do
+    hours = Keyword.get(opts, :hours, 24)
+    since = DateTime.add(DateTime.utc_now(), -hours * 3600, :second)
+
+    from(l in RequestLog,
+      where: l.router_id in ^router_ids and l.traffic_type == "proxy",
+      group_by: l.router_id,
+      select: %{
+        router_id: l.router_id,
+        last_request_at: max(l.inserted_at),
+        request_count_24h: count(fragment("CASE WHEN ? >= ? THEN 1 END", l.inserted_at, ^since))
+      }
+    )
+    |> Repo.all()
+    |> Map.new(&{&1.router_id, Map.take(&1, [:last_request_at, :request_count_24h])})
+  end
+
+  @doc """
+  Request count, error count and an hourly sparkline for every router in
+  `router_ids` at once — the ambient-awareness fix for the router list
+  (dodo_router-f6v.4), where a router serving 40k req/day and one never
+  called otherwise render identically. One grouped query for the whole
+  list, not one per card.
+
+  Returns `%{router_id => %{request_count:, error_count:, hourly: [n, ...]}}`,
+  `hourly` oldest-first with one entry per hour in the window (default 24h),
+  zero-filled for hours with no traffic.
+  """
+  def activity_summary_for_routers(router_ids, opts \\ [])
+  def activity_summary_for_routers([], _opts), do: %{}
+
+  def activity_summary_for_routers(router_ids, opts) do
+    hours = Keyword.get(opts, :hours, 24)
+    since = DateTime.add(DateTime.utc_now(), -hours * 3600, :second)
+
+    rows =
+      from(l in RequestLog,
+        where:
+          l.router_id in ^router_ids and l.inserted_at >= ^since and
+            l.traffic_type == "proxy",
+        group_by: [l.router_id, fragment("date_trunc('hour', ?)", l.inserted_at)],
+        select: %{
+          router_id: l.router_id,
+          bucket: fragment("date_trunc('hour', ?)", l.inserted_at),
+          total: count(l.id),
+          errors: count(fragment("CASE WHEN ? = 'error' THEN 1 END", l.status))
+        }
+      )
+      |> Repo.all()
+
+    buckets = bucket_range(truncate_to_bucket(since, :hour), :hour)
+    by_router = Enum.group_by(rows, & &1.router_id)
+
+    Map.new(router_ids, fn router_id ->
+      router_rows = Map.get(by_router, router_id, [])
+      by_bucket = Map.new(router_rows, &{normalize_bucket(&1.bucket), &1})
+
+      hourly = for b <- buckets, do: Map.get(by_bucket, b, %{total: 0}).total
+
+      {router_id,
+       %{
+         request_count: Enum.sum(Enum.map(router_rows, & &1.total)),
+         error_count: Enum.sum(Enum.map(router_rows, & &1.errors)),
+         hourly: hourly
+       }}
+    end)
   end
 
   @doc """
@@ -499,14 +679,20 @@ defmodule DodoRouter.Logs do
     end)
   end
 
+  @doc """
+  `:offset_hours` (default 0) shifts the window back in time — see
+  `stats/2`'s doc for the period-over-period rationale. Additive.
+  """
   def latency_percentiles(%Router{} = router, opts \\ []) do
     hours = Keyword.get(opts, :hours, 24)
-    since = DateTime.add(DateTime.utc_now(), -hours * 3600, :second)
+    offset_hours = Keyword.get(opts, :offset_hours, 0)
+    until = DateTime.add(DateTime.utc_now(), -offset_hours * 3600, :second)
+    since = DateTime.add(until, -hours * 3600, :second)
 
     query =
       from l in RequestLog,
         where:
-          l.router_id == ^router.id and l.inserted_at >= ^since and
+          l.router_id == ^router.id and l.inserted_at >= ^since and l.inserted_at < ^until and
             l.traffic_type == "proxy" and not is_nil(l.latency_ms),
         select: %{
           p50: fragment("percentile_cont(0.5) WITHIN GROUP (ORDER BY ?)", l.latency_ms),
@@ -515,6 +701,42 @@ defmodule DodoRouter.Logs do
         }
 
     Repo.one(query) || %{p50: nil, p95: nil, p99: nil}
+  end
+
+  @doc """
+  Router-wide comparison basis for a single request's timing/cost trace page:
+  this router's median (p50) and p95 total latency, plus its median cost,
+  over the trailing window (`:hours`, default 24). One query for both
+  figures — `overhead` isn't its own column (it's `latency_ms` minus provider
+  time), so rather than a separate median-overhead aggregate the honest
+  comparison for a single request's total time is against this same p50/p95,
+  which IS directly queryable.
+
+  Returns `nil` fields (never `0`) when the router has no traffic in the
+  window, so callers can omit the comparison rather than show a fabricated
+  baseline.
+  """
+  def request_baselines(router_id, opts \\ []) do
+    hours = Keyword.get(opts, :hours, 24)
+    since = DateTime.add(DateTime.utc_now(), -hours * 3600, :second)
+
+    query =
+      from l in RequestLog,
+        where:
+          l.router_id == ^router_id and l.inserted_at >= ^since and l.traffic_type == "proxy" and
+            not is_nil(l.latency_ms),
+        select: %{
+          p50_latency_ms:
+            fragment("percentile_cont(0.5) WITHIN GROUP (ORDER BY ?)", l.latency_ms),
+          p95_latency_ms:
+            fragment("percentile_cont(0.95) WITHIN GROUP (ORDER BY ?)", l.latency_ms),
+          median_cost_usd:
+            fragment("percentile_cont(0.5) WITHIN GROUP (ORDER BY ?)", l.estimated_cost_usd),
+          sample_size: count(l.id)
+        }
+
+    Repo.one(query) ||
+      %{p50_latency_ms: nil, p95_latency_ms: nil, median_cost_usd: nil, sample_size: 0}
   end
 
   def requests_per_minute(%Router{} = router, opts \\ []) do
@@ -614,6 +836,18 @@ defmodule DodoRouter.Logs do
     |> Repo.all()
   end
 
+  @doc """
+  Counts distinct sessions for a router — the total behind `list_sessions/2`'s
+  pagination, not the number of underlying request log rows.
+  """
+  def count_sessions(%Router{} = router) do
+    from(l in RequestLog,
+      where: l.router_id == ^router.id and not is_nil(l.session_id),
+      distinct: l.session_id
+    )
+    |> Repo.aggregate(:count)
+  end
+
   defp maybe_filter_since_hours(query, nil), do: query
 
   defp maybe_filter_since_hours(query, hours) do
@@ -676,6 +910,23 @@ defmodule DodoRouter.Logs do
   end
 
   @doc """
+  The session's input tokens bucketed by context segment — stored per-log
+  attributions summed, so this reads kilobytes of jsonb, never re-parses
+  bodies. nil when no row in the session carries one.
+  """
+  def session_token_attribution(%Router{} = router, session_id) do
+    from(l in RequestLog,
+      where:
+        l.router_id == ^router.id and l.session_id == ^session_id and
+          not is_nil(l.token_attribution),
+      order_by: [asc: l.inserted_at],
+      select: l.token_attribution
+    )
+    |> Repo.all()
+    |> TokenAttribution.merge()
+  end
+
+  @doc """
   Gets aggregate stats for a session.
   """
   def session_stats(%Router{} = router, session_id) do
@@ -731,6 +982,19 @@ defmodule DodoRouter.Logs do
 
   defp maybe_filter_favorite(query, true), do: where(query, [l], l.favorite == true)
   defp maybe_filter_favorite(query, _), do: query
+
+  defp maybe_filter_session(query, nil), do: query
+  defp maybe_filter_session(query, session_id), do: where(query, [l], l.session_id == ^session_id)
+
+  defp maybe_filter_recording(query, nil), do: query
+
+  defp maybe_filter_recording(query, recording_id),
+    do: where(query, [l], l.recording_id == ^recording_id)
+
+  defp maybe_filter_failures(query, true),
+    do: where(query, [l], l.status in ["error", "fallback"])
+
+  defp maybe_filter_failures(query, _), do: query
 
   defp empty_stats do
     %{

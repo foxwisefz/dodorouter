@@ -20,6 +20,82 @@ defmodule DodoRouterWeb.LogLiveTest do
       assert html =~ log.final_provider
     end
 
+    test "column headers group the failure-reading path (time, status, provider, latency) before secondary context",
+         %{conn: conn, user: user} do
+      {router, _api_key} = RoutersFixtures.router_fixture(user)
+      LogsFixtures.log_fixture(router)
+
+      {:ok, live, _html} = live(conn, ~p"/logs")
+
+      thead = live |> element("thead") |> render()
+
+      headers = [
+        "Time",
+        "Status",
+        "Provider / Model",
+        "Latency",
+        "Router",
+        "Type",
+        "Tokens",
+        "Message"
+      ]
+
+      positions =
+        Enum.map(headers, fn header ->
+          {pos, _} = :binary.match(thead, header)
+          pos
+        end)
+
+      assert positions == Enum.sort(positions),
+             "expected column headers in order #{inspect(headers)}, got positions #{inspect(positions)}"
+    end
+
+    test "shows plain count when under the limit", %{conn: conn, user: user} do
+      {router, _api_key} = RoutersFixtures.router_fixture(user)
+      LogsFixtures.log_fixture(router)
+      LogsFixtures.log_fixture(router)
+
+      {:ok, live, _html} = live(conn, ~p"/logs")
+
+      html = render(live)
+      assert html =~ ~s(id="logs-count")
+      assert html =~ "2 requests"
+      refute html =~ "showing"
+    end
+
+    test "shows 'showing X of N' when results are truncated by the limit", %{
+      conn: conn,
+      user: user
+    } do
+      {router, _api_key} = RoutersFixtures.router_fixture(user)
+
+      for _ <- 1..101 do
+        LogsFixtures.log_fixture(router)
+      end
+
+      {:ok, live, _html} = live(conn, ~p"/logs")
+
+      html = render(live)
+      assert html =~ ~s(id="logs-count")
+      assert html =~ "showing 100 of 101 requests"
+    end
+
+    test "colors latency against the router's own p95 baseline", %{conn: conn, user: user} do
+      {router, _api_key} = RoutersFixtures.router_fixture(user)
+
+      for _ <- 1..20 do
+        LogsFixtures.log_fixture(router, %{latency_ms: 100})
+      end
+
+      LogsFixtures.log_fixture(router, %{latency_ms: 10_000})
+
+      {:ok, live, _html} = live(conn, ~p"/logs?router_id=#{router.id}")
+
+      html = render(live)
+      assert html =~ ~s(data-latency-band="slow")
+      assert html |> String.split(~s(data-latency-band="slow")) |> length() == 2
+    end
+
     test "shows empty state when no logs", %{conn: conn, user: user} do
       {_router, _api_key} = RoutersFixtures.router_fixture(user)
 
@@ -75,6 +151,73 @@ defmodule DodoRouterWeb.LogLiveTest do
       live |> render_click("toggle_favorite", %{"id" => log.id})
 
       assert Logs.get_log!(user, log.id).favorite
+    end
+
+    test "failures filter shows only error/fallback rows and the breakdown banner", %{
+      conn: conn,
+      user: user
+    } do
+      {router, _api_key} = RoutersFixtures.router_fixture(user)
+
+      LogsFixtures.log_fixture(router, %{
+        status: "error",
+        final_provider: "flaky-provider",
+        final_model: "flaky-model"
+      })
+
+      LogsFixtures.log_fixture(router, %{
+        status: "fallback",
+        final_provider: "backup-provider",
+        final_model: "backup-model"
+      })
+
+      LogsFixtures.log_fixture(router, %{status: "success", final_provider: "ok-provider"})
+
+      {:ok, live, html} =
+        live(conn, ~p"/logs?router_id=#{router.id}&failures=true")
+
+      assert html =~ "flaky-provider"
+      assert html =~ "backup-provider"
+      refute html =~ "ok-provider"
+
+      assert has_element?(live, "#failure-breakdown")
+      assert html =~ "last 24h"
+      assert html =~ "flaky-provider/flaky-model"
+      assert html =~ "backup-provider/backup-model"
+    end
+
+    test "a :log_created success does not appear while in failures mode", %{
+      conn: conn,
+      user: user
+    } do
+      {router, _api_key} = RoutersFixtures.router_fixture(user)
+
+      {:ok, live, _html} = live(conn, ~p"/logs?router_id=#{router.id}&failures=true")
+
+      # broadcasts to subscribers, mirroring how a real request completes
+      {:ok, _log} =
+        Logs.create_log(%{
+          router_id: router.id,
+          request_id: Ecto.UUID.generate(),
+          status: "success",
+          final_provider: "should-not-appear",
+          final_model: "test-model"
+        })
+
+      html = render(live)
+      refute html =~ "should-not-appear"
+
+      {:ok, _log} =
+        Logs.create_log(%{
+          router_id: router.id,
+          request_id: Ecto.UUID.generate(),
+          status: "error",
+          final_provider: "should-appear",
+          final_model: "test-model"
+        })
+
+      html = render(live)
+      assert html =~ "should-appear"
     end
   end
 
@@ -138,6 +281,38 @@ defmodule DodoRouterWeb.LogLiveTest do
   end
 
   describe "Show" do
+    test "left rail groups boxes by task, not by data source", %{conn: conn, user: user} do
+      {router, _api_key} = RoutersFixtures.router_fixture(user)
+
+      log =
+        LogsFixtures.log_fixture(router, %{
+          session_id: "task-grouping-session",
+          attempted_steps: [
+            %{"provider" => "test_provider", "status" => "success", "latency_ms" => 100}
+          ]
+        })
+
+      {:ok, live, html} = live(conn, ~p"/logs/#{log.request_id}")
+
+      # all preserved information is present, just regrouped
+      assert has_element?(live, "[data-group='what-happened']")
+      assert has_element?(live, "[data-group='what-it-cost']")
+      assert has_element?(live, "[data-group='where-it-came-from']")
+
+      # "what happened" carries status, model/provider and the routing chain
+      assert has_element?(live, "[data-group='what-happened']", "Status")
+      assert has_element?(live, "[data-group='what-happened']", "Model")
+      assert has_element?(live, "[data-group='what-happened']", "Routing")
+
+      # "what it cost" carries usage/cache/cost
+      assert has_element?(live, "[data-group='what-it-cost']", "Cost")
+
+      # "where it came from" carries the session
+      assert has_element?(live, "[data-group='where-it-came-from']", "task-grouping-session")
+
+      assert html =~ "Left sidebar"
+    end
+
     test "subscription-covered requests say plan instead of $0.0000", %{conn: conn, user: user} do
       {router, _api_key} = RoutersFixtures.router_fixture(user)
 
@@ -295,6 +470,136 @@ defmodule DodoRouterWeb.LogLiveTest do
       {:ok, _live, html2} = live(conn, ~p"/logs/#{slow_upload.request_id}")
       assert html2 =~ "Upload"
       assert html2 =~ "Wait"
+    end
+
+    test "timing renders as a single proportional bar with numbers behind a details toggle", %{
+      conn: conn,
+      user: user
+    } do
+      {router, _api_key} = RoutersFixtures.router_fixture(user)
+
+      log =
+        LogsFixtures.log_fixture(router, %{
+          latency_ms: 7000,
+          attempted_steps: [%{"latency_ms" => 6800}],
+          ttfb_ms: 2600,
+          upload_ms: 400,
+          provider_processing_ms: 1800
+        })
+
+      {:ok, live, html} = live(conn, ~p"/logs/#{log.request_id}")
+
+      assert has_element?(live, "#timing-bar")
+      assert has_element?(live, "[data-timing-segment='upload']")
+      assert has_element?(live, "[data-timing-segment='wait']")
+      assert has_element?(live, "[data-timing-segment='processing']")
+      assert has_element?(live, "[data-timing-segment='overhead']")
+
+      # numbers still available, behind an expand rather than always stacked
+      assert html =~ "<details"
+      assert html =~ "Breakdown"
+      assert html =~ "Provider"
+      assert html =~ "Overhead"
+    end
+
+    test "timing bar renders with only unattributed/overhead when finer fields are missing (old rows)",
+         %{conn: conn, user: user} do
+      {router, _api_key} = RoutersFixtures.router_fixture(user)
+
+      log =
+        LogsFixtures.log_fixture(router, %{
+          latency_ms: 5000,
+          ttfb_ms: nil,
+          upload_ms: nil,
+          provider_processing_ms: nil
+        })
+
+      {:ok, live, _html} = live(conn, ~p"/logs/#{log.request_id}")
+
+      assert has_element?(live, "#timing-bar")
+      refute has_element?(live, "[data-timing-segment='upload']")
+      refute has_element?(live, "[data-timing-segment='wait']")
+      refute has_element?(live, "[data-timing-segment='processing']")
+    end
+
+    test "overhead and cost carry a router-median comparison basis", %{conn: conn, user: user} do
+      {router, _api_key} = RoutersFixtures.router_fixture(user)
+
+      # establish a router baseline: several requests at a known latency/cost
+      for _ <- 1..5 do
+        LogsFixtures.log_fixture(router, %{
+          latency_ms: 1000,
+          estimated_cost_usd: Decimal.new("0.0200")
+        })
+      end
+
+      log =
+        LogsFixtures.log_fixture(router, %{
+          latency_ms: 7000,
+          attempted_steps: [%{"latency_ms" => 6800}],
+          estimated_cost_usd: Decimal.new("0.0412")
+        })
+
+      {:ok, live, html} = live(conn, ~p"/logs/#{log.request_id}")
+
+      assert has_element?(live, "#overhead-baseline")
+      assert has_element?(live, "#cost-baseline")
+      assert html =~ "router median"
+    end
+
+    test "omits the baseline rather than fabricate one when the router has no recent traffic", %{
+      conn: conn,
+      user: user
+    } do
+      {router, _api_key} = RoutersFixtures.router_fixture(user)
+
+      log =
+        LogsFixtures.log_fixture(router, %{
+          latency_ms: 3000,
+          estimated_cost_usd: Decimal.new("0.0100")
+        })
+
+      {:ok, live, _html} = live(conn, ~p"/logs/#{log.request_id}")
+
+      # this log IS the router's only traffic — its own p50 equals itself,
+      # so no meaningful comparison basis exists and none should be fabricated
+      refute has_element?(live, "#overhead-baseline")
+      refute has_element?(live, "#cost-baseline")
+    end
+
+    test "marks the dominant hop in a multi-attempt routing chain", %{conn: conn, user: user} do
+      {router, _api_key} = RoutersFixtures.router_fixture(user)
+
+      log =
+        LogsFixtures.log_fixture(router, %{
+          latency_ms: 5000,
+          attempted_steps: [
+            %{"provider" => "provider_a", "status" => "error", "latency_ms" => 4500},
+            %{"provider" => "provider_b", "status" => "success", "latency_ms" => 500}
+          ]
+        })
+
+      {:ok, live, _html} = live(conn, ~p"/logs/#{log.request_id}")
+
+      assert has_element?(live, "[data-hop-slow='true']")
+      refute has_element?(live, "[data-hop-slow='true']", "provider_b")
+    end
+
+    test "does not mark any hop when latency is evenly spread", %{conn: conn, user: user} do
+      {router, _api_key} = RoutersFixtures.router_fixture(user)
+
+      log =
+        LogsFixtures.log_fixture(router, %{
+          latency_ms: 1000,
+          attempted_steps: [
+            %{"provider" => "provider_a", "status" => "error", "latency_ms" => 500},
+            %{"provider" => "provider_b", "status" => "success", "latency_ms" => 500}
+          ]
+        })
+
+      {:ok, live, _html} = live(conn, ~p"/logs/#{log.request_id}")
+
+      refute has_element?(live, "[data-hop-slow='true']")
     end
 
     test "model reasoning is viewable but collapsed", %{conn: conn, user: user} do

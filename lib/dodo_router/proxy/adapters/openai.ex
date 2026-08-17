@@ -13,7 +13,6 @@ defmodule DodoRouter.Proxy.Adapters.OpenAI do
     endpoints: %{
       "openai" => "https://api.openai.com/v1"
     },
-    models: ~w(gpt-4o gpt-4o-mini gpt-4-turbo gpt-4.1 gpt-4.1-mini o1 o1-mini o3 o3-mini),
     color: "green",
     short_description: "GPT-4o, o1, o3 models"
 
@@ -24,7 +23,6 @@ defmodule DodoRouter.Proxy.Adapters.OpenAI do
   alias DodoRouter.Routers.RoutingStep
 
   @base_url "https://api.openai.com/v1"
-  @timeout_ms 120_000
 
   @doc """
   Upstream headers: our credentials plus the client's forwardable headers, per
@@ -49,7 +47,7 @@ defmodule DodoRouter.Proxy.Adapters.OpenAI do
     payload_size_bytes = Adapter.record_outbound_body(body)
     start_time = FinchTelemetry.mark_request_start()
 
-    case Req.post(url, headers: headers, json: body, receive_timeout: @timeout_ms) do
+    case Req.post(url, headers: headers, json: body, receive_timeout: Adapter.receive_timeout()) do
       {:ok, %{status: 200, body: response_body, headers: resp_headers}} ->
         total_ms = latency(start_time)
         upload_ms = FinchTelemetry.get_upload_ms(start_time)
@@ -153,7 +151,7 @@ defmodule DodoRouter.Proxy.Adapters.OpenAI do
       Req.post(url,
         headers: headers,
         json: body,
-        receive_timeout: @timeout_ms,
+        receive_timeout: Adapter.receive_timeout(),
         into: into_fun
       )
 

@@ -37,6 +37,76 @@ defmodule DodoRouter.ReplaysTest do
     %{provider_key_id: ctx.provider_key.id, model: model}
   end
 
+  describe "build_step/5 plan_type" do
+    test "subscription and metered slugs classify as coding/standard to match subscription_key?/1",
+         ctx do
+      cases = [
+        {"anthropic_oauth", "coding"},
+        {"openai-codex", "coding"},
+        {"moonshot_coding", "coding"},
+        {"zai_coding", "coding"},
+        {"zai_standard", "standard"},
+        {"anthropic", "standard"},
+        {"openai", "standard"}
+      ]
+
+      for {slug, expected_plan_type} <- cases do
+        provider_key = ProvidersFixtures.provider_key_fixture(ctx.user, %{provider_slug: slug})
+
+        assert {:ok, step} =
+                 Replays.build_step(ctx.user, ctx.router.id, provider_key.id, "some-model")
+
+        assert step.plan_type == expected_plan_type,
+               "expected #{slug} to classify as #{expected_plan_type}, got #{step.plan_type}"
+
+        assert step.plan_type ==
+                 if(DodoRouter.Providers.subscription_key?(provider_key),
+                   do: "coding",
+                   else: "standard"
+                 )
+      end
+    end
+  end
+
+  describe "reasoning controls on a cross-model replay" do
+    @thinking_source %RequestLog{
+      request_body:
+        Jason.encode!(%{
+          "model" => "claude-opus-5",
+          "thinking" => %{"type" => "adaptive"},
+          "reasoning_effort" => "high",
+          "messages" => [%{"role" => "user", "content" => "hi"}]
+        })
+    }
+
+    test "a different model does not inherit the source's thinking block" do
+      # `thinking: adaptive` is a capability of the model that was asked, not
+      # a property of the conversation. Carried to claude-opus-4-5 it is a
+      # 400 — "adaptive thinking is not supported on this model" — so the
+      # candidate never answers and the comparison measures nothing.
+      assert {:ok, request} = Replays.prepare_request(@thinking_source, "claude-opus-4-5")
+
+      refute Map.has_key?(request, "thinking")
+      refute Map.has_key?(request, "reasoning_effort")
+      assert request["model"] == "claude-opus-4-5"
+      assert request["messages"]
+    end
+
+    test "replaying the same model keeps them, because that is a re-run" do
+      assert {:ok, request} = Replays.prepare_request(@thinking_source, "claude-opus-5")
+
+      assert request["thinking"] == %{"type" => "adaptive"}
+      assert request["reasoning_effort"] == "high"
+    end
+
+    test "an explicit effort still replaces whatever the source carried" do
+      assert {:ok, request} = Replays.prepare_request(@thinking_source, "claude-opus-5", "low")
+
+      refute Map.has_key?(request, "thinking")
+      refute Map.has_key?(request, "reasoning_effort")
+    end
+  end
+
   describe "replay/3" do
     test "replays through the target and links the new log to the original", ctx do
       assert {:ok, %RequestLog{} = replay} = Replays.replay(ctx.user, ctx.source, target(ctx))
@@ -242,16 +312,33 @@ defmodule DodoRouter.ReplaysTest do
       assert step["reasoning_effort"] == "high"
     end
 
-    test "no effort keeps the original body's reasoning params (faithful replay)", ctx do
+    test "no effort drops them when the model changes, since they belong to the old model", ctx do
+      # This asserted the opposite until a real evaluation proved it wrong:
+      # the source's `thinking` block travelled to claude-opus-4-5, which
+      # answered "adaptive thinking is not supported on this model" and never
+      # produced a candidate. Fidelity to the request cannot outrank the
+      # request being accepted at all.
       assert {:ok, replay} =
                Replays.replay(ctx.user, ctx.reasoning_source, target(ctx))
 
       request = Jason.decode!(replay.request_body)
-      assert request["reasoning_effort"] == "low"
-      assert request["thinking"] == %{"type" => "enabled", "budget_tokens" => 1024}
+      refute Map.has_key?(request, "reasoning_effort")
+      refute Map.has_key?(request, "thinking")
 
       assert [step] = replay.attempted_steps
       assert step["reasoning_effort"] == nil
+    end
+
+    test "no effort keeps them when the model is unchanged, which is a true re-run", ctx do
+      assert {:ok, replay} =
+               Replays.replay(ctx.user, ctx.reasoning_source, %{
+                 provider_key_id: ctx.provider_key.id,
+                 model: "original-model"
+               })
+
+      request = Jason.decode!(replay.request_body)
+      assert request["reasoning_effort"] == "low"
+      assert request["thinking"] == %{"type" => "enabled", "budget_tokens" => 1024}
     end
 
     test "blank effort behaves as as-original", ctx do
@@ -263,7 +350,9 @@ defmodule DodoRouter.ReplaysTest do
                })
 
       request = Jason.decode!(replay.request_body)
-      assert request["reasoning_effort"] == "low"
+      # As-original still means "no effort of our own" — but the target is a
+      # different model, so the old model's controls do not travel.
+      refute Map.has_key?(request, "reasoning_effort")
       assert [step] = replay.attempted_steps
       assert step["reasoning_effort"] == nil
     end
@@ -402,6 +491,30 @@ defmodule DodoRouter.ReplaysTest do
         })
 
       assert {:ok, %RequestLog{}} = Replays.replay(ctx.user, broken_child, target(ctx))
+    end
+  end
+
+  describe "incumbent_target/1" do
+    test "reads the serving key and model off the successful attempt" do
+      log = %RequestLog{
+        final_model: "kimi-k2.6",
+        attempted_steps: [
+          %{"status" => "error", "provider_key_id" => "key-a", "model" => "m1"},
+          %{"status" => "success", "provider_key_id" => "key-b", "model" => "kimi-k2.6"}
+        ]
+      }
+
+      assert Replays.incumbent_target(log) == %{provider_key_id: "key-b", model: "kimi-k2.6"}
+    end
+
+    test "nil when no attempt carries a provider key (legacy rows)" do
+      log = %RequestLog{
+        final_model: "m",
+        attempted_steps: [%{"status" => "success", "model" => "m"}]
+      }
+
+      assert Replays.incumbent_target(log) == nil
+      assert Replays.incumbent_target(%RequestLog{attempted_steps: nil}) == nil
     end
   end
 

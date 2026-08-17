@@ -11,6 +11,7 @@ defmodule DodoRouterWeb.EvalLive.Index do
      socket
      |> assign(:page_title, "Evaluations")
      |> assign(:empty?, evaluations == [])
+     |> assign(:agent_base, DodoRouterWeb.Endpoint.url())
      |> stream(:evaluations, evaluations)}
   end
 
@@ -52,6 +53,33 @@ defmodule DodoRouterWeb.EvalLive.Index do
               <span>Judge: {evaluation.judge_model}</span>
             </div>
           </.link>
+        </div>
+
+        <div
+          :if={@nav_routers != []}
+          id="agent-access"
+          class="rounded-2xl border border-base-300/60 bg-base-100 p-5"
+        >
+          <h2 class="font-semibold">Run evals from your coding agent</h2>
+          <p class="mt-1 max-w-2xl text-sm text-base-content/55">
+            Connect your agent with this one command and approve it in the browser. It reads back
+            the whole workflow — find a real request, replay it on other models, score the answers
+            — so it can compare quality against price without you in the loop.
+          </p>
+
+          <code
+            phx-no-curly-interpolation
+            class="mt-4 block overflow-x-auto rounded-lg bg-base-200/70 px-3 py-2 font-mono text-xs"
+          >
+            claude mcp add --transport http dodorouter {@agent_base}/mcp
+          </code>
+
+          <p class="mt-3 text-xs text-base-content/45">
+            No key to paste — it registers itself and you decide what it may read.
+            <.link navigate={~p"/agent-activity"} class="text-primary hover:underline">
+              See what connected agents have done
+            </.link>
+          </p>
         </div>
       </div>
     </Layouts.app>

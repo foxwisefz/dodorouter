@@ -17,7 +17,6 @@ defmodule DodoRouter.Proxy.Adapters.DeepSeek do
     endpoints: %{
       "deepseek" => "https://api.deepseek.com/v1"
     },
-    models: ~w(deepseek-chat deepseek-reasoner),
     color: "cyan",
     short_description: "DeepSeek V3, R1 models"
 

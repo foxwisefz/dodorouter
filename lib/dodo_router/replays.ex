@@ -46,9 +46,15 @@ defmodule DodoRouter.Replays do
     root = source |> Logs.root_of() |> Repo.preload(:router)
     effort = normalize_effort(target[:reasoning_effort])
     message_index = target[:message_index]
+    system_prompt = target[:system_prompt]
+    message_patches = target[:message_patches]
 
     with :ok <- validate_effort(effort),
-         {:ok, request} <- prepare_request(root, model, effort, message_index),
+         {:ok, request} <-
+           prepare_request(root, model, effort, message_index,
+             system_prompt: system_prompt,
+             message_patches: message_patches
+           ),
          {:ok, step} <- build_step(user, root.router_id, key_id, model, effort) do
       request_id = Ecto.UUID.generate()
 
@@ -116,23 +122,143 @@ defmodule DodoRouter.Replays do
   effort is only an opt-in default at the adapter layer, so a leftover body
   value would silently win over the user's choice.
   """
-  def prepare_request(source, target_model, reasoning_effort \\ nil, message_index \\ nil)
+  def prepare_request(
+        source,
+        target_model,
+        reasoning_effort \\ nil,
+        message_index \\ nil,
+        overrides \\ []
+      )
 
-  def prepare_request(%RequestLog{} = source, target_model, reasoning_effort, message_index) do
+  def prepare_request(
+        %RequestLog{} = source,
+        target_model,
+        reasoning_effort,
+        message_index,
+        overrides
+      ) do
     with :ok <- validate_model(target_model),
          {:ok, decoded} <- decode_body(source.request_body),
          :ok <- ensure_messages(decoded),
          {:ok, decoded} <- truncate_at(decoded, message_index),
-         :ok <- ensure_not_truncated(decoded) do
+         :ok <- ensure_not_truncated(decoded),
+         # Patches apply before the system-prompt override: their indexes
+         # refer to the messages array as served, and apply_system_prompt
+         # may prepend a message, which would shift every index by one.
+         {:ok, decoded} <- apply_message_patches(decoded, overrides[:message_patches]) do
       request =
         decoded
         |> Map.drop(@strip_fields)
-        |> drop_reasoning_params(reasoning_effort)
+        |> drop_reasoning_params(reasoning_effort, decoded["model"], target_model)
+        |> apply_system_prompt(overrides[:system_prompt])
         |> Map.put("model", target_model)
 
       {:ok, request}
     end
   end
+
+  # Replaces the content of the message at each patched index — the
+  # mechanism behind context-transform experiments ("does compressing tool
+  # output preserve reasoning?"): same frozen history, one bit flipped, no
+  # world drift. The transform is computed by the caller; the router never
+  # executes client code. An index with no message behind it is an error,
+  # not a skip — a benchmark that silently measured the unpatched request
+  # would be confidently wrong.
+  defp apply_message_patches(decoded, nil), do: {:ok, decoded}
+  defp apply_message_patches(decoded, []), do: {:ok, decoded}
+
+  defp apply_message_patches(%{"messages" => messages} = decoded, patches)
+       when is_list(patches) do
+    count = length(messages)
+
+    if Enum.all?(patches, &valid_patch?(&1, count)) do
+      messages =
+        Enum.reduce(patches, messages, fn patch, acc ->
+          index = patch["index"] || patch[:index]
+          content = if Map.has_key?(patch, "content"), do: patch["content"], else: patch[:content]
+          List.update_at(acc, index, &Map.put(&1, "content", content))
+        end)
+
+      {:ok, Map.put(decoded, "messages", messages)}
+    else
+      {:error, :invalid_message_patch}
+    end
+  end
+
+  defp apply_message_patches(_decoded, _patches), do: {:error, :invalid_message_patch}
+
+  defp valid_patch?(patch, count) when is_map(patch) do
+    index = patch["index"] || patch[:index]
+    content = if Map.has_key?(patch, "content"), do: patch["content"], else: patch[:content]
+
+    is_integer(index) and index >= 0 and index < count and
+      (is_binary(content) or is_list(content))
+  end
+
+  defp valid_patch?(_patch, _count), do: false
+
+  @doc """
+  Applies message patches to a stored request body — the judge-side twin of
+  `patch_system_prompt/2`, so what the judge reads is what the run sent.
+  Returns the body unchanged when there is nothing to patch or the body
+  cannot be decoded; an invalid patch already failed the run before any
+  judge saw it.
+  """
+  def patch_messages(request_body, patches)
+      when is_binary(request_body) and is_list(patches) and patches != [] do
+    case Jason.decode(request_body) do
+      {:ok, %{"messages" => _} = decoded} ->
+        case apply_message_patches(decoded, patches) do
+          {:ok, patched} -> Jason.encode!(patched)
+          {:error, _} -> request_body
+        end
+
+      _ ->
+        request_body
+    end
+  end
+
+  def patch_messages(request_body, _patches), do: request_body
+
+  # Replaces the system message's content — or prepends one when the served
+  # request had none. The replay-a-real-log anchor stays: everything else
+  # about the request is exactly what was served, only the hypothesis under
+  # test changes (dodo_router-kk1).
+  defp apply_system_prompt(request, nil), do: request
+
+  defp apply_system_prompt(%{"messages" => messages} = request, prompt)
+       when is_binary(prompt) do
+    {messages, replaced?} =
+      Enum.map_reduce(messages, false, fn
+        %{"role" => "system"} = msg, false -> {Map.put(msg, "content", prompt), true}
+        msg, replaced? -> {msg, replaced?}
+      end)
+
+    messages =
+      if replaced?,
+        do: messages,
+        else: [%{"role" => "system", "content" => prompt} | messages]
+
+    Map.put(request, "messages", messages)
+  end
+
+  @doc """
+  The same patch, applied to a stored request-body JSON string — what the
+  judge scores against must be the request the run actually sent.
+  """
+  def patch_system_prompt(request_body, nil), do: request_body
+
+  def patch_system_prompt(request_body, prompt) when is_binary(request_body) do
+    case Jason.decode(request_body) do
+      {:ok, %{"messages" => _} = decoded} ->
+        Jason.encode!(apply_system_prompt(decoded, prompt))
+
+      _ ->
+        request_body
+    end
+  end
+
+  def patch_system_prompt(request_body, _prompt), do: request_body
 
   # Cut the history at the chosen user message (inclusive) so the replay
   # asks "what would this model have answered at that exchange". Runs
@@ -163,6 +289,87 @@ defmodule DodoRouter.Replays do
     case prepare_request(source, "replay-probe", nil, message_index) do
       {:ok, _request} -> nil
       {:error, reason} -> reason
+    end
+  end
+
+  @doc """
+  The messages of a stored request, numbered exactly the way
+  `message_patches` indexes them, as `[%{index:, role:, content:, text?:}]`.
+
+  Anyone authoring a patch is choosing a position in this list, so they
+  have to be able to read it — an index typed against a request you cannot
+  see is a guess, and a wrong guess is only found out minutes into a paid
+  benchmark. `[]` when the body is missing or undecodable, which is the
+  same condition `replay_blocker/2` already refuses on.
+
+  `content` is flattened to text for reading and for seeding a patch.
+  `text?` is false when the stored content was a block array rather than a
+  string, because replacing one with a string changes the message's shape
+  and the author should know that before doing it.
+  """
+  def source_messages(%RequestLog{} = log) do
+    with {:ok, decoded} <- decode_body(log.request_body),
+         :ok <- ensure_messages(decoded) do
+      decoded["messages"]
+      |> Enum.with_index()
+      |> Enum.map(fn {message, index} ->
+        content = if is_map(message), do: message["content"], else: nil
+
+        %{
+          index: index,
+          role: (is_map(message) && message["role"]) || "message",
+          content: flatten_content(content),
+          text?: is_binary(content) or is_nil(content)
+        }
+      end)
+    else
+      _error -> []
+    end
+  end
+
+  @doc """
+  The system prompt this request was served with, flattened to text, or nil
+  when it had none — the starting point for a prompt variant, since a
+  variant is nearly always an edit of the real prompt rather than a fresh
+  one written from memory.
+  """
+  def served_system_prompt(%RequestLog{} = log) do
+    case Enum.find(source_messages(log), &(&1.role == "system")) do
+      %{content: content} when content != "" -> content
+      _none -> nil
+    end
+  end
+
+  defp flatten_content(content) when is_binary(content), do: content
+
+  # Multi-block content joins its text parts; a non-text block (an image,
+  # a tool result) is named rather than dropped, so the preview never
+  # reads as a shorter message than the one that was really sent.
+  defp flatten_content(content) when is_list(content) do
+    Enum.map_join(content, "\n", fn
+      %{"type" => "text", "text" => text} when is_binary(text) -> text
+      %{"text" => text} when is_binary(text) -> text
+      %{"type" => type} -> "[#{type}]"
+      _other -> "[block]"
+    end)
+  end
+
+  defp flatten_content(_content), do: ""
+
+  @doc """
+  The `%{provider_key_id, model}` that actually served a log — the incumbent
+  an evaluation needs as its baseline — or `nil` when the serving key is
+  unknown (legacy rows, or steps that predate provider keys).
+  """
+  def incumbent_target(%RequestLog{} = log) do
+    (log.attempted_steps || [])
+    |> Enum.find(fn step -> step["status"] == "success" && step["provider_key_id"] end)
+    |> case do
+      %{"provider_key_id" => key_id} = step ->
+        %{provider_key_id: key_id, model: log.final_model || step["model"]}
+
+      _ ->
+        nil
     end
   end
 
@@ -262,10 +469,37 @@ defmodule DodoRouter.Replays do
   defp validate_effort(effort) when is_binary(effort) and byte_size(effort) <= 32, do: :ok
   defp validate_effort(_effort), do: {:error, :invalid_reasoning_effort}
 
-  defp drop_reasoning_params(request, nil), do: request
+  # Reasoning controls belong to the model that was asked, not to the
+  # conversation. `thinking: {"type": "adaptive"}` is a 400 on a Claude model
+  # that predates adaptive thinking, so carrying the source's block to a
+  # different model means the candidate never answers at all — the request
+  # is refused before it is read.
+  #
+  # Kept when the model is unchanged: that is a genuine re-run, and there
+  # fidelity is the whole point.
+  @reasoning_params ~w(reasoning_effort thinking reasoning)
 
-  defp drop_reasoning_params(request, _effort),
-    do: Map.drop(request, ["reasoning_effort", "thinking"])
+  defp drop_reasoning_params(request, effort, source_model, target_model) do
+    cond do
+      effort not in [nil, ""] -> drop_reasoning(request)
+      target_model != source_model -> drop_reasoning(request)
+      true -> request
+    end
+  end
+
+  # `output_config` also carries structured outputs, so only its effort key
+  # goes — dropping the object would lose the schema the caller asked for.
+  defp drop_reasoning(request) do
+    request
+    |> Map.drop(@reasoning_params)
+    |> case do
+      %{"output_config" => config} = dropped when is_map(config) ->
+        Map.put(dropped, "output_config", Map.delete(config, "effort"))
+
+      dropped ->
+        dropped
+    end
+  end
 
   defp decode_body(body) when is_binary(body) do
     case Jason.decode(body) do
@@ -308,8 +542,8 @@ defmodule DodoRouter.Replays do
     end
   end
 
-  defp plan_type_for(%{provider_slug: slug}) do
-    if String.contains?(slug, "coding"), do: "coding", else: "standard"
+  defp plan_type_for(provider_key) do
+    if Providers.subscription_key?(provider_key), do: "coding", else: "standard"
   end
 
   defp offerable_key?(%{provider_slug: "test_provider"}) do
@@ -326,9 +560,11 @@ defmodule DodoRouter.Replays do
     plan_catalog =
       if key.provider_slug == catalog_provider,
         do: [],
-        else: Models.list_models_by_provider(key.provider_slug)
+        else: Models.offerable_models(key.provider_slug)
 
-    catalog = plan_catalog ++ Models.list_models_by_provider(catalog_provider)
+    # Offerable, not every row we hold: a model models.dev stopped listing is
+    # retired at the provider, and offering it spends a run to discover that.
+    catalog = plan_catalog ++ Models.offerable_models(catalog_provider)
 
     catalog_entries =
       Enum.map(catalog, fn model ->
@@ -341,12 +577,19 @@ defmodule DodoRouter.Replays do
         }
       end)
 
+    # The adapter's own list stands in only when we have no catalog for this
+    # provider. Appended to a real one it reintroduces models the adapter has
+    # outlived — they are not rows, so no catalog filter can see them.
     registry_entries =
-      provider
-      |> Registry.available_models()
-      |> Enum.map(
-        &%{id: &1, display_name: &1, input_price: nil, output_price: nil, max_input_tokens: nil}
-      )
+      if catalog_entries == [] do
+        provider
+        |> Registry.available_models()
+        |> Enum.map(
+          &%{id: &1, display_name: &1, input_price: nil, output_price: nil, max_input_tokens: nil}
+        )
+      else
+        []
+      end
 
     (catalog_entries ++ registry_entries)
     |> Enum.uniq_by(& &1.id)

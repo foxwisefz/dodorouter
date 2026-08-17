@@ -6,6 +6,7 @@ defmodule DodoRouterWeb.SessionLive.Show do
   alias DodoRouter.Logs.MessageNormalizer
   alias DodoRouter.Routers
   alias DodoRouter.TextDiff
+  alias DodoRouterWeb.Components.Charts
 
   @impl true
   def mount(%{"router_id" => router_id, "session_id" => session_id}, _session, socket) do
@@ -65,149 +66,186 @@ defmodule DodoRouterWeb.SessionLive.Show do
   @impl true
   def render(assigns) do
     ~H"""
-    <div>
-      <div class="flex items-center gap-3 mb-6">
-        <a href={~p"/routers/#{@router.id}/sessions"} class="btn btn-ghost btn-sm btn-circle">←</a>
-        <div class="flex-1">
-          <%= if @editing_name do %>
-            <form phx-submit="save_name" class="flex items-center gap-2">
-              <input
-                type="text"
-                name="session_name"
-                value={@session_name || ""}
-                placeholder="Session name"
-                class="input input-sm input-bordered w-full max-w-xs"
-                phx-mounted={JS.focus()}
-              />
-              <button type="submit" class="btn btn-sm btn-primary">Save</button>
-              <button type="button" phx-click="cancel_edit" class="btn btn-sm btn-ghost">
-                Cancel
-              </button>
-            </form>
-          <% else %>
-            <div class="flex items-center gap-2">
-              <h1 class="text-xl font-bold">
-                {if @session_name, do: @session_name, else: "Session"}
-              </h1>
-              <button phx-click="edit_name" class="btn btn-ghost btn-xs" title="Edit name">
-                <.icon name="hero-pencil" class="size-3" />
-              </button>
-            </div>
-          <% end %>
-          <p class="text-sm font-mono text-base-content/50">{@session_id}</p>
-        </div>
-      </div>
-      
-    <!-- Stats -->
-      <div class="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
-        <div class="stat bg-base-100 border border-base-300 rounded-lg p-3">
-          <div class="stat-title text-xs">Requests</div>
-          <div class="stat-value text-lg">{@stats.request_count}</div>
-        </div>
-        <div class="stat bg-base-100 border border-base-300 rounded-lg p-3">
-          <div class="stat-title text-xs">Cost</div>
-          <div id="session-cost" class="stat-value text-lg">
-            {format_usd(@stats.total_cost_usd)}
-          </div>
-          <div
-            :if={would_be_cost(@stats)}
-            class="text-xs text-base-content/50 mt-0.5"
-            title="Traffic served through subscription/coding-plan keys has no marginal per-token cost. This is what the same tokens would cost at pay-as-you-go API list prices."
-          >
-            ~{format_usd(would_be_cost(@stats))} at API rates
-          </div>
-        </div>
-        <div class="stat bg-base-100 border border-base-300 rounded-lg p-3">
-          <div class="stat-title text-xs">Total Tokens</div>
-          <div class="stat-value text-lg">{@stats.total_tokens || 0}</div>
-        </div>
-        <div class="stat bg-base-100 border border-base-300 rounded-lg p-3">
-          <div class="stat-title text-xs">Avg Latency</div>
-          <div class="stat-value text-lg">{format_latency(@stats.avg_latency_ms)}ms</div>
-        </div>
-        <div class="stat bg-base-100 border border-base-300 rounded-lg p-3">
-          <div class="stat-title text-xs">Success Rate</div>
-          <div class="stat-value text-lg">
-            <%= if @stats.request_count > 0 do %>
-              {round((@stats.successful_requests || 0) / @stats.request_count * 100)}%
+    <Layouts.app flash={@flash} current_scope={@current_scope}>
+      <div>
+        <div class="flex items-center gap-3 mb-6">
+          <a href={~p"/routers/#{@router.id}/sessions"} class="btn btn-ghost btn-sm btn-circle">←</a>
+          <div class="flex-1">
+            <%= if @editing_name do %>
+              <form phx-submit="save_name" class="flex items-center gap-2">
+                <input
+                  type="text"
+                  name="session_name"
+                  value={@session_name || ""}
+                  placeholder="Session name"
+                  class="input input-sm input-bordered w-full max-w-xs"
+                  phx-mounted={JS.focus()}
+                />
+                <button type="submit" class="btn btn-sm btn-primary">Save</button>
+                <button type="button" phx-click="cancel_edit" class="btn btn-sm btn-ghost">
+                  Cancel
+                </button>
+              </form>
             <% else %>
-              —
+              <div class="flex items-center gap-2">
+                <h1 class="text-xl font-bold">
+                  {if @session_name, do: @session_name, else: "Session"}
+                </h1>
+                <button phx-click="edit_name" class="btn btn-ghost btn-xs" title="Edit name">
+                  <.icon name="hero-pencil" class="size-3" />
+                </button>
+              </div>
             <% end %>
+            <p class="text-sm font-mono text-base-content/50">{@session_id}</p>
           </div>
         </div>
-      </div>
+        
+    <!-- Stats -->
+        <div class="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6">
+          <Charts.stat_tile
+            id="session-requests"
+            label="Requests"
+            value={to_string(@stats.request_count)}
+          />
+          <Charts.stat_tile
+            id="session-cost"
+            label="Cost"
+            value={format_usd(@stats.total_cost_usd)}
+            subtext={
+              if would_be_cost(@stats), do: "~#{format_usd(would_be_cost(@stats))} at API rates"
+            }
+          />
+          <Charts.stat_tile
+            id="session-tokens"
+            label="Total Tokens"
+            value={to_string(@stats.total_tokens || 0)}
+          />
+          <Charts.stat_tile
+            id="session-latency"
+            label="p95 Latency"
+            value={"#{format_latency(@latency_percentiles.p95)}ms"}
+            subtext={"p50 #{format_latency(@latency_percentiles.p50)}ms"}
+          />
+          <Charts.stat_tile
+            id="session-success"
+            label="Success Rate"
+            value={
+              if @stats.request_count > 0,
+                do: "#{round((@stats.successful_requests || 0) / @stats.request_count * 100)}%",
+                else: "—"
+            }
+          />
+        </div>
 
-      <.cache_regression_notice :if={@cache_regression} finding={@cache_regression} />
-      
-    <!-- Request timeline -->
-      <h2 class="text-lg font-semibold mb-3">Requests</h2>
-      <div class="space-y-2">
-        <%= for log <- @logs do %>
-          <a
-            id={"turn-#{log.id}"}
-            href={~p"/logs/#{log.id}" <> "?return_to=" <> URI.encode_www_form("/routers/#{@router.id}/sessions/#{@session_id}")}
-            class={[
-              "block p-3 rounded-lg text-sm transition-colors",
-              log.status == "pending" && "bg-info/10 animate-pulse",
-              log.status == "success" && "bg-success/10 hover:bg-success/20",
-              log.status == "fallback" && "bg-warning/10 hover:bg-warning/20",
-              log.status == "error" && "bg-error/10 hover:bg-error/20",
-              diverging_turn?(@cache_regression, log) && "ring-2 ring-warning/60"
-            ]}
+        <.cache_regression_notice :if={@cache_regression} finding={@cache_regression} />
+        
+    <!-- What the session's input tokens were made of. Shares are pro-rata
+       allocations of the billed totals (no provider tokenizer is public),
+       so the percentages are the trustworthy part. -->
+        <div :if={attribution_rows(@token_attribution) != []} class="mb-6">
+          <h2 class="text-lg font-semibold mb-3">Context breakdown</h2>
+          <div
+            id="session-token-attribution"
+            class="bg-base-100 border border-base-300 rounded-lg p-4 space-y-2 text-xs max-w-xl"
           >
-            <div
-              :if={diverging_turn?(@cache_regression, log)}
-              class="flex items-center gap-1.5 text-xs font-medium text-warning mb-2"
-            >
-              <.icon name="hero-scissors" class="size-3.5" /> Cache stopped hitting here
-            </div>
-            <div class="flex items-center justify-between">
-              <div class="flex items-center gap-3">
-                <span class={[
-                  "w-2 h-2 rounded-full shrink-0",
-                  log.status == "pending" && "bg-info",
-                  log.status == "success" && "bg-success",
-                  log.status == "fallback" && "bg-warning",
-                  log.status == "error" && "bg-error"
-                ]}>
+            <div :for={row <- attribution_rows(@token_attribution)} class="space-y-0.5">
+              <div class="flex justify-between">
+                <span class="text-base-content/60">{row.label}</span>
+                <span class="font-mono">
+                  {row.pct}% <span class="text-base-content/40">· ~{row.tokens}</span>
+                  <span
+                    :if={row.cached_pct > 0}
+                    class="text-success"
+                    title="Share of this segment that sat in the cacheable prefix"
+                  >
+                    {row.cached_pct}% cached
+                  </span>
                 </span>
-                <div class="flex items-center gap-2">
-                  <div class="w-4 h-4 rounded flex items-center justify-center shrink-0 bg-base-200">
-                    <.provider_logo slug={normalize_slug(log.final_provider)} class="w-3 h-3" />
+              </div>
+              <div class="h-1 rounded-full bg-base-300/60 overflow-hidden">
+                <div class="h-full rounded-full bg-primary/70" style={"width: #{row.pct}%"}></div>
+              </div>
+              <div :if={row.by_tool != []} class="text-[10px] text-base-content/45 text-right">
+                {Enum.map_join(row.by_tool, " · ", fn {tool, tokens} -> "#{tool} ~#{tokens}" end)}
+              </div>
+            </div>
+            <p class="text-[10px] text-base-content/40 pt-1">
+              Summed across {@token_attribution["rows"]} requests · shares of
+              ~{@token_attribution["basis_tokens"]} billed input tokens, allocated pro-rata
+            </p>
+          </div>
+        </div>
+        
+    <!-- Request timeline -->
+        <h2 class="text-lg font-semibold mb-3">Requests</h2>
+        <div class="space-y-2">
+          <%= for log <- @logs do %>
+            <a
+              id={"turn-#{log.id}"}
+              href={~p"/logs/#{log.id}" <> "?return_to=" <> URI.encode_www_form("/routers/#{@router.id}/sessions/#{@session_id}")}
+              class={[
+                "block p-3 rounded-lg text-sm transition-colors",
+                log.status == "pending" && "bg-info/10 animate-pulse",
+                log.status == "success" && "bg-success/10 hover:bg-success/20",
+                log.status == "fallback" && "bg-warning/10 hover:bg-warning/20",
+                log.status == "error" && "bg-error/10 hover:bg-error/20",
+                diverging_turn?(@cache_regression, log) && "ring-2 ring-warning/60"
+              ]}
+            >
+              <div
+                :if={diverging_turn?(@cache_regression, log)}
+                class="flex items-center gap-1.5 text-xs font-medium text-warning mb-2"
+              >
+                <.icon name="hero-scissors" class="size-3.5" /> Cache stopped hitting here
+              </div>
+              <div class="flex items-center justify-between">
+                <div class="flex items-center gap-3">
+                  <span class={[
+                    "w-2 h-2 rounded-full shrink-0",
+                    log.status == "pending" && "bg-info",
+                    log.status == "success" && "bg-success",
+                    log.status == "fallback" && "bg-warning",
+                    log.status == "error" && "bg-error"
+                  ]}>
+                  </span>
+                  <div class="flex items-center gap-2">
+                    <div class="w-4 h-4 rounded flex items-center justify-center shrink-0 bg-base-200">
+                      <.provider_logo slug={normalize_slug(log.final_provider)} class="w-3 h-3" />
+                    </div>
+                    <span class="font-mono text-base-content/80">
+                      {log.final_provider}/{log.final_model}
+                    </span>
                   </div>
-                  <span class="font-mono text-base-content/80">
-                    {log.final_provider}/{log.final_model}
+                  <span
+                    :if={log.call_type}
+                    class="px-1.5 py-0.5 rounded text-xs font-medium bg-base-300/50 text-base-content/70"
+                  >
+                    {call_type_name(log.call_type)}
+                  </span>
+                  <span class={[
+                    "px-1.5 py-0.5 rounded text-xs font-medium",
+                    status_badge_class(log.status)
+                  ]}>
+                    {log.status}
                   </span>
                 </div>
-                <span
-                  :if={log.call_type}
-                  class="px-1.5 py-0.5 rounded text-xs font-medium bg-base-300/50 text-base-content/70"
-                >
-                  {call_type_name(log.call_type)}
-                </span>
-                <span class={[
-                  "px-1.5 py-0.5 rounded text-xs font-medium",
-                  status_badge_class(log.status)
-                ]}>
-                  {log.status}
-                </span>
+                <div class="flex items-center gap-4 text-base-content/50 text-sm shrink-0">
+                  <.log_cost log={log} />
+                  <span :if={Map.get(log, :latency_ms)} class="font-mono">{log.latency_ms}ms</span>
+                  <span class="font-mono text-xs">{format_time(log.inserted_at)}</span>
+                </div>
               </div>
-              <div class="flex items-center gap-4 text-base-content/50 text-sm shrink-0">
-                <.log_cost log={log} />
-                <span :if={Map.get(log, :latency_ms)} class="font-mono">{log.latency_ms}ms</span>
-                <span class="font-mono text-xs">{format_time(log.inserted_at)}</span>
+              <div
+                :if={last_message_preview(log)}
+                class="mt-2 text-xs text-base-content/60 truncate pl-5"
+              >
+                {last_message_preview(log)}
               </div>
-            </div>
-            <div
-              :if={last_message_preview(log)}
-              class="mt-2 text-xs text-base-content/60 truncate pl-5"
-            >
-              {last_message_preview(log)}
-            </div>
-          </a>
-        <% end %>
+            </a>
+          <% end %>
+        </div>
       </div>
-    </div>
+    </Layouts.app>
     """
   end
 
@@ -248,7 +286,7 @@ defmodule DodoRouterWeb.SessionLive.Show do
             The region both requests share, which should have come back byte-identical.
           </p>
           <div class="mt-2 max-h-80 overflow-y-auto rounded-lg bg-base-100 border border-base-300 p-3">
-            <.diff_block segments={@diff.segments} />
+            <.diff_block segments={@diff.segments} mono eq_class="text-base-content/40" />
           </div>
         </details>
 
@@ -258,27 +296,6 @@ defmodule DodoRouterWeb.SessionLive.Show do
           list, system prompt, or model).
         </p>
       </div>
-    </div>
-    """
-  end
-
-  attr :segments, :list, required: true
-
-  defp diff_block(assigns) do
-    assigns = assign(assigns, :segments, TextDiff.compact_for_display(assigns.segments))
-
-    ~H"""
-    <div class="whitespace-pre-wrap break-words leading-relaxed font-mono text-xs">
-      <%= for {op, text} <- @segments do %>
-        <%= case op do %>
-          <% :eq -> %>
-            <span class="text-base-content/40">{text}</span>
-          <% :del -> %>
-            <del class="bg-error/15 text-error rounded-sm no-underline">{text}</del>
-          <% :ins -> %>
-            <ins class="bg-success/15 text-success rounded-sm no-underline">{text}</ins>
-        <% end %>
-      <% end %>
     </div>
     """
   end
@@ -324,6 +341,37 @@ defmodule DodoRouterWeb.SessionLive.Show do
   defp decimal_float(%Decimal{} = d), do: Decimal.to_float(d)
   defp decimal_float(n) when is_number(n), do: n / 1
 
+  @attribution_labels [
+    {"system", "System prompt"},
+    {"tools", "Tool definitions"},
+    {"history", "History"},
+    {"tool_results", "Tool results"},
+    {"file_contents", "File contents"}
+  ]
+
+  # Non-empty buckets of the session rollup, largest first — same shape the
+  # log page renders per request, summed by Logs.session_token_attribution.
+  defp attribution_rows(%{"buckets" => buckets, "basis_tokens" => basis})
+       when is_integer(basis) and basis > 0 do
+    for {key, label} <- @attribution_labels,
+        bucket = buckets[key],
+        is_map(bucket),
+        (bucket["allocated_tokens"] || 0) > 0 do
+      tokens = bucket["allocated_tokens"]
+
+      %{
+        label: label,
+        tokens: tokens,
+        pct: round(tokens / basis * 100),
+        cached_pct: round((bucket["cached_tokens"] || 0) / tokens * 100),
+        by_tool: bucket |> Map.get("by_tool", %{}) |> Enum.sort_by(fn {_t, n} -> -n end)
+      }
+    end
+    |> Enum.sort_by(&(-&1.tokens))
+  end
+
+  defp attribution_rows(_rollup), do: []
+
   defp load_data(socket) do
     router = socket.assigns.router
     session_id = socket.assigns.session_id
@@ -342,6 +390,29 @@ defmodule DodoRouterWeb.SessionLive.Show do
     |> assign(:logs, logs)
     |> assign(:session_name, session_name)
     |> assign(:cache_regression, cache_regression(logs))
+    |> assign(:latency_percentiles, latency_percentiles(logs))
+    |> assign(:token_attribution, Logs.session_token_attribution(router, session_id))
+  end
+
+  # A session is small enough that a per-session DB percentile query is
+  # overkill — the logs are already loaded for the timeline, so the
+  # percentiles are computed from those in memory (nearest-rank method).
+  defp latency_percentiles(logs) do
+    latencies =
+      logs
+      |> Enum.map(&Map.get(&1, :latency_ms))
+      |> Enum.filter(&is_number/1)
+      |> Enum.sort()
+
+    %{p50: percentile(latencies, 0.50), p95: percentile(latencies, 0.95)}
+  end
+
+  defp percentile([], _p), do: nil
+
+  defp percentile(sorted, p) do
+    count = length(sorted)
+    index = max(0, ceil(p * count) - 1)
+    Enum.at(sorted, index)
   end
 
   # The classifier names the turn; the view also needs the turn *before* it —

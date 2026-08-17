@@ -2,6 +2,7 @@ defmodule DodoRouterWeb.EvalLiveTest do
   use DodoRouterWeb.ConnCase, async: true
 
   import Phoenix.LiveViewTest
+  import Ecto.Query
 
   alias DodoRouter.LogsFixtures
   alias DodoRouter.Evaluations
@@ -11,6 +12,28 @@ defmodule DodoRouterWeb.EvalLiveTest do
   alias DodoRouter.RoutersFixtures
 
   setup :register_and_log_in_user
+
+  test "preselects the incumbent model as a candidate", %{conn: conn, user: user} do
+    {router, _api_key} = RoutersFixtures.router_fixture(user)
+    provider_key = ProvidersFixtures.provider_key_fixture(user)
+
+    log =
+      LogsFixtures.log_fixture(router, %{
+        final_model: "test-model",
+        attempted_steps: [
+          %{"status" => "success", "provider_key_id" => provider_key.id, "model" => "test-model"}
+        ]
+      })
+
+    {:ok, live, _html} = live(conn, ~p"/logs/#{log.id}/evals/new")
+
+    # The guide's first rule is "include the model you use today" — the form
+    # starts from it rather than asking every user to remember.
+    assert has_element?(
+             live,
+             "#selected-candidates input[value='#{provider_key.id}|test-model']"
+           ) or has_element?(live, "#selected-candidates", "test-model")
+  end
 
   test "creates an evaluation from a selected log", %{conn: conn, user: user} do
     {router, _api_key} = RoutersFixtures.router_fixture(user)
@@ -165,6 +188,39 @@ defmodule DodoRouterWeb.EvalLiveTest do
              live,
              "select[name='evaluation[judge_key]'] option[selected][value='#{provider_key.id}']"
            )
+  end
+
+  test "warns when the judge would bill against a plan rather than the API", %{
+    conn: conn,
+    user: user
+  } do
+    {router, _api_key} = RoutersFixtures.router_fixture(user)
+    metered = ProvidersFixtures.provider_key_fixture(user, %{"label" => "metered"})
+
+    plan =
+      ProvidersFixtures.provider_key_fixture(user, %{
+        "provider_slug" => "test_provider_coding",
+        "label" => "plan key"
+      })
+
+    log = LogsFixtures.log_fixture(router)
+    {:ok, live, _html} = live(conn, ~p"/logs/#{log.id}/evals/new")
+
+    refute has_element?(live, "#judge-billing-warning")
+
+    live
+    |> form("#eval-form", %{"evaluation" => %{"judge_key" => plan.id}})
+    |> render_change()
+
+    # A judge that gets refused costs every score in the batch, not one run.
+    assert has_element?(live, "#judge-billing-warning")
+    assert render(live) =~ "Prefer a metered API key"
+
+    live
+    |> form("#eval-form", %{"evaluation" => %{"judge_key" => metered.id}})
+    |> render_change()
+
+    refute has_element?(live, "#judge-billing-warning")
   end
 
   test "a recent judge whose key is gone is not offered", %{conn: conn, user: user} do
@@ -381,15 +437,17 @@ defmodule DodoRouterWeb.EvalLiveTest do
 
     {:ok, live, _html} = live(conn, ~p"/evals/#{evaluation.id}")
 
-    # Errored runs are collapsed by default; reveal them first.
-    live |> element("#toggle-errored-legacy") |> render_click()
+    # Errored runs collapse behind a toggle only when there is something
+    # else to show. This batch is all errors, so they are the result and
+    # stand on their own.
+    refute has_element?(live, "#toggle-errored-legacy")
 
     assert has_element?(live, "#eval-runs a[href='/logs/#{candidate.id}']", "Candidate log")
     assert has_element?(live, "#eval-runs a[href='/logs/#{judge.id}']", "Judge log")
     assert has_element?(live, "#eval-runs", "Errored")
   end
 
-  test "groups run history by batch and hides errored runs behind a toggle",
+  test "one results view: a batch selector switches every section at once",
        %{conn: conn, user: user} do
     {router, _api_key} = RoutersFixtures.router_fixture(user)
     provider_key = ProvidersFixtures.provider_key_fixture(user)
@@ -429,7 +487,7 @@ defmodule DodoRouterWeb.EvalLiveTest do
       |> Repo.insert!()
     end
 
-    _old_run = insert_run.(%{status: "completed", score: 60, batch_id: old_batch})
+    old_run = insert_run.(%{status: "completed", score: 60, batch_id: old_batch})
     scored = insert_run.(%{status: "completed", score: 90, batch_id: new_batch})
     errored = insert_run.(%{status: "failed", error: "boom", batch_id: new_batch, repetition: 2})
 
@@ -439,20 +497,43 @@ defmodule DodoRouterWeb.EvalLiveTest do
 
     {:ok, live, _html} = live(conn, ~p"/evals/#{evaluation.id}")
 
-    # One section per batch, latest first with its own label.
-    assert has_element?(live, "#batch-#{new_batch}", "Latest batch")
+    # Both batches are listed in the selector; the latest is the default
+    # view and the only one whose runs are on the page.
+    assert has_element?(live, "#batch-#{new_batch}", "Latest")
     assert has_element?(live, "#batch-#{old_batch}")
 
-    # Errored runs stay collapsed until toggled, scored runs show right away.
     assert has_element?(live, "#run-#{scored.id}")
-    refute has_element?(live, "#run-#{errored.id}")
+    assert has_element?(live, "#run-#{errored.id}")
+    refute has_element?(live, "#run-#{old_run.id}")
+
+    # The aggregates follow the selection: the latest batch scored 90, the
+    # old one 60. Switching rewrites stats, rankings and the run list
+    # together — that is the entire point of the selector.
+    assert has_element?(live, "#eval-summary", "90/100")
+    refute has_element?(live, "#eval-summary", "60/100")
+
+    live |> element("#batch-#{old_batch}") |> render_click()
+
+    assert has_element?(live, "#run-#{old_run.id}")
+    refute has_element?(live, "#run-#{scored.id}")
+    assert has_element?(live, "#eval-summary", "60/100")
+    refute has_element?(live, "#eval-summary", "90/100")
+
+    live |> element("#batch-#{new_batch}") |> render_click()
+
+    assert has_element?(live, "#run-#{scored.id}")
+    refute has_element?(live, "#run-#{old_run.id}")
+
+    # Every run shows by default — an errored run is a result, not an
+    # advanced option. The toggle exists to *hide* them.
+    assert has_element?(live, "#run-#{errored.id}")
     assert has_element?(live, "#toggle-errored-#{new_batch}", "1 errored")
 
     live |> element("#toggle-errored-#{new_batch}") |> render_click()
-    assert has_element?(live, "#run-#{errored.id}")
+    refute has_element?(live, "#run-#{errored.id}")
 
     live |> element("#toggle-errored-#{new_batch}") |> render_click()
-    refute has_element?(live, "#run-#{errored.id}")
+    assert has_element?(live, "#run-#{errored.id}")
   end
 
   test "chart draws lines, marks errored runs, and pins a series on click",
@@ -810,5 +891,1469 @@ defmodule DodoRouterWeb.EvalLiveTest do
 
     assert length(cx_values) == 2
     assert length(Enum.uniq(cx_values)) == 2
+  end
+
+  describe "a run names its own judge key" do
+    setup %{user: user} do
+      {router, _api_key} = RoutersFixtures.router_fixture(user)
+      judge = ProvidersFixtures.provider_key_fixture(user, %{"label" => "Key 1"})
+      log = LogsFixtures.log_fixture(router)
+
+      {:ok, evaluation} =
+        Evaluations.create_evaluation(user, log, %{
+          name: "Judged history",
+          criteria: "Be useful",
+          judge_model: "test-model",
+          judge_provider_key_id: judge.id,
+          candidate_targets: [
+            %{
+              "provider_key_id" => judge.id,
+              "provider" => "test_provider",
+              "model" => "test-model"
+            }
+          ]
+        })
+
+      %EvaluationRun{}
+      |> EvaluationRun.changeset(%{
+        evaluation_id: evaluation.id,
+        status: "completed",
+        score: 90,
+        candidate_provider: "test_provider",
+        candidate_model: "test-model",
+        repetition: 1,
+        judge_provider_key_id: judge.id,
+        judge_provider_key_label: judge.label
+      })
+      |> Repo.insert!()
+
+      %{evaluation: evaluation, judge: judge}
+    end
+
+    test "shows the key it was judged by", %{conn: conn, evaluation: evaluation} do
+      {:ok, _live, html} = live(conn, ~p"/evals/#{evaluation.id}")
+
+      assert html =~ "judged by Key 1"
+      refute html =~ "deleted"
+    end
+
+    test "marks the key as deleted once it is gone", %{
+      conn: conn,
+      user: user,
+      evaluation: evaluation,
+      judge: judge
+    } do
+      replacement = ProvidersFixtures.provider_key_fixture(user, %{"label" => "Key 2"})
+
+      {:ok, _} = DodoRouter.Providers.delete_provider_key(judge, reassign_to: replacement)
+
+      {:ok, _live, html} = live(conn, ~p"/evals/#{evaluation.id}")
+
+      # the run still names what judged it, and says the credential is gone
+      assert html =~ "judged by Key 1"
+      assert html =~ "deleted"
+    end
+  end
+
+  describe "a batch that failed" do
+    setup %{user: user} do
+      {router, _api_key} = RoutersFixtures.router_fixture(user)
+      key = ProvidersFixtures.provider_key_fixture(user, %{"label" => "Key 1"})
+
+      log =
+        LogsFixtures.log_fixture(router, %{
+          request_body:
+            Jason.encode!(%{
+              "model" => "original-model",
+              "messages" => [%{"role" => "user", "content" => "Say hello"}]
+            })
+        })
+
+      {:ok, evaluation} =
+        Evaluations.create_evaluation(user, log, %{
+          name: "Failed batch",
+          criteria: "Be useful",
+          judge_model: "fail-model",
+          judge_provider_key_id: key.id,
+          candidate_targets: [
+            %{
+              "provider_key_id" => key.id,
+              "provider" => "test_provider",
+              "model" => "test-model"
+            }
+          ],
+          repetitions: 1
+        })
+
+      # The production path, so benchmark_status is written the way a real
+      # run writes it.
+      :ok = Evaluations.enqueue(user, evaluation)
+
+      %{evaluation: Evaluations.get_evaluation!(user, evaluation.id), key: key}
+    end
+
+    test "says the judge failed, not the model", %{conn: conn, evaluation: evaluation} do
+      {:ok, live, _html} = live(conn, ~p"/evals/#{evaluation.id}")
+
+      # Errored runs are hidden behind a toggle; when every run errored the
+      # page has nothing else to show, so the batch opens expanded.
+      html = render(live)
+
+      assert html =~ "Judge failed"
+      # The answer that was paid for is on the page, not one click away in
+      # the log viewer.
+      assert html =~ "Hello from test-model"
+    end
+
+    test "offers to retry only the failed runs, naming what it will redo", %{
+      conn: conn,
+      user: user,
+      evaluation: evaluation
+    } do
+      {:ok, live, _html} = live(conn, ~p"/evals/#{evaluation.id}")
+
+      assert has_element?(live, "#retry-failed-button")
+      assert render(live) =~ "re-judge"
+
+      # Give the evaluation a judge that can score, then retry.
+      evaluation
+      |> Ecto.Changeset.change(judge_model: "judge-model")
+      |> Repo.update!()
+
+      live |> element("#retry-failed-button") |> render_click()
+
+      run =
+        Repo.one!(
+          from(r in EvaluationRun,
+            where: r.evaluation_id == ^evaluation.id and is_nil(r.superseded_at)
+          )
+        )
+
+      assert run.status == "completed"
+      assert is_integer(run.score)
+
+      _ = user
+    end
+
+    test "a retry counts against the runs being retried, not the whole batch", %{
+      conn: conn,
+      evaluation: evaluation
+    } do
+      {:ok, live, _html} = live(conn, ~p"/evals/#{evaluation.id}")
+
+      # A retry re-runs rows that already exist, so counting against the
+      # plan reads "1 of 1" from the first second and the bar never moves.
+      # The denominator is what is actually being retried.
+      send(live.pid, {:retry_started, 4})
+      assert render(live) =~ "0 of 4"
+
+      send(live.pid, {:benchmark_progress, {:ok, :whatever}})
+      send(live.pid, {:benchmark_progress, {:ok, :whatever}})
+
+      html = render(live)
+      assert html =~ "2 of 4"
+      assert has_element?(live, "#eval-progress progress[value='2'][max='4']")
+    end
+
+    test "shows the benchmark's own status when nothing completed", %{
+      conn: conn,
+      evaluation: evaluation
+    } do
+      {:ok, _live, html} = live(conn, ~p"/evals/#{evaluation.id}")
+
+      assert html =~ "eval-status"
+    end
+  end
+
+  test "warns when the judge and a candidate share one provider key", %{conn: conn, user: user} do
+    {router, _api_key} = RoutersFixtures.router_fixture(user)
+    key = ProvidersFixtures.provider_key_fixture(user, %{"label" => "Key 1"})
+    log = LogsFixtures.log_fixture(router)
+
+    {:ok, evaluation} =
+      Evaluations.create_evaluation(user, log, %{
+        name: "Shared key",
+        criteria: "Be useful",
+        judge_model: "test-model",
+        judge_provider_key_id: key.id,
+        candidate_targets: [
+          %{
+            "provider_key_id" => key.id,
+            "provider" => "test_provider",
+            "model" => "test-model"
+          }
+        ],
+        repetitions: 3
+      })
+
+    {:ok, live, _html} = live(conn, ~p"/evals/#{evaluation.id}")
+
+    # Judging and generating on one account is how a benchmark rate-limits
+    # itself, and it is knowable before the run rather than after.
+    assert has_element?(live, "#shared-key-warning")
+    assert render(live) =~ "Key 1"
+  end
+
+  describe "a long rubric" do
+    setup %{user: user} do
+      {router, _api_key} = RoutersFixtures.router_fixture(user)
+      key = ProvidersFixtures.provider_key_fixture(user)
+      log = LogsFixtures.log_fixture(router)
+
+      criteria =
+        Enum.map_join(1..40, "\n", fn n ->
+          "#{n}. A hard rule the reply must obey, stated at length so the rubric is genuinely long."
+        end)
+
+      {:ok, evaluation} =
+        Evaluations.create_evaluation(user, log, %{
+          name: "Long rubric",
+          criteria: criteria,
+          judge_model: "test-model",
+          judge_provider_key_id: key.id,
+          candidate_targets: [
+            %{
+              "provider_key_id" => key.id,
+              "provider" => "test_provider",
+              "model" => "test-model"
+            }
+          ]
+        })
+
+      %{evaluation: evaluation}
+    end
+
+    test "is clamped until asked for, so it cannot set the row's height", %{
+      conn: conn,
+      evaluation: evaluation
+    } do
+      {:ok, live, _html} = live(conn, ~p"/evals/#{evaluation.id}")
+
+      assert has_element?(live, "#criteria-body.line-clamp-6")
+      assert has_element?(live, "#toggle-criteria")
+
+      html = live |> element("#toggle-criteria") |> render_click()
+
+      refute has_element?(live, "#criteria-body.line-clamp-6")
+      assert html =~ "Show less"
+    end
+
+    test "a short rubric gets no toggle at all", %{conn: conn, user: user} do
+      {router, _api_key} = RoutersFixtures.router_fixture(user)
+      key = ProvidersFixtures.provider_key_fixture(user, %{"label" => "Short rubric key"})
+      log = LogsFixtures.log_fixture(router)
+
+      {:ok, short} =
+        Evaluations.create_evaluation(user, log, %{
+          name: "Short rubric",
+          criteria: "Answer directly.",
+          judge_model: "test-model",
+          judge_provider_key_id: key.id,
+          candidate_targets: []
+        })
+
+      {:ok, live, _html} = live(conn, ~p"/evals/#{short.id}")
+
+      refute has_element?(live, "#toggle-criteria")
+      refute has_element?(live, "#criteria-body.line-clamp-6")
+    end
+
+    test "the two panels are not stretched to a common height", %{
+      conn: conn,
+      evaluation: evaluation
+    } do
+      {:ok, live, _html} = live(conn, ~p"/evals/#{evaluation.id}")
+
+      # Grid items stretch by default, so the rubric's height became the
+      # chart's height and left the plot floating in whitespace.
+      assert has_element?(live, "#eval-panels.items-start")
+    end
+  end
+
+  test "the score chart says why it is empty rather than drawing bare axes", %{
+    conn: conn,
+    user: user
+  } do
+    {router, _api_key} = RoutersFixtures.router_fixture(user)
+    key = ProvidersFixtures.provider_key_fixture(user)
+    log = LogsFixtures.log_fixture(router)
+
+    {:ok, evaluation} =
+      Evaluations.create_evaluation(user, log, %{
+        name: "Nothing scored",
+        criteria: "Be useful",
+        judge_model: "test-model",
+        judge_provider_key_id: key.id,
+        candidate_targets: [
+          %{"provider_key_id" => key.id, "provider" => "test_provider", "model" => "test-model"}
+        ]
+      })
+
+    # A ranked target with no scored run: rankings exist, the chart has
+    # nothing to plot.
+    %EvaluationRun{}
+    |> EvaluationRun.changeset(%{
+      evaluation_id: evaluation.id,
+      status: "failed",
+      failure_stage: "candidate",
+      candidate_provider: "test_provider",
+      candidate_model: "test-model",
+      repetition: 1
+    })
+    |> Repo.insert!()
+
+    {:ok, live, _html} = live(conn, ~p"/evals/#{evaluation.id}")
+
+    refute has_element?(live, "#quality-consistency-chart svg")
+    assert has_element?(live, "#score-trend", "No run has been scored")
+  end
+
+  describe "a batch where most runs errored" do
+    setup %{user: user} do
+      {router, _api_key} = RoutersFixtures.router_fixture(user)
+      key = ProvidersFixtures.provider_key_fixture(user, %{"label" => "Mixed key"})
+      log = LogsFixtures.log_fixture(router)
+
+      {:ok, evaluation} =
+        Evaluations.create_evaluation(user, log, %{
+          name: "Mostly errors",
+          criteria: "Be useful",
+          judge_model: "test-model",
+          judge_provider_key_id: key.id,
+          candidate_targets: [
+            %{"provider_key_id" => key.id, "provider" => "test_provider", "model" => "test-model"}
+          ]
+        })
+
+      batch = Ecto.UUID.generate()
+      evaluation = evaluation |> Ecto.Changeset.change(last_batch_id: batch) |> Repo.update!()
+
+      insert = fn attrs ->
+        %EvaluationRun{}
+        |> EvaluationRun.changeset(
+          Map.merge(
+            %{
+              evaluation_id: evaluation.id,
+              batch_id: batch,
+              candidate_provider: "test_provider",
+              candidate_model: "test-model"
+            },
+            attrs
+          )
+        )
+        |> Repo.insert!()
+      end
+
+      scored =
+        insert.(%{
+          status: "completed",
+          score: 2,
+          repetition: 1,
+          summary: "Missing markers",
+          issues: ["No TITLE marker", "Prose before HTML"],
+          criterion_scores: %{"accuracy" => 35, "completeness" => 30},
+          candidate_output: "the answer text",
+          reasoning: "Checked each rule."
+        })
+
+      errored =
+        insert.(%{
+          status: "failed",
+          failure_stage: "candidate",
+          repetition: 2,
+          error: "Candidate call rate limited"
+        })
+
+      %{evaluation: evaluation, scored: scored, errored: errored}
+    end
+
+    test "the errors are on the page without hunting for a toggle", %{
+      conn: conn,
+      evaluation: evaluation,
+      errored: errored
+    } do
+      {:ok, live, _html} = live(conn, ~p"/evals/#{evaluation.id}")
+
+      # 16 of 18 failing is the batch's headline, not a footnote behind a
+      # control that reads like an advanced option.
+      assert has_element?(live, "#run-#{errored.id}")
+      assert render(live) =~ "Candidate call rate limited"
+    end
+
+    test "a scored run's detail is collapsed, so a long batch stays scannable", %{
+      conn: conn,
+      evaluation: evaluation,
+      scored: scored
+    } do
+      {:ok, live, _html} = live(conn, ~p"/evals/#{evaluation.id}")
+
+      # Criterion bars, issue lists, the answer and the judge's reasoning are
+      # each screens tall; eighteen runs of them is not a page anyone reads.
+      assert has_element?(live, "#run-#{scored.id} details#run-detail-#{scored.id}")
+      assert has_element?(live, "#run-detail-#{scored.id} li", "No TITLE marker")
+
+      # The one-line identity stays visible without expanding anything.
+      assert has_element?(live, "#run-#{scored.id}", "Missing markers")
+    end
+
+    test "failures are summarised by provider and cause, not one row per run", %{
+      conn: conn,
+      user: user,
+      evaluation: evaluation
+    } do
+      # Three more failures on one provider for one reason: the digest says
+      # that once, with a count.
+      for repetition <- 3..5 do
+        %EvaluationRun{}
+        |> EvaluationRun.changeset(%{
+          evaluation_id: evaluation.id,
+          batch_id: evaluation.last_batch_id,
+          status: "failed",
+          failure_stage: "candidate",
+          candidate_provider: "moonshot",
+          candidate_model: "kimi",
+          repetition: repetition,
+          error: "You've reached your usage limit for this billing cycle"
+        })
+        |> Repo.insert!()
+      end
+
+      {:ok, live, _html} = live(conn, ~p"/evals/#{evaluation.id}")
+
+      assert has_element?(live, "#failure-digest", "moonshot")
+      assert has_element?(live, "#failure-digest", "out of quota")
+      assert has_element?(live, "#failure-digest li", "3")
+      _ = user
+    end
+
+    test "accounts for every planned run, including the ones that never started", %{
+      conn: conn,
+      user: user,
+      evaluation: evaluation
+    } do
+      # A benchmark that dies partway leaves three populations, and the
+      # digest used to describe only the first: runs that failed, runs stuck
+      # mid-flight, and runs that never started at all. The last is why a
+      # model can be configured as a candidate and appear nowhere on the
+      # page — the one question "why did nothing happen for glm-5?" asks.
+      evaluation
+      |> Ecto.Changeset.change(
+        repetitions: 3,
+        candidate_targets: [
+          %{"provider_key_id" => Ecto.UUID.generate(), "provider" => "zai", "model" => "glm-5"},
+          %{
+            "provider_key_id" => Ecto.UUID.generate(),
+            "provider" => "moonshot",
+            "model" => "kimi-k2.7-code"
+          }
+        ]
+      )
+      |> Repo.update!()
+
+      # One stuck row for glm-5; kimi never got a row at all.
+      %EvaluationRun{}
+      |> EvaluationRun.changeset(%{
+        evaluation_id: evaluation.id,
+        batch_id: evaluation.last_batch_id,
+        status: "running",
+        candidate_provider: "zai",
+        candidate_model: "glm-5",
+        repetition: 1
+      })
+      |> Repo.insert!()
+
+      {:ok, live, _html} = live(conn, ~p"/evals/#{evaluation.id}")
+
+      assert has_element?(live, "#failure-digest", "Interrupted")
+      assert has_element?(live, "#failure-digest", "Never started")
+      assert has_element?(live, "#failure-digest", "kimi-k2.7-code")
+    end
+
+    test "marks the affected candidate in the list, not only in the banner", %{
+      conn: conn,
+      user: user,
+      evaluation: evaluation
+    } do
+      key = DodoRouter.Providers.get_provider_key!(user, evaluation.judge_provider_key_id)
+      DodoRouter.Providers.apply_health(key.id, :quota, "usage limit reached")
+
+      evaluation
+      |> Ecto.Changeset.change(
+        candidate_targets: [
+          %{"provider_key_id" => key.id, "provider" => "test_provider", "model" => "model-a"}
+        ]
+      )
+      |> Repo.update!()
+
+      {:ok, live, _html} = live(conn, ~p"/evals/#{evaluation.id}")
+
+      # The banner says it once; the list is where the eye goes to answer
+      # "which of these six is the problem".
+      assert has_element?(live, "#eval-candidates", "out of quota")
+    end
+
+    test "a key the proxy already knows is exhausted is called out before running", %{
+      conn: conn,
+      user: user,
+      evaluation: evaluation
+    } do
+      key = DodoRouter.Providers.get_provider_key!(user, evaluation.judge_provider_key_id)
+      DodoRouter.Providers.apply_health(key.id, :quota, "usage limit reached")
+
+      {:ok, live, _html} = live(conn, ~p"/evals/#{evaluation.id}")
+
+      assert has_element?(live, "#key-preflight", "out of quota")
+
+      # And starting it is refused rather than half-run.
+      live |> form("#run-eval-form") |> render_submit()
+      assert render(live) =~ "Not starting"
+    end
+
+    test "a running benchmark can be cancelled from the page", %{
+      conn: conn,
+      user: user,
+      evaluation: evaluation
+    } do
+      evaluation
+      |> Ecto.Changeset.change(benchmark_status: "running")
+      |> DodoRouter.Repo.update!()
+
+      test_pid = self()
+
+      spawn(fn ->
+        Registry.register(DodoRouter.EvaluationRegistry, evaluation.id, nil)
+        send(test_pid, :registered)
+        Process.sleep(:infinity)
+      end)
+
+      assert_receive :registered
+
+      {:ok, live, _html} = live(conn, ~p"/evals/#{evaluation.id}")
+      assert has_element?(live, "#cancel-eval-button")
+
+      live |> element("#cancel-eval-button") |> render_click()
+
+      assert DodoRouter.Evaluations.get_evaluation!(user, evaluation.id).benchmark_status ==
+               "cancelled"
+    end
+
+    test "Run again accepts a repetitions override", %{
+      conn: conn,
+      user: user,
+      evaluation: evaluation
+    } do
+      {:ok, live, _html} = live(conn, ~p"/evals/#{evaluation.id}")
+
+      assert has_element?(live, "#run-repetitions")
+
+      live |> form("#run-eval-form", %{"repetitions" => "5"}) |> render_submit()
+
+      assert DodoRouter.Evaluations.get_evaluation!(user, evaluation.id).repetitions == 5
+    end
+
+    test "errored runs can still be hidden when only the scores matter", %{
+      conn: conn,
+      evaluation: evaluation,
+      errored: errored,
+      scored: scored
+    } do
+      {:ok, live, _html} = live(conn, ~p"/evals/#{evaluation.id}")
+
+      live |> element("button[phx-click='toggle_errored']") |> render_click()
+
+      refute has_element?(live, "#run-#{errored.id}")
+      assert has_element?(live, "#run-#{scored.id}")
+    end
+  end
+
+  test "says which models it is set up to run, even before any of them have", %{
+    conn: conn,
+    user: user
+  } do
+    {router, _api_key} = RoutersFixtures.router_fixture(user)
+    key = ProvidersFixtures.provider_key_fixture(user, %{"label" => "Key 1"})
+    log = LogsFixtures.log_fixture(router)
+
+    {:ok, evaluation} =
+      Evaluations.create_evaluation(user, log, %{
+        name: "Configured but unrun",
+        criteria: "Be useful",
+        judge_model: "test-model",
+        judge_provider_key_id: key.id,
+        repetitions: 3,
+        candidate_targets: [
+          %{"provider_key_id" => key.id, "provider" => "test_provider", "model" => "model-a"},
+          %{"provider_key_id" => key.id, "provider" => "test_provider", "model" => "model-b"}
+        ]
+      })
+
+    {:ok, live, _html} = live(conn, ~p"/evals/#{evaluation.id}")
+
+    # The rankings table only lists models that produced runs, so an
+    # evaluation that never ran — or died halfway — showed nothing at all
+    # about what it was set up to measure.
+    assert has_element?(live, "#eval-candidates", "model-a")
+    assert has_element?(live, "#eval-candidates", "model-b")
+    assert has_element?(live, "#eval-candidates", "Key 1")
+    assert render(live) =~ "6 runs"
+  end
+
+  test "an earlier attempt stays reachable under the run that replaced it", %{
+    conn: conn,
+    user: user
+  } do
+    {router, _api_key} = RoutersFixtures.router_fixture(user)
+    key = ProvidersFixtures.provider_key_fixture(user)
+    log = LogsFixtures.log_fixture(router)
+
+    {:ok, evaluation} =
+      Evaluations.create_evaluation(user, log, %{
+        name: "Retried",
+        criteria: "Be useful",
+        judge_model: "test-model",
+        judge_provider_key_id: key.id,
+        candidate_targets: [
+          %{"provider_key_id" => key.id, "provider" => "test_provider", "model" => "test-model"}
+        ]
+      })
+
+    batch = Ecto.UUID.generate()
+    evaluation = evaluation |> Ecto.Changeset.change(last_batch_id: batch) |> Repo.update!()
+
+    live_run =
+      %EvaluationRun{}
+      |> EvaluationRun.changeset(%{
+        evaluation_id: evaluation.id,
+        batch_id: batch,
+        status: "completed",
+        score: 80,
+        candidate_provider: "test_provider",
+        candidate_model: "test-model",
+        repetition: 1
+      })
+      |> Repo.insert!()
+
+    %EvaluationRun{}
+    |> EvaluationRun.changeset(%{
+      evaluation_id: evaluation.id,
+      status: "failed",
+      failure_stage: "judge",
+      candidate_provider: "test_provider",
+      candidate_model: "test-model",
+      repetition: 1,
+      error: "Judge call failed — anthropic rate limited",
+      superseded_at: DateTime.utc_now(),
+      superseded_by_id: live_run.id
+    })
+    |> Repo.insert!()
+
+    {:ok, live, _html} = live(conn, ~p"/evals/#{evaluation.id}")
+
+    # One row in the batch, not two — but the failure it replaced is still
+    # on the page rather than overwritten.
+    assert render(live) =~ "1 runs"
+    assert has_element?(live, "#run-attempts-#{live_run.id}", "rate limited")
+  end
+
+  test "a benchmark that died mid-run stops claiming to be running", %{conn: conn, user: user} do
+    {router, _api_key} = RoutersFixtures.router_fixture(user)
+    key = ProvidersFixtures.provider_key_fixture(user)
+    log = LogsFixtures.log_fixture(router)
+
+    {:ok, evaluation} =
+      Evaluations.create_evaluation(user, log, %{
+        name: "Interrupted",
+        criteria: "Be useful",
+        judge_model: "test-model",
+        judge_provider_key_id: key.id,
+        candidate_targets: [
+          %{"provider_key_id" => key.id, "provider" => "test_provider", "model" => "test-model"}
+        ]
+      })
+
+    # A restart, a crash, or a status write that never landed leaves this
+    # behind. No process is running, so the page must not show a spinner
+    # and a progress bar forever.
+    evaluation |> Ecto.Changeset.change(benchmark_status: "running") |> Repo.update!()
+
+    {:ok, live, _html} = live(conn, ~p"/evals/#{evaluation.id}")
+
+    refute has_element?(live, "#eval-progress")
+    assert has_element?(live, "#eval-status", "interrupted")
+    refute has_element?(live, "#run-eval-button[disabled]")
+  end
+
+  test "hands the agent surface to the user as a runnable command", %{conn: conn, user: user} do
+    {_router, _api_key} = RoutersFixtures.router_fixture(user)
+
+    {:ok, live, _html} = live(conn, ~p"/evals")
+
+    # The command is the only way an agent learns this surface exists. It names
+    # no router because MCP is router-unscoped — the agent asks which routers it
+    # reaches once connected, so there is no slug to get wrong here.
+    assert has_element?(live, "#agent-access", "claude mcp add")
+    assert has_element?(live, "#agent-access", "/mcp")
+  end
+
+  test "benchmarks a recording in one motion", %{conn: conn, user: user} do
+    {router, _api_key} = RoutersFixtures.router_fixture(user)
+    provider_key = ProvidersFixtures.provider_key_fixture(user)
+    {:ok, recording} = DodoRouter.Recordings.start_recording(router, %{name: "Prod capture"})
+
+    body = fn text ->
+      Jason.encode!(%{"model" => "m", "messages" => [%{"role" => "user", "content" => text}]})
+    end
+
+    log1 =
+      LogsFixtures.log_fixture(router, %{
+        recording_id: recording.id,
+        request_body: body.("one"),
+        final_model: "test-model",
+        attempted_steps: [
+          %{"status" => "success", "provider_key_id" => provider_key.id, "model" => "test-model"}
+        ]
+      })
+
+    log2 =
+      LogsFixtures.log_fixture(router, %{recording_id: recording.id, request_body: body.("two")})
+
+    # Captured but not replayable: excluded from the sample, not fatal.
+    LogsFixtures.log_fixture(router, %{recording_id: recording.id})
+
+    {:ok, live, html} =
+      live(conn, ~p"/routers/#{router.id}/recordings/#{recording.id}/evals/new")
+
+    # The source panel says what is being benchmarked and what fell out.
+    assert has_element?(live, "#eval-recording-source", "Prod capture")
+    assert html =~ "of 3 captured"
+    assert has_element?(live, "#planned-runs-note")
+
+    # The incumbent that served the capture is preselected as a candidate.
+    assert has_element?(live, "#selected-candidates", "test-model")
+
+    live
+    |> form("#eval-form", %{"evaluation" => %{"judge_key" => provider_key.id}})
+    |> render_change()
+
+    live
+    |> form("#eval-form", %{
+      "evaluation" => %{
+        "name" => "Recording benchmark",
+        "criteria" => "Answer accurately",
+        "candidate_target_values" => ["#{provider_key.id}|test-model"],
+        "repetitions" => "1",
+        "judge_key" => provider_key.id,
+        "judge_target" => "#{provider_key.id}|test-model"
+      }
+    })
+    |> render_submit()
+
+    {path, _flash} = assert_redirect(live)
+    assert String.starts_with?(path, "/evals/")
+
+    evaluation_id = path |> String.trim_leading("/evals/") |> URI.parse() |> Map.fetch!(:path)
+    evaluation = Evaluations.get_evaluation!(user, evaluation_id)
+
+    assert evaluation.recording_id == recording.id
+    assert Enum.sort(evaluation.source_log_ids) == Enum.sort([log1.id, log2.id])
+    # 2 source logs x 1 candidate x 1 repetition, run by the save action.
+    assert length(evaluation.runs) == 2
+  end
+
+  test "multi-log rankings expose the weakest request and expand per source", %{
+    conn: conn,
+    user: user
+  } do
+    {router, _api_key} = RoutersFixtures.router_fixture(user)
+    provider_key = ProvidersFixtures.provider_key_fixture(user)
+
+    body = fn text ->
+      Jason.encode!(%{"model" => "m", "messages" => [%{"role" => "user", "content" => text}]})
+    end
+
+    log1 = LogsFixtures.log_fixture(router, %{request_body: body.("one")})
+    log2 = LogsFixtures.log_fixture(router, %{request_body: body.("two")})
+
+    {:ok, evaluation} =
+      Evaluations.create_evaluation(user, log1, %{
+        name: "Per-source UI",
+        criteria: "Be useful",
+        judge_model: "judge-model",
+        judge_provider_key_id: provider_key.id,
+        candidate_targets: [
+          %{
+            "provider_key_id" => provider_key.id,
+            "provider" => "test_provider",
+            "model" => "test-model"
+          }
+        ],
+        source_log_ids: [log1.id, log2.id]
+      })
+
+    for {source_log, score} <- [{log1, 90}, {log2, 30}] do
+      %EvaluationRun{}
+      |> EvaluationRun.changeset(%{
+        evaluation_id: evaluation.id,
+        status: "completed",
+        score: score,
+        candidate_provider: "test_provider",
+        candidate_model: "test-model",
+        source_log_id: source_log.id
+      })
+      |> Repo.insert!()
+    end
+
+    {:ok, live, html} = live(conn, ~p"/evals/#{evaluation.id}")
+
+    # The weakest request's average is visible without expanding anything.
+    assert html =~ "Weakest request"
+    assert has_element?(live, "button[phx-click='toggle_ranking_sources']", "30")
+
+    html = live |> element("button[phx-click='toggle_ranking_sources']") |> render_click()
+    assert html =~ "Per source request, weakest first"
+    assert html =~ String.slice(log2.id, 0, 8)
+  end
+
+  test "a recording-based benchmark shows the monthly projection panel", %{
+    conn: conn,
+    user: user
+  } do
+    {router, _api_key} = RoutersFixtures.router_fixture(user)
+    provider_key = ProvidersFixtures.provider_key_fixture(user)
+    {:ok, recording} = DodoRouter.Recordings.start_recording(router, %{name: "Rate capture"})
+
+    recording =
+      recording
+      |> Ecto.Changeset.change(
+        started_at: DateTime.add(DateTime.utc_now(), -15, :day),
+        stopped_at: DateTime.utc_now(),
+        status: "stopped"
+      )
+      |> Repo.update!()
+
+    log =
+      LogsFixtures.log_fixture(router, %{
+        recording_id: recording.id,
+        request_body:
+          Jason.encode!(%{"model" => "m", "messages" => [%{"role" => "user", "content" => "hi"}]}),
+        list_cost_usd: Decimal.new("1.00")
+      })
+
+    {:ok, evaluation} =
+      Evaluations.create_evaluation(user, log, %{
+        name: "Projection UI",
+        criteria: "Be useful",
+        judge_model: "judge-model",
+        judge_provider_key_id: provider_key.id,
+        candidate_targets: [
+          %{
+            "provider_key_id" => provider_key.id,
+            "provider" => "test_provider",
+            "model" => "cheap"
+          }
+        ],
+        recording_id: recording.id
+      })
+
+    %EvaluationRun{}
+    |> EvaluationRun.changeset(%{
+      evaluation_id: evaluation.id,
+      status: "completed",
+      score: 90,
+      candidate_provider: "test_provider",
+      candidate_model: "cheap",
+      candidate_list_cost_usd: Decimal.new("0.25")
+    })
+    |> Repo.insert!()
+
+    {:ok, live, html} = live(conn, ~p"/evals/#{evaluation.id}")
+
+    assert has_element?(live, "#savings-projection")
+    assert html =~ "As served, this traffic projects to"
+    assert html =~ "Savings /month"
+  end
+
+  test "a verdict is applied from the ranking row and stays revertible", %{
+    conn: conn,
+    user: user
+  } do
+    {router, _api_key} = RoutersFixtures.router_fixture(user)
+    incumbent_key = ProvidersFixtures.provider_key_fixture(user, %{"label" => "Incumbent key"})
+    candidate_key = ProvidersFixtures.provider_key_fixture(user, %{"label" => "Candidate key"})
+
+    {:ok, step} =
+      DodoRouter.Routers.create_routing_step(router, %{
+        "provider" => "test_provider",
+        "model" => "incumbent-model",
+        "provider_key_id" => incumbent_key.id
+      })
+
+    log =
+      LogsFixtures.log_fixture(router, %{
+        final_model: "incumbent-model",
+        attempted_steps: [
+          %{
+            "status" => "success",
+            "provider_key_id" => incumbent_key.id,
+            "model" => "incumbent-model"
+          }
+        ]
+      })
+
+    {:ok, evaluation} =
+      Evaluations.create_evaluation(user, log, %{
+        name: "Apply flow",
+        criteria: "Answer accurately",
+        judge_model: "judge-model",
+        judge_provider_key_id: candidate_key.id,
+        candidate_targets: [
+          %{
+            "provider_key_id" => candidate_key.id,
+            "provider" => "test_provider",
+            "model" => "cheap-model"
+          }
+        ]
+      })
+
+    %EvaluationRun{}
+    |> EvaluationRun.changeset(%{
+      evaluation_id: evaluation.id,
+      status: "completed",
+      score: 90,
+      candidate_provider: "test_provider",
+      candidate_model: "cheap-model"
+    })
+    |> Repo.insert!()
+
+    {:ok, live, _html} = live(conn, ~p"/evals/#{evaluation.id}")
+
+    html = live |> element("button[phx-click='apply_verdict']") |> render_click()
+    assert html =~ "Routing updated"
+    assert has_element?(live, "#applied-changes", "cheap-model")
+
+    updated = DodoRouter.Routers.get_routing_step!(router, step.id)
+    assert updated.model == "cheap-model"
+    assert updated.provider_key_id == candidate_key.id
+
+    # Keep the decision honest: monitoring starts from the applied change
+    # and the panel appears with the benchmark's baseline.
+    html = live |> element("button[phx-click='enable_monitor']") |> render_click()
+    assert html =~ "Monitoring on"
+    assert has_element?(live, "#eval-monitor", "Live monitoring")
+    assert has_element?(live, "#eval-monitor", "cheap-model")
+
+    html = live |> element("#toggle-monitor") |> render_click()
+    assert html =~ "Monitoring paused"
+    assert has_element?(live, "#eval-monitor", "paused")
+
+    html = live |> element("button[phx-click='revert_verdict']") |> render_click()
+    assert html =~ "Routing reverted"
+    assert has_element?(live, "#applied-changes", "reverted")
+
+    reverted = DodoRouter.Routers.get_routing_step!(router, step.id)
+    assert reverted.model == "incumbent-model"
+    assert reverted.provider_key_id == incumbent_key.id
+  end
+
+  test "a recording with nothing replayable bounces back with the reason", %{
+    conn: conn,
+    user: user
+  } do
+    {router, _api_key} = RoutersFixtures.router_fixture(user)
+    {:ok, recording} = DodoRouter.Recordings.start_recording(router)
+    LogsFixtures.log_fixture(router, %{recording_id: recording.id})
+
+    assert {:error, {:redirect, %{to: to, flash: flash}}} =
+             live(conn, ~p"/routers/#{router.id}/recordings/#{recording.id}/evals/new")
+
+    assert to == "/routers/#{router.id}/recordings/#{recording.id}"
+    assert flash["error"] =~ "can be replayed"
+  end
+
+  describe "prompt variants in the builder" do
+    setup %{user: user} do
+      {router, _api_key} = RoutersFixtures.router_fixture(user)
+      provider_key = ProvidersFixtures.provider_key_fixture(user)
+
+      log =
+        LogsFixtures.log_fixture(router, %{
+          final_model: "test-model",
+          attempted_steps: [
+            %{
+              "status" => "success",
+              "provider_key_id" => provider_key.id,
+              "model" => "test-model"
+            }
+          ],
+          request_body:
+            Jason.encode!(%{
+              "model" => "test-model",
+              "messages" => [
+                %{"role" => "system", "content" => "original prompt"},
+                %{"role" => "user", "content" => "the long tool result"}
+              ]
+            })
+        })
+
+      %{router: router, provider_key: provider_key, log: log}
+    end
+
+    defp add_variant(live, index, name, system_prompt) do
+      live |> element("#add-variant-button") |> render_click()
+
+      live
+      |> form("#eval-form", %{
+        "evaluation" => %{
+          "prompt_variants" => %{
+            to_string(index) => %{"name" => name, "system_prompt" => system_prompt}
+          }
+        }
+      })
+      |> render_change()
+
+      live
+    end
+
+    defp submit_eval(live, provider_key, extra) do
+      live
+      |> form("#eval-form", %{"evaluation" => %{"judge_key" => provider_key.id}})
+      |> render_change()
+
+      live
+      |> form("#eval-form", %{
+        "evaluation" =>
+          Map.merge(
+            %{
+              "name" => "Prompt A/B",
+              "criteria" => "Answer accurately",
+              "candidate_target_values" => ["#{provider_key.id}|test-model"],
+              "repetitions" => "1",
+              "judge_key" => provider_key.id,
+              "judge_target" => "#{provider_key.id}|test-model"
+            },
+            extra
+          )
+      })
+      |> render_submit()
+    end
+
+    test "a variant authored in the builder reaches the wire", %{
+      conn: conn,
+      user: user,
+      provider_key: provider_key,
+      log: log
+    } do
+      {:ok, live, _html} = live(conn, ~p"/logs/#{log.id}/evals/new")
+
+      # Nothing until asked for: the default stays "replay it as served".
+      assert has_element?(live, "#prompt-variants", "No variants")
+      refute has_element?(live, "#variant-0")
+
+      add_variant(live, 0, "terse", "You are terse. Reply in one word.")
+      assert has_element?(live, "#variant-0-name")
+
+      submit_eval(live, provider_key, %{
+        "prompt_variants" => %{
+          "0" => %{"name" => "terse", "system_prompt" => "You are terse. Reply in one word."}
+        }
+      })
+
+      {path, _flash} = assert_redirect(live)
+      id = path |> String.trim_leading("/evals/") |> URI.parse() |> Map.fetch!(:path)
+      evaluation = Evaluations.get_evaluation!(user, id)
+
+      assert evaluation.prompt_variants == [
+               %{"name" => "terse", "system_prompt" => "You are terse. Reply in one word."}
+             ]
+
+      assert Enum.map(evaluation.runs, & &1.variant_name) == ["terse"]
+
+      candidate_log =
+        Repo.get!(DodoRouter.Logs.RequestLog, hd(evaluation.runs).candidate_log_id)
+
+      assert candidate_log.request_body =~ "You are terse"
+    end
+
+    test "a blank system prompt is the as-served baseline, not an empty prompt", %{
+      conn: conn,
+      user: user,
+      provider_key: provider_key,
+      log: log
+    } do
+      {:ok, live, _html} = live(conn, ~p"/logs/#{log.id}/evals/new")
+
+      add_variant(live, 0, "as-served", "")
+
+      submit_eval(live, provider_key, %{
+        "prompt_variants" => %{"0" => %{"name" => "as-served", "system_prompt" => ""}}
+      })
+
+      {path, _flash} = assert_redirect(live)
+      id = path |> String.trim_leading("/evals/") |> URI.parse() |> Map.fetch!(:path)
+      evaluation = Evaluations.get_evaluation!(user, id)
+
+      # nil, not "": the baseline sits in the comparison under its own name
+      # rather than being served an empty system message.
+      assert evaluation.prompt_variants == [%{"name" => "as-served", "system_prompt" => nil}]
+
+      candidate_log =
+        Repo.get!(DodoRouter.Logs.RequestLog, hd(evaluation.runs).candidate_log_id)
+
+      assert candidate_log.request_body =~ "original prompt"
+    end
+
+    test "a message patch authored in the builder replaces that message", %{
+      conn: conn,
+      user: user,
+      provider_key: provider_key,
+      log: log
+    } do
+      {:ok, live, _html} = live(conn, ~p"/logs/#{log.id}/evals/new")
+
+      add_variant(live, 0, "compressed", "")
+      live |> element("#add-patch-0") |> render_click()
+      assert has_element?(live, "#variant-0-patch-0-index")
+
+      patched = %{
+        "0" => %{
+          "name" => "compressed",
+          "system_prompt" => "",
+          "message_patches" => %{"0" => %{"index" => "1", "content" => "short tool result"}}
+        }
+      }
+
+      submit_eval(live, provider_key, %{"prompt_variants" => patched})
+
+      {path, _flash} = assert_redirect(live)
+      id = path |> String.trim_leading("/evals/") |> URI.parse() |> Map.fetch!(:path)
+      evaluation = Evaluations.get_evaluation!(user, id)
+
+      assert evaluation.prompt_variants == [
+               %{
+                 "name" => "compressed",
+                 "system_prompt" => nil,
+                 "message_patches" => [%{"index" => 1, "content" => "short tool result"}]
+               }
+             ]
+
+      candidate_log =
+        Repo.get!(DodoRouter.Logs.RequestLog, hd(evaluation.runs).candidate_log_id)
+
+      assert candidate_log.request_body =~ "short tool result"
+      refute candidate_log.request_body =~ "the long tool result"
+    end
+
+    test "an index the anchor has but a shorter sampled request does not is refused", %{
+      conn: conn,
+      user: user,
+      router: router,
+      provider_key: provider_key
+    } do
+      {:ok, recording} = DodoRouter.Recordings.start_recording(router, %{name: "Prod capture"})
+
+      body = fn contents ->
+        Jason.encode!(%{
+          "model" => "test-model",
+          "messages" => Enum.map(contents, &%{"role" => "user", "content" => &1})
+        })
+      end
+
+      LogsFixtures.log_fixture(router, %{
+        recording_id: recording.id,
+        request_body: body.(["one", "two", "three"]),
+        final_model: "test-model",
+        attempted_steps: [
+          %{"status" => "success", "provider_key_id" => provider_key.id, "model" => "test-model"}
+        ]
+      })
+
+      LogsFixtures.log_fixture(router, %{
+        recording_id: recording.id,
+        request_body: body.(["only one"])
+      })
+
+      {:ok, live, _html} =
+        live(conn, ~p"/routers/#{router.id}/recordings/#{recording.id}/evals/new")
+
+      # The picker offers the anchor's messages; the same position in every
+      # OTHER sampled request is the part no page can show, so it is checked.
+      add_variant(live, 0, "compressed", "")
+      live |> element("#add-patch-0") |> render_click()
+
+      html =
+        submit_eval(live, provider_key, %{
+          "prompt_variants" => %{
+            "0" => %{
+              "name" => "compressed",
+              "system_prompt" => "",
+              "message_patches" => %{"0" => %{"index" => "2", "content" => "short"}}
+            }
+          }
+        })
+
+      assert html =~ "compressed"
+      assert html =~ "does not have"
+      assert Evaluations.list_evaluations(user) == []
+      # The refusal re-renders the builder, so the row that caused it is
+      # still there to be corrected.
+      assert has_element?(live, "#variant-0-patch-0-content", "short")
+    end
+
+    test "the request being varied is on the page, numbered the way patches index it", %{
+      conn: conn,
+      log: log
+    } do
+      {:ok, live, _html} = live(conn, ~p"/logs/#{log.id}/evals/new")
+
+      assert has_element?(live, "#source-request", "2 messages")
+      refute has_element?(live, "#source-request", "the long tool result")
+
+      html = live |> element("#toggle-source-request") |> render_click()
+
+      assert html =~ "the long tool result"
+      assert html =~ "original prompt"
+
+      # And it opens itself the moment there is a variant to author.
+      live |> element("#toggle-source-request") |> render_click()
+      refute has_element?(live, "#source-request", "the long tool result")
+
+      live |> element("#add-variant-button") |> render_click()
+      assert has_element?(live, "#source-request", "the long tool result")
+    end
+
+    test "a variant starts from the served prompt rather than a blank box", %{
+      conn: conn,
+      log: log
+    } do
+      {:ok, live, _html} = live(conn, ~p"/logs/#{log.id}/evals/new")
+
+      live |> element("#add-variant-button") |> render_click()
+      # Nothing to diff until the two sides differ.
+      refute has_element?(live, "#variant-0-prompt-diff")
+      refute has_element?(live, "#variant-0-system-prompt", "original prompt")
+
+      live |> element("#use-served-prompt-0") |> render_click()
+      assert has_element?(live, "#variant-0-system-prompt", "original prompt")
+      refute has_element?(live, "#variant-0-prompt-diff")
+
+      # ...and editing it shows what the edit did, not just the new text.
+      html =
+        live
+        |> form("#eval-form", %{
+          "evaluation" => %{
+            "prompt_variants" => %{
+              "0" => %{"name" => "terse", "system_prompt" => "original prompt, but terse"}
+            }
+          }
+        })
+        |> render_change()
+
+      assert html =~ "Served prompt → this variant"
+      assert has_element?(live, "#variant-0-prompt-diff ins", "terse")
+    end
+
+    test "choosing a message opens its real text for editing, and diffs the edit", %{
+      conn: conn,
+      log: log
+    } do
+      {:ok, live, _html} = live(conn, ~p"/logs/#{log.id}/evals/new")
+
+      live |> element("#add-variant-button") |> render_click()
+      live |> element("#add-patch-0") |> render_click()
+
+      # The index field is the request's own messages, not a number to guess.
+      assert has_element?(
+               live,
+               "#variant-0-patch-0-index option",
+               "1 · user · the long tool result"
+             )
+
+      live
+      |> form("#eval-form", %{
+        "evaluation" => %{
+          "prompt_variants" => %{
+            "0" => %{
+              "name" => "compressed",
+              "system_prompt" => "",
+              "message_patches" => %{"0" => %{"index" => "1", "content" => ""}}
+            }
+          }
+        }
+      })
+      |> render_change()
+
+      # Picking it seeds the box with what was really sent.
+      assert has_element?(live, "#variant-0-patch-0-content", "the long tool result")
+
+      html =
+        live
+        |> form("#eval-form", %{
+          "evaluation" => %{
+            "prompt_variants" => %{
+              "0" => %{
+                "name" => "compressed",
+                "system_prompt" => "",
+                "message_patches" => %{"0" => %{"index" => "1", "content" => "the short result"}}
+              }
+            }
+          }
+        })
+        |> render_change()
+
+      assert html =~ "Message 1 as served → this variant"
+      assert has_element?(live, "#variant-0-patch-0-diff del", "long")
+      assert has_element?(live, "#variant-0-patch-0-diff ins", "short")
+    end
+
+    test "an edit already made is never re-seeded out from under the author", %{
+      conn: conn,
+      log: log
+    } do
+      {:ok, live, _html} = live(conn, ~p"/logs/#{log.id}/evals/new")
+
+      live |> element("#add-variant-button") |> render_click()
+      live |> element("#add-patch-0") |> render_click()
+
+      patch = fn content ->
+        live
+        |> form("#eval-form", %{
+          "evaluation" => %{
+            "prompt_variants" => %{
+              "0" => %{
+                "name" => "compressed",
+                "system_prompt" => "",
+                "message_patches" => %{"0" => %{"index" => "1", "content" => content}}
+              }
+            }
+          }
+        })
+        |> render_change()
+      end
+
+      patch.("")
+      assert has_element?(live, "#variant-0-patch-0-content", "the long tool result")
+
+      # Clearing the box on a message already chosen is the author's edit,
+      # not a fresh pick — re-seeding here would make the field unclearable.
+      patch.("")
+
+      refute has_element?(live, "#variant-0-patch-0-content", "the long tool result")
+    end
+
+    test "two variants with one name are refused, and the typed rows survive saying so", %{
+      conn: conn,
+      log: log
+    } do
+      {:ok, live, _html} = live(conn, ~p"/logs/#{log.id}/evals/new")
+
+      live |> element("#add-variant-button") |> render_click()
+      live |> element("#add-variant-button") |> render_click()
+
+      html =
+        live
+        |> form("#eval-form", %{
+          "evaluation" => %{
+            "prompt_variants" => %{
+              "0" => %{"name" => "terse", "system_prompt" => "one word"},
+              "1" => %{"name" => "terse", "system_prompt" => "two words"}
+            }
+          }
+        })
+        |> render_change()
+
+      assert html =~ "variant names must be distinct"
+      # A shape the schema rejects never becomes a change, so the rows have
+      # to be rendered from what was typed or the message erases its cause.
+      assert has_element?(live, "#variant-1-system-prompt", "two words")
+    end
+
+    test "the planned-runs note multiplies by the variant count", %{conn: conn, log: log} do
+      {:ok, live, _html} = live(conn, ~p"/logs/#{log.id}/evals/new")
+
+      # One source log and no variants: nothing to multiply, nothing to say.
+      refute has_element?(live, "#planned-runs-note")
+
+      live |> element("#add-variant-button") |> render_click()
+      live |> element("#add-variant-button") |> render_click()
+
+      html =
+        live
+        |> form("#eval-form", %{
+          "evaluation" => %{
+            "repetitions" => "3",
+            "prompt_variants" => %{
+              "0" => %{"name" => "a", "system_prompt" => ""},
+              "1" => %{"name" => "b", "system_prompt" => ""}
+            }
+          }
+        })
+        |> render_change()
+
+      assert html =~ "2 prompt variants"
+      assert has_element?(live, "#planned-runs-note", "6")
+    end
+
+    test "duplicating an evaluation carries its variants into the builder", %{
+      conn: conn,
+      user: user,
+      provider_key: provider_key,
+      log: log
+    } do
+      {:ok, source} =
+        Evaluations.create_evaluation(user, log, %{
+          name: "Prompt A/B",
+          criteria: "Be correct",
+          judge_model: "test-model",
+          judge_provider_key_id: provider_key.id,
+          prompt_variants: [
+            %{"name" => "as-served", "system_prompt" => nil},
+            %{
+              "name" => "compressed",
+              "system_prompt" => "You are terse.",
+              "message_patches" => [%{"index" => 1, "content" => "short"}]
+            }
+          ],
+          candidate_targets: [
+            %{
+              "provider_key_id" => provider_key.id,
+              "provider" => "test_provider",
+              "model" => "test-model"
+            }
+          ],
+          repetitions: 1
+        })
+
+      {:ok, live, _html} = live(conn, ~p"/logs/#{log.id}/evals/new?from=#{source.id}")
+
+      assert has_element?(live, "#variant-0-name[value='as-served']")
+      assert has_element?(live, "#variant-1-name[value='compressed']")
+      assert has_element?(live, "#variant-1-system-prompt", "You are terse.")
+      assert has_element?(live, "#variant-1-patch-0-index option[selected][value='1']")
+      assert has_element?(live, "#variant-1-patch-0-content", "short")
+    end
+
+    test "a variant row can be removed again", %{conn: conn, log: log} do
+      {:ok, live, _html} = live(conn, ~p"/logs/#{log.id}/evals/new")
+
+      live |> element("#add-variant-button") |> render_click()
+      live |> element("#add-variant-button") |> render_click()
+      assert has_element?(live, "#variant-1")
+
+      live |> element("#variant-0 button[phx-click='remove_variant']") |> render_click()
+
+      refute has_element?(live, "#variant-1")
+      assert has_element?(live, "#variant-0")
+    end
+  end
+
+  test "someone else's recording is not a benchmark entry point", %{conn: conn} do
+    other = DodoRouter.AccountsFixtures.user_fixture()
+    {other_router, _} = RoutersFixtures.router_fixture(other)
+    {:ok, foreign} = DodoRouter.Recordings.start_recording(other_router)
+
+    # The router fetch is scoped first, so a foreign router 404s outright.
+    assert_raise Ecto.NoResultsError, fn ->
+      live(conn, ~p"/routers/#{other_router.id}/recordings/#{foreign.id}/evals/new")
+    end
   end
 end

@@ -17,7 +17,6 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
       "moonshot" => "https://api.moonshot.ai/v1",
       "moonshot_coding" => "https://api.kimi.com/coding/v1"
     },
-    models: ~w(kimi-k2.5 kimi-k2 moonshot-v1-8k moonshot-v1-32k moonshot-v1-128k),
     color: "amber",
     short_description: "Kimi K2 models",
     key_short_descriptions: %{
@@ -33,7 +32,6 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
 
   @standard_base_url "https://api.moonshot.ai/v1"
   @coding_base_url "https://api.kimi.com/coding/v1"
-  @timeout_ms 120_000
 
   @doc false
   def base_url(%RoutingStep{plan_type: "coding"}), do: @coding_base_url
@@ -79,7 +77,7 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
     payload_size_bytes = Adapter.record_outbound_body(body)
     start_time = FinchTelemetry.mark_request_start()
 
-    case Req.post(url, headers: headers, json: body, receive_timeout: @timeout_ms) do
+    case Req.post(url, headers: headers, json: body, receive_timeout: Adapter.receive_timeout()) do
       {:ok, %{status: 200, body: response_body, headers: resp_headers}} ->
         total_ms = latency(start_time)
         upload_ms = FinchTelemetry.get_upload_ms(start_time)
@@ -199,7 +197,7 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
       Req.post(url,
         headers: headers,
         json: body,
-        receive_timeout: @timeout_ms,
+        receive_timeout: Adapter.receive_timeout(),
         into: into_fun
       )
 
@@ -481,7 +479,8 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
 
   defp ensure_reasoning_content(msg), do: msg
 
-  defp accumulate_chunk(acc, chunk_data) do
+  @doc false
+  def accumulate_chunk(acc, chunk_data) do
     choice = get_in(chunk_data, ["choices", Access.at(0)])
 
     content =
@@ -497,7 +496,11 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
       end
 
     tool_calls = accumulate_tool_calls(acc.tool_calls, chunk_data)
-    usage = chunk_data["usage"] || acc.usage
+
+    # Without stream_options (which the coding endpoint rejects — 46a95cf),
+    # Moonshot puts usage inside the final chunk's choice rather than in a
+    # top-level usage frame; missing it logs the request with null tokens.
+    usage = chunk_data["usage"] || get_in(choice, ["usage"]) || acc.usage
 
     finish_reason = get_in(choice, ["finish_reason"]) || acc.finish_reason
 
@@ -549,7 +552,8 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
     end
   end
 
-  defp build_final_response(acc, timing_meta) do
+  @doc false
+  def build_final_response(acc, timing_meta) do
     message = build_final_message(acc)
 
     meta = %{

@@ -106,4 +106,17 @@ if config_env() == :prod do
 
   config :dodo_router, :email_from, System.get_env("EMAIL_FROM", "noreply@dodorouter.com")
   config :dodo_router, :email_reply_to, System.get_env("EMAIL_REPLY_TO")
+
+  # ATTESTO_ISSUER/ATTESTO_AUDIENCE must be read at boot, not baked into the
+  # release at compile time (dodo_router-16u) — a value set in the server's
+  # .env has no effect otherwise. Default the issuer to this endpoint's public
+  # URL (same host runtime.exs already resolved above) and the audience to
+  # issuer <> "/mcp", so OAuth discovery documents advertise the real host
+  # rather than https://localhost.
+  attesto_issuer = System.get_env("ATTESTO_ISSUER") || "https://#{host}"
+  attesto_audience = System.get_env("ATTESTO_AUDIENCE") || "#{attesto_issuer}/mcp"
+
+  config :dodo_router, AttestoPhoenix.Config,
+    issuer: attesto_issuer,
+    audience: attesto_audience
 end

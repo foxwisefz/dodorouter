@@ -18,6 +18,36 @@ defmodule DodoRouterWeb.RouterLiveTest do
       assert html =~ router.slug
     end
 
+    test "cards show 24h request count, error rate and a sparkline", %{conn: conn, user: user} do
+      {router, _api_key} = RoutersFixtures.router_fixture(user, %{name: "Busy Router"})
+
+      for _ <- 1..3 do
+        DodoRouter.LogsFixtures.log_fixture(router, %{status: "success"})
+      end
+
+      DodoRouter.LogsFixtures.log_fixture(router, %{status: "error"})
+
+      {:ok, _live, html} = live(conn, ~p"/routers")
+
+      assert html =~ ~s(data-router-requests="4")
+      assert html =~ ~s(data-router-errors="1")
+      assert html =~ "last 24h"
+    end
+
+    test "the error pill links to the router's failures view", %{conn: conn, user: user} do
+      {router, _api_key} = RoutersFixtures.router_fixture(user, %{name: "Flaky Router"})
+
+      DodoRouter.LogsFixtures.log_fixture(router, %{status: "success"})
+      DodoRouter.LogsFixtures.log_fixture(router, %{status: "error"})
+
+      {:ok, live, _html} = live(conn, ~p"/routers")
+
+      assert has_element?(
+               live,
+               ~s(a[href="/logs?router_id=#{router.id}&failures=true"])
+             )
+    end
+
     test "shows empty state when no routers", %{conn: conn} do
       {:ok, _live, html} = live(conn, ~p"/routers")
 
@@ -77,6 +107,98 @@ defmodule DodoRouterWeb.RouterLiveTest do
       {:ok, _live, html} = live(conn, ~p"/routers")
 
       refute html =~ other_router.name
+    end
+  end
+
+  describe "Show" do
+    test "latency stat shows p95 with p50 subtext, not a bare mean", %{conn: conn, user: user} do
+      {router, _api_key} = RoutersFixtures.router_fixture(user)
+
+      for _ <- 1..20 do
+        DodoRouter.LogsFixtures.log_fixture(router, %{latency_ms: 100})
+      end
+
+      DodoRouter.LogsFixtures.log_fixture(router, %{latency_ms: 10_000})
+
+      {:ok, _live, html} = live(conn, ~p"/routers/#{router.id}")
+
+      assert html =~ "p95 Latency"
+      refute html =~ "Avg Latency"
+    end
+
+    test "KPI row renders via the shared stat_tile component", %{conn: conn, user: user} do
+      {router, _api_key} = RoutersFixtures.router_fixture(user)
+
+      {:ok, live, _html} = live(conn, ~p"/routers/#{router.id}")
+
+      assert has_element?(live, "#router-requests")
+      assert has_element?(live, "#router-success")
+      assert has_element?(live, "#router-tokens")
+      assert has_element?(live, "#router-latency")
+      refute has_element?(live, ".stat-card")
+    end
+
+    test "routing steps show their share of traffic and error rate", %{
+      conn: conn,
+      user: user
+    } do
+      {router, _api_key} = RoutersFixtures.router_fixture(user)
+
+      {:ok, step_a} =
+        DodoRouter.Routers.create_routing_step(router, %{
+          provider: "zai",
+          model: "glm-4.6"
+        })
+
+      {:ok, step_b} =
+        DodoRouter.Routers.create_routing_step(router, %{
+          provider: "moonshot",
+          model: "kimi-k2"
+        })
+
+      # step A errors, falls back to step B — one served request each
+      DodoRouter.LogsFixtures.log_fixture(router, %{
+        status: "fallback",
+        attempted_steps: [
+          %{"step_id" => step_a.id, "status" => "error"},
+          %{"step_id" => step_b.id, "status" => "success"}
+        ]
+      })
+
+      # step A alone serves this one cleanly
+      DodoRouter.LogsFixtures.log_fixture(router, %{
+        status: "success",
+        attempted_steps: [
+          %{"step_id" => step_a.id, "status" => "success"}
+        ]
+      })
+
+      {:ok, _live, html} = live(conn, ~p"/routers/#{router.id}")
+
+      assert html =~ ~s(data-step-id="#{step_a.id}")
+      assert html =~ ~s(data-step-share="50%")
+      assert html =~ ~s(data-step-errors="1")
+
+      assert html =~ ~s(data-step-id="#{step_b.id}")
+      assert html =~ ~s(data-step-share="50%")
+    end
+
+    test "a step with no traffic in the window is dimmed, not silently zero", %{
+      conn: conn,
+      user: user
+    } do
+      {router, _api_key} = RoutersFixtures.router_fixture(user)
+
+      {:ok, unused_step} =
+        DodoRouter.Routers.create_routing_step(router, %{
+          provider: "zai",
+          model: "glm-4.6"
+        })
+
+      {:ok, _live, html} = live(conn, ~p"/routers/#{router.id}")
+
+      assert html =~ ~s(data-step-id="#{unused_step.id}")
+      assert html =~ "no traffic in 24h"
     end
   end
 end

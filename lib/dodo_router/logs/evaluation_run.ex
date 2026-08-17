@@ -20,7 +20,41 @@ defmodule DodoRouter.Logs.EvaluationRun do
     # What the judge found missing/ambiguous in the rubric itself.
     field :rubric_gaps, {:array, :string}, default: []
     field :raw_judge_response, :string
+    # Which source log this run measured. Nil means the evaluation's anchor
+    # log — every run before multi-log evaluations existed.
+    field :source_log_id, :binary_id
+    # Which prompt variant this run measured; nil is the as-served baseline
+    # (and every run from before variants existed). The patch itself lives
+    # on the immutable evaluation, keyed by this name.
+    field :variant_name, :string
+    # nil = a benchmark run (every pre-monitor row reads that way);
+    # "monitor" marks judge-only runs a monitor sweep produced from live
+    # traffic, so benchmark aggregates never mix them in.
+    field :kind, :string
+    # next_action mode only: the judge's verdict on the candidate's
+    # proposed next move relative to what production actually did —
+    # "better" | "equivalent" | "worse". nil on rubric-mode runs.
+    field :preference, :string
+    # What the provider's response claimed actually answered — nil when the
+    # response named nothing or the row predates the column. The ranking is
+    # keyed on candidate_model (what was requested); a difference here is a
+    # provider-side alias/snapshot resolution the reader deserves to see.
+    field :candidate_served_model, :string
     field :error, :string
+    # Machine-readable twin of `error`: a stable token (rate_limited,
+    # auth_error, provider_key_missing, empty_response, judge_unparseable,
+    # judge_setup, crashed, cancelled, interrupted, ...) so clients decide
+    # whether retrying could help without regexing prose. Nil on rows
+    # written before the column existed.
+    field :error_category, :string
+    # "candidate" | "judge" — which half of the run failed. A judge failure
+    # keeps candidate_output, so it can be re-judged without paying for the
+    # answer twice. Nil unless status is "failed".
+    field :failure_stage, :string
+    # Set on the *copy* of an attempt that a retry replaced. A row with this
+    # set is history: it is excluded from every aggregate, and reachable
+    # only through the run that superseded it.
+    field :superseded_at, :utc_datetime_usec
     field :duration_ms, :integer
     field :judge_prompt_version, :string, default: "v1"
     field :candidate_provider, :string
@@ -38,10 +72,21 @@ defmodule DodoRouter.Logs.EvaluationRun do
     # so aggregates don't mix executions. Nil on rows from before batching.
     field :batch_id, :binary_id
 
+    # The judge key as it was when this run happened. The label is a
+    # snapshot, so it survives the key being deleted — a run must keep
+    # naming what judged it even after the evaluation is repointed at
+    # another key. See Evaluations.judge_key_deleted?/1.
+    field :judge_provider_key_label, :string
+    # Same snapshot on the candidate side: candidate_provider names the
+    # provider, never which of that provider's keys answered.
+    field :candidate_provider_key_label, :string
+
     belongs_to :evaluation, DodoRouter.Logs.Evaluation
     belongs_to :judge_log, DodoRouter.Logs.RequestLog
     belongs_to :candidate_log, DodoRouter.Logs.RequestLog
     belongs_to :candidate_provider_key, DodoRouter.Providers.ProviderKey
+    belongs_to :judge_provider_key, DodoRouter.Providers.ProviderKey
+    belongs_to :superseded_by, __MODULE__
 
     timestamps(type: :utc_datetime)
   end
@@ -58,7 +103,16 @@ defmodule DodoRouter.Logs.EvaluationRun do
       :reasoning,
       :rubric_gaps,
       :raw_judge_response,
+      :source_log_id,
+      :variant_name,
+      :kind,
+      :preference,
+      :candidate_served_model,
       :error,
+      :error_category,
+      :failure_stage,
+      :superseded_at,
+      :superseded_by_id,
       :duration_ms,
       :judge_prompt_version,
       :candidate_provider_key_id,
@@ -74,7 +128,10 @@ defmodule DodoRouter.Logs.EvaluationRun do
       :judge_list_cost_usd,
       :batch_id,
       :evaluation_id,
-      :judge_log_id
+      :judge_log_id,
+      :judge_provider_key_id,
+      :judge_provider_key_label,
+      :candidate_provider_key_label
     ])
     |> validate_required([:status, :evaluation_id, :judge_prompt_version])
     |> validate_inclusion(:status, ~w(pending running completed failed))

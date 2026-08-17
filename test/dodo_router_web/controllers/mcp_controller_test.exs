@@ -1,0 +1,1829 @@
+defmodule DodoRouterWeb.MCPControllerTest do
+  @moduledoc """
+  The 2026-07-28 transport rules. These are the parts a hand-rolled protocol
+  gets wrong quietly — a header the server forgot to compare against the body
+  is invisible until an intermediary routes on one and the server acts on the
+  other.
+  """
+
+  use DodoRouterWeb.ConnCase, async: true
+
+  import Ecto.Query
+
+  alias DodoRouter.Agents
+  alias DodoRouter.AccountsFixtures
+  alias DodoRouter.AuthZFixtures
+  alias DodoRouter.LogsFixtures
+  alias DodoRouter.RoutersFixtures
+
+  @version "2026-07-28"
+
+  setup do
+    user = AccountsFixtures.user_fixture()
+    {router, proxy_key} = RoutersFixtures.router_fixture(user)
+
+    %{
+      user: user,
+      router: router,
+      proxy_key: proxy_key,
+      token: AuthZFixtures.access_token(user)
+    }
+  end
+
+  # Builds a spec-shaped request: the mirrored headers are derived from the
+  # body, exactly as a conforming client must derive them.
+  defp rpc(conn, token, method, params \\ nil, opts \\ []) do
+    id = Keyword.get(opts, :id, 1)
+    version = Keyword.get(opts, :version, @version)
+
+    body =
+      %{"jsonrpc" => "2.0", "method" => method}
+      |> then(&if id, do: Map.put(&1, "id", id), else: &1)
+      |> then(&if params, do: Map.put(&1, "params", params), else: &1)
+
+    conn
+    |> put_req_header("authorization", "Bearer #{token}")
+    |> put_req_header("mcp-protocol-version", Keyword.get(opts, :protocol_header, version))
+    |> put_req_header("mcp-method", Keyword.get(opts, :method_header, method))
+    |> then(fn c ->
+      case Keyword.get(opts, :name_header, params && params["name"]) do
+        nil -> c
+        name -> put_req_header(c, "mcp-name", name)
+      end
+    end)
+    |> then(fn c ->
+      case opts[:origin] do
+        nil -> c
+        origin -> put_req_header(c, "origin", origin)
+      end
+    end)
+    |> post("/mcp", body)
+  end
+
+  defp tool_json(response) do
+    response["result"]["structuredContent"]
+  end
+
+  describe "transport rules" do
+    test "requires a credential", %{conn: conn} do
+      conn =
+        conn
+        |> put_req_header("mcp-protocol-version", @version)
+        |> put_req_header("mcp-method", "tools/list")
+        |> post("/mcp", %{"jsonrpc" => "2.0", "id" => 1, "method" => "tools/list"})
+
+      assert json_response(conn, 401)["error"] == "invalid_token"
+    end
+
+    test "GET and DELETE are 405 — those were the removed session verbs", %{
+      conn: conn,
+      token: token
+    } do
+      authed = put_req_header(conn, "authorization", "Bearer #{token}")
+
+      for c <- [get(authed, "/mcp"), delete(authed, "/mcp")] do
+        assert json_response(c, 405)["error"]["message"] =~ "POST only"
+        assert get_resp_header(c, "allow") == ["POST"]
+      end
+    end
+
+    test "a missing protocol version header means a legacy client, not an error", %{
+      conn: conn,
+      token: token
+    } do
+      # Claude Code opens with exactly this: `initialize`, no MCP-Protocol-Version
+      # header, no mirrored headers. Refusing it is a 400 the client cannot act
+      # on, and a modern-only endpoint it cannot connect to is not an interface.
+      conn =
+        conn
+        |> put_req_header("authorization", "Bearer #{token}")
+        |> post("/mcp", %{
+          "jsonrpc" => "2.0",
+          "id" => 1,
+          "method" => "initialize",
+          "params" => %{"protocolVersion" => "2025-06-18", "capabilities" => %{}}
+        })
+
+      result = json_response(conn, 200)["result"]
+      # Its own version echoed back: the tool surface is identical across these
+      # revisions, so there is nothing to downgrade.
+      assert result["protocolVersion"] == "2025-06-18"
+      assert result["capabilities"]["tools"]
+      assert result["serverInfo"]["name"] == "dodo-router"
+    end
+
+    test "a legacy client can call tools without the mirrored headers", %{
+      conn: conn,
+      token: token,
+      router: router
+    } do
+      conn =
+        conn
+        |> put_req_header("authorization", "Bearer #{token}")
+        |> post("/mcp", %{
+          "jsonrpc" => "2.0",
+          "id" => 2,
+          "method" => "tools/call",
+          "params" => %{"name" => "list_routers", "arguments" => %{}}
+        })
+
+      body = json_response(conn, 200)
+      assert body["result"]["isError"] == false
+
+      assert body["result"]["structuredContent"]["routers"] |> hd() |> Map.get("slug") ==
+               router.slug
+    end
+
+    test "an unknown protocol version negotiates down rather than failing", %{
+      conn: conn,
+      token: token
+    } do
+      conn =
+        conn
+        |> put_req_header("authorization", "Bearer #{token}")
+        |> post("/mcp", %{
+          "jsonrpc" => "2.0",
+          "id" => 1,
+          "method" => "initialize",
+          "params" => %{"protocolVersion" => "1999-01-01"}
+        })
+
+      # Naming the modern revision here would hand back something the client
+      # cannot parse.
+      assert json_response(conn, 200)["result"]["protocolVersion"] == "2025-06-18"
+    end
+
+    test "a negotiated legacy version is served, not refused", %{conn: conn, token: token} do
+      # Claude Code sends this header on every request after the handshake,
+      # naming the version it negotiated. Reading presence as "must be modern"
+      # rejected it one request after a successful initialize.
+      conn = rpc(conn, token, "tools/list", nil, protocol_header: "2025-11-25")
+
+      assert json_response(conn, 200)["result"]["tools"]
+    end
+
+    test "reports every version it serves when asked for one it does not", %{
+      conn: conn,
+      token: token
+    } do
+      conn = rpc(conn, token, "tools/list", nil, protocol_header: "1999-01-01")
+
+      error = json_response(conn, 400)["error"]
+      assert @version in error["data"]["supported"]
+      assert "2025-11-25" in error["data"]["supported"]
+      assert error["data"]["requested"] == "1999-01-01"
+    end
+
+    test "rejects a protocol version header that disagrees with the body", %{
+      conn: conn,
+      token: token
+    } do
+      params = %{"_meta" => %{"io.modelcontextprotocol/protocolVersion" => "2025-11-25"}}
+      conn = rpc(conn, token, "tools/list", params)
+
+      assert json_response(conn, 400)["error"]["code"] == -32_020
+    end
+
+    test "rejects an Mcp-Method header that disagrees with the body", %{conn: conn, token: token} do
+      conn = rpc(conn, token, "tools/list", nil, method_header: "tools/call")
+
+      error = json_response(conn, 400)["error"]
+      assert error["code"] == -32_020
+      assert error["message"] =~ "Mcp-Method"
+    end
+
+    test "rejects an Mcp-Name header that disagrees with the body", %{conn: conn, token: token} do
+      params = %{"name" => "list_routers", "arguments" => %{}}
+      conn = rpc(conn, token, "tools/call", params, name_header: "get_log")
+
+      error = json_response(conn, 400)["error"]
+      assert error["code"] == -32_020
+      assert error["message"] =~ "Mcp-Name"
+    end
+
+    test "decodes a base64-wrapped Mcp-Name before comparing", %{conn: conn, token: token} do
+      params = %{"name" => "list_routers", "arguments" => %{}}
+      wrapped = "=?base64?" <> Base.encode64("list_routers") <> "?="
+
+      conn = rpc(conn, token, "tools/call", params, name_header: wrapped)
+
+      # A plain string comparison would call this a mismatch.
+      assert json_response(conn, 200)["result"]["isError"] == false
+    end
+
+    test "a notification is accepted with 202 and no body", %{conn: conn, token: token} do
+      conn = rpc(conn, token, "notifications/whatever", nil, id: nil)
+
+      assert response(conn, 202) == ""
+    end
+
+    test "an unimplemented method is 404 with -32601 and says what exists", %{
+      conn: conn,
+      token: token
+    } do
+      conn = rpc(conn, token, "resources/list")
+
+      error = json_response(conn, 404)["error"]
+      assert error["code"] == -32_601
+      assert "tools/call" in error["data"]["implemented"]
+    end
+
+    test "a foreign Origin is refused", %{conn: conn, token: token} do
+      conn = rpc(conn, token, "tools/list", nil, origin: "https://evil.example")
+
+      assert json_response(conn, 403)["error"]["message"] =~ "not allowed"
+    end
+
+    test "ping works", %{conn: conn, token: token} do
+      assert json_response(rpc(conn, token, "ping"), 200)["result"]
+    end
+  end
+
+  describe "tools/list" do
+    test "lists every tool, marking the ones this token cannot use", %{
+      conn: conn,
+      user: user,
+      router: router
+    } do
+      limited = AuthZFixtures.access_token(user, scopes: ["logs:read"])
+
+      tools = json_response(rpc(conn, limited, "tools/list"), 200)["result"]["tools"]
+      by_name = Map.new(tools, &{&1["name"], &1})
+
+      # Hiding unusable tools would make a missing scope look like a missing
+      # feature; naming the scope tells the agent what to ask its user for.
+      assert by_name["list_logs"]["description"] =~ "requests this router served"
+      refute by_name["list_logs"]["description"] =~ "UNAVAILABLE"
+      assert by_name["create_eval"]["description"] =~ "UNAVAILABLE"
+      assert by_name["create_eval"]["description"] =~ "evals:write"
+
+      assert by_name["get_log"]["inputSchema"]["required"] == ["id"]
+    end
+  end
+
+  describe "tools/call" do
+    defp call_tool(conn, token, name, args \\ %{}) do
+      rpc(conn, token, "tools/call", %{"name" => name, "arguments" => args})
+    end
+
+    test "an agent can retry only what failed, without re-running everything", %{
+      conn: conn,
+      token: token,
+      user: user,
+      router: router
+    } do
+      # The product gained cheap recovery — re-score a stored answer whose
+      # judge call failed — and MCP had no way to reach it. run_eval is the
+      # only other option and it re-generates every answer already paid for.
+      key = DodoRouter.ProvidersFixtures.provider_key_fixture(user, %{"label" => "Key 1"})
+
+      log =
+        DodoRouter.LogsFixtures.log_fixture(router, %{
+          request_body:
+            Jason.encode!(%{
+              "model" => "m",
+              "messages" => [%{"role" => "user", "content" => "hi"}]
+            })
+        })
+
+      {:ok, evaluation} =
+        DodoRouter.Evaluations.create_evaluation(user, log, %{
+          name: "Judge failed",
+          criteria: "Be useful",
+          judge_model: "fail-model",
+          judge_provider_key_id: key.id,
+          candidate_targets: [
+            %{"provider_key_id" => key.id, "provider" => "test_provider", "model" => "test-model"}
+          ],
+          repetitions: 1
+        })
+
+      {:ok, _} = DodoRouter.Evaluations.run(user, evaluation)
+
+      body =
+        json_response(
+          call_tool(conn, token, "get_eval", %{"id" => evaluation.id, "include" => ["runs"]}),
+          200
+        )
+
+      payload = tool_json(body)
+
+      # The stage is what tells an agent this is recoverable at all.
+      assert [run] = payload["runs"]
+      assert run["failure_stage"] == "judge"
+      # And the category spares it regexing the prose (dodo_router-5wq).
+      assert is_binary(run["error_category"])
+      assert run["judged_by"] == "Key 1"
+      assert payload["retryable"]["judge"] == 1
+
+      evaluation
+      |> Ecto.Changeset.change(judge_model: "judge-model")
+      |> DodoRouter.Repo.update!()
+
+      retried = json_response(call_tool(conn, token, "retry_eval", %{"id" => evaluation.id}), 200)
+      assert retried["result"]["isError"] == false
+
+      assert [%{"status" => "completed"}] =
+               DodoRouter.Repo.all(
+                 from(r in DodoRouter.Logs.EvaluationRun,
+                   where: r.evaluation_id == ^evaluation.id and is_nil(r.superseded_at),
+                   select: %{"status" => r.status}
+                 )
+               )
+    end
+
+    test "get_eval runs carry candidate_log_id, judge_log_id and criterion_scores", %{
+      conn: conn,
+      token: token,
+      user: user,
+      router: router
+    } do
+      # The guide (priv/agent/evals_guide.md) promises these ids so an agent
+      # can pass them to get_log for the full answer or judge reasoning.
+      key = DodoRouter.ProvidersFixtures.provider_key_fixture(user, %{"label" => "Key 1"})
+
+      log =
+        DodoRouter.LogsFixtures.log_fixture(router, %{
+          request_body:
+            Jason.encode!(%{
+              "model" => "m",
+              "messages" => [%{"role" => "user", "content" => "hi"}]
+            })
+        })
+
+      {:ok, evaluation} =
+        DodoRouter.Evaluations.create_evaluation(user, log, %{
+          name: "Scored run",
+          criteria: "Be useful",
+          judge_model: "judge-model",
+          judge_provider_key_id: key.id,
+          candidate_targets: [
+            %{"provider_key_id" => key.id, "provider" => "test_provider", "model" => "test-model"}
+          ],
+          repetitions: 1
+        })
+
+      {:ok, _} = DodoRouter.Evaluations.run(user, evaluation)
+
+      body =
+        json_response(
+          call_tool(conn, token, "get_eval", %{"id" => evaluation.id, "include" => ["runs"]}),
+          200
+        )
+
+      payload = tool_json(body)
+
+      assert [run] = payload["runs"]
+      assert run["candidate_log_id"]
+      assert run["judge_log_id"]
+      assert is_map(run["criterion_scores"])
+    end
+
+    test "run_eval refuses a judge key already known to be unusable", %{
+      conn: conn,
+      token: token,
+      user: user,
+      router: router
+    } do
+      key = DodoRouter.ProvidersFixtures.provider_key_fixture(user, %{"label" => "Spent"})
+      DodoRouter.Providers.apply_health(key.id, :quota, "usage limit reached")
+
+      log = DodoRouter.LogsFixtures.log_fixture(router)
+
+      {:ok, evaluation} =
+        DodoRouter.Evaluations.create_evaluation(user, log, %{
+          name: "Doomed",
+          criteria: "Be useful",
+          judge_model: "judge-model",
+          judge_provider_key_id: key.id,
+          candidate_targets: []
+        })
+
+      body = json_response(call_tool(conn, token, "run_eval", %{"id" => evaluation.id}), 200)
+
+      # An error the agent can act on, rather than a batch of answers
+      # generated and discarded unscored.
+      assert body["result"]["isError"] == true
+      assert [%{"text" => text}] = body["result"]["content"]
+      assert text =~ "Spent"
+      assert text =~ "quota"
+    end
+
+    test "list_routers returns what the token reaches", %{
+      conn: conn,
+      token: token,
+      router: router
+    } do
+      body = json_response(call_tool(conn, token, "list_routers"), 200)
+
+      assert body["result"]["isError"] == false
+      assert [%{"slug" => slug}] = tool_json(body)["routers"]
+      assert slug == router.slug
+      # Text content mirrors the structured payload for clients that only render text.
+      assert [%{"type" => "text", "text" => text}] = body["result"]["content"]
+      assert text =~ router.slug
+    end
+
+    test "the router argument is optional with one router and required with several", %{
+      conn: conn,
+      user: user,
+      router: router
+    } do
+      LogsFixtures.log_fixture(router)
+
+      # An OAuth token carries scopes but no router list, so reach is every
+      # router its owner has — one here.
+      one = AuthZFixtures.access_token(user)
+      body = json_response(call_tool(conn, one, "list_logs"), 200)
+      assert body["result"]["isError"] == false
+      assert tool_json(body)["router"] == router.slug
+
+      # A second router makes the argument ambiguous, and ambiguous is refused
+      # rather than guessed — picking one silently would attribute results to a
+      # router the caller never named.
+      {_second, _key} = RoutersFixtures.router_fixture(user)
+      many = AuthZFixtures.access_token(user)
+      body = json_response(call_tool(conn, many, "list_logs"), 200)
+      assert body["result"]["isError"]
+      assert hd(body["result"]["content"])["text"] =~ "`router` is required"
+    end
+
+    test "a missing scope is an isError result, not a transport failure", %{
+      conn: conn,
+      user: user
+    } do
+      limited = AuthZFixtures.access_token(user, scopes: ["logs:read"])
+
+      body = json_response(call_tool(conn, limited, "list_evals"), 200)
+
+      # 200 with isError so the model reads the reason and can adapt; a bare
+      # 403 would tell it only that something broke.
+      assert body["result"]["isError"]
+      assert hd(body["result"]["content"])["text"] =~ "evals:read"
+    end
+
+    test "get_log withholds bodies visibly without the scope", %{
+      conn: conn,
+      user: user,
+      router: router
+    } do
+      log =
+        LogsFixtures.log_fixture(router, %{
+          request_body:
+            Jason.encode!(%{"messages" => [%{"role" => "user", "content" => "secret"}]})
+        })
+
+      limited = AuthZFixtures.access_token(user, scopes: ["logs:read"])
+
+      body = json_response(call_tool(conn, limited, "get_log", %{"id" => log.id}), 200)
+      payload = tool_json(body)
+
+      assert payload["total_tokens"] == 150
+      assert payload["request_body"]["withheld"] =~ "logs:read_bodies"
+      refute inspect(payload) =~ "secret"
+    end
+
+    test "eval targets say how each key bills, and advise against a plan judge", %{
+      conn: conn,
+      user: user,
+      token: token
+    } do
+      DodoRouter.ProvidersFixtures.provider_key_fixture(user, %{"label" => "metered"})
+
+      DodoRouter.ProvidersFixtures.provider_key_fixture(user, %{
+        "provider_slug" => "test_provider_coding",
+        "label" => "plan key"
+      })
+
+      body = json_response(call_tool(conn, token, "list_eval_targets"), 200)
+      by_label = Map.new(tool_json(body)["targets"], &{&1["label"], &1})
+
+      assert by_label["metered"]["billing"] == "metered"
+      assert by_label["metered"]["judge_advice"] == nil
+
+      # An agent picking a judge has no other way to know a plan key can be
+      # refused for being outside its vendor's coding environment.
+      assert by_label["plan key"]["billing"] == "subscription"
+      assert by_label["plan key"]["judge_advice"] =~ "metered key for the judge"
+    end
+
+    test "create_eval accepts prompt variants and rankings carry them", %{
+      conn: conn,
+      token: token,
+      user: user,
+      router: router
+    } do
+      key = DodoRouter.ProvidersFixtures.provider_key_fixture(user, %{"label" => "Key 1"})
+
+      log =
+        DodoRouter.LogsFixtures.log_fixture(router, %{
+          request_body:
+            Jason.encode!(%{
+              "model" => "m",
+              "messages" => [%{"role" => "user", "content" => "hi"}]
+            })
+        })
+
+      resp =
+        json_response(
+          call_tool(conn, token, "create_eval", %{
+            "request_log_id" => log.id,
+            "name" => "Prompt A/B",
+            "criteria" => "Be useful",
+            "judge" => %{"provider_key_id" => key.id, "model" => "judge-model"},
+            "candidates" => [%{"provider_key_id" => key.id, "model" => "test-model"}],
+            "prompt_variants" => [
+              %{"name" => "as-served", "system_prompt" => nil},
+              %{"name" => "terse", "system_prompt" => "Reply in one word."}
+            ],
+            "repetitions" => 1,
+            "include_incumbent" => false,
+            "run" => true
+          }),
+          200
+        )
+
+      payload = tool_json(resp)
+      assert payload["planned_runs"] == 2
+
+      # Poll until the two runs land, then read the ranking rows.
+      eval_id = payload["id"]
+
+      rankings =
+        Enum.reduce_while(1..50, nil, fn _, _ ->
+          body =
+            json_response(call_tool(conn, token, "get_eval", %{"id" => eval_id}), 200)
+
+          p = tool_json(body)
+
+          if p["running"] == false and length(p["rankings"]) == 2,
+            do: {:halt, p["rankings"]},
+            else: Process.sleep(100) && {:cont, nil}
+        end)
+
+      assert rankings
+      assert rankings |> Enum.map(& &1["variant"]) |> Enum.sort() == ["as-served", "terse"]
+    end
+
+    test "create_eval accepts a set of logs and reports the planned volume", %{
+      conn: conn,
+      token: token,
+      user: user,
+      router: router
+    } do
+      key = DodoRouter.ProvidersFixtures.provider_key_fixture(user, %{"label" => "Key 1"})
+
+      body = fn text ->
+        Jason.encode!(%{"model" => "m", "messages" => [%{"role" => "user", "content" => text}]})
+      end
+
+      log1 = DodoRouter.LogsFixtures.log_fixture(router, %{request_body: body.("one")})
+      log2 = DodoRouter.LogsFixtures.log_fixture(router, %{request_body: body.("two")})
+
+      resp =
+        json_response(
+          call_tool(conn, token, "create_eval", %{
+            "request_log_ids" => [log1.id, log2.id],
+            "name" => "On my traffic",
+            "criteria" => "Be useful",
+            "judge" => %{"provider_key_id" => key.id, "model" => "judge-model"},
+            "candidates" => [
+              %{"provider_key_id" => key.id, "model" => "test-model"}
+            ],
+            "repetitions" => 2,
+            "include_incumbent" => false
+          }),
+          200
+        )
+
+      payload = tool_json(resp)
+      assert Enum.sort(payload["source_log_ids"]) == Enum.sort([log1.id, log2.id])
+      # 2 logs x 1 candidate x 2 repetitions — stated before it is spent.
+      assert payload["planned_runs"] == 4
+
+      # A foreign or missing log in the set is refused up front, named.
+      resp =
+        json_response(
+          call_tool(conn, token, "create_eval", %{
+            "request_log_ids" => [log1.id, Ecto.UUID.generate()],
+            "name" => "Bad set",
+            "criteria" => "Be useful",
+            "judge" => %{"provider_key_id" => key.id, "model" => "judge-model"},
+            "candidates" => [%{"provider_key_id" => key.id, "model" => "test-model"}]
+          }),
+          200
+        )
+
+      assert resp["result"]["isError"]
+      assert hd(resp["result"]["content"])["text"] =~ "Log "
+    end
+
+    test "list_recordings names the captures and create_eval benchmarks one", %{
+      conn: conn,
+      token: token,
+      user: user,
+      router: router
+    } do
+      key = DodoRouter.ProvidersFixtures.provider_key_fixture(user, %{"label" => "Key 1"})
+      {:ok, recording} = DodoRouter.Recordings.start_recording(router, %{name: "Prod capture"})
+
+      body = fn text ->
+        Jason.encode!(%{"model" => "m", "messages" => [%{"role" => "user", "content" => text}]})
+      end
+
+      log1 =
+        DodoRouter.LogsFixtures.log_fixture(router, %{
+          recording_id: recording.id,
+          request_body: body.("one")
+        })
+
+      log2 =
+        DodoRouter.LogsFixtures.log_fixture(router, %{
+          recording_id: recording.id,
+          request_body: body.("two")
+        })
+
+      # A log with no stored body is captured but not replayable — it must
+      # be excluded from the benchmark, not fail it.
+      DodoRouter.LogsFixtures.log_fixture(router, %{recording_id: recording.id})
+
+      listed = tool_json(json_response(call_tool(conn, token, "list_recordings"), 200))
+
+      assert [%{"id" => listed_id, "name" => "Prod capture", "request_count" => 3}] =
+               listed["recordings"]
+
+      assert listed_id == recording.id
+
+      resp =
+        json_response(
+          call_tool(conn, token, "create_eval", %{
+            "recording_id" => recording.id,
+            "name" => "Recording benchmark",
+            "criteria" => "Be useful",
+            "judge" => %{"provider_key_id" => key.id, "model" => "judge-model"},
+            "candidates" => [%{"provider_key_id" => key.id, "model" => "test-model"}],
+            "include_incumbent" => false
+          }),
+          200
+        )
+
+      payload = tool_json(resp)
+      assert Enum.sort(payload["source_log_ids"]) == Enum.sort([log1.id, log2.id])
+      assert payload["recording_id"] == recording.id
+    end
+
+    test "multi-log rankings carry a per-source breakdown, worst first", %{
+      conn: conn,
+      token: token,
+      user: user,
+      router: router
+    } do
+      key = DodoRouter.ProvidersFixtures.provider_key_fixture(user, %{"label" => "Key 1"})
+
+      body = fn text ->
+        Jason.encode!(%{"model" => "m", "messages" => [%{"role" => "user", "content" => text}]})
+      end
+
+      log1 = DodoRouter.LogsFixtures.log_fixture(router, %{request_body: body.("one")})
+      log2 = DodoRouter.LogsFixtures.log_fixture(router, %{request_body: body.("two")})
+
+      {:ok, evaluation} =
+        DodoRouter.Evaluations.create_evaluation(user, log1, %{
+          name: "Per-source",
+          criteria: "Be useful",
+          judge_model: "judge-model",
+          judge_provider_key_id: key.id,
+          candidate_targets: [
+            %{"provider_key_id" => key.id, "provider" => "test_provider", "model" => "test-model"}
+          ],
+          source_log_ids: [log1.id, log2.id]
+        })
+
+      for {source_log, score} <- [{log1, 90}, {log2, 30}] do
+        %DodoRouter.Logs.EvaluationRun{}
+        |> DodoRouter.Logs.EvaluationRun.changeset(%{
+          evaluation_id: evaluation.id,
+          status: "completed",
+          score: score,
+          candidate_provider: "test_provider",
+          candidate_model: "test-model",
+          source_log_id: source_log.id
+        })
+        |> DodoRouter.Repo.insert!()
+      end
+
+      payload =
+        tool_json(
+          json_response(call_tool(conn, token, "get_eval", %{"id" => evaluation.id}), 200)
+        )
+
+      assert [%{"model" => "test-model", "per_source" => per_source}] = payload["rankings"]
+
+      assert [
+               %{"source_log_id" => worst_id, "avg_score" => 30},
+               %{"avg_score" => 90}
+             ] = per_source
+
+      assert worst_id == log2.id
+    end
+
+    test "a recording-based benchmark projects savings at the capture's rate", %{
+      conn: conn,
+      token: token,
+      user: user,
+      router: router
+    } do
+      key = DodoRouter.ProvidersFixtures.provider_key_fixture(user, %{"label" => "Key 1"})
+      {:ok, recording} = DodoRouter.Recordings.start_recording(router, %{name: "Rate capture"})
+
+      # Backdate to a 15-day window: 2 captured requests -> 4/month.
+      recording =
+        recording
+        |> Ecto.Changeset.change(
+          started_at: DateTime.add(DateTime.utc_now(), -15, :day),
+          stopped_at: DateTime.utc_now(),
+          status: "stopped"
+        )
+        |> DodoRouter.Repo.update!()
+
+      body = fn text ->
+        Jason.encode!(%{"model" => "m", "messages" => [%{"role" => "user", "content" => text}]})
+      end
+
+      log =
+        DodoRouter.LogsFixtures.log_fixture(router, %{
+          recording_id: recording.id,
+          request_body: body.("one"),
+          list_cost_usd: Decimal.new("1.00")
+        })
+
+      DodoRouter.LogsFixtures.log_fixture(router, %{
+        recording_id: recording.id,
+        request_body: body.("two"),
+        list_cost_usd: Decimal.new("1.00")
+      })
+
+      {:ok, evaluation} =
+        DodoRouter.Evaluations.create_evaluation(user, log, %{
+          name: "Projection",
+          criteria: "Be useful",
+          judge_model: "judge-model",
+          judge_provider_key_id: key.id,
+          candidate_targets: [
+            %{"provider_key_id" => key.id, "provider" => "test_provider", "model" => "cheap"}
+          ],
+          recording_id: recording.id
+        })
+
+      %DodoRouter.Logs.EvaluationRun{}
+      |> DodoRouter.Logs.EvaluationRun.changeset(%{
+        evaluation_id: evaluation.id,
+        status: "completed",
+        score: 90,
+        candidate_provider: "test_provider",
+        candidate_model: "cheap",
+        candidate_list_cost_usd: Decimal.new("0.25")
+      })
+      |> DodoRouter.Repo.insert!()
+
+      payload =
+        tool_json(
+          json_response(call_tool(conn, token, "get_eval", %{"id" => evaluation.id}), 200)
+        )
+
+      projection = payload["savings_projection"]
+      assert projection["monthly_requests"] == 4
+      # $2 over 15 days -> $4/month as served; candidate at $0.25 x 4 = $1.
+      assert_in_delta projection["baseline_monthly_cost_usd"], 4.0, 0.001
+      assert [row] = projection["rows"]
+      assert row["model"] == "cheap"
+      assert_in_delta row["projected_monthly_cost_usd"], 1.0, 0.001
+      assert_in_delta row["monthly_savings_usd"], 3.0, 0.001
+    end
+
+    test "get_eval reports the routing changes applied from a verdict", %{
+      conn: conn,
+      token: token,
+      user: user,
+      router: router
+    } do
+      incumbent_key =
+        DodoRouter.ProvidersFixtures.provider_key_fixture(user, %{"label" => "Incumbent"})
+
+      candidate_key =
+        DodoRouter.ProvidersFixtures.provider_key_fixture(user, %{"label" => "Candidate"})
+
+      {:ok, _step} =
+        DodoRouter.Routers.create_routing_step(router, %{
+          "provider" => "test_provider",
+          "model" => "incumbent-model",
+          "provider_key_id" => incumbent_key.id
+        })
+
+      log =
+        DodoRouter.LogsFixtures.log_fixture(router, %{
+          final_model: "incumbent-model",
+          attempted_steps: [
+            %{
+              "status" => "success",
+              "provider_key_id" => incumbent_key.id,
+              "model" => "incumbent-model"
+            }
+          ]
+        })
+
+      {:ok, evaluation} =
+        DodoRouter.Evaluations.create_evaluation(user, log, %{
+          name: "Applied",
+          criteria: "Be useful",
+          judge_model: "judge-model",
+          judge_provider_key_id: candidate_key.id,
+          candidate_targets: [
+            %{
+              "provider_key_id" => candidate_key.id,
+              "provider" => "test_provider",
+              "model" => "cheap-model"
+            }
+          ]
+        })
+
+      {:ok, _step, event} =
+        DodoRouter.Evaluations.apply_verdict(user, evaluation, %{
+          "provider_key_id" => candidate_key.id,
+          "model" => "cheap-model"
+        })
+
+      # A scored ranking for the applied model, so monitoring has a baseline.
+      %DodoRouter.Logs.EvaluationRun{}
+      |> DodoRouter.Logs.EvaluationRun.changeset(%{
+        evaluation_id: evaluation.id,
+        status: "completed",
+        score: 82,
+        candidate_provider: "test_provider",
+        candidate_model: "cheap-model"
+      })
+      |> DodoRouter.Repo.insert!()
+
+      {:ok, _monitor} = DodoRouter.Evaluations.enable_monitor(user, evaluation, event)
+
+      payload =
+        tool_json(
+          json_response(call_tool(conn, token, "get_eval", %{"id" => evaluation.id}), 200)
+        )
+
+      assert payload["monitor"]["status"] == "active"
+      assert payload["monitor"]["baseline_avg"] == 82
+      assert payload["monitor"]["target_model"] == "cheap-model"
+      assert payload["monitor"]["alerted_at"] == nil
+
+      assert [change] = payload["applied_changes"]
+      assert change["before"]["model"] == "incumbent-model"
+      assert change["after"]["model"] == "cheap-model"
+      assert change["reverted_at"] == nil
+    end
+
+    test "create_eval runs a per-decision comparison and refuses actionless logs", %{
+      conn: conn,
+      token: token,
+      user: user,
+      router: router
+    } do
+      key = DodoRouter.ProvidersFixtures.provider_key_fixture(user, %{"label" => "Key 1"})
+
+      log =
+        DodoRouter.LogsFixtures.log_fixture(router, %{
+          request_body:
+            Jason.encode!(%{
+              "model" => "m",
+              "messages" => [%{"role" => "user", "content" => "next move?"}]
+            }),
+          response_body:
+            Jason.encode!(%{
+              "choices" => [
+                %{"message" => %{"role" => "assistant", "content" => "recorded move"}}
+              ]
+            })
+        })
+
+      resp =
+        json_response(
+          call_tool(conn, token, "create_eval", %{
+            "request_log_id" => log.id,
+            "name" => "Per-decision",
+            "criteria" => "Advance the task",
+            "comparison_mode" => "next_action",
+            "judge" => %{"provider_key_id" => key.id, "model" => "judge-model"},
+            "candidates" => [%{"provider_key_id" => key.id, "model" => "test-model"}],
+            "include_incumbent" => false
+          }),
+          200
+        )
+
+      assert tool_json(resp)["comparison_mode"] == "next_action"
+
+      # A log with no stored response has no recorded action to compare
+      # against — refused up front, named.
+      actionless =
+        DodoRouter.LogsFixtures.log_fixture(router, %{
+          request_body:
+            Jason.encode!(%{
+              "model" => "m",
+              "messages" => [%{"role" => "user", "content" => "hi"}]
+            })
+        })
+
+      resp =
+        json_response(
+          call_tool(conn, token, "create_eval", %{
+            "request_log_id" => actionless.id,
+            "name" => "No action",
+            "criteria" => "Advance the task",
+            "comparison_mode" => "next_action",
+            "judge" => %{"provider_key_id" => key.id, "model" => "judge-model"},
+            "candidates" => [%{"provider_key_id" => key.id, "model" => "test-model"}]
+          }),
+          200
+        )
+
+      assert resp["result"]["isError"]
+      assert hd(resp["result"]["content"])["text"] =~ "no extractable action"
+    end
+
+    test "create_eval refuses a message patch that misses the log's messages", %{
+      conn: conn,
+      token: token,
+      user: user,
+      router: router
+    } do
+      key = DodoRouter.ProvidersFixtures.provider_key_fixture(user, %{"label" => "Key 1"})
+
+      log =
+        DodoRouter.LogsFixtures.log_fixture(router, %{
+          request_body:
+            Jason.encode!(%{
+              "model" => "m",
+              "messages" => [%{"role" => "user", "content" => "only one message"}]
+            })
+        })
+
+      resp =
+        json_response(
+          call_tool(conn, token, "create_eval", %{
+            "request_log_id" => log.id,
+            "name" => "Bad patch",
+            "criteria" => "Be useful",
+            "prompt_variants" => [
+              %{
+                "name" => "compressed",
+                "message_patches" => [%{"index" => 5, "content" => "x"}]
+              }
+            ],
+            "judge" => %{"provider_key_id" => key.id, "model" => "judge-model"},
+            "candidates" => [%{"provider_key_id" => key.id, "model" => "test-model"}]
+          }),
+          200
+        )
+
+      assert resp["result"]["isError"]
+      text = hd(resp["result"]["content"])["text"]
+      assert text =~ "cannot patch log"
+      assert text =~ log.id
+    end
+
+    test "session aggregates answer the 'what did this question cost' shape", %{
+      conn: conn,
+      token: token,
+      router: router
+    } do
+      for {text, cost, list_cost} <- [{"a", "0.40", "1.00"}, {"b", "1.00", "2.50"}] do
+        DodoRouter.LogsFixtures.log_fixture(router, %{
+          session_id: "question-7",
+          session_name: "Q7",
+          request_body: Jason.encode!(%{"messages" => [%{"role" => "user", "content" => text}]}),
+          estimated_cost_usd: Decimal.new(cost),
+          list_cost_usd: Decimal.new(list_cost)
+        })
+      end
+
+      DodoRouter.LogsFixtures.log_fixture(router, %{session_id: "question-8", status: "error"})
+
+      listed = tool_json(json_response(call_tool(conn, token, "list_sessions"), 200))
+      assert listed["returned"] == 2
+      assert %{"session_id" => "question-8"} = hd(listed["sessions"])
+
+      session =
+        tool_json(
+          json_response(
+            call_tool(conn, token, "get_session", %{"session_id" => "question-7"}),
+            200
+          )
+        )
+
+      assert session["request_count"] == 2
+      assert session["successful_requests"] == 2
+      # Metered and list price stay two figures, never blended.
+      assert_in_delta session["cost_usd"], 1.40, 0.001
+      assert_in_delta session["list_cost_usd"], 3.50, 0.001
+      assert session["first_request"]
+
+      # A session still in flight (or not yet started) answers with its
+      # current truth — zeros — never an error the caller must special-case.
+      pending =
+        tool_json(
+          json_response(
+            call_tool(conn, token, "get_session", %{"session_id" => "not-started-yet"}),
+            200
+          )
+        )
+
+      assert pending["request_count"] == 0
+      assert pending["cost_usd"] == nil
+    end
+
+    test "token attribution rides get_log and rolls up on get_session", %{
+      conn: conn,
+      token: token,
+      router: router
+    } do
+      attribution = fn tokens ->
+        %{
+          "version" => 1,
+          "basis_tokens" => tokens,
+          "total_chars" => tokens * 4,
+          "cache_frontier" => nil,
+          "buckets" => %{
+            "system" => %{"chars" => 0, "allocated_tokens" => 0, "cached_tokens" => 0},
+            "tools" => %{"chars" => 0, "allocated_tokens" => 0, "cached_tokens" => 0},
+            "history" => %{
+              "chars" => tokens * 2,
+              "allocated_tokens" => div(tokens, 2),
+              "cached_tokens" => 0
+            },
+            "tool_results" => %{
+              "chars" => tokens * 2,
+              "allocated_tokens" => tokens - div(tokens, 2),
+              "cached_tokens" => 0,
+              "by_tool" => %{"Read" => tokens - div(tokens, 2)}
+            },
+            "file_contents" => %{"chars" => 0, "allocated_tokens" => 0, "cached_tokens" => 0}
+          }
+        }
+      end
+
+      log =
+        DodoRouter.LogsFixtures.log_fixture(router, %{
+          session_id: "q-1",
+          token_attribution: attribution.(100)
+        })
+
+      DodoRouter.LogsFixtures.log_fixture(router, %{
+        session_id: "q-1",
+        token_attribution: attribution.(50)
+      })
+
+      fetched =
+        tool_json(json_response(call_tool(conn, token, "get_log", %{"id" => log.id}), 200))
+
+      assert fetched["token_attribution"]["basis_tokens"] == 100
+      assert fetched["token_attribution"]["buckets"]["tool_results"]["by_tool"]["Read"] == 50
+
+      session =
+        tool_json(
+          json_response(call_tool(conn, token, "get_session", %{"session_id" => "q-1"}), 200)
+        )
+
+      rollup = session["token_attribution"]
+      assert rollup["rows"] == 2
+      assert rollup["basis_tokens"] == 150
+      assert rollup["buckets"]["tool_results"]["by_tool"]["Read"] == 75
+    end
+
+    test "list_logs drills into a session with an honest total", %{
+      conn: conn,
+      token: token,
+      router: router
+    } do
+      for text <- ~w(a b c) do
+        DodoRouter.LogsFixtures.log_fixture(router, %{
+          session_id: "question-7",
+          request_body: Jason.encode!(%{"messages" => [%{"role" => "user", "content" => text}]})
+        })
+      end
+
+      DodoRouter.LogsFixtures.log_fixture(router, %{session_id: "other"})
+
+      body =
+        tool_json(
+          json_response(
+            call_tool(conn, token, "list_logs", %{"session_id" => "question-7", "limit" => 2}),
+            200
+          )
+        )
+
+      assert body["returned"] == 2
+      assert body["total"] == 3
+      assert Enum.all?(body["logs"], &(&1["session_id"] == "question-7"))
+
+      # A window in the future matches nothing; a bad timestamp is an error,
+      # not an ignored filter.
+      empty =
+        tool_json(
+          json_response(
+            call_tool(conn, token, "list_logs", %{"since" => "2030-01-01T00:00:00Z"}),
+            200
+          )
+        )
+
+      assert empty["total"] == 0
+
+      bad =
+        json_response(call_tool(conn, token, "list_logs", %{"since" => "yesterday-ish"}), 200)
+
+      assert bad["result"]["isError"]
+      assert hd(bad["result"]["content"])["text"] =~ "ISO 8601"
+    end
+
+    test "spend, cache and recording aggregates carry both cost figures and no bodies", %{
+      conn: conn,
+      token: token,
+      router: router
+    } do
+      {:ok, recording} = DodoRouter.Recordings.start_recording(router, %{name: "Capture"})
+
+      DodoRouter.LogsFixtures.log_fixture(router, %{
+        recording_id: recording.id,
+        final_model: "cheap-model",
+        estimated_cost_usd: Decimal.new("0.10"),
+        list_cost_usd: Decimal.new("0.30"),
+        cache_read_tokens: 80
+      })
+
+      DodoRouter.LogsFixtures.log_fixture(router, %{
+        final_model: "big-model",
+        estimated_cost_usd: Decimal.new("2.00"),
+        list_cost_usd: Decimal.new("2.00")
+      })
+
+      spend = tool_json(json_response(call_tool(conn, token, "get_spend"), 200))
+      assert spend["window_hours"] == 24
+      # Highest spend first, both figures separate.
+      assert [%{"model" => "big-model"}, %{"model" => "cheap-model"} = cheap] = spend["by_model"]
+      assert_in_delta cheap["cost_usd"], 0.10, 0.001
+      assert_in_delta cheap["list_cost_usd"], 0.30, 0.001
+      refute Map.has_key?(cheap, "request_body")
+
+      cache = tool_json(json_response(call_tool(conn, token, "get_cache_stats"), 200))
+      assert cache["cache_read_tokens"] == 80
+      assert cache["cached_requests"] == 1
+      assert cache["total_requests"] == 2
+      assert is_number(cache["hit_rate"])
+
+      stats =
+        tool_json(
+          json_response(call_tool(conn, token, "get_recording", %{"id" => recording.id}), 200)
+        )
+
+      assert stats["request_count"] == 1
+      assert_in_delta stats["cost_usd"], 0.10, 0.001
+      assert_in_delta stats["list_cost_usd"], 0.30, 0.001
+      refute Map.has_key?(stats, "request_body")
+
+      # Foreign recordings stay indistinguishable from missing ones.
+      other = DodoRouter.AccountsFixtures.user_fixture()
+      {other_router, _} = DodoRouter.RoutersFixtures.router_fixture(other)
+      {:ok, foreign} = DodoRouter.Recordings.start_recording(other_router)
+
+      resp = json_response(call_tool(conn, token, "get_recording", %{"id" => foreign.id}), 200)
+      assert resp["result"]["isError"]
+    end
+
+    test "create_eval refuses a recording the token's user does not own", %{
+      conn: conn,
+      token: token,
+      user: user
+    } do
+      key = DodoRouter.ProvidersFixtures.provider_key_fixture(user, %{"label" => "Key 1"})
+
+      other_user = DodoRouter.AccountsFixtures.user_fixture()
+      {other_router, _} = DodoRouter.RoutersFixtures.router_fixture(other_user)
+      {:ok, foreign} = DodoRouter.Recordings.start_recording(other_router)
+
+      resp =
+        json_response(
+          call_tool(conn, token, "create_eval", %{
+            "recording_id" => foreign.id,
+            "name" => "Foreign capture",
+            "criteria" => "Be useful",
+            "judge" => %{"provider_key_id" => key.id, "model" => "judge-model"},
+            "candidates" => [%{"provider_key_id" => key.id, "model" => "test-model"}]
+          }),
+          200
+        )
+
+      assert resp["result"]["isError"]
+      assert hd(resp["result"]["content"])["text"] =~ "No recording"
+    end
+
+    test "superseded attempts are one include away", %{
+      conn: conn,
+      token: token,
+      user: user,
+      router: router
+    } do
+      key = DodoRouter.ProvidersFixtures.provider_key_fixture(user, %{"label" => "Key 1"})
+
+      log =
+        DodoRouter.LogsFixtures.log_fixture(router, %{
+          request_body:
+            Jason.encode!(%{
+              "model" => "m",
+              "messages" => [%{"role" => "user", "content" => "hi"}]
+            })
+        })
+
+      {:ok, evaluation} =
+        DodoRouter.Evaluations.create_evaluation(user, log, %{
+          name: "History",
+          criteria: "Be useful",
+          judge_model: "fail-model",
+          judge_provider_key_id: key.id,
+          candidate_targets: [
+            %{"provider_key_id" => key.id, "provider" => "test_provider", "model" => "test-model"}
+          ],
+          repetitions: 1
+        })
+
+      {:ok, _} = DodoRouter.Evaluations.run(user, evaluation)
+
+      evaluation
+      |> Ecto.Changeset.change(judge_model: "judge-model")
+      |> DodoRouter.Repo.update!()
+
+      retried = json_response(call_tool(conn, token, "retry_eval", %{"id" => evaluation.id}), 200)
+      assert retried["result"]["isError"] == false
+
+      # "Did this model fail the first time too?" — answerable without the UI.
+      body =
+        json_response(
+          call_tool(conn, token, "get_eval", %{
+            "id" => evaluation.id,
+            "include" => ["attempts"]
+          }),
+          200
+        )
+
+      payload = tool_json(body)
+      assert [run] = payload["runs"]
+      assert run["status"] == "completed"
+      assert [attempt] = run["previous_attempts"]
+      assert attempt["status"] == "failed"
+      assert attempt["failure_stage"] == "judge"
+      assert attempt["superseded_at"]
+    end
+
+    test "get_eval is light by default and expands on request", %{
+      conn: conn,
+      token: token,
+      user: user,
+      router: router
+    } do
+      key = DodoRouter.ProvidersFixtures.provider_key_fixture(user, %{"label" => "Key 1"})
+
+      log =
+        DodoRouter.LogsFixtures.log_fixture(router, %{
+          request_body:
+            Jason.encode!(%{
+              "model" => "m",
+              "messages" => [%{"role" => "user", "content" => "hi"}]
+            })
+        })
+
+      {:ok, evaluation} =
+        DodoRouter.Evaluations.create_evaluation(user, log, %{
+          name: "Poll me",
+          criteria: "A very long rubric that should not ride every poll",
+          judge_model: "judge-model",
+          judge_provider_key_id: key.id,
+          candidate_targets: [
+            %{"provider_key_id" => key.id, "provider" => "test_provider", "model" => "test-model"}
+          ],
+          repetitions: 1
+        })
+
+      {:ok, _} = DodoRouter.Evaluations.run(user, evaluation)
+
+      # Polling payload: status, summary and rankings — not 50 runs with
+      # 2,000-char previews, and not the criteria re-sent every 2 seconds.
+      body = json_response(call_tool(conn, token, "get_eval", %{"id" => evaluation.id}), 200)
+      payload = tool_json(body)
+
+      assert payload["status"]
+      assert payload["summary"]
+      assert payload["rankings"]
+      refute Map.has_key?(payload, "runs")
+      refute Map.has_key?(payload, "criteria")
+
+      # And everything is one include away.
+      body =
+        json_response(
+          call_tool(conn, token, "get_eval", %{
+            "id" => evaluation.id,
+            "include" => ["runs", "criteria"]
+          }),
+          200
+        )
+
+      payload = tool_json(body)
+      assert [_ | _] = payload["runs"]
+      assert payload["criteria"] =~ "long rubric"
+    end
+
+    test "cancel_eval stops a running benchmark and refuses when idle", %{
+      conn: conn,
+      token: token,
+      user: user,
+      router: router
+    } do
+      key = DodoRouter.ProvidersFixtures.provider_key_fixture(user, %{"label" => "Key 1"})
+
+      log =
+        DodoRouter.LogsFixtures.log_fixture(router, %{
+          request_body:
+            Jason.encode!(%{
+              "model" => "m",
+              "messages" => [%{"role" => "user", "content" => "hi"}]
+            })
+        })
+
+      {:ok, evaluation} =
+        DodoRouter.Evaluations.create_evaluation(user, log, %{
+          name: "Cancel me",
+          criteria: "Be useful",
+          judge_model: "judge-model",
+          judge_provider_key_id: key.id,
+          candidate_targets: [
+            %{"provider_key_id" => key.id, "provider" => "test_provider", "model" => "test-model"}
+          ]
+        })
+
+      evaluation
+      |> Ecto.Changeset.change(benchmark_status: "running")
+      |> DodoRouter.Repo.update!()
+
+      test_pid = self()
+
+      spawn(fn ->
+        Registry.register(DodoRouter.EvaluationRegistry, evaluation.id, nil)
+        send(test_pid, :registered)
+        Process.sleep(:infinity)
+      end)
+
+      assert_receive :registered
+
+      body = json_response(call_tool(conn, token, "cancel_eval", %{"id" => evaluation.id}), 200)
+      assert body["result"]["isError"] == false
+      assert tool_json(body)["status"] == "cancelled"
+
+      body = json_response(call_tool(conn, token, "cancel_eval", %{"id" => evaluation.id}), 200)
+      assert body["result"]["isError"]
+      assert hd(body["result"]["content"])["text"] =~ "nothing to cancel"
+    end
+
+    test "create_eval clones an existing evaluation via from_eval_id with overrides", %{
+      conn: conn,
+      token: token,
+      user: user,
+      router: router
+    } do
+      key = DodoRouter.ProvidersFixtures.provider_key_fixture(user, %{"label" => "Key 1"})
+
+      log =
+        DodoRouter.LogsFixtures.log_fixture(router, %{
+          request_body:
+            Jason.encode!(%{
+              "model" => "m",
+              "messages" => [%{"role" => "user", "content" => "hi"}]
+            })
+        })
+
+      {:ok, source} =
+        DodoRouter.Evaluations.create_evaluation(user, log, %{
+          name: "Original",
+          criteria: "A long rubric that should not need re-sending",
+          good_examples: "a fine answer",
+          judge_model: "judge-model",
+          judge_provider_key_id: key.id,
+          candidate_targets: [
+            %{"provider_key_id" => key.id, "provider" => "test_provider", "model" => "test-model"}
+          ],
+          repetitions: 2
+        })
+
+      # Override only the candidates; everything else carries over.
+      body =
+        json_response(
+          call_tool(conn, token, "create_eval", %{
+            "from_eval_id" => source.id,
+            "candidates" => [%{"provider_key_id" => key.id, "model" => "challenger-model"}],
+            "include_incumbent" => false
+          }),
+          200
+        )
+
+      payload = tool_json(body)
+      assert payload["id"] != source.id
+
+      clone = DodoRouter.Evaluations.get_evaluation!(user, payload["id"])
+      assert clone.criteria == source.criteria
+      assert clone.good_examples == "a fine answer"
+      assert clone.judge_model == "judge-model"
+      assert clone.repetitions == 2
+      assert clone.request_log_id == log.id
+      assert Enum.map(clone.candidate_targets, & &1["model"]) == ["challenger-model"]
+
+      # An id that is not yours reads as absent, not as someone else's.
+      other_user = DodoRouter.AccountsFixtures.user_fixture()
+      {other_router, _} = DodoRouter.RoutersFixtures.router_fixture(other_user)
+      other_log = DodoRouter.LogsFixtures.log_fixture(other_router)
+
+      other_key = DodoRouter.ProvidersFixtures.provider_key_fixture(other_user)
+
+      {:ok, foreign} =
+        DodoRouter.Evaluations.create_evaluation(other_user, other_log, %{
+          name: "Foreign",
+          criteria: "x",
+          judge_model: "judge-model",
+          judge_provider_key_id: other_key.id,
+          candidate_targets: [
+            %{
+              "provider_key_id" => other_key.id,
+              "provider" => "test_provider",
+              "model" => "test-model"
+            }
+          ]
+        })
+
+      body =
+        json_response(
+          call_tool(conn, token, "create_eval", %{"from_eval_id" => foreign.id}),
+          200
+        )
+
+      assert body["result"]["isError"]
+    end
+
+    test "run_eval can override repetitions", %{
+      conn: conn,
+      token: token,
+      user: user,
+      router: router
+    } do
+      key = DodoRouter.ProvidersFixtures.provider_key_fixture(user, %{"label" => "Key 1"})
+
+      log =
+        DodoRouter.LogsFixtures.log_fixture(router, %{
+          request_body:
+            Jason.encode!(%{
+              "model" => "m",
+              "messages" => [%{"role" => "user", "content" => "hi"}]
+            })
+        })
+
+      {:ok, evaluation} =
+        DodoRouter.Evaluations.create_evaluation(user, log, %{
+          name: "Reps via MCP",
+          criteria: "Be useful",
+          judge_model: "judge-model",
+          judge_provider_key_id: key.id,
+          candidate_targets: [
+            %{"provider_key_id" => key.id, "provider" => "test_provider", "model" => "test-model"}
+          ],
+          repetitions: 1
+        })
+
+      body =
+        json_response(
+          call_tool(conn, token, "run_eval", %{"id" => evaluation.id, "repetitions" => 4}),
+          200
+        )
+
+      assert body["result"]["isError"] == false
+      assert DodoRouter.Evaluations.get_evaluation!(user, evaluation.id).repetitions == 4
+    end
+
+    test "create_eval includes the incumbent as a candidate by default", %{
+      conn: conn,
+      token: token,
+      user: user,
+      router: router
+    } do
+      incumbent_key =
+        DodoRouter.ProvidersFixtures.provider_key_fixture(user, %{"label" => "Incumbent"})
+
+      other_key = DodoRouter.ProvidersFixtures.provider_key_fixture(user, %{"label" => "Other"})
+
+      log_attrs = fn ->
+        %{
+          request_body:
+            Jason.encode!(%{
+              "model" => "m",
+              "messages" => [%{"role" => "user", "content" => "hi"}]
+            }),
+          final_model: "test-model",
+          attempted_steps: [
+            %{
+              "status" => "success",
+              "provider_key_id" => incumbent_key.id,
+              "model" => "test-model"
+            }
+          ]
+        }
+      end
+
+      base_args = fn log ->
+        %{
+          "request_log_id" => log.id,
+          "name" => "Baseline check",
+          "criteria" => "Be useful",
+          "judge" => %{"provider_key_id" => other_key.id, "model" => "judge-model"},
+          "candidates" => [
+            %{"provider_key_id" => other_key.id, "model" => "challenger-model"}
+          ]
+        }
+      end
+
+      # A benchmark without the incumbent has numbers but no baseline — the
+      # source log names what served it, so nobody should have to remember.
+      log = DodoRouter.LogsFixtures.log_fixture(router, log_attrs.())
+      body = json_response(call_tool(conn, token, "create_eval", base_args.(log)), 200)
+      payload = tool_json(body)
+
+      eval = DodoRouter.Evaluations.get_evaluation!(user, payload["id"])
+      models = Enum.map(eval.candidate_targets, & &1["model"])
+      assert "test-model" in models
+      assert "challenger-model" in models
+
+      # Opting out is explicit.
+      log = DodoRouter.LogsFixtures.log_fixture(router, log_attrs.())
+
+      body =
+        json_response(
+          call_tool(
+            conn,
+            token,
+            "create_eval",
+            Map.put(base_args.(log), "include_incumbent", false)
+          ),
+          200
+        )
+
+      eval = DodoRouter.Evaluations.get_evaluation!(user, tool_json(body)["id"])
+      assert Enum.map(eval.candidate_targets, & &1["model"]) == ["challenger-model"]
+
+      # Already naming the incumbent model (any key) adds nothing.
+      log = DodoRouter.LogsFixtures.log_fixture(router, log_attrs.())
+
+      args =
+        Map.put(base_args.(log), "candidates", [
+          %{"provider_key_id" => other_key.id, "model" => "test-model"}
+        ])
+
+      body = json_response(call_tool(conn, token, "create_eval", args), 200)
+      eval = DodoRouter.Evaluations.get_evaluation!(user, tool_json(body)["id"])
+      assert length(eval.candidate_targets) == 1
+    end
+
+    test "create_eval warns when the judge shares a provider key with a candidate", %{
+      conn: conn,
+      token: token,
+      user: user,
+      router: router
+    } do
+      key = DodoRouter.ProvidersFixtures.provider_key_fixture(user, %{"label" => "Shared Key"})
+      other = DodoRouter.ProvidersFixtures.provider_key_fixture(user, %{"label" => "Solo Key"})
+
+      log =
+        DodoRouter.LogsFixtures.log_fixture(router, %{
+          request_body:
+            Jason.encode!(%{
+              "model" => "m",
+              "messages" => [%{"role" => "user", "content" => "hi"}]
+            })
+        })
+
+      args = fn judge_key ->
+        %{
+          "request_log_id" => log.id,
+          "name" => "Shared key check",
+          "criteria" => "Be useful",
+          "judge" => %{"provider_key_id" => judge_key.id, "model" => "judge-model"},
+          "candidates" => [
+            %{"provider_key_id" => key.id, "model" => "test-model"}
+          ]
+        }
+      end
+
+      # Judging and generating through one account spends the same quota
+      # twice — knowable at creation, so it is said at creation.
+      body = json_response(call_tool(conn, token, "create_eval", args.(key)), 200)
+      payload = tool_json(body)
+      assert payload["shared_judge_key_label"] == "Shared Key"
+      assert Enum.any?(payload["warnings"], &(&1 =~ "quota"))
+
+      body = json_response(call_tool(conn, token, "create_eval", args.(other)), 200)
+      payload = tool_json(body)
+      assert payload["shared_judge_key_label"] == nil
+      assert payload["warnings"] in [nil, []]
+    end
+
+    test "eval targets filter by provider, model substring and limit", %{
+      conn: conn,
+      user: user,
+      token: token
+    } do
+      DodoRouter.ProvidersFixtures.provider_key_fixture(user, %{"label" => "metered"})
+
+      DodoRouter.ProvidersFixtures.provider_key_fixture(user, %{
+        "provider_slug" => "test_provider_coding",
+        "label" => "plan key"
+      })
+
+      {:ok, _} =
+        DodoRouter.Models.create_model(%{
+          provider_slug: "test_provider",
+          model_id: "alpha-large",
+          display_name: "Alpha Large",
+          input_price_per_million: Decimal.new("1.0"),
+          output_price_per_million: Decimal.new("2.0")
+        })
+
+      {:ok, _} =
+        DodoRouter.Models.create_model(%{
+          provider_slug: "test_provider",
+          model_id: "beta-mini",
+          display_name: "Beta Mini",
+          input_price_per_million: Decimal.new("0.1"),
+          output_price_per_million: Decimal.new("0.2")
+        })
+
+      # provider filter: only test_provider keys, not the coding-plan slug
+      body =
+        json_response(
+          call_tool(conn, token, "list_eval_targets", %{"provider" => "test_provider"}),
+          200
+        )
+
+      targets = tool_json(body)["targets"]
+      assert Enum.all?(targets, &(&1["provider"] == "test_provider"))
+
+      # model substring filter: prunes model lists and drops emptied targets
+      body =
+        json_response(call_tool(conn, token, "list_eval_targets", %{"model" => "ALPHA"}), 200)
+
+      %{"targets" => filtered} = tool_json(body)
+      assert filtered != []
+
+      for target <- filtered, model <- target["models"] do
+        assert model["id"] =~ "alpha" or model["display_name"] =~ "Alpha"
+      end
+
+      # limit caps the target list and says so
+      body = json_response(call_tool(conn, token, "list_eval_targets", %{"limit" => 1}), 200)
+      payload = tool_json(body)
+      assert length(payload["targets"]) == 1
+      assert payload["truncated"] == true
+    end
+
+    test "send_feedback mails the admins with the account attached", %{
+      conn: conn,
+      token: token,
+      user: user
+    } do
+      body =
+        json_response(
+          call_tool(conn, token, "send_feedback", %{"message" => "get_eval is perfect now"}),
+          200
+        )
+
+      assert body["result"]["isError"] == false
+      assert tool_json(body)["delivered"] == true
+
+      # assert_receive scans past the fixture's own login email.
+      assert_receive {:email, %Swoosh.Email{to: [{"", "hgezim@dodorouter.com"}]} = email}
+      assert email.subject =~ user.email
+      assert email.text_body =~ "get_eval is perfect now"
+      assert email.reply_to == {"", user.email}
+
+      body = json_response(call_tool(conn, token, "send_feedback", %{"message" => "  "}), 200)
+      assert body["result"]["isError"]
+    end
+
+    test "an unknown tool names the way to find the real ones", %{conn: conn, token: token} do
+      body = json_response(call_tool(conn, token, "delete_everything"), 200)
+
+      assert body["result"]["isError"]
+      assert hd(body["result"]["content"])["text"] =~ "tools/list"
+    end
+
+    test "a log on another router is not reachable", %{conn: conn, user: user, token: token} do
+      {other, _key} = RoutersFixtures.router_fixture(user)
+      other_log = LogsFixtures.log_fixture(other)
+
+      body = json_response(call_tool(conn, token, "get_log", %{"id" => other_log.id}), 200)
+
+      assert body["result"]["isError"]
+    end
+  end
+
+  describe "audit" do
+    test "records the tool by name, under the mcp interface", %{
+      conn: conn,
+      user: user,
+      token: token,
+      router: router
+    } do
+      log = LogsFixtures.log_fixture(router, %{request_body: ~s({"messages":[]})})
+
+      call_tool(conn, token, "get_log", %{"id" => log.id})
+
+      assert [call] = Agents.list_calls(user)
+      assert call.interface == "mcp"
+      assert call.operation == "tools/call"
+      assert call.tool == "get_log"
+      assert call.target_type == "request_log"
+      assert call.target_id == log.id
+      assert call.returned_bodies
+    end
+
+    test "a session target is recorded, though its id is not a UUID", %{
+      conn: conn,
+      user: user,
+      token: token
+    } do
+      # Session ids are whatever the client named them — `question-7`, not a
+      # uuid. A target_id column that only accepts uuids silently threw away
+      # every get_session row, and the rescue in Agents.record_call/1 turned
+      # that into a log line no test was reading. The tool most likely to be
+      # called on a live agent's own traffic was the one with no audit trail.
+      call_tool(conn, token, "get_session", %{"session_id" => "question-7"})
+
+      assert [call] = Agents.list_calls(user)
+      assert call.tool == "get_session"
+      assert call.target_type == "session"
+      assert call.target_id == "question-7"
+    end
+
+    test "records a refused call with no credential", %{conn: conn} do
+      conn
+      |> put_req_header("mcp-protocol-version", @version)
+      |> put_req_header("mcp-method", "tools/list")
+      |> post("/mcp", %{"jsonrpc" => "2.0", "id" => 1, "method" => "tools/list"})
+
+      assert [call] = DodoRouter.Repo.all(DodoRouter.Agents.ApiCall)
+      assert call.interface == "mcp"
+      assert call.outcome == "denied"
+    end
+  end
+
+  describe "credential separation" do
+    test "a router's proxy key is not an agent credential", %{
+      conn: conn,
+      proxy_key: proxy_key
+    } do
+      # The regression the whole agent surface exists to prevent: a key that
+      # sends traffic must not read it back. It was true when bearer agent
+      # tokens guarded this and has to stay true now OAuth does.
+      assert conn |> rpc(proxy_key, "tools/list") |> json_response(401)
+
+      assert DodoRouter.Repo.all(DodoRouter.Agents.ApiCall)
+             |> Enum.all?(&(&1.outcome == "denied"))
+    end
+
+    test "the proxy endpoints still take the proxy key", %{
+      conn: conn,
+      router: router,
+      proxy_key: proxy_key
+    } do
+      # ...and the separation must not have broken what that key is for.
+      assert conn
+             |> put_req_header("authorization", "Bearer #{proxy_key}")
+             |> get("/r/#{router.slug}/v1/models")
+             |> json_response(200)
+    end
+  end
+
+  describe "get_guide" do
+    test "returns the workflow prose, with no scope required", %{conn: conn, user: user} do
+      # The guide reached agents through the REST surface's GET /agent until
+      # that was removed. Nothing else carries the part that decides whether
+      # the numbers mean anything, so it has to be callable here — and by a
+      # token holding nothing, since an agent reads it before asking for more.
+      scopeless = AuthZFixtures.access_token(user, scopes: [])
+
+      guide = call_tool(conn, scopeless, "get_guide") |> json_response(200) |> tool_json()
+
+      assert guide["guide"] =~ "The incumbent is included for you"
+      assert guide["guide"] =~ "rubric_feedback"
+    end
+  end
+end

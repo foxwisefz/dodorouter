@@ -19,8 +19,6 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
     },
     endpoint_path: "/messages",
     request_format: :anthropic,
-    models:
-      ~w(claude-sonnet-4-20250514 claude-opus-4-20250514 claude-3-5-sonnet-20241022 claude-3-5-haiku-20241022 claude-3-opus-20240229),
     color: "orange",
     short_description: "Claude Sonnet, Opus, Haiku"
 
@@ -34,7 +32,6 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
   @response_passthrough_key Adapter.response_passthrough_key()
 
   @base_url "https://api.anthropic.com/v1"
-  @timeout_ms 120_000
   @api_version "2023-06-01"
   @oauth_beta "oauth-2025-04-20"
 
@@ -147,7 +144,7 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
     payload_size_bytes = Adapter.record_outbound_body(body)
     start_time = FinchTelemetry.mark_request_start()
 
-    case Req.post(url, headers: headers, json: body, receive_timeout: @timeout_ms) do
+    case Req.post(url, headers: headers, json: body, receive_timeout: Adapter.receive_timeout()) do
       {:ok, %{status: 200, body: response_body, headers: resp_headers}} ->
         total_ms = latency(start_time)
         upload_ms = FinchTelemetry.get_upload_ms(start_time)
@@ -188,6 +185,14 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
   @impl true
   def stream(request, %RoutingStep{} = step, api_key, send_chunk, client_headers \\ []) do
     url = @base_url <> "/messages"
+
+    # FallbackChain sets this when the client speaks Anthropic too and nothing
+    # has been streamed yet: relay the provider's native events verbatim
+    # instead of reframing through the OpenAI chunk shape, which has no
+    # representation for thinking or server-tool blocks. Popped here so it can
+    # never ride into the request body.
+    {passthrough?, request} = Map.pop(request, Adapter.stream_passthrough_key(), false)
+
     body = build_anthropic_request(request, step) |> Map.put("stream", true)
     headers = request_headers(api_key, client_headers)
 
@@ -214,22 +219,33 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
 
         acc = resp.private.stream_acc
 
+        process_events = fn events ->
+          if passthrough?,
+            do: passthrough_anthropic_events(acc, events),
+            else: process_anthropic_events(acc, events)
+        end
+
         case parse_anthropic_sse(data, acc.sse_buffer) do
           {{:events, events}, buffer} ->
-            # Convert and forward as OpenAI format
-            {acc, openai_chunks} = process_anthropic_events(acc, events)
+            {acc, wire_chunks} = process_events.(events)
             acc = %{acc | sse_buffer: buffer}
             # Park before forwarding, not after: the egress reads the real
             # message id from here while handling the very first chunk, and a
             # frame carrying `message_start` and a delta together would
             # otherwise hand it a stale accumulator.
             Process.put(:__anthropic_stream_acc__, acc)
-            Enum.each(openai_chunks, &send_chunk.(&1))
+            Enum.each(wire_chunks, &send_chunk.(&1))
             {:cont, {req, Req.Response.put_private(resp, :stream_acc, acc)}}
 
-          {:done, _buffer} ->
-            send_chunk.("data: [DONE]\n\n")
-            {:halt, {req, resp}}
+          {{:events_then_done, events}, _buffer} ->
+            {acc, wire_chunks} = process_events.(events)
+            acc = %{acc | sse_buffer: ""}
+            Process.put(:__anthropic_stream_acc__, acc)
+            Enum.each(wire_chunks, &send_chunk.(&1))
+            # [DONE] is an OpenAI-wire sentinel; the native stream already
+            # ended with its own message_stop event.
+            unless passthrough?, do: send_chunk.("data: [DONE]\n\n")
+            {:halt, {req, Req.Response.put_private(resp, :stream_acc, acc)}}
 
           {:skip, buffer} ->
             acc = %{acc | sse_buffer: buffer}
@@ -241,7 +257,7 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
       Req.post(url,
         headers: headers,
         json: body,
-        receive_timeout: @timeout_ms,
+        receive_timeout: Adapter.receive_timeout(),
         into: into_fun
       )
 
@@ -289,13 +305,27 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
       |> Map.take(@count_tokens_fields)
       |> Map.put("model", step.model || params["model"])
 
-    # Same translation as build_anthropic_request/2: Claude 5 models reject an
-    # explicit thinking disable; omission is the portable spelling.
+    # Same translation as build_anthropic_request/2: only Fable 5 rejects an
+    # explicit thinking disable, so only there is the block omitted — the
+    # count must describe the request dispatch would actually send.
     case body["thinking"] do
-      %{"type" => "disabled"} -> Map.delete(body, "thinking")
-      _ -> body
+      %{"type" => "disabled"} ->
+        if thinking_always_on_model?(step.model || params["model"]),
+          do: Map.delete(body, "thinking"),
+          else: body
+
+      _ ->
+        body
     end
   end
+
+  # Fable 5 rejects thinking.type=disabled at any effort — thinking has no
+  # off switch there (probed live 2026-08-16, dodo_router-cit). Every other
+  # current Claude model accepts an explicit disable.
+  defp thinking_always_on_model?(model) when is_binary(model),
+    do: String.starts_with?(model, "claude-fable")
+
+  defp thinking_always_on_model?(_), do: false
 
   @doc """
   Forwards a count_tokens request to Anthropic. Returns `{:ok, body}` with the
@@ -363,14 +393,29 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
     body = put_output_config(body, request)
 
     # Forward a client-supplied thinking block (if any) so it takes precedence
-    # over the step-level default. An explicit disable is translated to
-    # omission: Claude 5 models reject thinking.type=disabled outright, and on
-    # older models omission means the same thing. It still counts as a client
-    # choice, so the step-level effort default is not injected over it.
+    # over the step-level default. An explicit disable travels as sent —
+    # probed live 2026-08-16: Opus 5, Sonnet 5 and Opus 4.8 all accept it, and
+    # on the Claude 5 models omission turns thinking ON (adaptive default),
+    # billing the client for the very thing it turned off (dodo_router-cit).
+    # Fable 5 alone rejects disabled at any effort and has no off switch, so
+    # only there is omission the honest spelling — recorded, not silent.
+    # Either way a disable is a client choice, so the step-level effort
+    # default is not injected over it (the :anthropic injection would set
+    # thinking.type=adaptive, overriding the disable).
     body =
       case request["thinking"] do
-        %{"type" => "disabled"} ->
-          body
+        %{"type" => "disabled"} = thinking ->
+          if thinking_always_on_model?(step.model) do
+            Fidelity.record_dropped_body_fields(
+              %{"thinking" => thinking},
+              :unsupported_by_model,
+              "Fable 5 rejects thinking.type=disabled at any effort; thinking cannot be turned off there"
+            )
+
+            body
+          else
+            Map.put(body, "thinking", thinking)
+          end
 
         nil ->
           Adapter.inject_reasoning_effort(body, step.reasoning_effort, :anthropic)
@@ -777,7 +822,8 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
   defp put_if(map, nil, _key, _value), do: map
   defp put_if(map, _present, key, value), do: Map.put(map, key, value)
 
-  defp parse_anthropic_sse(data, buffer) do
+  @doc false
+  def parse_anthropic_sse(data, buffer) do
     combined = buffer <> data
     lines = String.split(combined, "\n")
 
@@ -801,7 +847,10 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
       |> Enum.reject(&is_nil/1)
 
     cond do
-      Enum.any?(events, &(&1["type"] == "message_stop")) -> {:done, ""}
+      # The terminating frame still carries its events: a `message_delta`
+      # sharing a TCP frame with `message_stop` holds the final usage, and
+      # discarding it logged that stream with null token counts.
+      Enum.any?(events, &(&1["type"] == "message_stop")) -> {{:events_then_done, events}, ""}
       events == [] -> {:skip, buffer}
       true -> {{:events, events}, buffer}
     end
@@ -821,6 +870,11 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
       # delta, so the egress still has it in hand when it emits its own
       # `message_start` — see `process_anthropic_events/2`.
       message_id: nil,
+      # The resolved model off `message_start`, repeated on every reframed
+      # chunk — chunks without one made OpenAI-format clients fall back to
+      # the requested model for provenance, silently wrong exactly when a
+      # fallback step fired (dodo_router-bnn).
+      model: nil,
       # Native fields off `message_delta` that the OpenAI chunk shape has no
       # place for — `context_management` applied edits, `stop_details` behind a
       # refusal, the `stop_sequence` that actually matched. Collected here
@@ -845,6 +899,28 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
     end
   end
 
+  @doc """
+  The passthrough twin of `process_anthropic_events/2`: same accumulation for
+  logging, but the wire output is each native event re-serialized verbatim
+  instead of an OpenAI reframing.
+
+  This is what carries thinking blocks (with their signatures), redacted
+  thinking and server-tool blocks to a streaming Anthropic client in their
+  original order — the reframed stream has no representation for any of them,
+  and Anthropic rejects a continued turn whose thinking blocks were dropped
+  or reordered.
+  """
+  def passthrough_anthropic_events(acc, events) do
+    {acc, _openai_chunks} = process_anthropic_events(acc, events)
+
+    wire =
+      Enum.map(events, fn event ->
+        "event: #{event["type"]}\ndata: #{Jason.encode!(event)}\n\n"
+      end)
+
+    {acc, wire}
+  end
+
   @doc false
   def process_anthropic_events(acc, events) do
     Enum.reduce(events, {acc, []}, fn event, {acc, chunks} ->
@@ -854,8 +930,16 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
         # enough to use it rather than synthesise one. It names a message in
         # Anthropic's store, which is what `previous_message_id` cache
         # diagnostics refer to; a synthesised id cannot be used for that.
+        # Its usage carries the input-side figures (`input_tokens`, cache
+        # read/write) that `message_delta` may never repeat.
         "message_start" ->
-          {%{acc | message_id: get_in(event, ["message", "id"])}, chunks}
+          acc = %{
+            acc
+            | message_id: get_in(event, ["message", "id"]),
+              model: get_in(event, ["message", "model"])
+          }
+
+          {seed_usage_from_message_start(acc, get_in(event, ["message", "usage"])), chunks}
 
         "content_block_start" ->
           case event["content_block"] do
@@ -875,7 +959,7 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
               }
 
               chunk =
-                build_openai_stream_chunk(%{
+                build_openai_stream_chunk(new_acc, %{
                   "tool_calls" => [Map.put(tool_call, "index", tool_idx)]
                 })
 
@@ -891,7 +975,7 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
           case delta["type"] do
             "text_delta" ->
               new_acc = %{acc | content: acc.content <> (delta["text"] || "")}
-              chunk = build_openai_stream_chunk(%{"content" => delta["text"]})
+              chunk = build_openai_stream_chunk(new_acc, %{"content" => delta["text"]})
               {new_acc, chunks ++ [chunk]}
 
             "input_json_delta" ->
@@ -905,7 +989,7 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
                     end)
 
                   chunk =
-                    build_openai_stream_chunk(%{
+                    build_openai_stream_chunk(acc, %{
                       "tool_calls" => [
                         %{"index" => tool_idx, "function" => %{"arguments" => partial}}
                       ]
@@ -983,6 +1067,28 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
     end)
   end
 
+  defp seed_usage_from_message_start(acc, usage) when is_map(usage) do
+    base = %{
+      "prompt_tokens" => usage["input_tokens"],
+      "completion_tokens" => usage["output_tokens"],
+      "total_tokens" => (usage["input_tokens"] || 0) + (usage["output_tokens"] || 0)
+    }
+
+    base =
+      if usage["cache_read_input_tokens"],
+        do: Map.put(base, "cache_read_tokens", usage["cache_read_input_tokens"]),
+        else: base
+
+    base =
+      if usage["cache_creation_input_tokens"],
+        do: Map.put(base, "cache_write_tokens", usage["cache_creation_input_tokens"]),
+        else: base
+
+    %{acc | usage: base}
+  end
+
+  defp seed_usage_from_message_start(acc, _), do: acc
+
   # `type`, `delta.stop_reason` and `usage` are translated into the OpenAI
   # chunk shape; everything else on the tail event is not. `delta` is unwrapped
   # so the egress can put its contents straight back into the `delta` it emits
@@ -995,10 +1101,20 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
     Map.merge(top, delta)
   end
 
-  defp build_openai_stream_chunk(delta) do
+  # Every reframed chunk names the model that is actually serving — the
+  # resolved one off `message_start` — the way real OpenAI chunks do. A
+  # chunk without one made clients fall back to the requested model for
+  # provenance, silently wrong exactly when a fallback fired.
+  defp build_openai_stream_chunk(acc, delta) do
     chunk = %{
       "choices" => [%{"index" => 0, "delta" => delta}]
     }
+
+    chunk =
+      case acc.model do
+        model when is_binary(model) and model != "" -> Map.put(chunk, "model", model)
+        _blank -> chunk
+      end
 
     "data: #{Jason.encode!(chunk)}\n\n"
   end
@@ -1031,6 +1147,14 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
       "choices" => [%{"index" => 0, "message" => message, "finish_reason" => finish_reason}],
       "_meta" => meta
     }
+
+    # The resolved model off message_start — the provider's own claim, which
+    # outranks the step's requested string when the chain stamps the response.
+    response =
+      case acc.model do
+        model when is_binary(model) and model != "" -> Map.put(response, "model", model)
+        _blank -> response
+      end
 
     response = if acc.usage, do: Map.put(response, "usage", acc.usage), else: response
 

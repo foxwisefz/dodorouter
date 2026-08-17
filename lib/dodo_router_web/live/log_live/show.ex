@@ -8,6 +8,7 @@ defmodule DodoRouterWeb.LogLive.Show do
   alias DodoRouter.Proxy.Adapter.Registry
   alias DodoRouter.Proxy.Fidelity
   alias DodoRouter.Usage
+  alias DodoRouterWeb.Components.Charts
   alias DodoRouterWeb.MarkdownRenderer
 
   import DodoRouterWeb.PromptComponents
@@ -75,6 +76,7 @@ defmodule DodoRouterWeb.LogLive.Show do
       |> assign(:finish_reason, extract_finish_reason(log.response_body))
       |> assign(:evaluations, Evaluations.list_for_log(socket.assigns.current_user, log.id))
       |> assign(:replay_count, Logs.replay_counts([log.id]) |> Map.get(log.id, 0))
+      |> assign(:baselines, Logs.request_baselines(log.router_id))
 
     {:ok, socket}
   end
@@ -128,620 +130,760 @@ defmodule DodoRouterWeb.LogLive.Show do
   @impl true
   def render(assigns) do
     ~H"""
-    <div>
-      <!-- Header -->
-      <div class="flex items-center gap-4 mb-6">
-        <.link navigate={@return_to || ~p"/logs"} class="btn btn-ghost btn-sm btn-square">
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            class="h-5 w-5"
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-          >
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" />
-          </svg>
-        </.link>
-        <div class="flex-1">
-          <h1 class="text-2xl font-bold">Request Details</h1>
-          <code class="text-sm text-base-content/60">{@log.request_id}</code>
-        </div>
-        <details id="log-evaluations" class="group relative">
-          <summary class="btn btn-ghost btn-sm list-none gap-2 cursor-pointer">
-            <.icon name="hero-beaker" class="size-4" /> Evaluations
-            <span
-              :if={@evaluations != []}
-              class="rounded-full bg-primary/10 px-1.5 text-[10px] font-semibold text-primary"
+    <Layouts.app flash={@flash} current_scope={@current_scope}>
+      <div>
+        <!-- Header -->
+        <div class="flex items-center gap-4 mb-6">
+          <.link navigate={@return_to || ~p"/logs"} class="btn btn-ghost btn-sm btn-square">
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              class="h-5 w-5"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
             >
-              {length(@evaluations)}
-            </span>
-            <.icon
-              name="hero-chevron-down"
-              class="size-3.5 transition-transform group-open:rotate-180"
-            />
-          </summary>
-          <div class="absolute right-0 z-50 mt-2 w-72 overflow-hidden rounded-xl border border-base-300/70 bg-base-100 shadow-xl">
-            <div class="px-3 pb-1 pt-3 text-[10px] font-semibold uppercase tracking-wider text-base-content/40">
-              Evaluations for this log
-            </div>
-            <div :if={@evaluations == []} class="px-3 py-3 text-sm text-base-content/45">
-              No evaluations yet
-            </div>
-            <.link
-              :for={evaluation <- @evaluations}
-              navigate={~p"/evals/#{evaluation.id}"}
-              class="flex items-center gap-3 px-3 py-2.5 text-sm transition hover:bg-base-200"
-              title={"Open evaluation: #{evaluation.name}"}
-            >
-              <span class="grid size-8 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary">
-                <.icon name="hero-chart-bar-square" class="size-4" />
-              </span>
-              <span class="min-w-0">
-                <span class="block truncate font-medium">{evaluation.name}</span><span class="block text-xs capitalize text-base-content/40">{evaluation.benchmark_status}</span>
-              </span>
-            </.link>
-            <div class="border-t border-base-300/60 p-2">
-              <.link
-                id="create-eval-button"
-                navigate={~p"/logs/#{@log.id}/evals/new"}
-                class="flex items-center gap-2 rounded-lg px-2.5 py-2 text-sm font-medium text-primary transition hover:bg-primary/5"
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M15 19l-7-7 7-7"
+              />
+            </svg>
+          </.link>
+          <div class="flex-1">
+            <h1 class="text-2xl font-bold">Request Details</h1>
+            <code class="text-sm text-base-content/60">{@log.request_id}</code>
+          </div>
+          <details id="log-evaluations" class="group relative">
+            <summary class="btn btn-ghost btn-sm list-none gap-2 cursor-pointer">
+              <.icon name="hero-beaker" class="size-4" /> Evaluations
+              <span
+                :if={@evaluations != []}
+                class="rounded-full bg-primary/10 px-1.5 text-[10px] font-semibold text-primary"
               >
-                <.icon name="hero-plus" class="size-4" /> Create new evaluation
-              </.link>
-            </div>
-          </div>
-        </details>
-        <.link
-          :if={@log.replayed_from_id}
-          id="replay-of-link"
-          navigate={~p"/logs/#{@log.replayed_from_id}/replay?replay=#{@log.id}"}
-          class="btn btn-ghost btn-sm gap-2"
-          title="This log was produced by a replay — open the side-by-side comparison with its original"
-        >
-          <.icon name="hero-scale" class="w-4 h-4" /> Compare with original
-        </.link>
-        <.link
-          :if={!@log.replayed_from_id}
-          id="replay-button"
-          navigate={~p"/logs/#{@log.id}/replay"}
-          class="btn btn-primary btn-soft btn-sm gap-2"
-        >
-          <.icon name="hero-arrow-path" class="w-4 h-4" /> Replay
-          <span :if={@replay_count > 0} class="badge badge-sm">{@replay_count}</span>
-        </.link>
-        <button
-          type="button"
-          id="favorite-button"
-          phx-click="toggle_favorite"
-          data-favorited={to_string(@log.favorite)}
-          class={[
-            "btn btn-ghost btn-sm btn-square",
-            @log.favorite && "text-warning"
-          ]}
-          title={if @log.favorite, do: "Unfavorite", else: "Favorite"}
-        >
-          <.icon
-            name={if @log.favorite, do: "hero-star-solid", else: "hero-star"}
-            class="w-5 h-5"
-          />
-        </button>
-      </div>
-      
-    <!-- Split pane -->
-      <div class="flex-1 flex flex-col lg:flex-row overflow-hidden">
-        <!-- Left sidebar -->
-        <div class="w-full lg:w-52 shrink-0 max-h-44 lg:max-h-none border-b lg:border-b-0 lg:border-r border-base-300/30 overflow-y-auto p-3 space-y-4 lg:space-y-4 bg-base-100/30 grid grid-cols-2 gap-x-4 lg:block">
-          <!-- Status -->
-          <div>
-            <div class="text-[10px] uppercase tracking-wider text-base-content/40 font-semibold mb-1">
-              Status
-            </div>
-            <div class="text-lg"><.status_badge status={@log.status} /></div>
-            <div
-              :if={@finish_reason in ["length", "max_tokens", "model_length", "content_filter"]}
-              id="truncation-notice"
-              class="mt-2 flex items-start gap-1.5 rounded-lg bg-warning/10 px-2 py-1.5 text-[11px] leading-snug text-warning"
-              title={"finish_reason: #{@finish_reason}"}
-            >
-              <.icon name="hero-scissors" class="w-3.5 h-3.5 shrink-0 mt-px" />
-              <span>
-                {if @finish_reason == "content_filter",
-                  do: "Response cut off by the provider's content filter",
-                  else: "Response truncated — hit the max_tokens limit"}
+                {length(@evaluations)}
               </span>
+              <.icon
+                name="hero-chevron-down"
+                class="size-3.5 transition-transform group-open:rotate-180"
+              />
+            </summary>
+            <div class="absolute right-0 z-50 mt-2 w-72 overflow-hidden rounded-xl border border-base-300/70 bg-base-100 shadow-xl">
+              <div class="px-3 pb-1 pt-3 text-[10px] font-semibold uppercase tracking-wider text-base-content/40">
+                Evaluations for this log
+              </div>
+              <div :if={@evaluations == []} class="px-3 py-3 text-sm text-base-content/45">
+                No evaluations yet
+              </div>
+              <.link
+                :for={evaluation <- @evaluations}
+                navigate={~p"/evals/#{evaluation.id}"}
+                class="flex items-center gap-3 px-3 py-2.5 text-sm transition hover:bg-base-200"
+                title={"Open evaluation: #{evaluation.name}"}
+              >
+                <span class="grid size-8 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary">
+                  <.icon name="hero-chart-bar-square" class="size-4" />
+                </span>
+                <span class="min-w-0">
+                  <span class="block truncate font-medium">{evaluation.name}</span><span class="block text-xs capitalize text-base-content/40">{evaluation.benchmark_status}</span>
+                </span>
+              </.link>
+              <div class="border-t border-base-300/60 p-2">
+                <.link
+                  id="create-eval-button"
+                  navigate={~p"/logs/#{@log.id}/evals/new"}
+                  class="flex items-center gap-2 rounded-lg px-2.5 py-2 text-sm font-medium text-primary transition hover:bg-primary/5"
+                >
+                  <.icon name="hero-plus" class="size-4" /> Create new evaluation
+                </.link>
+              </div>
             </div>
-          </div>
-          
+          </details>
+          <.link
+            :if={@log.replayed_from_id}
+            id="replay-of-link"
+            navigate={~p"/logs/#{@log.replayed_from_id}/replay?replay=#{@log.id}"}
+            class="btn btn-ghost btn-sm gap-2"
+            title="This log was produced by a replay — open the side-by-side comparison with its original"
+          >
+            <.icon name="hero-scale" class="w-4 h-4" /> Compare with original
+          </.link>
+          <.link
+            :if={!@log.replayed_from_id}
+            id="replay-button"
+            navigate={~p"/logs/#{@log.id}/replay"}
+            class="btn btn-primary btn-soft btn-sm gap-2"
+          >
+            <.icon name="hero-arrow-path" class="w-4 h-4" /> Replay
+            <span :if={@replay_count > 0} class="badge badge-sm">{@replay_count}</span>
+          </.link>
+          <button
+            type="button"
+            id="favorite-button"
+            phx-click="toggle_favorite"
+            data-favorited={to_string(@log.favorite)}
+            class={[
+              "btn btn-ghost btn-sm btn-square",
+              @log.favorite && "text-warning"
+            ]}
+            title={if @log.favorite, do: "Unfavorite", else: "Favorite"}
+          >
+            <.icon
+              name={if @log.favorite, do: "hero-star-solid", else: "hero-star"}
+              class="w-5 h-5"
+            />
+          </button>
+        </div>
+        
+    <!-- Split pane -->
+        <div class="flex-1 flex flex-col lg:flex-row overflow-hidden">
+          <!-- Left sidebar -->
+          <div class="w-full lg:w-52 shrink-0 max-h-44 lg:max-h-none border-b lg:border-b-0 lg:border-r border-base-300/30 overflow-y-auto p-3 space-y-4 lg:space-y-4 bg-base-100/30 grid grid-cols-2 gap-x-4 lg:block">
+            <%!-- Grouped by the task a reader has, not by where each field
+               comes from (status/timing/model/session/usage/routing were six
+               boxes ordered by data source). "What happened" answers the
+               debugging question first: did it work, what answered it, how
+               long did it take, and which hop in the chain was where the
+               time went — read top to bottom in that order. --%>
+            
+    <!-- Status -->
+            <div data-group="what-happened">
+              <div class="text-[10px] uppercase tracking-wider text-base-content/40 font-semibold mb-1">
+                Status
+              </div>
+              <div class="text-lg"><.status_badge status={@log.status} /></div>
+              <div
+                :if={@finish_reason in ["length", "max_tokens", "model_length", "content_filter"]}
+                id="truncation-notice"
+                class="mt-2 flex items-start gap-1.5 rounded-lg bg-warning/10 px-2 py-1.5 text-[11px] leading-snug text-warning"
+                title={"finish_reason: #{@finish_reason}"}
+              >
+                <.icon name="hero-scissors" class="w-3.5 h-3.5 shrink-0 mt-px" />
+                <span>
+                  {if @finish_reason == "content_filter",
+                    do: "Response cut off by the provider's content filter",
+                    else: "Response truncated — hit the max_tokens limit"}
+                </span>
+              </div>
+            </div>
+            
+    <!-- Model -->
+            <div data-group="what-happened">
+              <div class="text-[10px] uppercase tracking-wider text-base-content/40 font-semibold mb-1">
+                {if @log.status == "error", do: "Model (last attempted)", else: "Model"}
+              </div>
+              <div class={[
+                "text-sm font-mono",
+                @log.status == "error" && "text-base-content/50 line-through decoration-error/40"
+              ]}>
+                {@log.final_model}
+              </div>
+              <div class="flex items-center gap-1.5 mt-1">
+                <div class="w-3.5 h-3.5 rounded flex items-center justify-center shrink-0 bg-base-200">
+                  <.provider_logo slug={normalize_slug(@log.final_provider)} class="w-2.5 h-2.5" />
+                </div>
+                <div class="text-xs text-base-content/60">{@log.final_provider}</div>
+              </div>
+              <div
+                :if={requested_model(@req_params, @log)}
+                class="mt-1 text-[11px] text-base-content/40"
+                title="Model named by the client; the routing chain decided what actually served it"
+              >
+                requested: <span class="font-mono">{requested_model(@req_params, @log)}</span>
+              </div>
+              <%= if effort = attempt_effort(List.last(@log.attempted_steps)) do %>
+                <div class="mt-1.5">
+                  <span
+                    class="px-1.5 py-0.5 rounded text-xs bg-accent/20 text-accent"
+                    title="Reasoning effort configured on the routing step at request time"
+                  >
+                    effort: {effort}
+                  </span>
+                </div>
+              <% end %>
+            </div>
+            
     <!-- Timing -->
-          <div>
-            <div class="text-[10px] uppercase tracking-wider text-base-content/40 font-semibold mb-1">
-              Timing
-            </div>
-            <div class="space-y-1 text-xs">
-              <div class="flex justify-between">
+            <div data-group="what-happened">
+              <div class="text-[10px] uppercase tracking-wider text-base-content/40 font-semibold mb-1">
+                Timing
+              </div>
+              <div class="flex justify-between text-xs mb-1">
                 <span class="text-base-content/60">Total</span>
                 <span class="font-mono">{fmt_ms(@log.latency_ms)}</span>
               </div>
-              <div class="flex justify-between">
-                <span class="text-base-content/60">Provider</span>
-                <span class="font-mono">{fmt_ms(provider_time(@log))}</span>
-              </div>
-              <div class="flex justify-between">
-                <span class="text-base-content/60">Overhead</span>
-                <span class="font-mono">{fmt_ms(overhead_time(@log))}</span>
-              </div>
-              <div :if={@log.ttfb_ms} class="flex justify-between">
-                <span class="text-base-content/60">TTFB</span>
-                <span class="font-mono">{fmt_ms(@log.ttfb_ms)}</span>
-              </div>
-              <%!-- Upload/Wait only earn a row when upload actually took time;
-                   otherwise Wait just repeats TTFB --%>
-              <div :if={@log.upload_ms && @log.upload_ms > 0} class="flex justify-between">
-                <span class="text-base-content/60">Upload</span>
-                <span class="font-mono">{fmt_ms(@log.upload_ms)}</span>
-              </div>
-              <div
-                :if={@log.ttfb_ms && @log.upload_ms && @log.upload_ms > 0}
-                class="flex justify-between"
-              >
-                <span class="text-base-content/60" title="TTFB minus upload">Wait</span>
-                <span class="font-mono">{fmt_ms(wait_time(@log))}</span>
-              </div>
-              <%= if @log.provider_processing_ms do %>
-                <div class="flex justify-between">
-                  <span class="text-base-content/60">Proc</span>
-                  <span class="font-mono">{@log.provider_processing_ms}ms</span>
+              <%!-- One stacked bar answers "where did the time go" without
+                 mental subtraction. Segments are a non-overlapping partition
+                 that always sums to Total by construction: Upload + Wait +
+                 Provider processing + Unattributed together equal
+                 `provider_time/1` (the sum of every attempted step's own
+                 latency), and Overhead is `total - provider_time`. TTFB is
+                 deliberately not a segment — it's Upload + Wait, so plotting
+                 it too would double-count. "Unattributed" absorbs whatever
+                 provider_time isn't explained by upload/wait/proc (retried
+                 attempts before the winning one, or old rows missing the
+                 finer-grained fields), so old rows still render an honest,
+                 if coarser, bar instead of one that silently omits time. --%>
+              <Charts.share_bar
+                id="timing-bar"
+                segments={timing_segments(@log)}
+                tip_suffix="of total time"
+              />
+              <details class="mt-1.5 text-xs">
+                <summary class="cursor-pointer text-base-content/60 select-none">
+                  Breakdown
+                </summary>
+                <div class="space-y-1 mt-1.5">
+                  <div class="flex justify-between">
+                    <span class="text-base-content/60">Provider</span>
+                    <span class="font-mono">{fmt_ms(provider_time(@log))}</span>
+                  </div>
+                  <div class="flex justify-between">
+                    <span class="text-base-content/60">Overhead</span>
+                    <span class="font-mono">{fmt_ms(overhead_time(@log))}</span>
+                  </div>
+                  <%!-- "Overhead" has no median of its own to compare against
+                     (it isn't a stored column); comparing this request's
+                     Total against the router's own p50/p95 total latency is
+                     the honest basis that's actually queryable. Omitted
+                     entirely when the router has no other recent traffic to
+                     compare against, rather than comparing a value to
+                     itself. --%>
+                  <div
+                    :if={total_baseline_note(@log, @baselines)}
+                    id="overhead-baseline"
+                    class="text-[10px] text-base-content/40 -mt-0.5"
+                  >
+                    {total_baseline_note(@log, @baselines)}
+                  </div>
+                  <div :if={@log.ttfb_ms} class="flex justify-between">
+                    <span class="text-base-content/60">TTFB</span>
+                    <span class="font-mono">{fmt_ms(@log.ttfb_ms)}</span>
+                  </div>
+                  <%!-- Upload/Wait only earn a row when upload actually took time;
+                     otherwise Wait just repeats TTFB --%>
+                  <div :if={@log.upload_ms && @log.upload_ms > 0} class="flex justify-between">
+                    <span class="text-base-content/60">Upload</span>
+                    <span class="font-mono">{fmt_ms(@log.upload_ms)}</span>
+                  </div>
+                  <div
+                    :if={@log.ttfb_ms && @log.upload_ms && @log.upload_ms > 0}
+                    class="flex justify-between"
+                  >
+                    <span class="text-base-content/60" title="TTFB minus upload">Wait</span>
+                    <span class="font-mono">{fmt_ms(wait_time(@log))}</span>
+                  </div>
+                  <%= if @log.provider_processing_ms do %>
+                    <div class="flex justify-between">
+                      <span class="text-base-content/60">Proc</span>
+                      <span class="font-mono">{@log.provider_processing_ms}ms</span>
+                    </div>
+                  <% end %>
                 </div>
-              <% end %>
+              </details>
             </div>
-          </div>
-          
-    <!-- Model -->
-          <div>
-            <div class="text-[10px] uppercase tracking-wider text-base-content/40 font-semibold mb-1">
-              {if @log.status == "error", do: "Model (last attempted)", else: "Model"}
-            </div>
-            <div class={[
-              "text-sm font-mono",
-              @log.status == "error" && "text-base-content/50 line-through decoration-error/40"
-            ]}>
-              {@log.final_model}
-            </div>
-            <div class="flex items-center gap-1.5 mt-1">
-              <div class="w-3.5 h-3.5 rounded flex items-center justify-center shrink-0 bg-base-200">
-                <.provider_logo slug={normalize_slug(@log.final_provider)} class="w-2.5 h-2.5" />
-              </div>
-              <div class="text-xs text-base-content/60">{@log.final_provider}</div>
-            </div>
-            <div
-              :if={requested_model(@req_params, @log)}
-              class="mt-1 text-[11px] text-base-content/40"
-              title="Model named by the client; the routing chain decided what actually served it"
-            >
-              requested: <span class="font-mono">{requested_model(@req_params, @log)}</span>
-            </div>
-            <%= if effort = attempt_effort(List.last(@log.attempted_steps)) do %>
-              <div class="mt-1.5">
-                <span
-                  class="px-1.5 py-0.5 rounded text-xs bg-accent/20 text-accent"
-                  title="Reasoning effort configured on the routing step at request time"
-                >
-                  effort: {effort}
-                </span>
+
+            <%= if length(@log.tools_invoked) > 0 do %>
+              <div data-group="what-happened">
+                <div class="text-[10px] uppercase tracking-wider text-base-content/40 font-semibold mb-1">
+                  Tools
+                </div>
+                <div class="flex flex-wrap gap-1">
+                  <span
+                    :for={tool <- @log.tools_invoked}
+                    class="badge badge-secondary badge-sm font-mono"
+                  >
+                    {tool}
+                  </span>
+                </div>
               </div>
             <% end %>
-          </div>
-          
-    <!-- Session -->
-          <div :if={@log.session_id}>
-            <div class="text-[10px] uppercase tracking-wider text-base-content/40 font-semibold mb-1">
-              Session
-            </div>
-            <.link
-              navigate={~p"/routers/#{@log.router_id}/sessions/#{@log.session_id}"}
-              class="text-xs font-mono text-primary hover:underline break-all"
-              title="All requests in this session"
-            >
-              {@log.session_id}
-            </.link>
-          </div>
-          
-    <!-- Usage -->
-          <div>
-            <div class="text-[10px] uppercase tracking-wider text-base-content/40 font-semibold mb-1">
-              Usage
-            </div>
-            <div class="space-y-1 text-xs">
-              <div class="flex justify-between">
-                <span class="text-base-content/60">Type</span>
-                <span class="text-right"><.call_type_badge type={@log.call_type} /></span>
+            
+    <!-- Routing Chain -->
+            <div data-group="what-happened">
+              <div class="text-[10px] uppercase tracking-wider text-base-content/40 font-semibold mb-1">
+                Routing
               </div>
-              <%= if @log.prompt_tokens || @log.completion_tokens do %>
-                <div class="flex justify-between">
-                  <span
-                    class="text-base-content/60"
-                    title="Uncached prompt tokens. Cache reads are billed separately at a reduced rate."
+              <%!-- The slow hop is marked relative to the OTHER hops of this
+                 same request (>60% of the summed attempt latencies), not
+                 against any router-wide baseline — that's the honest
+                 comparison for a single trace, and it needs no query. --%>
+              <div class="space-y-1">
+                <%= for {attempt, dominant?} <- dominant_hop_flags(@log.attempted_steps) do %>
+                  <div
+                    phx-click="set_tab"
+                    phx-value-tab="trace"
+                    role="button"
+                    title="Open the trace"
+                    data-hop-slow={if dominant?, do: "true"}
+                    class={[
+                      "flex items-center gap-1.5 text-xs rounded px-1 -mx-1 py-0.5 cursor-pointer hover:bg-secondary/60 transition-colors",
+                      dominant? && "bg-warning/10"
+                    ]}
                   >
-                    Input (new)
-                  </span>
-                  <span class="font-mono">{new_input(@log)}</span>
-                </div>
-              <% else %>
-                <div class="flex justify-between">
-                  <span class="text-base-content/60">Tokens</span>
-                  <span class="font-mono">{@log.total_tokens || "—"}</span>
-                </div>
-              <% end %>
-              <%= if @log.cache_read_tokens && @log.cache_read_tokens > 0 do %>
-                <div class="flex justify-between text-success">
-                  <span class="flex items-center gap-1">
-                    <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                        stroke-width="2"
-                        d="M13 10V3L4 14h7v7l9-11h-7z"
-                      />
-                    </svg>
-                    Cached
-                  </span>
-                  <span class="font-mono">
-                    {@log.cache_read_tokens}
-                    <span class="text-base-content/40">
-                      ({cache_pct(@log)})
-                    </span>
-                  </span>
-                </div>
-              <% end %>
-              <%= if @log.cache_write_tokens && @log.cache_write_tokens > 0 do %>
-                <div class="flex justify-between text-base-content/40">
-                  <span>Cache write</span>
-                  <span class="font-mono">{@log.cache_write_tokens}</span>
-                </div>
-              <% end %>
-              <div :if={@log.completion_tokens} class="flex justify-between">
-                <span class="text-base-content/60">Output</span>
-                <span class="font-mono">{@log.completion_tokens}</span>
-              </div>
-              <div class="flex justify-between">
-                <span class="text-base-content/60">Cost</span>
-                <%= if plan_covered?(@log) do %>
-                  <span
-                    class="text-success"
-                    title="Served through a subscription/coding-plan key — no marginal per-token cost. The figure is what the same tokens would cost at pay-as-you-go API list prices."
-                  >
-                    included in plan
+                    <%= if attempt["status"] == "success" do %>
+                      <span class="text-success">✓</span>
+                    <% else %>
+                      <span class="text-error">✗</span>
+                    <% end %>
+                    <span class="font-medium truncate">{attempt["provider"]}</span>
+                    <%= if attempt["provider_key_id"] && attempt["provider_key_slug"] do %>
+                      <.link
+                        navigate={
+                          ~p"/providers?highlight=#{attempt["provider_key_id"]}&provider=#{attempt["provider_key_slug"]}"
+                        }
+                        class="text-[10px] text-primary hover:underline truncate max-w-[80px]"
+                        title={attempt["provider_key_label"]}
+                      >
+                        {attempt["provider_key_label"]}
+                      </.link>
+                    <% end %>
                     <span
-                      :if={@log.list_cost_usd && Decimal.gt?(@log.list_cost_usd, 0)}
-                      class="font-mono text-base-content/45"
+                      class={[
+                        "font-mono ml-auto",
+                        if(dominant?, do: "text-warning", else: "text-base-content/40")
+                      ]}
+                      title={if dominant?, do: "Dominates this request's routing chain"}
                     >
-                      ~${Decimal.round(@log.list_cost_usd, 4)} at API rates
+                      {attempt["latency_ms"]}ms
                     </span>
-                  </span>
-                <% else %>
-                  <span class="font-mono">
-                    {if @log.estimated_cost_usd,
-                      do: "$#{Decimal.round(@log.estimated_cost_usd, 4)}",
-                      else: "-"}
-                  </span>
+                  </div>
                 <% end %>
               </div>
-              <div class="flex justify-between">
-                <span class="text-base-content/60" title="Request payload size">Req size</span>
-                <span class="font-mono">{format_bytes(@log.payload_size_bytes)}</span>
-              </div>
             </div>
-          </div>
 
-          <%= if length(@log.tools_invoked) > 0 do %>
-            <div>
+            <%!-- What it cost: tokens spent, how much of that was cache, and
+               the resulting spend against this router's own baseline —
+               previously split across "Usage" and left to imply cost was
+               just another usage number rather than the thing this box is
+               actually for. --%>
+            
+    <!-- Usage -->
+            <div data-group="what-it-cost">
               <div class="text-[10px] uppercase tracking-wider text-base-content/40 font-semibold mb-1">
-                Tools
+                Usage
               </div>
-              <div class="flex flex-wrap gap-1">
-                <span
-                  :for={tool <- @log.tools_invoked}
-                  class="badge badge-secondary badge-sm font-mono"
-                >
-                  {tool}
-                </span>
-              </div>
-            </div>
-          <% end %>
-          
-    <!-- Routing Chain -->
-          <div>
-            <div class="text-[10px] uppercase tracking-wider text-base-content/40 font-semibold mb-1">
-              Routing
-            </div>
-            <div class="space-y-1">
-              <%= for {attempt, _idx} <- Enum.with_index(@log.attempted_steps) do %>
-                <div
-                  phx-click="set_tab"
-                  phx-value-tab="trace"
-                  role="button"
-                  title="Open the trace"
-                  class="flex items-center gap-1.5 text-xs rounded px-1 -mx-1 py-0.5 cursor-pointer hover:bg-secondary/60 transition-colors"
-                >
-                  <%= if attempt["status"] == "success" do %>
-                    <span class="text-success">✓</span>
-                  <% else %>
-                    <span class="text-error">✗</span>
-                  <% end %>
-                  <span class="font-medium truncate">{attempt["provider"]}</span>
-                  <%= if attempt["provider_key_id"] && attempt["provider_key_slug"] do %>
-                    <.link
-                      navigate={
-                        ~p"/providers?highlight=#{attempt["provider_key_id"]}&provider=#{attempt["provider_key_slug"]}"
-                      }
-                      class="text-[10px] text-primary hover:underline truncate max-w-[80px]"
-                      title={attempt["provider_key_label"]}
-                    >
-                      {attempt["provider_key_label"]}
-                    </.link>
-                  <% end %>
-                  <span class="text-base-content/40 font-mono ml-auto">
-                    {attempt["latency_ms"]}ms
-                  </span>
+              <div class="space-y-1 text-xs">
+                <div class="flex justify-between">
+                  <span class="text-base-content/60">Type</span>
+                  <span class="text-right"><.call_type_badge type={@log.call_type} /></span>
                 </div>
-              <% end %>
+                <%= if @log.prompt_tokens || @log.completion_tokens do %>
+                  <div class="flex justify-between">
+                    <span
+                      class="text-base-content/60"
+                      title="Uncached prompt tokens. Cache reads are billed separately at a reduced rate."
+                    >
+                      Input (new)
+                    </span>
+                    <span class="font-mono">{new_input(@log)}</span>
+                  </div>
+                <% else %>
+                  <div class="flex justify-between">
+                    <span class="text-base-content/60">Tokens</span>
+                    <span class="font-mono">{@log.total_tokens || "—"}</span>
+                  </div>
+                <% end %>
+                <%= if @log.cache_read_tokens && @log.cache_read_tokens > 0 do %>
+                  <div class="flex justify-between text-success">
+                    <span class="flex items-center gap-1">
+                      <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                          stroke-width="2"
+                          d="M13 10V3L4 14h7v7l9-11h-7z"
+                        />
+                      </svg>
+                      Cached
+                    </span>
+                    <span class="font-mono">
+                      {@log.cache_read_tokens}
+                      <span class="text-base-content/40">
+                        ({cache_pct(@log)})
+                      </span>
+                    </span>
+                  </div>
+                <% end %>
+                <%= if @log.cache_write_tokens && @log.cache_write_tokens > 0 do %>
+                  <div class="flex justify-between text-base-content/40">
+                    <span>Cache write</span>
+                    <span class="font-mono">{@log.cache_write_tokens}</span>
+                  </div>
+                <% end %>
+                <div :if={@log.completion_tokens} class="flex justify-between">
+                  <span class="text-base-content/60">Output</span>
+                  <span class="font-mono">{@log.completion_tokens}</span>
+                </div>
+                <div class="flex justify-between">
+                  <span class="text-base-content/60">Cost</span>
+                  <%= if plan_covered?(@log) do %>
+                    <span
+                      class="text-success"
+                      title="Served through a subscription/coding-plan key — no marginal per-token cost. The figure is what the same tokens would cost at pay-as-you-go API list prices."
+                    >
+                      included in plan
+                      <span
+                        :if={@log.list_cost_usd && Decimal.gt?(@log.list_cost_usd, 0)}
+                        class="font-mono text-base-content/45"
+                      >
+                        ~${Decimal.round(@log.list_cost_usd, 4)} at API rates
+                      </span>
+                    </span>
+                  <% else %>
+                    <span class="font-mono">
+                      {if @log.estimated_cost_usd,
+                        do: "$#{Decimal.round(@log.estimated_cost_usd, 4)}",
+                        else: "-"}
+                    </span>
+                  <% end %>
+                </div>
+                <div
+                  :if={cost_baseline_note(@log, @baselines)}
+                  id="cost-baseline"
+                  class="text-[10px] text-base-content/40 text-right -mt-0.5"
+                >
+                  {cost_baseline_note(@log, @baselines)}
+                </div>
+                <div class="flex justify-between">
+                  <span class="text-base-content/60" title="Request payload size">Req size</span>
+                  <span class="font-mono">{format_bytes(@log.payload_size_bytes)}</span>
+                </div>
+                <div :if={@log.idempotency_key} class="flex justify-between gap-2">
+                  <span
+                    class="text-base-content/60 shrink-0"
+                    title="The client asked for exactly-once semantics on this request"
+                  >
+                    Idempotency key
+                  </span>
+                  <span class="font-mono break-all text-right">{@log.idempotency_key}</span>
+                </div>
+                <div :if={@log.idempotent_replay_of_id} class="flex justify-between text-success">
+                  <span title="Served from the stored response of an earlier request carrying the same Idempotency-Key — no provider call, no cost">
+                    Idempotent replay
+                  </span>
+                  <.link
+                    id="idempotent-replay-link"
+                    navigate={~p"/logs/#{@log.idempotent_replay_of_id}"}
+                    class="font-mono text-primary hover:underline"
+                  >
+                    original ↗
+                  </.link>
+                </div>
+              </div>
+            </div>
+
+            <%!-- What the input tokens were made of. Shares are pro-rata
+               allocations of the billed total (no provider tokenizer is
+               public), so the percentages are the trustworthy part. --%>
+            <div :if={attribution_rows(@log) != []} data-group="context-breakdown">
+              <div class="text-[10px] uppercase tracking-wider text-base-content/40 font-semibold mb-1">
+                Context breakdown
+              </div>
+              <div id="token-attribution" class="space-y-1 text-xs">
+                <div :for={row <- attribution_rows(@log)} class="space-y-0.5">
+                  <div class="flex justify-between">
+                    <span class="text-base-content/60">{row.label}</span>
+                    <span class="font-mono">
+                      {row.pct}% <span class="text-base-content/40">· ~{row.tokens}</span>
+                      <span
+                        :if={row.cached_pct > 0}
+                        class="text-success"
+                        title="Share of this segment sitting in the cacheable prefix"
+                      >
+                        {row.cached_pct}% cached
+                      </span>
+                    </span>
+                  </div>
+                  <div class="h-1 rounded-full bg-base-300/60 overflow-hidden">
+                    <div class="h-full rounded-full bg-primary/70" style={"width: #{row.pct}%"}></div>
+                  </div>
+                  <div
+                    :if={row.by_tool != []}
+                    class="text-[10px] text-base-content/45 text-right"
+                  >
+                    {Enum.map_join(row.by_tool, " · ", fn {tool, tokens} -> "#{tool} ~#{tokens}" end)}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <%!-- Where it came from: the session this request belongs to
+               (and, via that link, the router) — everything about the
+               client side of the request rather than what the provider did
+               with it. --%>
+            
+    <!-- Session -->
+            <div :if={@log.session_id} data-group="where-it-came-from">
+              <div class="text-[10px] uppercase tracking-wider text-base-content/40 font-semibold mb-1">
+                Session
+              </div>
+              <.link
+                navigate={~p"/routers/#{@log.router_id}/sessions/#{@log.session_id}"}
+                class="text-xs font-mono text-primary hover:underline break-all"
+                title="All requests in this session"
+              >
+                {@log.session_id}
+              </.link>
             </div>
           </div>
-        </div>
-        
+          
     <!-- Right content -->
-        <div class="flex-1 overflow-hidden flex flex-col">
-          <!-- Tabs -->
-          <div class="border-b border-base-300/30 px-4 pt-2">
-            <%!-- Two modes, not four peers. "Conversation" is a different axis —
+          <div class="flex-1 overflow-hidden flex flex-col">
+            <!-- Tabs -->
+            <div class="border-b border-base-300/30 px-4 pt-2">
+              <%!-- Two modes, not four peers. "Conversation" is a different axis —
                  what was *said*. "Trace" is the wire: client, us, each provider
                  we tried, and back. The three tabs it replaces were single hops
                  lifted out of that sequence and stripped of their position. --%>
-            <div class="flex gap-1 overflow-x-auto whitespace-nowrap" role="tablist">
-              <button
-                type="button"
-                phx-click="set_tab"
-                phx-value-tab="conversation"
-                role="tab"
-                aria-selected={@active_tab == "conversation"}
-                class={[
-                  "px-3 py-1.5 text-xs font-medium rounded-t-lg transition",
-                  @active_tab == "conversation" &&
-                    "bg-base-100 text-base-content border-t border-x border-base-300/30 -mb-px",
-                  @active_tab != "conversation" &&
-                    "text-base-content/60 hover:text-base-content hover:bg-base-200/50"
-                ]}
-              >
-                Conversation
-              </button>
-              <button
-                type="button"
-                phx-click="set_tab"
-                phx-value-tab="trace"
-                role="tab"
-                aria-selected={@active_tab == "trace"}
-                class={[
-                  "px-3 py-1.5 text-xs font-medium rounded-t-lg transition flex items-center gap-1.5",
-                  @active_tab == "trace" &&
-                    "bg-base-100 text-base-content border-t border-x border-base-300/30 -mb-px",
-                  @active_tab != "trace" &&
-                    "text-base-content/60 hover:text-base-content hover:bg-base-200/50"
-                ]}
-              >
-                Trace
-                <span :if={@fidelity_changes != []} class="badge badge-xs badge-ghost">
-                  {length(@fidelity_changes)}
-                </span>
-              </button>
-            </div>
-          </div>
-          
-    <!-- Tab panels -->
-          <div class="flex-1 overflow-y-auto">
-            <%= if @active_tab == "conversation" do %>
-              <div class="p-4">
-                <div
-                  :if={@log.status == "error"}
-                  id="request-failure-panel"
-                  class="mb-4 rounded-xl border border-error/30 bg-error/5 p-4"
+              <div class="flex gap-1 overflow-x-auto whitespace-nowrap" role="tablist">
+                <button
+                  type="button"
+                  phx-click="set_tab"
+                  phx-value-tab="conversation"
+                  role="tab"
+                  aria-selected={@active_tab == "conversation"}
+                  class={[
+                    "px-3 py-1.5 text-xs font-medium rounded-t-lg transition",
+                    @active_tab == "conversation" &&
+                      "bg-base-100 text-base-content border-t border-x border-base-300/30 -mb-px",
+                    @active_tab != "conversation" &&
+                      "text-base-content/60 hover:text-base-content hover:bg-base-200/50"
+                  ]}
                 >
-                  <div class="flex items-center gap-2 mb-1.5">
-                    <.icon name="hero-x-circle" class="size-5 text-error shrink-0" />
-                    <h3 class="font-semibold text-error">
-                      This request failed — no provider returned a response
-                    </h3>
-                  </div>
-                  <p :if={client_error_message(@log)} class="text-sm text-base-content/80 mb-3">
-                    Returned to your client:
-                    <span class="font-mono">{client_error_message(@log)}</span>
-                  </p>
-                  <div class="space-y-1">
-                    <div
-                      :for={attempt <- @log.attempted_steps || []}
-                      class="flex items-center gap-2 text-sm font-mono"
-                    >
-                      <.icon name="hero-x-mark" class="size-3.5 text-error shrink-0" />
-                      <span class="text-base-content/80">
-                        {attempt["provider"]}/{attempt["model"]}
-                      </span>
-                      <span class="text-error/80">
-                        {attempt["http_status"]} {attempt["error"]}
-                      </span>
-                      <span class="text-base-content/50 text-xs truncate">
-                        {attempt_error_message(attempt)}
-                      </span>
-                      <span class="ml-auto text-base-content/40 text-xs shrink-0">
-                        {attempt["latency_ms"]}ms
-                      </span>
-                    </div>
-                  </div>
-                  <button
-                    phx-click="set_tab"
-                    phx-value-tab="trace"
-                    class="mt-3 text-sm text-error font-medium hover:underline"
+                  Conversation
+                </button>
+                <button
+                  type="button"
+                  phx-click="set_tab"
+                  phx-value-tab="trace"
+                  role="tab"
+                  aria-selected={@active_tab == "trace"}
+                  class={[
+                    "px-3 py-1.5 text-xs font-medium rounded-t-lg transition flex items-center gap-1.5",
+                    @active_tab == "trace" &&
+                      "bg-base-100 text-base-content border-t border-x border-base-300/30 -mb-px",
+                    @active_tab != "trace" &&
+                      "text-base-content/60 hover:text-base-content hover:bg-base-200/50"
+                  ]}
+                >
+                  Trace
+                  <span :if={@fidelity_changes != []} class="badge badge-xs badge-ghost">
+                    {length(@fidelity_changes)}
+                  </span>
+                </button>
+              </div>
+            </div>
+            
+    <!-- Tab panels -->
+            <div class="flex-1 overflow-y-auto">
+              <%= if @active_tab == "conversation" do %>
+                <div class="p-4">
+                  <div
+                    :if={@log.status == "error"}
+                    id="request-failure-panel"
+                    class="mb-4 rounded-xl border border-error/30 bg-error/5 p-4"
                   >
-                    Full trace with headers and bodies →
-                  </button>
-                </div>
-                <%!-- "We changed nothing" is the product's central claim, so silence is the
+                    <div class="flex items-center gap-2 mb-1.5">
+                      <.icon name="hero-x-circle" class="size-5 text-error shrink-0" />
+                      <h3 class="font-semibold text-error">
+                        This request failed — no provider returned a response
+                      </h3>
+                    </div>
+                    <p :if={client_error_message(@log)} class="text-sm text-base-content/80 mb-3">
+                      Returned to your client:
+                      <span class="font-mono">{client_error_message(@log)}</span>
+                    </p>
+                    <div class="space-y-1">
+                      <div
+                        :for={attempt <- @log.attempted_steps || []}
+                        class="flex items-center gap-2 text-sm font-mono"
+                      >
+                        <.icon name="hero-x-mark" class="size-3.5 text-error shrink-0" />
+                        <span class="text-base-content/80">
+                          {attempt["provider"]}/{attempt["model"]}
+                        </span>
+                        <span class="text-error/80">
+                          {attempt["http_status"]} {attempt["error"]}
+                        </span>
+                        <span class="text-base-content/50 text-xs truncate">
+                          {attempt_error_message(attempt)}
+                        </span>
+                        <span class="ml-auto text-base-content/40 text-xs shrink-0">
+                          {attempt["latency_ms"]}ms
+                        </span>
+                      </div>
+                    </div>
+                    <button
+                      phx-click="set_tab"
+                      phx-value-tab="trace"
+                      class="mt-3 text-sm text-error font-medium hover:underline"
+                    >
+                      Full trace with headers and bodies →
+                    </button>
+                  </div>
+                  <%!-- "We changed nothing" is the product's central claim, so silence is the
      wrong way to say it. A clean request states it outright instead of
      rendering blank space where the panel would be. --%>
-                <%= if @fidelity_changes == [] do %>
-                  <div
-                    id="fidelity-clean"
-                    class="mb-4 flex items-center gap-2 rounded-lg border border-success/30 bg-success/5 px-4 py-2.5"
-                  >
-                    <.icon name="hero-check-circle" class="w-4 h-4 text-success shrink-0" />
-                    <span class="text-sm">
-                      <span class="font-semibold">Passed through unchanged</span>
-                      <span class="text-base-content/60">
-                        — {passthrough_summary(@log)}
-                      </span>
-                    </span>
-                  </div>
-                <% end %>
-                <%!-- The edits themselves live on the Trace, hung off the hop that
-                     made them. A floating table here could only point at a step
-                     three clicks away, which is what it used to do. --%>
-                <%= if length(@fidelity_changes) > 0 do %>
-                  <button
-                    type="button"
-                    id="fidelity-summary"
-                    phx-click="set_tab"
-                    phx-value-tab="trace"
-                    class="mb-4 w-full flex items-center gap-2 rounded-lg border border-base-300 bg-base-100 px-4 py-2.5 text-left hover:bg-base-200/60 transition-colors"
-                  >
-                    <.icon name="hero-scissors" class="w-4 h-4 text-base-content/50 shrink-0" />
-                    <span class="text-sm font-semibold">What the proxy changed</span>
-                    <span class="badge badge-sm badge-ghost">{length(@fidelity_changes)}</span>
-                    <span class="ml-auto text-xs text-primary">see it on the trace →</span>
-                  </button>
-                <% end %>
-                <%= if length(@truncation_flags) > 0 do %>
-                  <div class="alert alert-warning mb-4">
-                    <svg
-                      xmlns="http://www.w3.org/2000/svg"
-                      class="h-5 w-5 shrink-0"
-                      fill="none"
-                      viewBox="0 0 24 24"
-                      stroke="currentColor"
+                  <%= if @fidelity_changes == [] do %>
+                    <div
+                      id="fidelity-clean"
+                      class="mb-4 flex items-center gap-2 rounded-lg border border-success/30 bg-success/5 px-4 py-2.5"
                     >
-                      <path
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                        stroke-width="2"
-                        d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
-                      />
-                    </svg>
-                    <div>
-                      <span class="font-semibold">Content truncated</span>
-                      <span class="text-sm block">
-                        This request had large payloads that were truncated before storage.
+                      <.icon name="hero-check-circle" class="w-4 h-4 text-success shrink-0" />
+                      <span class="text-sm">
+                        <span class="font-semibold">Passed through unchanged</span>
+                        <span class="text-base-content/60">
+                          — {passthrough_summary(@log)}
+                        </span>
                       </span>
                     </div>
-                  </div>
-                <% end %>
-                <div
-                  :if={length(@req_messages) > 3}
-                  id="scroll-rail"
-                  phx-hook="ScrollRail"
-                  class="hidden lg:flex fixed right-3 top-1/2 -translate-y-1/2 z-30 flex-col gap-1.5"
-                >
-                  <a
-                    :for={bucket <- rail_buckets(@req_messages)}
-                    href={"#message-#{bucket.from}"}
-                    id={"rail-msg-#{bucket.from}"}
-                    data-from={bucket.from}
-                    data-to={bucket.to}
-                    class={[
-                      "block w-4 h-1 rounded-full transition-all hover:scale-x-150 hover:bg-primary",
-                      bucket_color(bucket)
-                    ]}
-                    title={bucket_title(bucket)}
+                  <% end %>
+                  <%!-- The edits themselves live on the Trace, hung off the hop that
+                     made them. A floating table here could only point at a step
+                     three clicks away, which is what it used to do. --%>
+                  <%= if length(@fidelity_changes) > 0 do %>
+                    <button
+                      type="button"
+                      id="fidelity-summary"
+                      phx-click="set_tab"
+                      phx-value-tab="trace"
+                      class="mb-4 w-full flex items-center gap-2 rounded-lg border border-base-300 bg-base-100 px-4 py-2.5 text-left hover:bg-base-200/60 transition-colors"
+                    >
+                      <.icon name="hero-scissors" class="w-4 h-4 text-base-content/50 shrink-0" />
+                      <span class="text-sm font-semibold">What the proxy changed</span>
+                      <span class="badge badge-sm badge-ghost">{length(@fidelity_changes)}</span>
+                      <span class="ml-auto text-xs text-primary">see it on the trace →</span>
+                    </button>
+                  <% end %>
+                  <%= if length(@truncation_flags) > 0 do %>
+                    <div class="alert alert-warning mb-4">
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        class="h-5 w-5 shrink-0"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        stroke="currentColor"
+                      >
+                        <path
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                          stroke-width="2"
+                          d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+                        />
+                      </svg>
+                      <div>
+                        <span class="font-semibold">Content truncated</span>
+                        <span class="text-sm block">
+                          This request had large payloads that were truncated before storage.
+                        </span>
+                      </div>
+                    </div>
+                  <% end %>
+                  <div
+                    :if={length(@req_messages) > 3}
+                    id="scroll-rail"
+                    phx-hook="ScrollRail"
+                    class="hidden lg:flex fixed right-3 top-1/2 -translate-y-1/2 z-30 flex-col gap-1.5"
                   >
-                  </a>
+                    <a
+                      :for={bucket <- rail_buckets(@req_messages)}
+                      href={"#message-#{bucket.from}"}
+                      id={"rail-msg-#{bucket.from}"}
+                      data-from={bucket.from}
+                      data-to={bucket.to}
+                      class={[
+                        "block w-4 h-1 rounded-full transition-all hover:scale-x-150 hover:bg-primary",
+                        bucket_color(bucket)
+                      ]}
+                      title={bucket_title(bucket)}
+                    >
+                    </a>
+                  </div>
+                  <.conversation
+                    messages={@req_messages}
+                    response={@resp_message}
+                    model={@log.final_model}
+                    provider={@log.final_provider}
+                    tools={@available_tools}
+                    cache_read_tokens={@log.cache_read_tokens}
+                    cache_write_tokens={@log.cache_write_tokens}
+                    replay_base={
+                      if(@log.replayed_from_id, do: nil, else: ~p"/logs/#{@log.id}/replay")
+                    }
+                  />
                 </div>
-                <.conversation
-                  messages={@req_messages}
-                  response={@resp_message}
-                  model={@log.final_model}
-                  provider={@log.final_provider}
-                  tools={@available_tools}
-                  cache_read_tokens={@log.cache_read_tokens}
-                  cache_write_tokens={@log.cache_write_tokens}
-                  replay_base={if(@log.replayed_from_id, do: nil, else: ~p"/logs/#{@log.id}/replay")}
-                />
-              </div>
-            <% end %>
+              <% end %>
 
-            <%!-- The Trace: one node per hop, in wire order, with everything the
+              <%!-- The Trace: one node per hop, in wire order, with everything the
                  proxy removed or rewrote hanging off the edge that produced it.
                  The tabs this replaced modelled the hops as unordered peers, so
                  a fallback chain had nowhere to render and the fidelity panel's
                  "Step" column pointed at a tab three clicks away. --%>
-            <%= if @active_tab == "trace" do %>
-              <div class="p-4">
-                <div class="text-sm text-base-content/60 mb-4">{trace_summary(@log)}</div>
-                <div>
-                  <%= for hop <- @trace do %>
-                    <.trace_edge :if={hop.edge} hop={hop} />
-                    <%= case hop.kind do %>
-                      <% :client_request -> %>
-                        <.trace_client_request
-                          format={@client_format}
-                          req_headers={@req_headers}
-                        />
-                      <% :attempt -> %>
-                        <.trace_attempt hop={hop} />
-                      <% :client_response -> %>
-                        <.trace_client_response
-                          log={@log}
-                          format={@client_format}
-                          resp_headers={@resp_headers}
-                        />
+              <%= if @active_tab == "trace" do %>
+                <div class="p-4">
+                  <div class="text-sm text-base-content/60 mb-4">{trace_summary(@log)}</div>
+                  <div>
+                    <%= for hop <- @trace do %>
+                      <.trace_edge :if={hop.edge} hop={hop} />
+                      <%= case hop.kind do %>
+                        <% :client_request -> %>
+                          <.trace_client_request
+                            format={@client_format}
+                            req_headers={@req_headers}
+                          />
+                        <% :attempt -> %>
+                          <.trace_attempt hop={hop} />
+                        <% :client_response -> %>
+                          <.trace_client_response
+                            log={@log}
+                            format={@client_format}
+                            resp_headers={@resp_headers}
+                          />
+                      <% end %>
                     <% end %>
-                  <% end %>
+                  </div>
                 </div>
-              </div>
-            <% end %>
-          </div>
-        </div>
-      </div>
-
-      <.modal
-        :if={@selected_tool}
-        id="tool-modal"
-        show
-        on_cancel={JS.push("hide_tool")}
-      >
-        <div class="flex items-center gap-2 mb-4">
-          <.icon name={tool_icon(@selected_tool.name)} class="w-5 h-5 text-base-content/60" />
-          <h3 class="text-lg font-semibold font-mono">{@selected_tool.name}</h3>
-        </div>
-
-        <%= if @selected_tool.description && String.length(@selected_tool.description) > 0 do %>
-          <div class="mb-4">
-            <div class="flex items-center gap-2 mb-2 text-sm text-base-content/40 font-semibold">
-              <.icon name="hero-document-text" class="w-4 h-4" />
-              <span>Description</span>
+              <% end %>
             </div>
-            <MarkdownRenderer.render content={@selected_tool.description} />
           </div>
-        <% end %>
+        </div>
 
-        <%= if @selected_tool.parameters != %{} do %>
-          <div class="text-[10px] uppercase tracking-wider text-base-content/40 font-semibold mb-2">
-            Parameters
+        <.modal
+          :if={@selected_tool}
+          id="tool-modal"
+          show
+          on_cancel={JS.push("hide_tool")}
+        >
+          <div class="flex items-center gap-2 mb-4">
+            <.icon name={tool_icon(@selected_tool.name)} class="w-5 h-5 text-base-content/60" />
+            <h3 class="text-lg font-semibold font-mono">{@selected_tool.name}</h3>
           </div>
-          <.json_panel
-            id="tool-parameters"
-            content={Jason.encode!(@selected_tool.parameters, pretty: true)}
-            copy_id="tool-parameters-copy"
-            max_height="max-h-96"
-          />
-        <% end %>
-      </.modal>
-    </div>
+
+          <%= if @selected_tool.description && String.length(@selected_tool.description) > 0 do %>
+            <div class="mb-4">
+              <div class="flex items-center gap-2 mb-2 text-sm text-base-content/40 font-semibold">
+                <.icon name="hero-document-text" class="w-4 h-4" />
+                <span>Description</span>
+              </div>
+              <MarkdownRenderer.render content={@selected_tool.description} />
+            </div>
+          <% end %>
+
+          <%= if @selected_tool.parameters != %{} do %>
+            <div class="text-[10px] uppercase tracking-wider text-base-content/40 font-semibold mb-2">
+              Parameters
+            </div>
+            <.json_panel
+              id="tool-parameters"
+              content={Jason.encode!(@selected_tool.parameters, pretty: true)}
+              copy_id="tool-parameters-copy"
+              max_height="max-h-96"
+            />
+          <% end %>
+        </.modal>
+      </div>
+    </Layouts.app>
     """
   end
 
@@ -1603,6 +1745,138 @@ defmodule DodoRouterWeb.LogLive.Show do
 
   defp wait_time(_), do: "-"
 
+  # Router-median comparison basis for the request's Total latency (see the
+  # comment above the "Overhead" row) — omitted when the router has no other
+  # recent traffic to compare against (sample_size <= 1 means this log is
+  # its own only data point).
+  defp total_baseline_note(log, baselines) do
+    with true <- is_integer(log.latency_ms),
+         true <- (baselines[:sample_size] || 0) > 1,
+         p50 when is_number(p50) <- baselines[:p50_latency_ms] do
+      "router median #{fmt_ms(round(p50))} · 24h"
+    else
+      _ -> nil
+    end
+  end
+
+  defp cost_baseline_note(log, baselines) do
+    with true <- match?(%Decimal{}, log.estimated_cost_usd),
+         true <- (baselines[:sample_size] || 0) > 1,
+         median when is_number(median) <- decimal_to_float(baselines[:median_cost_usd]) do
+      "router median $#{:erlang.float_to_binary(median, decimals: 4)} · 24h"
+    else
+      _ -> nil
+    end
+  end
+
+  defp decimal_to_float(%Decimal{} = d), do: Decimal.to_float(d)
+  defp decimal_to_float(v) when is_float(v), do: v
+  defp decimal_to_float(_), do: nil
+
+  # Marks the hop that dominates this request's own routing chain (>60% of
+  # the summed attempt latencies) — a within-request comparison against the
+  # OTHER hops of the same request, not a router-wide baseline, so it needs
+  # no query. Only meaningful with 2+ attempts; a single-attempt chain has
+  # nothing to compare against.
+  defp dominant_hop_flags(steps) when is_list(steps) and length(steps) >= 2 do
+    total = steps |> Enum.map(&(&1["latency_ms"] || 0)) |> Enum.sum()
+    max_latency = steps |> Enum.map(&(&1["latency_ms"] || 0)) |> Enum.max(fn -> 0 end)
+    threshold = total * 0.6
+
+    {marked, _} =
+      Enum.map_reduce(steps, false, fn step, marked_already ->
+        latency = step["latency_ms"] || 0
+
+        dominant? =
+          not marked_already and total > 0 and latency == max_latency and latency > threshold
+
+        {{step, dominant?}, marked_already or dominant?}
+      end)
+
+    marked
+  end
+
+  defp dominant_hop_flags(steps) when is_list(steps), do: Enum.map(steps, &{&1, false})
+  defp dominant_hop_flags(_), do: []
+
+  # Non-overlapping partition of `latency_ms` for the timing share bar — see
+  # the comment above the <Charts.share_bar> call for why this split (and not
+  # a bar built straight from Total/Provider/TTFB/Upload/Wait/Proc) is the one
+  # that's actually safe to plot: those fields overlap each other, this
+  # doesn't.
+  #
+  # `overhead = total - provider_time` is exact by construction (that's what
+  # `overhead_time/1` already computes). The remaining budget — `available`
+  # below — is handed out to Upload, Wait and Provider-processing *in that
+  # order, clamped to what's left*, rather than by clamping each to itself
+  # and letting "Unattributed" mop up: on an old row where `attempted_steps`
+  # is missing (so `provider_time` under-counts) but `ttfb_ms`/`upload_ms`
+  # are present, upload+wait+proc can exceed `provider_time`, and naively
+  # summing all five segments would then overshoot Total. Clamping
+  # sequentially guarantees the five segments always sum to exactly
+  # `latency_ms`, so the bar's proportions are never a lie — a row missing
+  # the finer fields just renders honestly with more of the time folded into
+  # "Unattributed" (or, if attempted_steps is missing too, into "Overhead").
+  defp timing_segments(log) do
+    total = log.latency_ms || 0
+    overhead = max(overhead_time(log), 0)
+    available = max(total - overhead, 0)
+
+    upload = min(log.upload_ms || 0, available)
+    remaining = available - upload
+
+    wait =
+      case log do
+        %{ttfb_ms: ttfb} when is_integer(ttfb) ->
+          min(max(ttfb - (log.upload_ms || 0), 0), remaining)
+
+        _ ->
+          0
+      end
+
+    remaining = remaining - wait
+    proc = min(log.provider_processing_ms || 0, remaining)
+    unattributed = remaining - proc
+
+    [
+      %{
+        key: "upload",
+        name: "Upload",
+        value: upload,
+        display: fmt_ms(upload),
+        color: Charts.series_color(0)
+      },
+      %{
+        key: "wait",
+        name: "Wait",
+        value: wait,
+        display: fmt_ms(wait),
+        color: Charts.series_color(1)
+      },
+      %{
+        key: "processing",
+        name: "Provider processing",
+        value: proc,
+        display: fmt_ms(proc),
+        color: Charts.series_color(2)
+      },
+      %{
+        key: "unattributed",
+        name: "Unattributed",
+        value: unattributed,
+        display: fmt_ms(unattributed),
+        color: Charts.series_color(3)
+      },
+      %{
+        key: "overhead",
+        name: "Proxy overhead",
+        value: overhead,
+        display: fmt_ms(overhead),
+        color: Charts.series_color(4)
+      }
+    ]
+  end
+
   defp format_bytes(nil), do: "-"
   defp format_bytes(bytes) when bytes < 1024, do: "#{bytes} B"
   defp format_bytes(bytes) when bytes < 1024 * 1024, do: "#{Float.round(bytes / 1024, 1)} KB"
@@ -1614,6 +1888,36 @@ defmodule DodoRouterWeb.LogLive.Show do
       pct -> "#{trunc(pct)}%"
     end
   end
+
+  @attribution_labels [
+    {"system", "System prompt"},
+    {"tools", "Tool definitions"},
+    {"history", "History"},
+    {"tool_results", "Tool results"},
+    {"file_contents", "File contents"}
+  ]
+
+  # Non-empty buckets, largest first, with shares of the billed total.
+  defp attribution_rows(%{token_attribution: %{"buckets" => buckets, "basis_tokens" => basis}})
+       when is_integer(basis) and basis > 0 do
+    for {key, label} <- @attribution_labels,
+        bucket = buckets[key],
+        is_map(bucket),
+        (bucket["allocated_tokens"] || 0) > 0 do
+      tokens = bucket["allocated_tokens"]
+
+      %{
+        label: label,
+        tokens: tokens,
+        pct: round(tokens / basis * 100),
+        cached_pct: round((bucket["cached_tokens"] || 0) / tokens * 100),
+        by_tool: bucket |> Map.get("by_tool", %{}) |> Enum.sort_by(fn {_t, n} -> -n end)
+      }
+    end
+    |> Enum.sort_by(&(-&1.tokens))
+  end
+
+  defp attribution_rows(_log), do: []
 
   defp new_input(%{prompt_tokens: nil}), do: "—"
 

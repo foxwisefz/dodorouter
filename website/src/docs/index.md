@@ -33,6 +33,10 @@ DodoRouter is an LLM proxy and router. Point any OpenAI-, Anthropic-, or Respons
     <p class="text-sm font-semibold text-foreground mb-1">Connect a coding agent →</p>
     <p class="text-xs text-muted-foreground">Claude Code, OpenCode, Forge, Codex CLI — verified configs.</p>
   </a>
+  <a href="/docs/agent-access/" class="docs-card block rounded-xl border border-border p-4 hover:border-accent transition-colors">
+    <p class="text-sm font-semibold text-foreground mb-1">Agent access (MCP) →</p>
+    <p class="text-xs text-muted-foreground">Let an agent read your traffic and benchmark models on it, over OAuth.</p>
+  </a>
 </div>
 
 ## How a request flows

@@ -18,7 +18,6 @@ defmodule DodoRouter.Proxy.Adapters.XAI do
     endpoints: %{
       "xai" => "https://api.x.ai/v1"
     },
-    models: ~w(grok-3 grok-3-mini),
     color: "slate",
     short_description: "Grok 3 models"
 

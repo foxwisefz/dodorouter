@@ -75,4 +75,77 @@ defmodule DodoRouterWeb.RecordingLiveTest do
       end
     end
   end
+
+  describe "Show" do
+    test "latency stat shows p95 with p50 subtext, not a bare mean", %{
+      conn: conn,
+      router: router
+    } do
+      {:ok, recording} = Recordings.start_recording(router, %{name: "Latency Recording"})
+
+      for _ <- 1..20 do
+        DodoRouter.LogsFixtures.log_fixture(router, %{
+          recording_id: recording.id,
+          latency_ms: 100
+        })
+      end
+
+      DodoRouter.LogsFixtures.log_fixture(router, %{
+        recording_id: recording.id,
+        latency_ms: 10_000
+      })
+
+      {:ok, _live, html} = live(conn, ~p"/routers/#{router.id}/recordings/#{recording.id}")
+
+      assert html =~ "p95 Latency"
+      refute html =~ "Avg Latency"
+    end
+
+    test "offers benchmarking once something is captured", %{conn: conn, router: router} do
+      {:ok, recording} = Recordings.start_recording(router, %{name: "Capture"})
+
+      {:ok, live, _html} = live(conn, ~p"/routers/#{router.id}/recordings/#{recording.id}")
+      refute has_element?(live, "#benchmark-recording-button")
+
+      DodoRouter.LogsFixtures.log_fixture(router, %{recording_id: recording.id})
+
+      {:ok, live, _html} = live(conn, ~p"/routers/#{router.id}/recordings/#{recording.id}")
+
+      assert has_element?(
+               live,
+               "#benchmark-recording-button[href='/routers/#{router.id}/recordings/#{recording.id}/evals/new']"
+             )
+    end
+
+    test "lists the benchmarks measured on this capture", %{
+      conn: conn,
+      router: router,
+      user: user
+    } do
+      provider_key = DodoRouter.ProvidersFixtures.provider_key_fixture(user)
+      {:ok, recording} = Recordings.start_recording(router, %{name: "Capture"})
+      log = DodoRouter.LogsFixtures.log_fixture(router, %{recording_id: recording.id})
+
+      {:ok, evaluation} =
+        DodoRouter.Evaluations.create_evaluation(user, log, %{
+          name: "Downgrade check",
+          criteria: "Answer accurately",
+          judge_model: "test-model",
+          judge_provider_key_id: provider_key.id,
+          candidate_targets: [
+            %{
+              "provider_key_id" => provider_key.id,
+              "provider" => "test_provider",
+              "model" => "test-model"
+            }
+          ],
+          recording_id: recording.id
+        })
+
+      {:ok, live, _html} = live(conn, ~p"/routers/#{router.id}/recordings/#{recording.id}")
+
+      assert has_element?(live, "#recording-benchmarks", "Downgrade check")
+      assert has_element?(live, "#recording-benchmarks a[href='/evals/#{evaluation.id}']")
+    end
+  end
 end

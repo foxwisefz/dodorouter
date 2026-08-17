@@ -8,6 +8,11 @@ defmodule DodoRouterWeb.AnthropicProxyControllerTest do
     %{router: router, api_key: api_key}
   end
 
+  import Ecto.Query, only: [from: 2]
+
+  defp recent_logs_query,
+    do: from(l in DodoRouter.Logs.RequestLog, order_by: [desc: l.inserted_at], limit: 1)
+
   defp auth_conn(conn, api_key) do
     put_req_header(conn, "x-api-key", api_key)
   end
@@ -163,6 +168,55 @@ defmodule DodoRouterWeb.AnthropicProxyControllerTest do
       small = count.("Hello")
       large = count.(String.duplicate("Hello world, this is a longer message. ", 200))
       assert large > small
+    end
+  end
+
+  describe "query parameters are not body fields" do
+    test "a query param never reaches the provider as a body field", %{conn: conn} do
+      user = DodoRouter.AccountsFixtures.user_fixture()
+      {router, api_key} = DodoRouter.RoutersFixtures.router_fixture(user)
+      key = DodoRouter.ProvidersFixtures.provider_key_fixture(user)
+
+      {:ok, _step} =
+        DodoRouter.Routers.create_routing_step(router, %{
+          position: 0,
+          provider: "test_provider",
+          model: "test-model",
+          provider_key_id: key.id
+        })
+
+      # Claude Code sends POST /v1/messages?beta=true — a real Anthropic query
+      # parameter. Phoenix merges query into the action's params, so reading
+      # those as "the body" turned it into a top-level body field and Anthropic
+      # answered 400 "beta: Extra inputs are not permitted".
+      conn =
+        conn
+        |> put_req_header("authorization", "Bearer #{api_key}")
+        |> put_req_header("content-type", "application/json")
+        |> post("/r/#{router.slug}/v1/messages?beta=true", %{
+          "model" => "test-model",
+          "max_tokens" => 64,
+          "messages" => [%{"role" => "user", "content" => "hi"}]
+        })
+
+      assert json_response(conn, 200)
+
+      log = List.first(DodoRouter.Repo.all(recent_logs_query()))
+
+      # Asserted on the fidelity record, not the outbound body: this router's
+      # step is OpenAI-format, so a passthrough field is *recorded as dropped*
+      # rather than merged onto the wire. Checking only the outbound body
+      # passes whether or not the bug is present. Channel-aware since
+      # dodo_router-69m: the param IS recorded — as a dropped query
+      # parameter, never as a body field.
+      changes = log.fidelity_changes || []
+
+      refute Enum.any?(changes, &(&1["name"] == "beta" and &1["channel"] == "request_body"))
+      assert Enum.any?(changes, &(&1["name"] == "beta" and &1["channel"] == "query_params"))
+
+      # And it is not in the normalized request either — it was never a body
+      # field, so there is nothing for the conversion to carry or lose.
+      refute Map.has_key?(Jason.decode!(log.request_body || "{}"), "beta")
     end
   end
 end

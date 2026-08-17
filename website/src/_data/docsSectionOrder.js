@@ -5,5 +5,6 @@ export default [
   "Providers & Models",
   "Dashboard",
   "Connect a Coding Agent",
+  "Agent Access",
   "Operations",
 ];

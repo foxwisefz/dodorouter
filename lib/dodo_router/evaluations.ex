@@ -4,8 +4,15 @@ defmodule DodoRouter.Evaluations do
   import Ecto.Query
 
   alias DodoRouter.Accounts.User
-  alias DodoRouter.Logs.{Evaluation, EvaluationRun}
-  alias DodoRouter.{Providers, Proxy, Replays, Repo}
+  alias DodoRouter.Logs.{EvalMonitor, Evaluation, EvaluationRun}
+  alias DodoRouter.Logs.RequestLog
+  alias DodoRouter.Providers.ProviderKey
+  alias DodoRouter.Proxy.Adapter.Registry, as: AdapterRegistry
+  alias DodoRouter.Recordings
+  alias DodoRouter.Recordings.Recording
+  alias DodoRouter.Routers
+  alias DodoRouter.Routers.{RoutingChangeEvent, RoutingStep}
+  alias DodoRouter.{Logs, Providers, Proxy, Redact, Replays, Repo}
 
   # v2: dropped the pass/fail verdict — scores and their distributions
   # carry the comparison; a binary threshold added noise, not signal.
@@ -19,6 +26,11 @@ defmodule DodoRouter.Evaluations do
   # tool-calling candidate against an empty response — not comparable.
   @prompt_version "v4"
   @benchmark_concurrency 3
+  # A rate limit is the provider saying "later", not a verdict on the model
+  # — recording it as a failed run turns a queueing problem into a missing
+  # data point, and a benchmark that fans out over one account produces
+  # them by the dozen. One ladder, shared by the candidate and judge calls.
+  @rate_limit_backoff_ms [2_000, 8_000]
   # Character budget per SOURCE block in the judge prompt, so a long source
   # conversation can't overflow the judge model's context window.
   @judge_source_limit 40_000
@@ -26,7 +38,7 @@ defmodule DodoRouter.Evaluations do
   def list_evaluations(%User{} = user) do
     run_counts =
       from(r in EvaluationRun,
-        where: r.evaluation_id == parent_as(:evaluation).id,
+        where: r.evaluation_id == parent_as(:evaluation).id and is_nil(r.kind),
         select: count()
       )
 
@@ -36,6 +48,61 @@ defmodule DodoRouter.Evaluations do
       order_by: [desc: e.inserted_at],
       select_merge: %{run_count: subquery(run_counts)},
       preload: [request_log: :router]
+    )
+    |> Repo.all()
+  end
+
+  @doc """
+  The user's evaluations anchored to logs of one router.
+
+  The agent API authenticates with a router's API key, so what it can list is
+  scoped to that router: a key handed to one product must not enumerate
+  another product's evaluations.
+
+  Paged, unlike `list_evaluations/1`: this is polled by a program against a
+  router that accumulates evaluations indefinitely.
+  """
+  def list_for_router(%User{} = user, router_id, opts \\ []) do
+    limit = Keyword.get(opts, :limit, 50)
+    offset = Keyword.get(opts, :offset, 0)
+
+    run_counts =
+      from(r in EvaluationRun,
+        where: r.evaluation_id == parent_as(:evaluation).id and is_nil(r.kind),
+        select: count()
+      )
+
+    from(e in Evaluation,
+      as: :evaluation,
+      join: l in assoc(e, :request_log),
+      where: e.evaluated_by_id == ^user.id and l.router_id == ^router_id,
+      order_by: [desc: e.inserted_at],
+      limit: ^limit,
+      offset: ^offset,
+      select_merge: %{run_count: subquery(run_counts)},
+      preload: [request_log: :router]
+    )
+    |> Repo.all()
+  end
+
+  @doc """
+  The user's evaluations created from one recording, newest first.
+
+  This is the provenance read: the recording page shows which benchmarks
+  were measured on its capture.
+  """
+  def list_for_recording(%User{} = user, recording_id) do
+    run_counts =
+      from(r in EvaluationRun,
+        where: r.evaluation_id == parent_as(:evaluation).id and is_nil(r.kind),
+        select: count()
+      )
+
+    from(e in Evaluation,
+      as: :evaluation,
+      where: e.evaluated_by_id == ^user.id and e.recording_id == ^recording_id,
+      order_by: [desc: e.inserted_at],
+      select_merge: %{run_count: subquery(run_counts)}
     )
     |> Repo.all()
   end
@@ -73,6 +140,117 @@ defmodule DodoRouter.Evaluations do
     |> Repo.all()
   end
 
+  @doc """
+  How many evaluations reference this provider key, by role.
+
+  Both roles keep an evaluation re-runnable, and a re-run missing either
+  credential is not a degraded result, it is no result at all. Only the
+  judge reference is a real foreign key (`ON DELETE RESTRICT`); candidates
+  live in the `candidate_targets` JSON column, where Postgres has no
+  opinion — so this count is the only thing standing between a delete and a
+  benchmark that fails minutes later for something knowable now.
+  """
+  def reference_counts(%ProviderKey{id: key_id}) do
+    judge =
+      Repo.aggregate(from(e in Evaluation, where: e.judge_provider_key_id == ^key_id), :count)
+
+    %{
+      judge: judge,
+      candidate: Repo.aggregate(candidate_targets_query(key_id), :count),
+      # Distinct, not judge + candidate: one evaluation commonly judges with
+      # the same key it benchmarks, and reporting that as two would overstate
+      # what the user is about to break.
+      total: Repo.aggregate(referencing_query(key_id), :count)
+    }
+  end
+
+  defp candidate_targets_query(key_id) do
+    from(e in Evaluation, where: ^candidate_reference(key_id))
+  end
+
+  defp referencing_query(key_id) do
+    # Composed as one dynamic: Ecto only accepts an interpolated dynamic at
+    # the top level of a where, never as one side of an `or`.
+    either =
+      dynamic([e], e.judge_provider_key_id == ^key_id or ^candidate_reference(key_id))
+
+    from(e in Evaluation, where: ^either)
+  end
+
+  # candidate_targets is jsonb[] — a Postgres array of objects, not a JSON
+  # array — so this unnests rather than using a containment operator.
+  defp candidate_reference(key_id) do
+    dynamic(
+      [e],
+      fragment(
+        "EXISTS (SELECT 1 FROM unnest(?) t WHERE t ->> 'provider_key_id' = ?)",
+        e.candidate_targets,
+        type(^key_id, :string)
+      )
+    )
+  end
+
+  @doc """
+  True when the run names a judge key that no longer exists.
+
+  The label is a snapshot and the id nulls with the key, so the pair tells
+  three things apart: a live key (both), a deleted one (label only), and a
+  run recorded before either was stored (neither) — which is unknown, not
+  deleted, and must not be reported as though we knew.
+  """
+  def judge_key_deleted?(%EvaluationRun{} = run) do
+    is_nil(run.judge_provider_key_id) and not is_nil(run.judge_provider_key_label)
+  end
+
+  @doc "The candidate counterpart of `judge_key_deleted?/1`."
+  def candidate_key_deleted?(%EvaluationRun{} = run) do
+    is_nil(run.candidate_provider_key_id) and not is_nil(run.candidate_provider_key_label)
+  end
+
+  @doc """
+  Moves every reference — judge and candidate — from one key to another.
+
+  Refuses a replacement from a different provider: an evaluation keeps its
+  `judge_model` and each target its `model`, and a key from another provider
+  cannot serve those — the row would claim a run that never happened.
+
+  Candidate targets are rewritten rather than update_all'd because they are
+  a JSON array: only the matching element's `provider_key_id` changes, and
+  the order the user chose is preserved.
+  """
+  def reassign_provider_key(%ProviderKey{} = from, %ProviderKey{} = to) do
+    cond do
+      from.user_id != to.user_id ->
+        {:error, :not_owned}
+
+      from.provider_slug != to.provider_slug ->
+        {:error, :provider_mismatch}
+
+      true ->
+        from(e in Evaluation, where: e.judge_provider_key_id == ^from.id)
+        |> Repo.update_all(set: [judge_provider_key_id: to.id])
+
+        from.id
+        |> candidate_targets_query()
+        |> Repo.all()
+        |> Enum.each(&repoint_targets(&1, from.id, to.id))
+
+        :ok
+    end
+  end
+
+  defp repoint_targets(%Evaluation{} = evaluation, from_id, to_id) do
+    targets =
+      Enum.map(evaluation.candidate_targets, fn
+        %{"provider_key_id" => ^from_id} = target -> %{target | "provider_key_id" => to_id}
+        target -> target
+      end)
+
+    evaluation
+    |> Ecto.Changeset.change(candidate_targets: targets)
+    |> Repo.update!()
+  end
+
   def get_evaluation(%User{} = user, id) do
     from(e in Evaluation,
       where: e.id == ^id and e.evaluated_by_id == ^user.id,
@@ -102,10 +280,69 @@ defmodule DodoRouter.Evaluations do
       |> Map.put("request_log_id", request_log.id)
       |> Map.put("evaluated_by_id", user.id)
 
+    # Provenance, not a param: recording_id is applied outside the cast so
+    # a client cannot stamp a foreign recording onto its evaluation. The
+    # two callers that pass it (the recording benchmark page and the MCP
+    # create_eval handler) both resolved the recording through an
+    # ownership-scoped fetch first.
+    {recording_id, attrs} = Map.pop(attrs, "recording_id")
+
     %Evaluation{}
     |> Evaluation.changeset(attrs)
+    |> put_recording(recording_id)
     |> validate_key_ownership(user)
     |> Repo.insert()
+  end
+
+  defp put_recording(changeset, nil), do: changeset
+
+  defp put_recording(changeset, recording_id),
+    do: Ecto.Changeset.put_change(changeset, :recording_id, recording_id)
+
+  @max_recording_source_logs 20
+
+  @doc """
+  Picks the source-log set a benchmark of this recording should replay.
+
+  Every captured request is checked with `Replays.replay_blocker/1`; when
+  more evaluable logs remain than an evaluation can hold
+  (#{@max_recording_source_logs}), the picks are spread evenly across the
+  capture in time order rather than taken from the front — the start of an
+  agent session (cold cache, short prompts) is not representative of it.
+
+  Returns `%{selected: logs, total: n, evaluable: n, excluded: %{reason => count}}`;
+  `excluded` counts the capture's non-replayable logs by blocker reason so
+  callers can say *why* the sample is smaller than the recording.
+  """
+  def source_logs_from_recording(%Recording{} = recording, opts \\ []) do
+    cap = Keyword.get(opts, :cap, @max_recording_source_logs)
+    logs = Recordings.list_logs_for_recording(recording, limit: :all)
+
+    {evaluable, blocked} =
+      logs
+      |> Enum.map(&{&1, Replays.replay_blocker(&1)})
+      |> Enum.split_with(fn {_log, blocker} -> is_nil(blocker) end)
+
+    excluded = blocked |> Enum.map(fn {_log, reason} -> reason end) |> Enum.frequencies()
+    evaluable = Enum.map(evaluable, fn {log, nil} -> log end)
+
+    %{
+      selected: evenly_sample(evaluable, cap),
+      total: length(logs),
+      evaluable: length(evaluable),
+      excluded: excluded
+    }
+  end
+
+  defp evenly_sample(list, cap) when length(list) <= cap, do: list
+  defp evenly_sample(list, cap) when cap <= 1, do: Enum.take(list, cap)
+
+  defp evenly_sample(list, cap) do
+    # cap indices spread over 0..n-1, endpoints included. With n > cap the
+    # step exceeds 1, so the floored indices are strictly increasing — no
+    # duplicates to dedupe.
+    n = length(list)
+    for i <- 0..(cap - 1), do: Enum.at(list, div(i * (n - 1), cap - 1))
   end
 
   # The UI only offers the user's own keys, but the ids arrive as client
@@ -141,16 +378,39 @@ defmodule DodoRouter.Evaluations do
     evaluation =
       evaluation |> Ecto.Changeset.change(last_batch_id: batch_id) |> Repo.update!()
 
+    # One measurement per (source log x candidate x repetition). The logs
+    # are fetched once up front — a missing/foreign one fails the batch here
+    # rather than half-way through spending.
+    source_logs =
+      for id <- Evaluation.source_log_ids(evaluation),
+          into: %{},
+          do: {id, Logs.get_log!(user, id)}
+
     jobs =
-      for target <- evaluation.candidate_targets,
+      for {_id, source_log} <- source_logs,
+          variant <- Evaluation.prompt_variants(evaluation),
+          target <- evaluation.candidate_targets,
           repetition <- 1..evaluation.repetitions,
-          do: {target, repetition}
+          do: {source_log, variant, target, repetition}
+
+    # Keys the providers told us are exhausted while this batch was running.
+    # A billing-cycle limit does not clear in the seconds between runs, so
+    # the remaining repetitions on that key are abandoned rather than bought
+    # again — six identical 403s taught nobody anything the first one didn't.
+    exhausted = :ets.new(:exhausted_keys, [:set, :public])
 
     results =
       jobs
       |> Task.async_stream(
-        fn {target, repetition} ->
-          result = safe_run_candidate(user, evaluation, target, repetition, batch_id)
+        fn {source_log, variant, target, repetition} ->
+          result =
+            if :ets.member(exhausted, target["provider_key_id"]) do
+              skip_run(evaluation, source_log, variant, target, repetition, batch_id)
+            else
+              user
+              |> safe_run_candidate(evaluation, source_log, variant, target, repetition, batch_id)
+              |> note_exhaustion(exhausted, target)
+            end
 
           Phoenix.PubSub.broadcast(
             DodoRouter.PubSub,
@@ -172,8 +432,335 @@ defmodule DodoRouter.Evaluations do
     {:ok, results}
   end
 
-  defp safe_run_candidate(user, evaluation, target, repetition, batch_id) do
-    run_candidate(user, evaluation, target, repetition, batch_id)
+  @doc """
+  Keys this benchmark would use that are already known to be unusable.
+
+  Returns `%{judge: blocker | nil, candidates: [blocker]}`. A blocker is
+  `%{key_id:, label:, status:, detail:, model:}` — `model` only for
+  candidates.
+
+  The health is already recorded by every request that ran through the
+  proxy (`Providers.record_attempts/1`), so this is reading evidence the
+  system already had rather than probing the provider. Discovering an
+  exhausted key one failed call at a time is what turns a benchmark into
+  nineteen wasted minutes.
+  """
+  def preflight(%User{} = user, %Evaluation{} = evaluation) do
+    %{
+      judge: blocker_for(user, evaluation.judge_provider_key_id),
+      candidates:
+        evaluation.candidate_targets
+        |> Enum.map(&candidate_blocker(user, &1))
+        |> Enum.reject(&is_nil/1)
+    }
+  end
+
+  # A candidate is unusable for two independent reasons: the key cannot pay,
+  # or the model is gone. The second only became knowable once the catalog
+  # started recording what the latest sync saw.
+  defp candidate_blocker(user, target) do
+    cond do
+      blocker = blocker_for(user, target["provider_key_id"]) ->
+        Map.put(blocker, :model, target["model"])
+
+      Providers.get_provider_key(user, target["provider_key_id"]) &&
+          retired_model?(user, target) ->
+        %{
+          key_id: target["provider_key_id"],
+          label: target["provider_name"] || target["provider"],
+          status: "retired",
+          detail: nil,
+          model: target["model"]
+        }
+
+      true ->
+        nil
+    end
+  end
+
+  # Checked against both the adapter's catalog and the key's own slug: a
+  # subscription key carries a mirrored catalog under its own slug, and a
+  # model is only gone when neither still lists it.
+  defp retired_model?(user, target) do
+    key = Providers.get_provider_key(user, target["provider_key_id"])
+    model = target["model"]
+
+    slugs = Enum.uniq([target["provider"], key && key.provider_slug]) |> Enum.reject(&is_nil/1)
+
+    Enum.any?(slugs, &DodoRouter.Models.retired?(&1, model)) and
+      not Enum.any?(slugs, &offered?(&1, model))
+  end
+
+  defp offered?(slug, model) do
+    slug |> DodoRouter.Models.offerable_models() |> Enum.any?(&(&1.model_id == model))
+  end
+
+  # "invalid" and "quota_exceeded" are settled facts about the credential.  # "invalid" and "quota_exceeded" are settled facts about the credential.
+  # A rate limit is not — it clears, and the backoff handles it.
+  @unusable_statuses ~w(invalid quota_exceeded)
+
+  # A run that was never attempted because an earlier one on the same key
+  # came back exhausted. Recorded rather than skipped silently: the batch
+  # still planned this measurement, and a missing row would read as though
+  # it was never asked for.
+  defp skip_run(evaluation, source_log, variant, target, repetition, batch_id) do
+    {:ok, run} =
+      create_run(evaluation, %{
+        source_log_id: source_log.id,
+        variant_name: variant && variant["name"],
+        candidate_provider_key_id: target["provider_key_id"],
+        candidate_provider: target["provider"],
+        candidate_model: target["model"],
+        repetition: repetition,
+        batch_id: batch_id,
+        status: "failed",
+        failure_stage: "candidate",
+        error:
+          "Skipped — #{target["provider"]} reported this key is out of quota earlier in this batch"
+      })
+
+    {:error, run}
+  end
+
+  defp note_exhaustion({_tag, %EvaluationRun{} = run} = result, exhausted, target) do
+    if run.status == "failed" and quota_error?(run.error) do
+      :ets.insert(exhausted, {target["provider_key_id"], true})
+    end
+
+    result
+  end
+
+  defp note_exhaustion(result, _exhausted, _target), do: result
+
+  defp quota_error?(error) when is_binary(error) do
+    String.contains?(error, ["out of quota", "usage limit", "auth error", "quota"])
+  end
+
+  defp quota_error?(_error), do: false
+
+  defp blocker_for(_user, nil), do: nil
+
+  defp blocker_for(user, key_id) do
+    case Providers.get_provider_key(user, key_id) do
+      %ProviderKey{status: status} = key when status in @unusable_statuses ->
+        %{
+          key_id: key.id,
+          label: key.label,
+          status: key.status,
+          detail: key.last_error_detail
+        }
+
+      %ProviderKey{} ->
+        nil
+
+      # Deletion is FK-restricted now, but rows written before the
+      # restriction can still name a key that no longer exists — and a
+      # missing key used to fall through to "no blocker", grinding through
+      # every doomed run before anything said so (dodo_router-7kq).
+      nil ->
+        %{
+          key_id: key_id,
+          label: nil,
+          status: "missing",
+          detail: "This provider key is no longer configured."
+        }
+    end
+  end
+
+  @doc """
+  Failed runs of the latest batch, split by the stage that failed.
+
+  A judge-stage failure is the cheap one to retry: the answer is already
+  paid for and stored, so only the scoring call is repeated.
+  """
+  def retryable_counts(%Evaluation{} = evaluation) do
+    unfinished = evaluation |> latest_batch_runs() |> Enum.filter(&unfinished?/1)
+
+    %{
+      judge: Enum.count(unfinished, &judge_retryable?/1),
+      candidate: Enum.count(unfinished, &(not judge_retryable?(&1)))
+    }
+  end
+
+  # "pending" and "running" are what a benchmark that died mid-flight leaves
+  # behind: rows created but never resolved. Treating only "failed" as
+  # retryable stranded them — they were not offered for retry and sat
+  # claiming to be in progress forever. Safe to include, because both retry
+  # paths run only when nothing is actually executing.
+  @unfinished_statuses ~w(failed pending running)
+
+  defp unfinished?(run), do: run.status in @unfinished_statuses
+
+  @doc """
+  Re-runs only the failed runs of the latest batch, in place.
+
+  In place, not appended: a retry is the same measurement taken again, and
+  adding rows would inflate the batch and skew every average computed over
+  it.
+
+  What gets repeated depends on the stage. A judge failure re-scores the
+  stored answer — with the evaluation's *current* judge, since the judge is
+  a property of the evaluation and swapping it is the usual way out of a
+  rate-limited or overloaded scorer. A candidate failure calls the provider
+  again for the target that run recorded, not whatever the evaluation's
+  targets say now: the row measures one model, and quietly pointing it at a
+  different one would make the batch incomparable with itself.
+  """
+  def retry_failed(%User{} = user, %Evaluation{} = evaluation) do
+    evaluation = get_evaluation!(user, evaluation.id)
+    failed = evaluation |> latest_batch_runs() |> Enum.filter(&unfinished?/1)
+
+    results =
+      failed
+      |> Task.async_stream(
+        fn run ->
+          result = safe_retry_run(user, evaluation, run)
+
+          Phoenix.PubSub.broadcast(
+            DodoRouter.PubSub,
+            "evaluation:#{evaluation.id}",
+            {:benchmark_progress, result}
+          )
+
+          result
+        end,
+        max_concurrency: @benchmark_concurrency,
+        ordered: false,
+        timeout: :infinity
+      )
+      |> Enum.map(fn
+        {:ok, result} -> result
+        {:exit, reason} -> {:error, {:candidate_task_exit, reason}}
+      end)
+
+    {:ok, results}
+  end
+
+  # Only a judge failure that still has its answer can skip regeneration;
+  # a "judge" stage with no stored output has nothing to re-score.
+  defp judge_retryable?(run) do
+    run.failure_stage == "judge" and is_binary(run.candidate_output) and
+      run.candidate_output != ""
+  end
+
+  defp safe_retry_run(user, evaluation, run) do
+    with_run_failure_guard(run, fn -> retry_run(user, evaluation, run) end)
+  end
+
+  defp retry_run(user, evaluation, run) do
+    started_at = System.monotonic_time(:millisecond)
+    output = run.candidate_output
+    judge_only? = judge_retryable?(run)
+    source_log = retry_source_log(user, evaluation, run)
+    variant = run_variant(evaluation, run)
+
+    archive_attempt!(run)
+    run = update_run!(run, %{status: "running", error: nil, failure_stage: nil})
+
+    if judge_only? do
+      source_log = variant_patched_source(source_log, variant)
+      judge_candidate(user, evaluation, source_log, run, output, started_at)
+    else
+      target =
+        %{
+          "provider_key_id" => run.candidate_provider_key_id,
+          "provider" => run.candidate_provider,
+          "model" => run.candidate_model
+        }
+        |> put_variant(variant)
+
+      generate_and_judge(user, evaluation, source_log, run, target, started_at)
+    end
+  end
+
+  # A retry must replay the run's own source log; nil means the row predates
+  # multi-log evaluations and the anchor is the honest answer.
+  defp retry_source_log(_user, evaluation, %EvaluationRun{source_log_id: nil}),
+    do: evaluation.request_log
+
+  defp retry_source_log(user, _evaluation, %EvaluationRun{source_log_id: id}),
+    do: Logs.get_log!(user, id)
+
+  # The patch a run measured, recovered by name — evaluations are immutable,
+  # so the lookup cannot drift.
+  defp run_variant(_evaluation, %EvaluationRun{variant_name: nil}), do: nil
+
+  defp run_variant(evaluation, %EvaluationRun{variant_name: name}) do
+    Enum.find(evaluation.prompt_variants || [], &(&1["name"] == name))
+  end
+
+  defp put_variant(target, nil), do: target
+
+  defp put_variant(target, variant) do
+    target
+    |> Map.put("system_prompt", variant["system_prompt"])
+    |> Map.put("message_patches", variant["message_patches"])
+  end
+
+  # What the judge reads must be the request the run actually sent: message
+  # patches first (their indexes refer to the array as served), then the
+  # system-prompt override — the same order the replay applied them.
+  defp variant_patched_source(source_log, nil), do: source_log
+
+  defp variant_patched_source(source_log, variant) when is_map(variant) do
+    body =
+      source_log.request_body
+      |> patch_body_messages(variant["message_patches"])
+      |> Replays.patch_system_prompt(variant["system_prompt"])
+
+    %{source_log | request_body: body}
+  end
+
+  defp patch_body_messages(body, patches) when is_list(patches) and patches != [],
+    do: Replays.patch_messages(body, patches)
+
+  defp patch_body_messages(body, _patches), do: body
+
+  # A copy of the attempt as it stands, stamped with when it was replaced and
+  # by which run. The copy carries no batch_id: it is not part of any batch's
+  # count, and giving it one would put it back into every aggregate that
+  # filters by batch.
+  defp archive_attempt!(%EvaluationRun{} = run) do
+    run
+    |> Map.take([
+      :evaluation_id,
+      :status,
+      :score,
+      :max_score,
+      :summary,
+      :criterion_scores,
+      :issues,
+      :reasoning,
+      :rubric_gaps,
+      :raw_judge_response,
+      :error,
+      :failure_stage,
+      :duration_ms,
+      :judge_prompt_version,
+      :candidate_provider_key_id,
+      :candidate_provider_key_label,
+      :candidate_provider,
+      :candidate_model,
+      :repetition,
+      :candidate_log_id,
+      :candidate_latency_ms,
+      :candidate_cost_usd,
+      :candidate_output,
+      :candidate_list_cost_usd,
+      :judge_cost_usd,
+      :judge_list_cost_usd,
+      :judge_log_id,
+      :judge_provider_key_id,
+      :judge_provider_key_label
+    ])
+    |> Map.put(:superseded_at, DateTime.utc_now())
+    |> Map.put(:superseded_by_id, run.id)
+    |> then(&EvaluationRun.changeset(%EvaluationRun{}, &1))
+    |> Repo.insert!()
+  end
+
+  defp safe_run_candidate(user, evaluation, source_log, variant, target, repetition, batch_id) do
+    run_candidate(user, evaluation, source_log, variant, target, repetition, batch_id)
   rescue
     exception ->
       {:error,
@@ -183,24 +770,192 @@ defmodule DodoRouter.Evaluations do
     kind, reason -> {:error, {:candidate_crashed, kind, reason}}
   end
 
-  def enqueue(%User{} = user, %Evaluation{} = evaluation) do
+  # logs x candidates x repetitions explodes quietly; the cap keeps one
+  # enqueue from buying more than anyone meant to. Matches the implicit
+  # single-log ceiling (30 candidates x 10 reps) exactly.
+  @max_planned_runs Application.compile_env(:dodo_router, :max_planned_eval_runs, 300)
+
+  @doc """
+  How many runs one benchmark execution of this evaluation performs:
+  `source logs x variants x candidates x repetitions`. Knowable — and
+  stated — before anything is spent.
+  """
+  def planned_run_count(%Evaluation{} = evaluation) do
+    length(Evaluation.source_log_ids(evaluation)) *
+      length(Evaluation.prompt_variants(evaluation)) *
+      length(evaluation.candidate_targets) *
+      evaluation.repetitions
+  end
+
+  def enqueue(%User{} = user, %Evaluation{} = evaluation, opts \\ []) do
+    evaluation = get_evaluation!(user, evaluation.id)
+    preflight = preflight(user, evaluation)
+
+    cond do
+      benchmark_running?(evaluation) ->
+        {:error, :already_running}
+
+      planned_run_count(evaluation) > @max_planned_runs ->
+        {:error, {:too_many_runs, planned_run_count(evaluation), @max_planned_runs}}
+
+      # A judge that cannot authenticate loses every score in the batch, not
+      # one data point: each candidate is still generated and paid for, then
+      # thrown away unscored. Refusing costs nothing and says why.
+      blocker = preflight.judge ->
+        {:error, {:judge_key_unusable, blocker}}
+
+      # One blocked candidate is one lost data point and the run proceeds;
+      # when EVERY candidate is blocked, starting would only spend the
+      # judge's quota on nothing.
+      preflight.candidates != [] and
+          length(preflight.candidates) >= length(evaluation.candidate_targets) ->
+        {:error, {:candidates_unusable, preflight.candidates}}
+
+      true ->
+        # A repetitions override persists on the evaluation — "run it again,
+        # but 5 times" is a statement about the benchmark, not one batch —
+        # and an out-of-range value is refused before anything is spent.
+        with {:ok, evaluation} <- apply_repetitions(evaluation, opts[:repetitions]) do
+          resolve_interrupted_runs(evaluation)
+          do_enqueue(user, evaluation)
+        end
+    end
+  end
+
+  defp apply_repetitions(evaluation, nil), do: {:ok, evaluation}
+
+  defp apply_repetitions(%Evaluation{repetitions: reps} = evaluation, reps), do: {:ok, evaluation}
+
+  defp apply_repetitions(evaluation, repetitions) do
+    evaluation
+    |> Evaluation.changeset(%{"repetitions" => repetitions})
+    |> Repo.update()
+  end
+
+  @doc """
+  Resolves every benchmark orphaned by the VM stopping.
+
+  A benchmark lives in a task, not in the database: restart the node — a
+  deploy, a crash, a Ctrl-C'd `mix phx.server` — and every run it had in
+  flight is orphaned. The rows keep saying "running" and the evaluation
+  keeps saying "running", which also locks it out of ever running again on
+  the stored-status fallback in `benchmark_running?/1`.
+
+  Called from `DodoRouter.Application.start/2`, because boot is the one
+  moment we can be certain nothing is executing. Idempotent, so a node that
+  restarts twice in a row is not a problem.
+
+  Returns `{runs_resolved, evaluations_resolved}`.
+  """
+  def recover_interrupted do
+    {runs, _} =
+      from(r in EvaluationRun,
+        where: r.status in ["pending", "running"] and is_nil(r.superseded_at)
+      )
+      |> Repo.update_all(
+        set: [
+          status: "failed",
+          failure_stage: "candidate",
+          error: "The benchmark stopped before this run finished",
+          error_category: "interrupted",
+          updated_at: DateTime.utc_now() |> DateTime.truncate(:second)
+        ]
+      )
+
+    evaluations =
+      from(e in Evaluation, where: e.benchmark_status == "running", select: e.id)
+      |> Repo.all()
+
+    for id <- evaluations do
+      evaluation =
+        from(e in Evaluation,
+          where: e.id == ^id,
+          preload: [runs: ^from(r in EvaluationRun, order_by: [asc: r.inserted_at])]
+        )
+        |> Repo.one!()
+
+      from(e in Evaluation, where: e.id == ^id)
+      |> Repo.update_all(set: [benchmark_status: status_of(evaluation)])
+    end
+
+    {runs, length(evaluations)}
+  end
+
+  # What the batch actually shows, now that nothing is going to change it.
+  defp status_of(%Evaluation{} = evaluation) do
+    runs = latest_batch_runs(evaluation)
+    completed = Enum.count(runs, &(&1.status == "completed"))
+
+    cond do
+      runs == [] -> "failed"
+      completed == length(runs) -> "completed"
+      completed == 0 -> "failed"
+      true -> "partial"
+    end
+  end
+
+  @doc """
+  Marks runs left mid-flight by a benchmark that stopped.
+
+  Called when we know nothing is executing, so a row still saying "pending"
+  or "running" is a leftover, not a live measurement. Left alone it claims
+  to be in progress forever — on the page, and to anything reading the API.
+  """
+  def resolve_interrupted_runs(%Evaluation{id: id}) do
+    from(r in EvaluationRun,
+      where:
+        r.evaluation_id == ^id and r.status in ["pending", "running"] and
+          is_nil(r.superseded_at)
+    )
+    |> Repo.update_all(
+      set: [
+        status: "failed",
+        failure_stage: "candidate",
+        error: "The benchmark stopped before this run finished",
+        updated_at: DateTime.utc_now() |> DateTime.truncate(:second)
+      ]
+    )
+  end
+
+  @doc """
+  Starts `retry_failed/2` in the background, like `enqueue/2`.
+
+  Retrying inline froze the caller for the length of the whole retry — a
+  LiveView that calls it renders nothing until every run finishes, so the
+  button appears to do nothing for minutes. Same task, same registry entry
+  and same broadcasts as a fresh run, so the progress UI works for both.
+
+  No preflight on the judge here: re-judging a stored answer is precisely
+  how a user recovers after swapping the judge key, and refusing on the
+  old key's health would block the fix.
+  """
+  def enqueue_retry(%User{} = user, %Evaluation{} = evaluation) do
     evaluation = get_evaluation!(user, evaluation.id)
 
     if benchmark_running?(evaluation) do
       {:error, :already_running}
     else
-      batch_id = Ecto.UUID.generate()
+      resolve_interrupted_runs(evaluation)
+      evaluation |> Ecto.Changeset.change(benchmark_status: "running") |> Repo.update!()
 
-      evaluation
-      |> Ecto.Changeset.change(benchmark_status: "running", last_batch_id: batch_id)
-      |> Repo.update!()
+      # Reloaded after the reconcile, so the total includes runs the sweep
+      # just turned from stranded into retryable. Broadcast rather than
+      # returned: every viewer of this evaluation needs the denominator,
+      # not only the one who pressed the button.
+      counts = user |> get_evaluation!(evaluation.id) |> retryable_counts()
+
+      Phoenix.PubSub.broadcast(
+        DodoRouter.PubSub,
+        "evaluation:#{evaluation.id}",
+        {:retry_started, counts.judge + counts.candidate}
+      )
 
       DodoRouter.BackgroundTask.start(available_task_supervisor(), fn ->
         case register_benchmark(evaluation.id) do
           :ok ->
-            result = run(user, evaluation, batch_id: batch_id)
-            status = benchmark_status(result)
-            evaluation |> Ecto.Changeset.change(benchmark_status: status) |> Repo.update!()
+            result = retry_failed(user, evaluation)
+
+            write_status!(evaluation, batch_status(user, evaluation))
 
             Phoenix.PubSub.broadcast(
               DodoRouter.PubSub,
@@ -214,6 +969,120 @@ defmodule DodoRouter.Evaluations do
       end)
 
       :ok
+    end
+  end
+
+  # force_change, not change: the struct in hand was loaded before the status
+  # was set to "running", so `change/2` compares the new value against the
+  # *stale* one. When they match — a "partial" batch re-run to "partial" —
+  # Ecto sees no change, writes nothing, and the row stays "running"
+  # forever, which also locks the evaluation out of ever running again.
+  defp write_status!(%Evaluation{} = evaluation, status) do
+    evaluation
+    |> Ecto.Changeset.change()
+    |> Ecto.Changeset.force_change(:benchmark_status, status)
+    |> Repo.update!()
+  end
+
+  # After a retry the batch is what matters, not the retried subset: a
+  # status computed from the retry alone would report "failed" for a batch
+  # that is still half scored, erasing results nobody re-ran.
+  defp batch_status(user, evaluation) do
+    runs = user |> get_evaluation!(evaluation.id) |> latest_batch_runs()
+    completed = Enum.count(runs, &(&1.status == "completed"))
+
+    cond do
+      runs == [] -> "failed"
+      completed == length(runs) -> "completed"
+      completed == 0 -> "failed"
+      true -> "partial"
+    end
+  end
+
+  defp do_enqueue(%User{} = user, %Evaluation{} = evaluation) do
+    batch_id = Ecto.UUID.generate()
+
+    evaluation
+    |> Ecto.Changeset.change(benchmark_status: "running", last_batch_id: batch_id)
+    |> Repo.update!()
+
+    DodoRouter.BackgroundTask.start(available_task_supervisor(), fn ->
+      case register_benchmark(evaluation.id) do
+        :ok ->
+          result = run(user, evaluation, batch_id: batch_id)
+          write_status!(evaluation, benchmark_status(result))
+
+          Phoenix.PubSub.broadcast(
+            DodoRouter.PubSub,
+            "evaluation:#{evaluation.id}",
+            {:benchmark_finished, result}
+          )
+
+        :already_running ->
+          :ok
+      end
+    end)
+
+    :ok
+  end
+
+  @doc """
+  Stops a running benchmark: kills the registered batch task, sweeps the
+  runs it never finished the way `recover_interrupted/0` does — but saying
+  "cancelled", not "stopped" — and stamps the evaluation `cancelled`.
+
+  Answers already generated and stored stay: they were paid for, and
+  `retry_eval` can still re-judge them. `{:error, :not_running}` when there
+  is nothing to cancel, so a double-click reads as such rather than as
+  success.
+  """
+  def cancel_benchmark(%User{} = user, %Evaluation{} = evaluation) do
+    evaluation = get_evaluation!(user, evaluation.id)
+
+    case benchmark_pids(evaluation.id) do
+      [] ->
+        {:error, :not_running}
+
+      pids ->
+        # The registry entry dies with the task, so the kill is also the
+        # deregistration. Provider calls in flight die with it — that is
+        # the point: the money stops here.
+        Enum.each(pids, &Process.exit(&1, :kill))
+
+        from(r in EvaluationRun,
+          where:
+            r.evaluation_id == ^evaluation.id and
+              r.status in ["pending", "running"] and is_nil(r.superseded_at)
+        )
+        |> Repo.update_all(
+          set: [
+            status: "failed",
+            failure_stage: "candidate",
+            error: "The benchmark was cancelled before this run finished",
+            error_category: "cancelled",
+            updated_at: DateTime.utc_now() |> DateTime.truncate(:second)
+          ]
+        )
+
+        write_status!(evaluation, "cancelled")
+
+        Phoenix.PubSub.broadcast(
+          DodoRouter.PubSub,
+          "evaluation:#{evaluation.id}",
+          {:benchmark_finished, :cancelled}
+        )
+
+        :ok
+    end
+  end
+
+  defp benchmark_pids(evaluation_id) do
+    case Process.whereis(DodoRouter.EvaluationRegistry) do
+      nil ->
+        []
+
+      _pid ->
+        for {pid, _} <- Registry.lookup(DodoRouter.EvaluationRegistry, evaluation_id), do: pid
     end
   end
 
@@ -259,11 +1128,16 @@ defmodule DodoRouter.Evaluations do
     end
   end
 
-  defp run_candidate(user, evaluation, target, repetition, batch_id) do
+  defp run_candidate(user, evaluation, source_log, variant, target, repetition, batch_id) do
     started_at = System.monotonic_time(:millisecond)
+    candidate_key = Providers.get_provider_key(user, target["provider_key_id"])
+    target = put_variant(target, variant)
 
     case create_run(evaluation, %{
-           candidate_provider_key_id: target["provider_key_id"],
+           source_log_id: source_log.id,
+           variant_name: variant && variant["name"],
+           candidate_provider_key_id: candidate_key && candidate_key.id,
+           candidate_provider_key_label: candidate_key && candidate_key.label,
            candidate_provider: target["provider"],
            candidate_model: target["model"],
            repetition: repetition,
@@ -271,7 +1145,7 @@ defmodule DodoRouter.Evaluations do
          }) do
       {:ok, run} ->
         with_run_failure_guard(run, fn ->
-          generate_and_judge(user, evaluation, run, target, started_at)
+          generate_and_judge(user, evaluation, source_log, run, target, started_at)
         end)
 
       {:error, changeset} ->
@@ -287,20 +1161,36 @@ defmodule DodoRouter.Evaluations do
       {:error,
        update_run!(run, %{
          status: "failed",
-         error: "Run crashed: #{Exception.message(exception)}"
+         error: "Run crashed: #{Exception.message(exception)}",
+         error_category: "crashed"
        })}
   catch
     kind, reason ->
       {:error,
-       update_run!(run, %{status: "failed", error: "Run crashed: #{inspect({kind, reason})}"})}
+       update_run!(run, %{
+         status: "failed",
+         error: "Run crashed: #{inspect({kind, reason})}",
+         error_category: "crashed"
+       })}
   end
 
-  defp generate_and_judge(user, evaluation, run, target, started_at) do
-    case Replays.replay(user, evaluation.request_log, %{
-           provider_key_id: target["provider_key_id"],
-           model: target["model"],
-           traffic_type: "evaluation_candidate"
-         }) do
+  defp generate_and_judge(user, evaluation, source_log, run, target, started_at) do
+    replay = fn ->
+      Replays.replay(user, source_log, %{
+        provider_key_id: target["provider_key_id"],
+        model: target["model"],
+        system_prompt: target["system_prompt"],
+        message_patches: target["message_patches"],
+        traffic_type: "evaluation_candidate"
+      })
+    end
+
+    # What the judge scores against must be the request the run actually
+    # sent — for a variant run, the patched request, not the anchor's.
+    source_log =
+      variant_patched_source(source_log, Map.take(target, ["system_prompt", "message_patches"]))
+
+    case with_rate_limit_backoff(replay) do
       {:ok, candidate_log} ->
         candidate_content = extract_message_content(candidate_log.response_body)
 
@@ -309,7 +1199,9 @@ defmodule DodoRouter.Evaluations do
             {:error,
              update_run!(run, %{
                status: "failed",
-               error: candidate_error_message(candidate_log),
+               failure_stage: "candidate",
+               error: candidate_error_message(candidate_log, target["model"]),
+               error_category: category_from_log(candidate_log),
                candidate_log_id: candidate_log.id,
                candidate_latency_ms: candidate_log.latency_ms,
                candidate_cost_usd: candidate_log.estimated_cost_usd,
@@ -322,7 +1214,9 @@ defmodule DodoRouter.Evaluations do
             {:error,
              update_run!(run, %{
                status: "failed",
+               failure_stage: "candidate",
                error: "Candidate response contained no message content",
+               error_category: "empty_response",
                candidate_log_id: candidate_log.id,
                candidate_latency_ms: candidate_log.latency_ms,
                candidate_cost_usd: candidate_log.estimated_cost_usd,
@@ -338,23 +1232,60 @@ defmodule DodoRouter.Evaluations do
                 candidate_latency_ms: candidate_log.latency_ms,
                 candidate_cost_usd: candidate_log.estimated_cost_usd,
                 candidate_list_cost_usd: candidate_log.list_cost_usd,
+                candidate_served_model: extract_served_model(candidate_log.response_body),
                 candidate_output: candidate_content
               })
 
-            judge_candidate(user, evaluation, run, candidate_content, started_at)
+            judge_candidate(user, evaluation, source_log, run, candidate_content, started_at)
         end
 
       {:error, reason} ->
         {:error,
          update_run!(run, %{
            status: "failed",
-           error: "Candidate generation error: #{inspect(reason)}",
+           failure_stage: "candidate",
+           error: candidate_failure_message(reason, target),
+           error_category: category_from_reason(reason),
            duration_ms: System.monotonic_time(:millisecond) - started_at
          })}
     end
   end
 
-  defp judge_candidate(user, evaluation, run, candidate_content, started_at) do
+  # A target whose key was deleted before deletes started asking about
+  # candidates. `:provider_key_not_found` tells the reader nothing about
+  # which of several targets is broken or what to do next.
+  defp candidate_failure_message(:provider_key_not_found, target) do
+    "The provider key for #{target["provider"]} / #{target["model"]} is no longer configured — " <>
+      "pick another key for this candidate and re-run."
+  end
+
+  defp candidate_failure_message(reason, _target) do
+    "Candidate generation error: " <> humanize_reason(reason)
+  end
+
+  # The machine-readable twin of the prose above: a stable token off the
+  # proxy's own error taxonomy (`Adapter.categorize_error/2` atoms travel
+  # through attempt rows as strings), so a client can branch on
+  # "rate_limited" instead of regexing sentences (dodo_router-5wq).
+  defp category_from_reason(:provider_key_not_found), do: "provider_key_missing"
+  defp category_from_reason({:error, reason}), do: category_from_reason(reason)
+  defp category_from_reason({:error, reason, _details}), do: category_from_reason(reason)
+
+  defp category_from_reason(reason) when is_atom(reason) and not is_nil(reason),
+    do: to_string(reason)
+
+  defp category_from_reason(_), do: "unknown"
+
+  # A failed replay still logged the attempts; the last one's `error` field
+  # is the categorized reason the proxy recorded on the wire.
+  defp category_from_log(candidate_log) do
+    case List.last(candidate_log.attempted_steps || []) do
+      %{"error" => error} when is_binary(error) and error != "" -> error
+      _ -> "provider_error"
+    end
+  end
+
+  defp judge_candidate(user, evaluation, source_log, run, candidate_content, started_at) do
     case Replays.build_step(
            user,
            evaluation.request_log.router_id,
@@ -362,14 +1293,28 @@ defmodule DodoRouter.Evaluations do
            evaluation.judge_model
          ) do
       {:ok, step} ->
-        request = judge_request(evaluation, candidate_content)
+        # Stamped from the step, not the evaluation: this is the key the
+        # judge call is about to authenticate with, and it is the last
+        # moment the label is known to be current.
+        run =
+          update_run!(run, %{
+            judge_provider_key_id: step.provider_key.id,
+            judge_provider_key_label: step.provider_key.label
+          })
 
-        case Proxy.dispatch(evaluation.request_log.router, request,
-               steps: [step],
-               log_mode: :sync,
-               request_id: Ecto.UUID.generate(),
-               traffic_type: "evaluation_judge"
-             ) do
+        mode = judge_mode(evaluation, run)
+        request = judge_request(evaluation, source_log, candidate_content, mode)
+
+        dispatch = fn ->
+          Proxy.dispatch(evaluation.request_log.router, request,
+            steps: [step],
+            log_mode: :sync,
+            request_id: Ecto.UUID.generate(),
+            traffic_type: "evaluation_judge"
+          )
+        end
+
+        case with_rate_limit_backoff(dispatch) do
           {:ok, response, meta} ->
             raw = response_content(response)
             duration = System.monotonic_time(:millisecond) - started_at
@@ -384,6 +1329,23 @@ defmodule DodoRouter.Evaluations do
             }
 
             case parse_judgement(raw) do
+              # A next_action judgement without a preference is not a
+              # judgement — the preference is the datum this mode exists
+              # for. Failing the judge stage keeps it re-scoreable via
+              # retry_eval without regenerating anything.
+              {:ok, %{preference: nil}} when mode == "next_action" ->
+                {:error,
+                 update_run!(
+                   run,
+                   Map.merge(judge_attrs, %{
+                     status: "failed",
+                     failure_stage: "judge",
+                     error:
+                       "Judge did not state a preference (better/equivalent/worse) for the candidate's next action.",
+                     error_category: "judge_unparseable"
+                   })
+                 )}
+
               {:ok, judgement} ->
                 {:ok,
                  update_run!(
@@ -395,20 +1357,33 @@ defmodule DodoRouter.Evaluations do
                      reasoning: judgement.reasoning,
                      criterion_scores: judgement.criterion_scores,
                      issues: judgement.issues,
-                     rubric_gaps: judgement.rubric_gaps
+                     rubric_gaps: judgement.rubric_gaps,
+                     # Recorded only when the judge was asked for one; a
+                     # stray field on a rubric-mode answer is not data.
+                     preference: if(mode == "next_action", do: judgement.preference)
                    })
                  )}
 
               {:error, reason} ->
                 {:error,
-                 update_run!(run, Map.merge(judge_attrs, %{status: "failed", error: reason}))}
+                 update_run!(
+                   run,
+                   Map.merge(judge_attrs, %{
+                     status: "failed",
+                     failure_stage: "judge",
+                     error: judge_parse_message(reason),
+                     error_category: "judge_unparseable"
+                   })
+                 )}
             end
 
           error ->
             {:error,
              update_run!(run, %{
                status: "failed",
-               error: proxy_error_message(error),
+               failure_stage: "judge",
+               error: "Judge call failed — " <> proxy_error_message(error),
+               error_category: category_from_reason(error),
                duration_ms: System.monotonic_time(:millisecond) - started_at
              })}
         end
@@ -417,7 +1392,9 @@ defmodule DodoRouter.Evaluations do
         {:error,
          update_run!(run, %{
            status: "failed",
-           error: "Judge setup error: #{inspect(reason)}",
+           failure_stage: "judge",
+           error: judge_setup_message(reason),
+           error_category: "judge_setup",
            duration_ms: System.monotonic_time(:millisecond) - started_at
          })}
     end
@@ -431,13 +1408,43 @@ defmodule DodoRouter.Evaluations do
   one misleading average. Runs from before batching (nil `last_batch_id`)
   are treated as one legacy batch.
   """
-  def latest_batch_runs(%Evaluation{runs: runs, last_batch_id: nil}), do: runs
+  # Superseded rows are history, never data: a retried attempt would
+  # otherwise be counted twice — once as the failure it was and once as the
+  # result it became — and drag every average with it.
+  # Monitor sweeps write runs of their own; benchmark aggregates never mix
+  # them in. The batch filter already excludes them on the second clause —
+  # a monitor batch never becomes last_batch_id — but a draft evaluation
+  # (nil last_batch_id) reads every run, so the kind filter is load-bearing
+  # there.
+  def latest_batch_runs(%Evaluation{runs: runs, last_batch_id: nil}),
+    do: runs |> benchmark_runs() |> live_runs()
 
   def latest_batch_runs(%Evaluation{runs: runs, last_batch_id: batch_id}),
-    do: Enum.filter(runs, &(&1.batch_id == batch_id))
+    do: runs |> benchmark_runs() |> live_runs() |> Enum.filter(&(&1.batch_id == batch_id))
 
-  def summary(%Evaluation{} = evaluation) do
-    runs = latest_batch_runs(evaluation)
+  defp benchmark_runs(runs), do: Enum.reject(runs, &(&1.kind == "monitor"))
+
+  @doc "Every run of this evaluation that has not been superseded."
+  def live_runs(runs) when is_list(runs), do: Enum.reject(runs, & &1.superseded_at)
+
+  @doc """
+  The attempts a run replaced, most recently superseded first.
+
+  Retrying keeps the row's identity so the batch stays one row per
+  measurement; the attempt it replaced is copied aside rather than
+  overwritten, so "why did it fail the first time" survives the fix.
+  """
+  def previous_attempts(%EvaluationRun{id: id}) do
+    from(r in EvaluationRun,
+      where: r.superseded_by_id == ^id,
+      order_by: [desc: r.superseded_at]
+    )
+    |> Repo.all()
+  end
+
+  def summary(%Evaluation{} = evaluation), do: evaluation |> latest_batch_runs() |> summary()
+
+  def summary(runs) when is_list(runs) do
     completed = Enum.filter(runs, &(&1.status == "completed" and is_integer(&1.score)))
     scores = Enum.map(completed, & &1.score)
 
@@ -486,11 +1493,12 @@ defmodule DodoRouter.Evaluations do
     end
   end
 
-  def rankings(%Evaluation{} = evaluation) do
-    evaluation
-    |> latest_batch_runs()
-    |> Enum.group_by(&{&1.candidate_provider, &1.candidate_model})
-    |> Enum.map(fn {{provider, model}, target_runs} ->
+  def rankings(%Evaluation{} = evaluation), do: evaluation |> latest_batch_runs() |> rankings()
+
+  def rankings(runs) when is_list(runs) do
+    runs
+    |> Enum.group_by(&{&1.candidate_provider, &1.candidate_model, &1.variant_name})
+    |> Enum.map(fn {{provider, model, variant}, target_runs} ->
       completed = Enum.filter(target_runs, &(&1.status == "completed" and is_integer(&1.score)))
       scores = Enum.map(completed, & &1.score)
       latencies = Enum.map(completed, & &1.candidate_latency_ms) |> Enum.reject(&is_nil/1)
@@ -498,6 +1506,9 @@ defmodule DodoRouter.Evaluations do
       %{
         provider: provider,
         model: model,
+        # nil for the as-served baseline and for every pre-variant run — a
+        # single-variant evaluation ranks exactly as it always did.
+        variant: variant,
         total: length(target_runs),
         successful: length(completed),
         average: average(scores),
@@ -509,10 +1520,70 @@ defmodule DodoRouter.Evaluations do
           completed
           |> Enum.map(&(&1.candidate_list_cost_usd || &1.candidate_cost_usd))
           |> Enum.reject(&is_nil/1)
-          |> decimal_average()
+          |> decimal_average(),
+        per_source: per_source_breakdown(target_runs),
+        decisions: decisions_rollup(completed)
       }
     end)
     |> Enum.sort_by(&(&1.average || -1), :desc)
+  end
+
+  # next_action mode's own verdict: of the decisions the judge compared,
+  # how often the candidate's next move was at least as good as what
+  # production actually did. nil when no run carries a preference (every
+  # rubric-mode evaluation).
+  defp decisions_rollup(completed) do
+    preferences = for run <- completed, run.preference != nil, do: run.preference
+
+    case preferences do
+      [] ->
+        nil
+
+      preferences ->
+        counts = Enum.frequencies(preferences)
+        better = Map.get(counts, "better", 0)
+        equivalent = Map.get(counts, "equivalent", 0)
+        worse = Map.get(counts, "worse", 0)
+
+        %{
+          better: better,
+          equivalent: equivalent,
+          worse: worse,
+          preferred_pct: round((better + equivalent) / (better + equivalent + worse) * 100)
+        }
+    end
+  end
+
+  # The aggregate average is where "fine on 18 of the 20 requests and
+  # catastrophic on 2" goes to hide — exactly the question a benchmark over
+  # a recording is asked. One row per source log, worst first (a source
+  # with no completed run at all sorts ahead of any scored one: nothing to
+  # average is the strongest failure signal). Empty on single-source
+  # benchmarks, where the aggregate already is the per-source answer.
+  defp per_source_breakdown(target_runs) do
+    case Enum.uniq_by(target_runs, & &1.source_log_id) do
+      [_single] ->
+        []
+
+      _many ->
+        target_runs
+        |> Enum.group_by(& &1.source_log_id)
+        |> Enum.map(fn {source_log_id, source_runs} ->
+          scores =
+            for run <- source_runs,
+                run.status == "completed" and is_integer(run.score),
+                do: run.score
+
+          %{
+            source_log_id: source_log_id,
+            average: average(scores),
+            min: if(scores == [], do: nil, else: Enum.min(scores)),
+            successful: length(scores),
+            total: length(source_runs)
+          }
+        end)
+        |> Enum.sort_by(&(&1.average || -1))
+    end
   end
 
   defp decimal_average([]), do: nil
@@ -523,6 +1594,557 @@ defmodule DodoRouter.Evaluations do
     |> Decimal.div(length(values))
   end
 
+  @seconds_per_month 30 * 24 * 3600
+  # Below this the rate is an artifact of when the operator clicked stop,
+  # not a property of the traffic.
+  @min_projection_window_seconds 600
+
+  @doc """
+  Projects each ranking row's per-request cost onto the recording's real
+  traffic rate — the sentence the downgrade loop exists for: "this model
+  scores within N points at ~$X/month at your current rate."
+
+  The baseline is what the capture's traffic actually cost as served,
+  scaled to a month; candidate rows are `avg_cost x monthly requests`.
+  Everything is at API list prices (the comparable figure when plan keys
+  meter $0), and judge spend is excluded — production does not pay a judge.
+
+  Returns `{:error, :window_too_short}` when the capture spans less than
+  #{@min_projection_window_seconds}s and `{:error, :no_traffic}` when it
+  holds no requests: a rate needs a denominator worth trusting.
+  """
+  def savings_projection(rankings, %Recording{} = recording, stats) do
+    seconds = capture_seconds(recording)
+
+    cond do
+      is_nil(seconds) or seconds < @min_projection_window_seconds ->
+        {:error, :window_too_short}
+
+      (stats.request_count || 0) == 0 ->
+        {:error, :no_traffic}
+
+      true ->
+        factor = Decimal.from_float(@seconds_per_month / seconds)
+        monthly_requests = round(stats.request_count * @seconds_per_month / seconds)
+
+        baseline =
+          stats.total_list_cost_usd && Decimal.mult(stats.total_list_cost_usd, factor)
+
+        rows =
+          for ranking <- rankings, not is_nil(ranking.avg_cost) do
+            projected = Decimal.mult(ranking.avg_cost, Decimal.new(monthly_requests))
+
+            %{
+              provider: ranking.provider,
+              model: ranking.model,
+              variant: ranking.variant,
+              avg_score: ranking.average,
+              projected_monthly_cost: projected,
+              monthly_savings: baseline && Decimal.sub(baseline, projected)
+            }
+          end
+
+        {:ok,
+         %{
+           window_seconds: seconds,
+           captured_requests: stats.request_count,
+           monthly_requests: monthly_requests,
+           baseline_monthly_cost: baseline,
+           rows: rows
+         }}
+    end
+  end
+
+  defp capture_seconds(%Recording{started_at: nil}), do: nil
+
+  # A still-running recording projects against the window so far — the
+  # rate is just as real, it only keeps refining.
+  defp capture_seconds(%Recording{started_at: started, stopped_at: nil}),
+    do: DateTime.diff(DateTime.utc_now(), started, :second)
+
+  defp capture_seconds(%Recording{started_at: started, stopped_at: stopped}),
+    do: DateTime.diff(stopped, started, :second)
+
+  ## Applying a verdict as a routing change
+
+  @doc """
+  Applies a benchmark verdict: the routing step that served this
+  evaluation's traffic starts serving the chosen candidate instead, and a
+  `RoutingChangeEvent` records before/after with the evaluation and batch
+  that justified it — the change stays auditable and revertible.
+
+  The step is found by the incumbent, not guessed: the step whose
+  `{provider_key, model}` matches what actually served the source request.
+  No match or several matches refuses rather than editing routing the
+  evidence was not measured on. Only the identity fields change (provider,
+  key, model, plan_type — the latter two derived from the key, never
+  accepted from the caller); temperature, max_tokens and reasoning_effort
+  stay as the operator set them, because the benchmark did not measure a
+  change to them.
+
+  A prompt-variant row cannot be applied — the system prompt belongs to
+  the client's codebase, not to routing.
+  """
+  def apply_verdict(%User{} = user, %Evaluation{} = evaluation, params) do
+    evaluation = get_evaluation!(user, evaluation.id)
+    router = evaluation.request_log.router
+
+    with :ok <- refuse_variant(params["variant"]),
+         {:ok, key} <- fetch_owned_key(user, params["provider_key_id"]),
+         {:ok, step} <- incumbent_step(evaluation, router),
+         :ok <- refuse_noop(step, key, params["model"]) do
+      before_snapshot = step_snapshot(step)
+
+      after_attrs = %{
+        "provider" => AdapterRegistry.adapter_provider(key.provider_slug),
+        "provider_key_id" => key.id,
+        "model" => params["model"],
+        "plan_type" => plan_type_for_key(key)
+      }
+
+      Ecto.Multi.new()
+      |> Ecto.Multi.update(:step, RoutingStep.changeset(step, after_attrs))
+      |> Ecto.Multi.insert(:event, fn %{step: updated} ->
+        %RoutingChangeEvent{
+          router_id: router.id,
+          routing_step_id: step.id,
+          evaluation_id: evaluation.id,
+          batch_id: evaluation.last_batch_id,
+          changed_by_id: user.id,
+          before_step: before_snapshot,
+          after_step: step_snapshot(updated)
+        }
+      end)
+      |> Repo.transaction()
+      |> case do
+        {:ok, %{step: step, event: event}} -> {:ok, step, event}
+        {:error, _op, changeset, _changes} -> {:error, changeset}
+      end
+    end
+  end
+
+  @doc """
+  Reverts an applied verdict: the step goes back to the event's
+  `before_step` and the event is stamped `reverted_at`. The step is
+  restored to what the event recorded even if it was edited since — the
+  event is the authority on what "before" means.
+  """
+  def revert_verdict(%User{} = user, event_id) do
+    event =
+      from(e in RoutingChangeEvent,
+        join: r in assoc(e, :router),
+        where: e.id == ^event_id and r.user_id == ^user.id
+      )
+      |> Repo.one()
+
+    cond do
+      is_nil(event) ->
+        {:error, :not_found}
+
+      event.reverted_at ->
+        {:error, :already_reverted}
+
+      true ->
+        case Repo.get(RoutingStep, event.routing_step_id) do
+          nil ->
+            {:error, :step_deleted}
+
+          step ->
+            attrs =
+              Map.take(event.before_step, ["provider", "provider_key_id", "model", "plan_type"])
+
+            Ecto.Multi.new()
+            |> Ecto.Multi.update(:step, RoutingStep.changeset(step, attrs))
+            |> Ecto.Multi.update(
+              :event,
+              Ecto.Changeset.change(event, reverted_at: DateTime.utc_now())
+            )
+            |> Repo.transaction()
+            |> case do
+              {:ok, %{step: step}} -> {:ok, step}
+              {:error, _op, changeset, _changes} -> {:error, changeset}
+            end
+        end
+    end
+  end
+
+  @doc "Routing changes applied from this evaluation, newest first."
+  def list_applied_changes(%Evaluation{} = evaluation) do
+    from(e in RoutingChangeEvent,
+      where: e.evaluation_id == ^evaluation.id,
+      order_by: [desc: e.inserted_at]
+    )
+    |> Repo.all()
+  end
+
+  defp refuse_variant(variant) when is_binary(variant) and variant != "",
+    do: {:error, :variant_not_applicable}
+
+  defp refuse_variant(_variant), do: :ok
+
+  defp fetch_owned_key(user, key_id) do
+    with {:ok, uuid} <- Ecto.UUID.cast(key_id || ""),
+         %ProviderKey{} = key <- Providers.get_provider_key(user, uuid) do
+      {:ok, key}
+    else
+      _ -> {:error, :unknown_key}
+    end
+  end
+
+  defp incumbent_step(evaluation, router) do
+    case Replays.incumbent_target(evaluation.request_log) do
+      nil ->
+        {:error, :no_incumbent}
+
+      %{provider_key_id: key_id, model: model} ->
+        router
+        |> Routers.list_routing_steps()
+        |> Enum.filter(&(&1.model == model and &1.provider_key_id == key_id))
+        |> case do
+          [step] -> {:ok, step}
+          [] -> {:error, :no_matching_step}
+          _many -> {:error, :ambiguous_step}
+        end
+    end
+  end
+
+  defp refuse_noop(step, key, model) do
+    if step.provider_key_id == key.id and step.model == model,
+      do: {:error, :already_serving},
+      else: :ok
+  end
+
+  # The snapshot keeps the key's label alongside its id so the audit row
+  # stays readable after the key is deleted.
+  defp step_snapshot(step) do
+    step = Repo.preload(step, :provider_key)
+
+    %{
+      "provider" => step.provider,
+      "provider_key_id" => step.provider_key_id,
+      "provider_key_label" => step.provider_key && step.provider_key.label,
+      "model" => step.model,
+      "plan_type" => step.plan_type
+    }
+  end
+
+  # Mirrors the routing UI's derivation: the key's slug decides the plan
+  # type, it is never accepted from the caller.
+  defp plan_type_for_key(key) do
+    if String.contains?(key.provider_slug, "coding"), do: "coding", else: "standard"
+  end
+
+  ## Continuous monitoring of a shipped downgrade
+
+  # Completed monitor scores considered when judging drift, and how many
+  # of them a verdict needs — three scores over a rolling window, not one
+  # unlucky answer.
+  @monitor_window 6
+  @monitor_min_scores 3
+  # Sweeps in a row below baseline before the alert fires: one bad sweep
+  # is a bad afternoon, two is a trend.
+  @monitor_drop_streak 2
+  # A drop smaller than the benchmark's own spread (floored at 5 points)
+  # is indistinguishable from noise.
+  @monitor_min_tolerance 5
+
+  @doc """
+  Starts monitoring an applied verdict: the evaluation's rubric and judge
+  keep scoring what production actually serves on this router, and a
+  sustained drop below the accepted baseline raises an anomaly.
+
+  The baseline is the applied model's own average (and spread) from the
+  accepted benchmark — what "as good as measured" means. One monitor per
+  evaluation.
+  """
+  def enable_monitor(%User{} = user, %Evaluation{} = evaluation, %RoutingChangeEvent{} = event) do
+    evaluation = get_evaluation!(user, evaluation.id)
+    target_model = event.after_step["model"]
+
+    ranking =
+      evaluation
+      |> rankings()
+      |> Enum.find(&(&1.model == target_model and is_nil(&1.variant)))
+
+    cond do
+      get_monitor(evaluation) ->
+        {:error, :already_monitoring}
+
+      is_nil(ranking) or is_nil(ranking.average) ->
+        {:error, :no_baseline}
+
+      true ->
+        %EvalMonitor{
+          router_id: evaluation.request_log.router_id,
+          evaluation_id: evaluation.id,
+          change_event_id: event.id,
+          baseline_avg: ranking.average,
+          baseline_stddev: ranking.stddev && round(ranking.stddev),
+          target_model: target_model
+        }
+        |> Repo.insert()
+    end
+  end
+
+  def get_monitor(%Evaluation{} = evaluation),
+    do: Repo.get_by(EvalMonitor, evaluation_id: evaluation.id)
+
+  def pause_monitor(%User{} = user, monitor_id),
+    do: set_monitor_status(user, monitor_id, "paused")
+
+  def resume_monitor(%User{} = user, monitor_id),
+    do: set_monitor_status(user, monitor_id, "active")
+
+  defp set_monitor_status(user, monitor_id, status) do
+    case fetch_monitor(user, monitor_id) do
+      nil -> {:error, :not_found}
+      monitor -> monitor |> Ecto.Changeset.change(status: status) |> Repo.update()
+    end
+  end
+
+  defp fetch_monitor(user, monitor_id) do
+    from(m in EvalMonitor,
+      join: r in assoc(m, :router),
+      where: m.id == ^monitor_id and r.user_id == ^user.id
+    )
+    |> Repo.one()
+  end
+
+  @doc "Active monitors whose interval has elapsed (or that never sampled)."
+  def due_monitors(now \\ DateTime.utc_now()) do
+    from(m in EvalMonitor, where: m.status == "active")
+    |> Repo.all()
+    |> Enum.filter(fn monitor ->
+      case monitor.last_sampled_at do
+        nil -> true
+        last -> DateTime.diff(now, last, :second) >= monitor.interval_hours * 3600
+      end
+    end)
+  end
+
+  @doc """
+  One monitoring sweep: judge the most recent live answers this router
+  served on the monitored model, then re-evaluate drift.
+
+  Judge-only — the answers were already generated and paid for by real
+  traffic, which is also why they are the honest thing to score. Skips
+  without sampling when the judge's key is known to be unusable (the
+  monitor stays due, so it self-heals when the key does).
+  """
+  def sweep_monitor(%EvalMonitor{} = monitor) do
+    evaluation =
+      Evaluation
+      |> Repo.get!(monitor.evaluation_id)
+      |> Repo.preload([:evaluated_by, :judge_provider_key, request_log: :router])
+
+    user = evaluation.evaluated_by
+
+    case preflight(user, evaluation).judge do
+      nil ->
+        logs = monitor_sample_logs(monitor)
+        batch_id = Ecto.UUID.generate()
+
+        for log <- logs do
+          judge_served_answer(user, evaluation, log, batch_id)
+        end
+
+        {:ok, finalize_sweep(monitor, length(logs))}
+
+      _blocker ->
+        {:error, :judge_unusable}
+    end
+  end
+
+  # The most recent live answers worth judging: real proxy traffic, served
+  # successfully by the monitored model, newer than the last sweep, whose
+  # request can feed the judge and whose answer text is extractable.
+  defp monitor_sample_logs(monitor) do
+    since = monitor.last_sampled_at || monitor.inserted_at
+
+    query =
+      from(l in RequestLog,
+        where:
+          l.router_id == ^monitor.router_id and
+            l.traffic_type == "proxy" and
+            l.status in ["success", "fallback"] and
+            l.inserted_at > ^since,
+        order_by: [desc: l.inserted_at],
+        limit: ^(monitor.sample_size * 4)
+      )
+
+    query =
+      case monitor.target_model do
+        nil -> query
+        model -> from(l in query, where: l.final_model == ^model)
+      end
+
+    query
+    |> Repo.all()
+    |> Enum.filter(&(is_nil(Replays.replay_blocker(&1)) and served_answer(&1) != nil))
+    |> Enum.take(monitor.sample_size)
+  end
+
+  defp judge_served_answer(user, evaluation, log, batch_id) do
+    started_at = System.monotonic_time(:millisecond)
+    answer = served_answer(log)
+
+    case create_run(evaluation, %{
+           kind: "monitor",
+           batch_id: batch_id,
+           source_log_id: log.id,
+           candidate_log_id: log.id,
+           candidate_provider: log.final_provider,
+           candidate_model: log.final_model,
+           candidate_latency_ms: log.latency_ms,
+           candidate_cost_usd: log.estimated_cost_usd,
+           candidate_list_cost_usd: log.list_cost_usd,
+           candidate_output: answer
+         }) do
+      {:ok, run} ->
+        with_run_failure_guard(run, fn ->
+          judge_candidate(user, evaluation, log, run, answer, started_at)
+        end)
+
+      {:error, changeset} ->
+        {:error, changeset}
+    end
+  end
+
+  defp finalize_sweep(monitor, _sampled_count) do
+    window = monitor_window_scores(monitor)
+    tolerance = max(monitor.baseline_stddev || 0, @monitor_min_tolerance)
+
+    dropped? =
+      length(window) >= @monitor_min_scores and
+        Enum.sum(window) / length(window) < monitor.baseline_avg - tolerance
+
+    drops = if dropped?, do: monitor.consecutive_drops + 1, else: 0
+
+    # Recovery clears the alert: an anomaly describes the present, not a
+    # grudge. A stale alert would train the operator to ignore the panel.
+    alerted_at =
+      cond do
+        not dropped? -> nil
+        drops >= @monitor_drop_streak -> monitor.alerted_at || DateTime.utc_now()
+        true -> monitor.alerted_at
+      end
+
+    monitor
+    |> Ecto.Changeset.change(
+      last_sampled_at: DateTime.utc_now(),
+      consecutive_drops: drops,
+      alerted_at: alerted_at
+    )
+    |> Repo.update!()
+    |> tap(fn updated ->
+      Phoenix.PubSub.broadcast(
+        DodoRouter.PubSub,
+        "evaluation:#{updated.evaluation_id}",
+        {:monitor_updated, updated.id}
+      )
+    end)
+  end
+
+  @doc "The rolling window of completed monitor scores, newest first."
+  def monitor_window_scores(%EvalMonitor{} = monitor) do
+    from(r in EvaluationRun,
+      where:
+        r.evaluation_id == ^monitor.evaluation_id and r.kind == "monitor" and
+          r.status == "completed" and not is_nil(r.score),
+      order_by: [desc: r.inserted_at],
+      limit: @monitor_window,
+      select: r.score
+    )
+    |> Repo.all()
+  end
+
+  @doc "Recent monitor runs for display, newest first."
+  def monitor_runs(%Evaluation{} = evaluation, limit \\ 20) do
+    from(r in EvaluationRun,
+      where: r.evaluation_id == ^evaluation.id and r.kind == "monitor",
+      order_by: [desc: r.inserted_at],
+      limit: ^limit
+    )
+    |> Repo.all()
+  end
+
+  @doc """
+  Why a log cannot anchor a next_action comparison, or nil.
+
+  The mode judges the candidate's proposal against what production
+  actually did, so a log whose stored response yields no extractable
+  action has nothing to compare against.
+  """
+  def next_action_blocker(log) do
+    if served_answer(log), do: nil, else: :no_recorded_action
+  end
+
+  @doc """
+  The first variant whose message patches cannot be applied to one of the
+  source logs, as `%{variant:, log_id:, reason:}` — or nil when every
+  patch lands.
+
+  Whether an index points at a message is only knowable per source log, so
+  `Evaluation`'s shape validation cannot decide it. A benchmark that
+  silently measured the unpatched request would be confidently wrong, so
+  both creation paths — the agent's `create_eval` and the builder — refuse
+  before anything is spent. Callers word their own message: an agent can
+  use the log id, a builder user cannot.
+  """
+  def message_patch_blocker(variants, logs) when is_list(variants) do
+    pairs =
+      for variant <- variants,
+          is_map(variant),
+          patches = variant["message_patches"],
+          is_list(patches) and patches != [],
+          log <- logs,
+          do: {variant, patches, log}
+
+    Enum.find_value(pairs, fn {variant, patches, log} ->
+      case Replays.prepare_request(log, "replay-probe", nil, nil, message_patches: patches) do
+        {:ok, _request} -> nil
+        {:error, reason} -> %{variant: variant["name"], log_id: log.id, reason: reason}
+      end
+    end)
+  end
+
+  def message_patch_blocker(_variants, _logs), do: nil
+
+  @doc """
+  Extracts the assistant's answer text from a stored response body, in
+  either wire format — OpenAI-shaped (`choices`) or Anthropic-shaped
+  (`content` blocks). nil when there is nothing judgeable.
+  """
+  def served_answer(%RequestLog{response_body: body}) when is_binary(body) do
+    case Jason.decode(body) do
+      {:ok, decoded} -> response_content(decoded) || anthropic_response_content(decoded)
+      {:error, _} -> nil
+    end
+  end
+
+  def served_answer(_log), do: nil
+
+  defp anthropic_response_content(%{"content" => blocks}) when is_list(blocks) do
+    blocks
+    |> Enum.map(fn
+      %{"type" => "text", "text" => text} when is_binary(text) ->
+        text
+
+      %{"type" => "tool_use"} = block ->
+        "[tool call] #{block["name"]}(#{Jason.encode!(block["input"] || %{})})"
+
+      _other ->
+        nil
+    end)
+    |> Enum.reject(&(&1 in [nil, ""]))
+    |> case do
+      [] -> nil
+      parts -> Enum.join(parts, "\n\n")
+    end
+  end
+
+  defp anthropic_response_content(_), do: nil
+
   def parse_judgement(raw) when is_binary(raw) do
     json =
       raw
@@ -532,9 +2154,8 @@ defmodule DodoRouter.Evaluations do
 
     with {:ok, decoded} <- Jason.decode(json),
          score when is_number(score) <- decoded["score"],
-         summary when is_binary(summary) <- decoded["summary"] do
-      score = score |> round() |> min(100) |> max(0)
-
+         summary when is_binary(summary) <- decoded["summary"],
+         {:scale, score} when score in 0..100 <- {:scale, round(score)} do
       {:ok,
        %{
          score: score,
@@ -542,10 +2163,20 @@ defmodule DodoRouter.Evaluations do
          reasoning: if(is_binary(decoded["reasoning"]), do: decoded["reasoning"]),
          criterion_scores: normalize_scores(decoded["criterion_scores"]),
          issues: Enum.filter(decoded["issues"] || [], &is_binary/1),
-         rubric_gaps: Enum.filter(decoded["rubric_gaps"] || [], &is_binary/1)
+         rubric_gaps: Enum.filter(decoded["rubric_gaps"] || [], &is_binary/1),
+         preference: normalize_preference(decoded["preference"])
        }}
     else
-      _ -> {:error, "Judge returned an invalid structured response"}
+      # Clamping stored 150 as 100 and a 1-5-scale 3 as 3/100 on the same
+      # axis with no flag. Off-scale is a judge-stage failure: the answer is
+      # kept and retry_eval re-judges it for pennies (dodo_router-exh).
+      {:scale, off_scale} ->
+        {:error,
+         "Judge scored #{off_scale}, outside the 0-100 scale — the rubric may imply a " <>
+           "different scale. Restate the criteria in terms of 0-100 and re-judge."}
+
+      _ ->
+        {:error, "Judge returned an invalid structured response"}
     end
   end
 
@@ -570,15 +2201,57 @@ defmodule DodoRouter.Evaluations do
   defp create_run(evaluation, attrs) do
     %EvaluationRun{}
     |> EvaluationRun.changeset(
-      Map.merge(attrs, %{evaluation_id: evaluation.id, judge_prompt_version: @prompt_version})
+      Map.merge(attrs, %{
+        evaluation_id: evaluation.id,
+        judge_prompt_version: prompt_version(evaluation, attrs[:kind])
+      })
     )
     |> Repo.insert()
   end
 
-  defp update_run!(run, attrs), do: run |> EvaluationRun.changeset(attrs) |> Repo.update!()
+  # The version names the prompt the judge actually saw: monitor runs judge
+  # in rubric mode whatever the evaluation's own framing, and next_action
+  # scores are not comparable with rubric scores of the same version number.
+  defp prompt_version(_evaluation, "monitor"), do: @prompt_version
+
+  defp prompt_version(evaluation, _kind) do
+    case Evaluation.comparison_mode(evaluation) do
+      "next_action" -> @prompt_version <> "-next-action"
+      _rubric -> @prompt_version
+    end
+  end
+
+  defp update_run!(run, attrs) do
+    attrs =
+      case Map.fetch(attrs, :error) do
+        {:ok, message} -> Map.put(attrs, :error, run_error_text(message))
+        :error -> attrs
+      end
+
+    run |> EvaluationRun.changeset(attrs) |> Repo.update!()
+  end
 
   @doc false
-  def judge_request(evaluation, candidate_content) do
+  def judge_request(evaluation, candidate_content),
+    do: judge_request(evaluation, evaluation.request_log, candidate_content)
+
+  @doc false
+  def judge_request(evaluation, source_log, candidate_content),
+    do:
+      judge_request(
+        evaluation,
+        source_log,
+        candidate_content,
+        Evaluation.comparison_mode(evaluation)
+      )
+
+  @doc false
+  # The judge scores against the request the run actually replayed — with a
+  # set of source logs that is the run's own log, not the anchor. `mode` is
+  # passed explicitly rather than read off the evaluation because a monitor
+  # sweep judges in rubric mode regardless: comparing a live answer to the
+  # recorded action would be comparing it to itself.
+  def judge_request(evaluation, source_log, candidate_content, mode) do
     %{
       "model" => evaluation.judge_model,
       "response_format" => %{"type" => "json_object"},
@@ -590,41 +2263,315 @@ defmodule DodoRouter.Evaluations do
         },
         %{
           "role" => "user",
-          "content" => judge_prompt(evaluation, evaluation.request_log, candidate_content)
+          "content" => judge_prompt(evaluation, source_log, candidate_content, mode)
         }
       ]
     }
   end
 
+  # A monitor judges live answers for absolute quality even on a
+  # next_action evaluation — there, the recorded action IS the live answer.
+  defp judge_mode(_evaluation, %EvaluationRun{kind: "monitor"}), do: "rubric"
+  defp judge_mode(evaluation, _run), do: Evaluation.comparison_mode(evaluation)
+
   @doc false
-  def proxy_error_message({:error, :all_providers_failed, attempts}) do
-    inspect(%{error: :all_providers_failed, attempts: attempts})
+  # Every attempt the chain made, named. This used to `inspect/1` the whole
+  # attempts list into a user-facing column, which put Elixir map syntax —
+  # and the *judge's* provider — in front of someone reading a candidate row.
+  # `:all_providers_failed` is the chain's own name for "nothing left to
+  # try", and for an evaluation the chain is one step long — the judge and
+  # each candidate are dispatched with an explicit `steps: [step]`, so the
+  # router's own fallbacks never apply and `should_fallback?/3` can't fire
+  # with nothing remaining. Reporting one failed attempt as "every provider
+  # failed" described a fallback that cannot happen, and reads as though the
+  # judge quietly moved to another provider — which would make the judge a
+  # variable and the scores incomparable.
+  def proxy_error_message({:error, :all_providers_failed, attempts}) when is_list(attempts) do
+    case Enum.map(attempts, &attempt_summary/1) do
+      [] -> "the provider failed"
+      [only] -> only
+      summaries -> "all #{length(summaries)} providers failed (#{Enum.join(summaries, "; ")})"
+    end
   end
 
-  def proxy_error_message({:error, reason}), do: inspect(reason)
-  def proxy_error_message(error), do: inspect(error)
+  def proxy_error_message({:error, reason}), do: humanize_reason(reason)
+  def proxy_error_message(error), do: humanize_reason(error)
+
+  # Only these three fields, never the whole attempt: an attempt carries
+  # outbound_headers, and the Authorization header in it is the real
+  # credential — the proxy redacts when it *writes a log*, so anything built
+  # from the in-memory attempts goes around that redaction.
+  defp attempt_summary(attempt) do
+    provider = attempt[:provider] || attempt["provider"] || "provider"
+    reason = attempt[:error] || attempt["error"]
+    status = attempt[:http_status] || attempt["http_status"]
+
+    [provider, reason && humanize_reason(reason), status && "HTTP #{status}"]
+    |> Enum.reject(&is_nil/1)
+    |> Enum.join(" ")
+  end
+
+  @error_limit 2_000
+
+  @doc """
+  What may be stored in `evaluation_runs.error`.
+
+  Two guarantees, both learned the hard way: no credential (a message built
+  from live attempt data once put a working OAuth token on the page), and a
+  bounded length (a 10,706-character inspected map was rendered as a run's
+  one-line subtitle).
+
+  Applied at the write, not at each call site, so a new failure branch
+  cannot forget it.
+  """
+  def run_error_text(nil), do: nil
+
+  def run_error_text(message) when is_binary(message) do
+    redacted = Redact.redact_secrets(message)
+
+    marker = " … [truncated]"
+
+    if String.length(redacted) > @error_limit do
+      String.slice(redacted, 0, @error_limit - String.length(marker)) <> marker
+    else
+      redacted
+    end
+  end
+
+  def run_error_text(other), do: other |> inspect() |> run_error_text()
+
+  defp humanize_reason(reason) when is_atom(reason) or is_binary(reason) do
+    case to_string(reason) do
+      "rate_limited" -> "rate limited"
+      "timeout" -> "timed out"
+      "server_error" -> "server error"
+      "context_overflow" -> "context window exceeded"
+      "auth_invalid" -> "authentication rejected"
+      other -> String.replace(other, "_", " ")
+    end
+  end
+
+  defp humanize_reason(reason), do: inspect(reason)
+
+  # Anything but the three words is treated as unstated, which next_action
+  # mode turns into a judge-stage failure — not silently coerced to a tie.
+  defp normalize_preference(preference) when is_binary(preference) do
+    case preference |> String.trim() |> String.downcase() do
+      valid when valid in ["better", "equivalent", "worse"] -> valid
+      _other -> nil
+    end
+  end
+
+  defp normalize_preference(_), do: nil
+
+  defp judge_parse_message(reason),
+    do: "Judge response could not be scored — " <> humanize_reason(reason)
+
+  defp judge_setup_message(:provider_key_not_found),
+    do: "The judge's provider key is no longer configured — pick another key and re-run."
+
+  defp judge_setup_message(reason), do: "Judge setup failed — " <> humanize_reason(reason)
+
+  # Retries `fun` while it comes back rate limited, walking the backoff
+  # ladder. Delays are configurable so the test suite doesn't sleep. A
+  # Retry-After the provider sent outranks the ladder — sleeping less than
+  # the provider asked just converts one 429 into two (dodo_router-6py).
+  defp with_rate_limit_backoff(fun) do
+    delays =
+      Application.get_env(:dodo_router, :eval_rate_limit_backoff_ms, @rate_limit_backoff_ms)
+
+    Enum.reduce_while(delays, fun.(), fn delay, result ->
+      if rate_limited?(result) do
+        Process.sleep(max(delay, retry_after_ms(result) || 0))
+        {:cont, fun.()}
+      else
+        {:halt, result}
+      end
+    end)
+  end
+
+  # Capped: a provider asking for ten minutes must not stall the runner
+  # longer than a run is worth.
+  @retry_after_cap_ms 30_000
+
+  @doc false
+  def retry_after_ms(result) do
+    steps =
+      case result do
+        {:ok, %{attempted_steps: steps}} -> steps
+        {:error, :all_providers_failed, attempts} -> attempts
+        _ -> []
+      end
+
+    steps
+    |> List.wrap()
+    |> Enum.reverse()
+    |> Enum.find_value(fn step ->
+      (step[:response_headers] || step["response_headers"])
+      |> header_value("retry-after")
+      |> parse_retry_after()
+    end)
+  end
+
+  defp header_value(headers, name) when is_list(headers) do
+    Enum.find_value(headers, fn
+      {key, value} -> if String.downcase(to_string(key)) == name, do: value
+      _ -> nil
+    end)
+  end
+
+  defp header_value(headers, name) when is_map(headers) do
+    Enum.find_value(headers, fn {key, value} ->
+      if String.downcase(to_string(key)) == name do
+        case value do
+          [first | _] -> first
+          other -> other
+        end
+      end
+    end)
+  end
+
+  defp header_value(_, _), do: nil
+
+  # Seconds form only; the HTTP-date form is rare on 429s and the ladder is
+  # a fine fallback for it.
+  defp parse_retry_after(value) when is_binary(value) do
+    case Integer.parse(value) do
+      {seconds, ""} when seconds > 0 -> min(seconds * 1000, @retry_after_cap_ms)
+      _ -> nil
+    end
+  end
+
+  defp parse_retry_after(_), do: nil
+
+  # Both shapes a rate limit can arrive in: a persisted candidate log whose
+  # attempts were all rate limited, and a judge dispatch that returned the
+  # attempts directly.
+  defp rate_limited?({:ok, %{attempted_steps: steps, status: "error"}}),
+    do: rate_limited_steps?(steps)
+
+  defp rate_limited?({:error, :all_providers_failed, attempts}), do: rate_limited_steps?(attempts)
+  defp rate_limited?(_result), do: false
+
+  defp rate_limited_steps?(steps) when is_list(steps) do
+    steps != [] and
+      Enum.all?(steps, fn step -> (step[:error] || step["error"]) == "rate_limited" end)
+  end
+
+  defp rate_limited_steps?(_steps), do: false
 
   @doc false
   def candidate_successful?(%{status: status}), do: status in ["success", "fallback"]
 
-  defp candidate_error_message(candidate_log) do
-    detail =
-      with body when is_binary(body) <- candidate_log.response_body,
-           {:ok, decoded} <- Jason.decode(body) do
-        decoded["detail"] || get_in(decoded, ["error", "message"]) || decoded["message"]
-      else
-        _ -> nil
-      end
+  @doc false
+  def candidate_error_message(candidate_log, requested_model \\ nil) do
+    cond do
+      reason = timeout_reason(candidate_log) -> reason
+      detail = attempt_error_detail(candidate_log, requested_model) -> detail
+      detail = provider_error_detail(candidate_log) -> detail
+      true -> "Candidate call failed (HTTP #{candidate_log.http_status || "unknown"})"
+    end
+  end
 
-    detail ||
-      "Candidate provider returned an error (HTTP #{candidate_log.http_status || "unknown"})"
+  # When the chain fails, the log's own body is the proxy's synthesized
+  # error; what the provider actually said is on the attempt. Reading only
+  # the body is how a rate limit came out as a bare HTTP 502.
+  defp attempt_error_detail(candidate_log, requested_model) do
+    steps = Map.get(candidate_log, :attempted_steps) || []
+
+    with step when not is_nil(step) <- List.last(steps),
+         reason when not is_nil(reason) <- step[:error] || step["error"] do
+      body_detail =
+        case Jason.decode(step[:error_body] || step["error_body"] || "") do
+          {:ok, decoded} when is_map(decoded) ->
+            join_error_detail(
+              get_in(decoded, ["error", "message"]) || decoded["message"],
+              get_in(decoded, ["error", "type"])
+            )
+
+          _ ->
+            nil
+        end
+
+      humanized = humanize_reason(reason)
+
+      cond do
+        # The one actionable sentence: the model is gone and no retry will
+        # bring it back. Everything else about a 404 is noise beside that.
+        reason in [:model_not_found, "model_not_found"] ->
+          "The model #{requested_model || model_from(body_detail)} no longer exists at this " <>
+            "provider — pick another."
+
+        is_nil(body_detail) ->
+          "Candidate call #{humanized}"
+
+        String.contains?(String.downcase(body_detail), humanized) ->
+          body_detail
+
+        true ->
+          "#{humanized}: #{body_detail}"
+      end
+    else
+      _ -> nil
+    end
+  end
+
+  # Our own deadline, not the provider's answer: the 502 and the body are
+  # both ours, and "the provider returned an error" is a false accusation.
+  defp timeout_reason(candidate_log) do
+    timed_out? =
+      Enum.any?(Map.get(candidate_log, :attempted_steps) || [], fn step ->
+        (step[:error] || step["error"]) == "timeout"
+      end) or Map.get(candidate_log, :response_body) == "Request timed out"
+
+    if timed_out?, do: "Candidate timed out before answering"
+  end
+
+  # A provider's message is not always the informative half — Anthropic's
+  # rate-limit body carries the message "Error" and puts the meaning in
+  # `type`. Keep both, and never return a message that says nothing.
+  defp provider_error_detail(candidate_log) do
+    with body when is_binary(body) <- Map.get(candidate_log, :response_body),
+         {:ok, decoded} <- Jason.decode(body) do
+      message = decoded["detail"] || get_in(decoded, ["error", "message"]) || decoded["message"]
+      type = get_in(decoded, ["error", "type"]) || decoded["type"]
+
+      join_error_detail(message, type)
+    else
+      _ -> nil
+    end
+  end
+
+  # Providers name the model in the message ("model: claude-3-5-sonnet-…").
+  defp model_from(detail) when is_binary(detail) do
+    case Regex.run(~r/model:?\s*([A-Za-z0-9._\-]+)/, detail) do
+      [_, model] -> model
+      _ -> detail
+    end
+  end
+
+  defp model_from(_detail), do: "requested"
+
+  defp join_error_detail(nil, nil), do: nil
+  defp join_error_detail(message, nil), do: message
+  defp join_error_detail(nil, type), do: humanize_reason(type)
+
+  defp join_error_detail(message, type) do
+    readable = humanize_reason(type)
+
+    cond do
+      # "Error", "error", and friends carry no information; the type does.
+      String.downcase(message) in ["error", "unknown", ""] -> readable
+      String.contains?(String.downcase(message), String.downcase(readable)) -> message
+      true -> "#{readable}: #{message}"
+    end
   end
 
   # The judge must stay blind to candidate identity: LLM judges show brand
   # and self-preference bias, so neither the model name, provider envelope,
   # nor sampling params may appear in the prompt — only the conversation
   # and the candidate's message content.
-  defp judge_prompt(evaluation, source, candidate_content) do
+  defp judge_prompt(evaluation, source, candidate_content, "rubric") do
     """
     Score the assistant response from 0 to 100 against the criteria. Intent match and completeness matter most. First work through the response against each criterion in the reasoning field, then score — the score must follow from the reasoning. If the criteria or examples are too vague or incomplete to judge confidently, name what is missing in rubric_gaps (empty array if the rubric was sufficient).
     #{answer_shape(source.request_body)}
@@ -645,6 +2592,38 @@ defmodule DodoRouter.Evaluations do
     </SOURCE_RESPONSE>
 
     Return exactly: {"reasoning": "assessment of the response against each criterion", "score": 0-100, "summary": "concise rationale", "criterion_scores": {"intent_match": 0-100, "completeness": 0-100, "appropriateness": 0-100, "accuracy": 0-100}, "issues": ["specific issue"], "rubric_gaps": ["what the criteria failed to specify, if anything"]}
+    """
+  end
+
+  # Per-decision framing: the same frozen history, two next moves. Nothing
+  # after this turn is simulated — the tool results in SOURCE_REQUEST really
+  # happened — so the judge compares exactly one decision, not a rollout.
+  defp judge_prompt(evaluation, source, candidate_content, "next_action") do
+    """
+    Two assistants received the identical conversation history in SOURCE_REQUEST and each produced a next action at this point. RECORDED_ACTION is what the production assistant actually did; CANDIDATE_ACTION is a challenger's proposal for the same turn. Nothing after this turn is simulated — every tool result in the history really happened — so judge exactly one decision: which next action better advances the task, per the criteria. Intent match and completeness matter most.
+
+    First work through BOTH actions against the criteria in the reasoning field, then decide. Score the CANDIDATE action from 0 to 100 for its own quality, and state a preference for the candidate relative to the recorded action: "better", "equivalent", or "worse". The preference must follow from the reasoning; equivalent means a real tie, not an unexamined one. If the criteria are too vague to decide confidently, name what is missing in rubric_gaps (empty array if the rubric was sufficient).
+    #{answer_shape(source.request_body)}
+    CRITERIA:
+    #{evaluation.criteria}
+
+    GOOD EXAMPLES (optional calibration):
+    #{evaluation.good_examples || "None"}
+
+    BAD EXAMPLES (optional calibration):
+    #{evaluation.bad_examples || "None"}
+
+    <SOURCE_REQUEST>
+    #{source.request_body |> source_conversation() |> truncate_middle(@judge_source_limit)}
+    </SOURCE_REQUEST>
+    <RECORDED_ACTION>
+    #{truncate_middle(served_answer(source) || "", @judge_source_limit)}
+    </RECORDED_ACTION>
+    <CANDIDATE_ACTION>
+    #{truncate_middle(candidate_content || "", @judge_source_limit)}
+    </CANDIDATE_ACTION>
+
+    Return exactly: {"reasoning": "both actions weighed against each criterion", "preference": "better" | "equivalent" | "worse", "score": 0-100, "summary": "concise rationale", "criterion_scores": {"intent_match": 0-100, "completeness": 0-100, "appropriateness": 0-100, "accuracy": 0-100}, "issues": ["specific issue with the candidate action"], "rubric_gaps": ["what the criteria failed to specify, if anything"]}
     """
   end
 
@@ -728,6 +2707,19 @@ defmodule DodoRouter.Evaluations do
 
   def extract_message_content(_), do: nil
 
+  # The response's own model claim — `stamp_serving_model` uses put_new, so
+  # a provider that names the snapshot it resolved to wins over the step's
+  # requested string. This is the receipt a ranking keyed on the requested
+  # model needs (dodo_router-zfn).
+  defp extract_served_model(response_body) when is_binary(response_body) do
+    case Jason.decode(response_body) do
+      {:ok, %{"model" => model}} when is_binary(model) and model != "" -> model
+      _ -> nil
+    end
+  end
+
+  defp extract_served_model(_), do: nil
+
   defp truncate_middle(text, max) do
     length = String.length(text)
 
@@ -799,11 +2791,17 @@ defmodule DodoRouter.Evaluations do
     end
   end
 
+  # Coercing "high" to 0 claimed the judge scored that criterion zero, and
+  # clamping 400 to 100 invented a compliant number. Entries that are not
+  # 0-100 numbers are dropped — absent is honest, fabricated is not.
   defp normalize_scores(scores) when is_map(scores) do
-    Map.new(scores, fn {key, value} ->
-      normalized = if is_number(value), do: value |> round() |> min(100) |> max(0), else: 0
-      {to_string(key), normalized}
-    end)
+    for {key, value} <- scores,
+        is_number(value),
+        rounded = round(value),
+        rounded in 0..100,
+        into: %{} do
+      {to_string(key), rounded}
+    end
   end
 
   defp normalize_scores(_), do: %{}

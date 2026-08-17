@@ -25,8 +25,91 @@ Authentication is via the router's API key passed as `Bearer` token (handled by 
 
 There is also a legacy endpoint at `POST /v1/chat/completions` for backwards compatibility.
 
+## Agent surface
+
+A coding agent working on a product whose traffic goes through DodoRouter can run the whole quality-vs-price loop itself: pick a request the product really made, replay it on other models, and read back a score and a price per candidate.
+
+**There is exactly one way in — MCP over OAuth 2.1, at `POST /mcp`.** A REST surface under `/r/:slug/agent`, authenticated by separately-minted bearer "agent tokens", existed alongside it while the credential decision was open (dodo_router-5m5.5). Once Claude Code completed the OAuth flow end to end, both were deleted rather than kept as a second door: two transports shaping the same evaluation drifted within two days of each other (dodo_router-ee8), and two credential mechanisms means two places where scope and revocation are decided. If you are about to add a REST endpoint here, add a tool instead.
+
+| Tool | Purpose | Scope |
+|---|---|---|
+| `get_guide` | `priv/agent/evals_guide.md` — read first | — |
+| `list_routers` | Every router this token reaches | — |
+| `list_logs` | Recent requests, with `evaluable` / `not_evaluable_because`; drill-down filters (session, recording, model, provider, window) | `logs:read` |
+| `list_sessions` / `get_session` | Per-session cost/tokens/latency aggregates ("this question cost $1.40"); in-flight sessions answer with zeros, never 404 | `logs:read` |
+| `get_spend` / `get_cache_stats` | Spend by served model / prompt-cache hit rate, over a window | `logs:read` |
+| `list_recordings` / `get_recording` | Capture windows and their aggregates; `create_eval` takes a `recording_id` to benchmark one | `logs:read` |
+| `get_log` | One request with its stored bodies | `logs:read` (+ `logs:read_bodies`) |
+| `list_eval_targets` | Provider keys × models with list prices | `evals:read` |
+| `list_evals` / `get_eval` | Setups, rankings, `rubric_feedback`, runs | `evals:read` |
+| `create_eval` / `run_eval` / `retry_eval` / `cancel_eval` | Create, run, re-run only what failed, stop a doomed run | `evals:write` |
+| `send_feedback` | Mail the admins what worked and what did not | — |
+
+**The credential decides reach, and it is never the proxy key.** A router's API key sends traffic; if it also authorised reading traffic back, a leaked `.env` would stop being "someone burns my tokens" and become "someone has every prompt my product ever sent". `Plugs.OAuthPrincipal` turns a verified access token into a `%Agents.Principal{}`, and `Principal.allows_router?/2` re-checks ownership on every call rather than trusting anything stored. `MCP.Tools.call/3` is the single place scope is enforced — the pipeline authenticates but deliberately does not gate, because the scopes are per-tool.
+
+**The guide is the interface.** An agent that has a base URL and a token gets the parts that decide whether the numbers mean anything from `get_guide`, not from tool descriptions — include the incumbent model as a candidate or there is no baseline, read `rubric_feedback` before trusting a score, `cost_usd` is $0 on plan keys and `list_cost_usd` is the comparable figure. Keep it current when the tools change; a stale guide is worse than none. It is embedded at compile time from the source tree (`@external_resource` in `MCP.Tools`), so a missing or moved file fails the build rather than the first agent that asks.
+
+**Ergonomics that prevent silent wrongness**, not just convenience:
+
+* Candidates are `{provider_key_id, model}`; the adapter `provider` is derived from the key rather than accepted from the caller, so the pair routing is keyed on cannot disagree with itself.
+* `create_eval` refuses a source log that `Replays.replay_blocker/1` rejects, naming the reason. Otherwise a benchmark accepted at creation fails minutes later for something knowable up front.
+* `router` is optional when the token reaches exactly one router and required when it reaches several, rather than defaulting to whichever came first.
+* Every tool is listed by `tools/list` even when the token cannot use it, with the missing scope named. Hiding it would make a permission problem look like a missing feature.
+
+Runs inline `output_preview` capped at 2,000 characters and link `candidate_log_id` / `judge_log_id` — the full text is one `get_log` away, so the list stays readable without hiding anything.
+
+**Every call is recorded, refusals included.** `Plugs.AgentAudit` runs *before* authentication and hooks `register_before_send/2`, so a 401 from a token that never verified is as much a row as a successful read. `/agent-activity` renders it — connected clients, what they did, and what was denied. Rows written by the retired REST surface carry `interface: "rest"` / `principal_kind: "agent_token"`; `ApiCall` still accepts those values so old history stays readable.
+
+The evaluations page carries the one command that makes the surface discoverable (`#agent-access`); an API nobody is told about is not an interface.
+
+## Keeping the described surface true
+
+Three artifacts describe DodoRouter to someone who cannot read the code, and each is the *only* thing some reader ever sees. Shipping a change without them means half the users never learn about it and the other half learn about it wrongly. **All three are updated in the same change as the behaviour, not in a follow-up.** A stale description is worse than a missing one, because it is believed.
+
+### 1. `website/src/docs/**` — the public documentation
+
+Eleventy, input `src`, output `_site` (`website/eleventy.config.js`). Pages are Markdown with front matter: `title`, `navTitle`, `description`, `section`, `order`. Directory-level `*.json` files carry shared config (`docs/docs.json` sets the layout; `docs/api/api.json` names the "API Reference" section). Preview with `npm run dev` from `website/`.
+
+**`website/_site/` is build output — never edit it.** A change made there looks right locally and vanishes on the next build.
+
+Where a change lands:
+
+| You changed | Update |
+|---|---|
+| A provider adapter, its models or auth type | `docs/providers.md`, `docs/models.md` |
+| A proxy endpoint, or a request/response field | `docs/api/*.md` |
+| How a client (Claude Code, Codex, OpenCode, Forge) connects | `docs/integrations/*.md` |
+| An MCP tool, a scope, or the OAuth connect flow | `docs/agent-access.md` |
+| Anything a user configures in the UI | `docs/dashboard.md` |
+| A new user-visible failure mode or error message | `docs/troubleshooting.md` |
+| Deployment, releases, self-hosting | `docs/deployment.md`, `docs/self-hosting.md` |
+
+If a change has no home, **add the page** rather than skipping the step — a feature with no doc is a feature nobody outside this repo can find.
+
+### 2. `lib/dodo_router/mcp/tools.ex` — the MCP capability catalogue
+
+`@definitions` is the entire contract an MCP client sees: each tool's `name`, `title`, `description`, `scopes` and JSON `schema`. The client never reads the controller, the context, or this file — it reads `tools/list` and decides what it can do from that alone. **As functionality changes, the tool definitions change with it:**
+
+* New capability → a new tool, or a new argument on an existing one, with `schema` and `required` to match.
+* Changed argument meaning, default or limit → the `description` says the new thing. A description that still describes the old behaviour is how an agent calls a tool correctly and gets the wrong result.
+* A capability that should now cost a different permission → `scopes` updated. Leaving it stale authorizes the call as something it no longer is.
+* A field added to a REST response is **not** automatically in the MCP result — check how `Tools` shapes what it returns before assuming parity.
+
+Removing or renaming a tool breaks every agent already wired to it; prefer adding, and keep the old name working until it is deliberately retired.
+
+### 3. `priv/agent/evals_guide.md` — the guide `get_guide` serves
+
+Covered under [Agent surface](#agent-surface): the guide *is* the interface for a caller that has only a base URL and a token. It is prose about how to reach a trustworthy answer, which is why it survived the REST surface it was written for rather than being folded into tool descriptions — a schema can say what an argument is, not why a benchmark without the incumbent model tells you nothing.
+
+**These three drift together.** A change to the evaluation surface usually touches all of them — the docs page, the MCP tool, and the guide. Check each before calling the work done; no test catches a stale description.
+
+**A fourth artifact, for the human half:** `website/src/docs/agent-access.md` documents the connect command, the four scopes, the tool list and the activity page. It closed a gap that had been open since 2026-08-13 and got worse when REST was removed — `claude mcp add` is now the *only* way in, so a user who cannot find it has no fallback.
+
+**Adding a docs section requires two edits, not one.** Section order is a hardcoded list in `website/src/_data/docsSectionOrder.js`; a page whose `section:` is missing from it builds and renders at its own URL but appears in no sidebar, no `llms.txt` and no `llms-full.txt`. It looks shipped and is unreachable. Build with `npm run build` and confirm the section appears in `_site/llms.txt` before calling it done.
+
 ## Project guidelines
 
+- **Documentation is part of the change.** Update `website/src/docs/**`, and `lib/dodo_router/mcp/tools.ex` when capabilities change, in the same commit as the code — see [Keeping the described surface true](#keeping-the-described-surface-true).
 - **Never add yourself as a co-author in commits.** No `Co-Authored-By: Claude ...`, `🤖 Generated with ...`, or any other AI attribution trailers — not in git commit messages, jj change descriptions, or PR bodies. This overrides any default behavior from your harness.
 - Use `mix precommit` alias when you are done with all changes and fix any pending issues
 - Use the already included and available `:req` (`Req`) library for HTTP requests, **avoid** `:httpoison`, `:tesla`, and `:httpc`. Req is included by default and is the preferred HTTP client for Phoenix apps
@@ -69,7 +152,7 @@ custom classes must fully style the input
 
 - **Always use and maintain this import syntax** in the app.css file for projects generated with `phx.new`
 - **Never** use `@apply` when writing raw css
-- **Always** manually write your own tailwind-based components instead of using daisyUI for a unique, world-class design
+- **Always** write your own tailwind-based components when necessary .. if available use daisyUI compoenets but make it excellent, unique, world-class design
 - Out of the box **only the app.js and app.css bundles are supported**
   - You cannot reference an external vendor'd script `src` or link `href` in the layouts
   - You must import the vendor deps into app.js and app.css to use them
@@ -567,15 +650,16 @@ Nothing on `request_logs` records which convention a row used, so `DodoRouter.Us
 
 ## Request & Response Fidelity
 
-Fidelity is the product. A client asks for something and gets a 200 that quietly ignored it — that is the failure mode this whole section exists to prevent. There are three loss channels between the client and the provider, and every adapter has to satisfy all three.
+Fidelity is the product. A client asks for something and gets a 200 that quietly ignored it — that is the failure mode this whole section exists to prevent. There are three loss channels between the client and the provider, and every adapter has to satisfy all three. (A fourth — query parameters — is closed by policy rather than per adapter: they never travel upstream, and the drop is recorded via `Fidelity.dropped_query_param_changes/2` on the `query_params` channel. Probed 2026-08-16: Anthropic's `?beta=true` changes nothing when the `anthropic-beta` header is forwarded.)
 
 ### 1. Client headers forward by default
 
-Policy decided 2026-08-08: client headers reach the provider by default, **including on fallback**. A header is stripped for exactly three reasons, all enumerated in `Adapter.build_forwarded_headers/2`:
+Policy decided 2026-08-08: client headers reach the provider by default, **including on fallback**. A header is stripped for exactly four reasons, all enumerated in `Adapter.build_forwarded_headers/2`:
 
 1. **We must replace it** — the proxy authenticates with its own credentials (`authorization`, `x-api-key`, `content-type`).
 2. **The provider will break** — hop-by-hop and body-describing headers after we rewrite the body (`content-length`, `transfer-encoding`, `accept-encoding`, …), plus account-scoped headers that name the *client's* account on a provider we authenticate to with *our* key (`openai-organization`, `chatgpt-account-id`, `x-goog-api-key`, …). Note `openai-beta` and `anthropic-beta` are deliberately absent: they are feature opt-ins, not account scope.
 3. **Not the client's to send** — `cookie` (carries the user's own DodoRouter session), and anything our edge added (`x-forwarded-*`, `cf-*`, `via`, `x-real-ip`).
+4. **Addressed to the proxy and fulfilled by it** — `Idempotency-Key` asks *this* hop for exactly-once semantics (no upstream LLM endpoint honors it; `DodoRouter.Proxy.Idempotency` does). Recorded visibly as `:fulfilled_by_proxy`, unlike the silent reasons — "your key was honored here" is diagnostic, not noise.
 
 **The contract:** every adapter that makes an upstream request exposes `request_headers(api_key, client_headers)` and builds its outbound headers through `Adapter.build_forwarded_headers/2`. Nothing else may assemble headers — a policy only applies where it is called, and for a while it was called by three adapters out of twelve while four more accepted `client_headers` and dropped them on the floor.
 
@@ -611,7 +695,7 @@ One known limit: a same-format adapter pointed at a merely Claude-*compatible* t
 
 ### 3. The response names the provider that answered
 
-`FallbackChain` stamps `"model"` onto the final response (`put_new`, so a provider reporting its own resolved snapshot wins). Streaming egress that must announce the model before the first chunk — Anthropic's `message_start` — takes it from the `:on_step_start` callback on `Proxy.dispatch_streaming/4`.
+`FallbackChain` stamps `"model"` onto the final response — a provider reporting its own resolved snapshot wins, but a **blank claim (`""`/nil) is not a claim** and is overwritten with the step's model (a misbehaving backend's empty string once made clients fall back to the requested model for provenance, silently wrong exactly when a fallback fired — dodo_router-bnn). Streaming egress that must announce the model before the first chunk — Anthropic's `message_start` — takes it from the `:on_step_start` callback on `Proxy.dispatch_streaming/4`; the reframed OpenAI-shaped chunks repeat the resolved model off the native `message_start` on every chunk, the way real OpenAI chunks do. Idempotent replays of bodies logged before stamping existed backfill the model from the row's `final_model`.
 
 **Why it matters:** streaming used to echo the *requested* model, so a silent fallback was invisible from outside. An entire Claude Code session once ran on Kimi unnoticed after Anthropic 429'd, and per-agent rollups inherit whatever the response claims.
 
@@ -619,7 +703,7 @@ One known limit: a same-format adapter pointed at a merely Claude-*compatible* t
 
 The passthrough wins on collision in this direction, because the only overlap is the `id` the egress would otherwise synthesise — and the provider's real one is strictly better (cache diagnostics reference it). It is still never allowed to become the IR's own `id`, which OpenAI-family clients read and expect to be a `chatcmpl-` value.
 
-**Streaming carries the tail, plus the id.** The stream accumulator collects untranslated `message_delta` fields and the egress merges them into the `message_delta` it emits (which is also how `stop_sequence` stopped being hardcoded `nil` there). The real `msg_…` id is not a tail field at all — Anthropic sends it in `message_start`, *before* any delta, so it is in hand when the egress opens its own stream and a streaming client now gets the provider's id rather than a synthesised one. That matters because `previous_message_id` cache diagnostics refer to it. The accumulator is parked in the process key **before** chunks are forwarded, not after, so a frame carrying `message_start` and a delta together does not hand the egress a stale one. Other `message_start` fields (`container`) are still not carried.
+**Streaming carries the tail, plus the id.** The stream accumulator collects untranslated `message_delta` fields and the egress merges them into the `message_delta` it emits (which is also how `stop_sequence` stopped being hardcoded `nil` there). The real `msg_…` id is not a tail field at all — Anthropic sends it in `message_start`, *before* any delta, so it is in hand when the egress opens its own stream and a streaming client now gets the provider's id rather than a synthesised one. That matters because `previous_message_id` cache diagnostics refer to it. The accumulator is parked in the process key **before** chunks are forwarded, not after, so a frame carrying `message_start` and a delta together does not hand the egress a stale one. Other `message_start` fields (`container`) are still not carried on the reframed path — the streaming passthrough below relays `message_start` whole.
 
 **Content blocks ride the same passthrough — on the sync path.** `convert_to_openai_format/1` reduces `content` over `text` and `tool_use` only, so `thinking`, `redacted_thinking`, server-tool blocks, and the `fallback` block Opus 5 / Fable 5 emit when a refusal is re-served have nowhere to go in the IR. When any such block appears, the **whole** native list travels in the passthrough under `"content"` and the Anthropic egress restores it 1:1 (`Map.merge(built, provider_passthrough)` already prefers it). The whole list rather than just the untranslatable part, because the reduction concatenates text blocks — their boundaries and interleaving cannot be recovered from what it produced.
 
@@ -627,7 +711,7 @@ It is carried **only** when something was untranslatable. Otherwise the egress r
 
 This is not a display nicety: Anthropic requires thinking blocks be echoed back unchanged to continue on the same model and rejects modified ones, so a client that never receives them cannot resume its own conversation.
 
-**Streaming still drops them.** `process_anthropic_events/2` ignores a non-`tool_use` `content_block_start` and lets `thinking_delta` fall through its catch-all, and the OpenAI-shaped delta stream has no representation to carry them in — restoring them needs the egress to re-emit `content_block_start`/`thinking_delta`/`content_block_stop` at the right positions. Same class of problem as the un-back-fillable `message_start` above.
+**Streaming passthrough carries them for the dominant path.** An Anthropic client on an Anthropic step does not get a reframed stream at all: `FallbackChain` sets `Adapter.stream_passthrough_key/0` on the request when the step's format matches the client's *and nothing has been streamed yet*, and the adapter then relays the provider's native SSE events verbatim (`passthrough_anthropic_events/2`) while still accumulating for logging. Thinking blocks, their `signature_delta`s, `redacted_thinking` and server-tool blocks reach the client in their original order — which is the only order Anthropic will accept back. The egress (`handle_stream_data/2`) recognises the `event: `-prefixed wire shape, commits the response head (`ensure_stream_head/0`) without emitting its synthetic `message_start`/`content_block_start`, and `finish_stream` becomes a no-op because the provider's own terminator already flowed. Reframing remains for every cross-format pairing and for a fallback step joining a stream another provider already started (the wire-touched check) — on those the OpenAI-shaped delta stream still has no representation for thinking blocks, so they are still dropped there. This narrowly anticipates the planned Exchange-pipeline streaming passthrough rather than extending the reframing side-channel.
 
 Related rules for streaming egress:
 
@@ -715,6 +799,8 @@ The helper maps them to provider-specific values:
 **Anthropic sends no token budget.** `thinking.budget_tokens` was removed on Opus 4.7, Opus 4.8, Opus 5, Sonnet 5 and Fable 5 — every current Claude model — and returns a 400 when sent; it survives only on 4.6 and older, which also accept `effort`. The switch is therefore unconditional rather than gated on a per-model table, which is the kind of capability folklore that goes stale silently. `minimal` folds into `low` because `low` is the shallowest depth Anthropic can express, and `max_tokens` is left exactly as the client set it — the old bump existed only to satisfy `max_tokens > budget_tokens`.
 
 Two edges worth knowing: `none` sends `thinking.type = "disabled"`, which **Fable 5 rejects outright** (thinking is always on there, so a step asking for none has no honest translation and the provider error is the truthful answer); and `output_config` also carries structured outputs, so the injection merges into the object the client's `response_format` built rather than replacing it.
+
+A **client-supplied** `thinking.type = "disabled"` forwards as sent (probed live 2026-08-16, dodo_router-cit): Opus 5, Sonnet 5 and Opus 4.8 accept it, and on the Claude 5 models omission would leave the adaptive default ON — billing the client for the very thing it turned off. Fable 5 is the one model with no off switch, so only there is the block omitted, with the drop recorded via `Fidelity` (`:unsupported_by_model`) rather than silent. Opus 5 rejects `disabled` combined with `output_config.effort` above `high`; that 400 is the client's own combination and travels back untouched.
 
 **OpenAI-family levels travel verbatim** — never clamped or rewritten. Which levels a model accepts is the step author's choice, and an unsupported one surfaces as a provider error in the logs rather than a silent downgrade.
 
@@ -930,7 +1016,7 @@ bd close <id>         # Complete work
 
 The managed Beads block is task-tracking guidance, not permission to override repository, user, or orchestrator instructions.
 
-- **Conservative (default)**: Use `bd` for task tracking. Do not run git commits, git pushes, or Dolt remote sync unless explicitly asked. At handoff, report changed files, validation, and suggested next commands.
+- **Conservative (default)**: Use `bd` for task tracking. Do not run git pushes, or Dolt remote sync unless explicitly asked. At handoff, report changed files, validation, and suggested next commands.
 - **Minimal**: Keep tool instruction files as pointers to `bd prime`; use the same conservative git policy unless active instructions say otherwise.
 - **Team-maintainer**: Only when the repository explicitly opts in, agents may close beads, run quality gates, commit, and push as part of session close. A current "do not commit" or "do not push" instruction still wins.
 

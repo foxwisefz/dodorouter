@@ -1,8 +1,10 @@
-<main>
+<%!-- A <div>, not a <main>: root.html.heex already opens the page's <main>,
+and every LiveView renders inside it. --%>
+<div>
   <.flash_group flash={@flash} />
   <%= if assigns[:inner_content] do %>
     {@inner_content}
   <% else %>
     {render_slot(@inner_block)}
   <% end %>
-</main>
+</div>

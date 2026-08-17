@@ -12,8 +12,6 @@ defmodule DodoRouter.Proxy.Adapters.OpenAICompatible do
   alias DodoRouter.Proxy.FinchTelemetry
   alias DodoRouter.Routers.RoutingStep
 
-  @timeout_ms 120_000
-
   def call(request, %RoutingStep{} = step, api_key, base_url, opts \\ []) do
     url = base_url <> "/chat/completions"
     body = build_request_body(request, step, opts)
@@ -22,7 +20,7 @@ defmodule DodoRouter.Proxy.Adapters.OpenAICompatible do
     payload_size_bytes = Adapter.record_outbound_body(body)
     start_time = FinchTelemetry.mark_request_start()
 
-    case Req.post(url, headers: headers, json: body, receive_timeout: @timeout_ms) do
+    case Req.post(url, headers: headers, json: body, receive_timeout: Adapter.receive_timeout()) do
       {:ok, %{status: 200, body: response_body, headers: resp_headers}} ->
         total_ms = latency(start_time)
         upload_ms = FinchTelemetry.get_upload_ms(start_time)
@@ -139,7 +137,7 @@ defmodule DodoRouter.Proxy.Adapters.OpenAICompatible do
       Req.post(url,
         headers: headers,
         json: body,
-        receive_timeout: @timeout_ms,
+        receive_timeout: Adapter.receive_timeout(),
         into: into_fun
       )
 

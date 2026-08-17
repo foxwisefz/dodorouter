@@ -18,7 +18,6 @@ defmodule DodoRouter.Proxy.Adapters.Mistral do
     endpoints: %{
       "mistral" => "https://api.mistral.ai/v1"
     },
-    models: ~w(mistral-large-latest mistral-small-latest codestral-latest),
     color: "orange",
     short_description: "Mistral Large, Small, Codestral"
 

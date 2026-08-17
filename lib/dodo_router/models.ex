@@ -16,6 +16,101 @@ defmodule DodoRouter.Models do
     Repo.all(from m in Model, where: m.provider_slug == ^provider_slug, order_by: m.model_id)
   end
 
+  @doc """
+  Models of a provider that may be offered for selection.
+
+  models.dev publishes no deprecation field — a retired model is simply
+  absent from `api.json` — so "seen in the most recent sync" is the only
+  retirement signal there is. Anything the newest sync did not touch is
+  assumed gone.
+
+  Two deliberate escapes. A catalog whose freshest entry is older than
+  `@catalog_trust_window` tells us nothing about what is retired, so
+  everything is offered rather than nothing: a sync that stopped running
+  must not empty every picker. And a row never stamped at all — written
+  before this column, or upserted by us rather than synced — is kept, since
+  absence of evidence is not retirement.
+
+  Pricing lookups do not go through here: a model can be retired upstream
+  while requests naming it are still in flight, and their cost still has to
+  be computed from something.
+  """
+  @catalog_trust_window_days 7
+
+  def offerable_models(provider_slug) do
+    case latest_sync_at(provider_slug) do
+      nil ->
+        list_models_by_provider(provider_slug)
+
+      latest ->
+        if DateTime.diff(DateTime.utc_now(), latest, :day) > @catalog_trust_window_days do
+          list_models_by_provider(provider_slug)
+        else
+          from(m in Model,
+            where:
+              m.provider_slug == ^provider_slug and
+                (is_nil(m.last_seen_at) or m.last_seen_at >= ^latest),
+            order_by: m.model_id
+          )
+          |> Repo.all()
+        end
+    end
+  end
+
+  @doc """
+  Model ids to offer for a provider: the catalog when we have one, the
+  caller's fallback when we do not.
+
+  The fallback is each adapter's hardcoded `models:` list. It exists for
+  providers we cannot sync and for the window before the first sync — it is
+  *not* an addendum to a real catalog. Appended to one, it reintroduces
+  every model the adapter has outlived: `claude-3-5-haiku-20241022` was
+  offered by a picker and answered 404 despite the catalog being current,
+  because it is not a catalog row at all and nothing filtering rows could
+  ever see it.
+  """
+  def offerable_model_ids(provider_slug, fallback_ids) do
+    case offerable_models(provider_slug) do
+      [] -> fallback_ids
+      models -> Enum.map(models, & &1.model_id)
+    end
+  end
+
+  @doc """
+  Whether a model we hold was left out of the most recent sync.
+
+  Deliberately narrow. A model absent from our catalog entirely is
+  *unknown*, not retired — providers serve ids models.dev never lists, and
+  warning about those would cry wolf on every hand-typed model. Retirement
+  is the specific case of a row we have that upstream stopped listing.
+  """
+  def retired?(provider_slug, model_id) do
+    case latest_sync_at(provider_slug) do
+      nil ->
+        false
+
+      latest ->
+        if DateTime.diff(DateTime.utc_now(), latest, :day) > @catalog_trust_window_days do
+          false
+        else
+          Repo.exists?(
+            from(m in Model,
+              where:
+                m.provider_slug == ^provider_slug and m.model_id == ^model_id and
+                  not is_nil(m.last_seen_at) and m.last_seen_at < ^latest
+            )
+          )
+        end
+    end
+  end
+
+  @doc "When this provider's catalog was last refreshed, or nil if never."
+  def latest_sync_at(provider_slug) do
+    Repo.one(
+      from(m in Model, where: m.provider_slug == ^provider_slug, select: max(m.last_seen_at))
+    )
+  end
+
   def get_model(id), do: Repo.get(Model, id)
 
   def get_model_by_id(provider_slug, model_id) do

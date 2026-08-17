@@ -11,6 +11,7 @@ defmodule DodoRouterWeb.RouterLive.Show do
   alias DodoRouter.Providers
   alias DodoRouter.Proxy.Adapter.Registry
   alias DodoRouter.Usage
+  alias DodoRouterWeb.Components.Charts
 
   @impl true
   def mount(%{"id" => id}, _session, socket) do
@@ -28,6 +29,9 @@ defmodule DodoRouterWeb.RouterLive.Show do
       socket
       |> assign(:router, router)
       |> assign(:stats, Logs.stats(router))
+      |> assign(:latency_percentiles, Logs.latency_percentiles(router))
+      |> assign(:step_traffic, Logs.step_traffic(router))
+      |> assign(:timeseries, Logs.timeseries(router))
       |> assign(:recent_events, [])
       |> assign(:stats_timer, nil)
       |> assign(:active_requests, 0)
@@ -73,7 +77,10 @@ defmodule DodoRouterWeb.RouterLive.Show do
 
   defp apply_action(socket, :edit_step, %{"step_id" => step_id}) do
     step = Routers.get_routing_step!(socket.assigns.router, step_id)
-    custom? = step.model not in Registry.available_models(step.provider)
+    # Asked of the catalog, not the adapter's hardcoded list: that list was
+    # written mid-2025, so a step on a current model was classified "custom"
+    # and got a free-text box, while a retired one counted as known.
+    custom? = step.model not in model_options(step.provider)
 
     socket
     |> assign(:page_title, "Edit Step - #{socket.assigns.router.name}")
@@ -385,8 +392,15 @@ defmodule DodoRouterWeb.RouterLive.Show do
   end
 
   def handle_info(:refresh_stats, socket) do
-    stats = Logs.stats(socket.assigns.router)
-    {:noreply, assign(socket, :stats, stats)}
+    router = socket.assigns.router
+    stats = Logs.stats(router)
+
+    {:noreply,
+     socket
+     |> assign(:stats, stats)
+     |> assign(:latency_percentiles, Logs.latency_percentiles(router))
+     |> assign(:step_traffic, Logs.step_traffic(router))
+     |> assign(:timeseries, Logs.timeseries(router))}
   end
 
   def handle_info({:log_pending, pending}, socket) do
@@ -412,20 +426,74 @@ defmodule DodoRouterWeb.RouterLive.Show do
   @impl true
   def render(assigns) do
     ~H"""
-    <div id="router-show-page" class="relative overflow-hidden">
-      <!-- Content -->
-      <div class="relative z-10">
-        <!-- Header -->
-        <div
-          id="router-header"
-          class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-8"
-        >
-          <div>
-            <div class="flex items-center gap-3">
+    <Layouts.app flash={@flash} current_scope={@current_scope}>
+      <div id="router-show-page" class="relative overflow-hidden">
+        <!-- Content -->
+        <div class="relative z-10">
+          <!-- Header -->
+          <div
+            id="router-header"
+            class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-8"
+          >
+            <div>
+              <div class="flex items-center gap-3">
+                <.link
+                  navigate={~p"/routers"}
+                  class="p-2 rounded-lg hover:bg-base-200 transition-colors text-base-content/60 hover:text-base-content"
+                >
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    class="h-5 w-5"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                  >
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="2"
+                      d="M15 19l-7-7 7-7"
+                    />
+                  </svg>
+                </.link>
+                <div>
+                  <h1 class="text-2xl font-bold">{@router.name}</h1>
+                  <p class="text-base-content/50 font-mono text-sm">{@router.slug}</p>
+                  <p class="text-xs text-base-content/40 mt-0.5">
+                    Session header: <span class="font-mono">{@router.session_header}</span>
+                  </p>
+                </div>
+              </div>
+            </div>
+            <div class="flex items-center gap-2">
               <.link
-                navigate={~p"/routers"}
-                class="p-2 rounded-lg hover:bg-base-200 transition-colors text-base-content/60 hover:text-base-content"
+                patch={~p"/routers/#{@router}/edit"}
+                class="btn btn-sm bg-base-200 border-base-300/50 hover:bg-base-300 gap-2"
               >
+                <.icon name="hero-pencil" class="size-4" /> Edit
+              </.link>
+              <.link
+                navigate={~p"/routers/#{@router}/recordings"}
+                class="btn btn-sm bg-base-200 border-base-300/50 hover:bg-base-300 gap-2"
+              >
+                <.icon name="hero-stop-circle" class="size-4" /> Recordings
+              </.link>
+              <.link
+                navigate={~p"/routers/#{@router}/sessions"}
+                class="btn btn-sm bg-base-200 border-base-300/50 hover:bg-base-300 gap-2"
+              >
+                <.icon name="hero-video-camera" class="size-4" /> Sessions
+              </.link>
+            </div>
+          </div>
+          
+    <!-- New API Key Alert -->
+          <div
+            :if={assigns[:new_api_key]}
+            class="card-bordered p-4 mb-6 border-warning/50 bg-warning/5"
+          >
+            <div class="flex gap-3">
+              <div class="stat-icon bg-warning/10 text-warning flex-shrink-0">
                 <svg
                   xmlns="http://www.w3.org/2000/svg"
                   class="h-5 w-5"
@@ -437,728 +505,123 @@ defmodule DodoRouterWeb.RouterLive.Show do
                     stroke-linecap="round"
                     stroke-linejoin="round"
                     stroke-width="2"
-                    d="M15 19l-7-7 7-7"
+                    d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
                   />
                 </svg>
-              </.link>
-              <div>
-                <h1 class="text-2xl font-bold">{@router.name}</h1>
-                <p class="text-base-content/50 font-mono text-sm">{@router.slug}</p>
-                <p class="text-xs text-base-content/40 mt-0.5">
-                  Session header: <span class="font-mono">{@router.session_header}</span>
-                </p>
+              </div>
+              <div class="flex-1">
+                <h3 class="font-semibold text-warning">New API key generated!</h3>
+                <p class="text-sm text-base-content/60">Save it now - this won't be shown again.</p>
+                <div class="flex items-start gap-2 mt-2">
+                  <code class="flex-1 p-3 bg-base-300 rounded-lg font-mono text-sm break-all select-all">
+                    {@new_api_key}
+                  </code>
+                  <button
+                    id="copy-new-api-key"
+                    phx-hook="CopyButton"
+                    data-copy={@new_api_key}
+                    class="p-3 rounded-lg bg-base-300 hover:bg-base-content/10 transition-colors shrink-0"
+                    title="Copy API key"
+                  >
+                    <.icon name="hero-clipboard" class="size-4 text-base-content/60" />
+                  </button>
+                </div>
               </div>
             </div>
           </div>
-          <div class="flex items-center gap-2">
-            <.link
-              patch={~p"/routers/#{@router}/edit"}
-              class="btn btn-sm bg-base-200 border-base-300/50 hover:bg-base-300 gap-2"
-            >
-              <.icon name="hero-pencil" class="size-4" /> Edit
-            </.link>
-            <.link
-              navigate={~p"/routers/#{@router}/recordings"}
-              class="btn btn-sm bg-base-200 border-base-300/50 hover:bg-base-300 gap-2"
-            >
-              <.icon name="hero-stop-circle" class="size-4" /> Recordings
-            </.link>
-            <.link
-              navigate={~p"/routers/#{@router}/sessions"}
-              class="btn btn-sm bg-base-200 border-base-300/50 hover:bg-base-300 gap-2"
-            >
-              <.icon name="hero-video-camera" class="size-4" /> Sessions
-            </.link>
-          </div>
-        </div>
-        
-    <!-- New API Key Alert -->
-        <div :if={assigns[:new_api_key]} class="card-bordered p-4 mb-6 border-warning/50 bg-warning/5">
-          <div class="flex gap-3">
-            <div class="stat-icon bg-warning/10 text-warning flex-shrink-0">
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                class="h-5 w-5"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-              >
-                <path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  stroke-width="2"
-                  d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
-                />
-              </svg>
-            </div>
-            <div class="flex-1">
-              <h3 class="font-semibold text-warning">New API key generated!</h3>
-              <p class="text-sm text-base-content/60">Save it now - this won't be shown again.</p>
-              <div class="flex items-start gap-2 mt-2">
-                <code class="flex-1 p-3 bg-base-300 rounded-lg font-mono text-sm break-all select-all">
-                  {@new_api_key}
-                </code>
-                <button
-                  id="copy-new-api-key"
-                  phx-hook="CopyButton"
-                  data-copy={@new_api_key}
-                  class="p-3 rounded-lg bg-base-300 hover:bg-base-content/10 transition-colors shrink-0"
-                  title="Copy API key"
-                >
-                  <.icon name="hero-clipboard" class="size-4 text-base-content/60" />
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-        
+          
     <!-- Getting started checklist -->
-        <% setup = setup_state(assigns) %>
-        <div :if={not setup_complete?(setup)} id="setup-checklist" class="card-bordered mb-8 p-5">
-          <div class="flex items-center justify-between mb-3">
-            <h2 class="text-sm font-semibold text-base-content">
-              Get this router serving requests
-            </h2>
-            <span class="text-xs text-base-content/50">
-              {Enum.count([setup.keys, setup.steps, setup.assigned, setup.request], & &1)}/4 done
-            </span>
+          <% setup = setup_state(assigns) %>
+          <div :if={not setup_complete?(setup)} id="setup-checklist" class="card-bordered mb-8 p-5">
+            <div class="flex items-center justify-between mb-3">
+              <h2 class="text-sm font-semibold text-base-content">
+                Get this router serving requests
+              </h2>
+              <span class="text-xs text-base-content/50">
+                {Enum.count([setup.keys, setup.steps, setup.assigned, setup.request], & &1)}/4 done
+              </span>
+            </div>
+            <ol class="space-y-1">
+              <.setup_item n={1} done={setup.keys} label="Add a provider API key">
+                <:action>
+                  <.link
+                    navigate={~p"/providers"}
+                    class="text-xs font-medium text-primary hover:underline"
+                  >
+                    Open Providers →
+                  </.link>
+                </:action>
+              </.setup_item>
+              <.setup_item n={2} done={setup.steps} label="Add a routing step (provider + model)">
+                <:action>
+                  <.link
+                    patch={~p"/routers/#{@router}/routing"}
+                    class="text-xs font-medium text-primary hover:underline"
+                  >
+                    Add step →
+                  </.link>
+                </:action>
+              </.setup_item>
+              <.setup_item n={3} done={setup.assigned} label="Assign an API key to every step">
+                <:action>
+                  <a
+                    :if={setup.steps}
+                    href="#routing-chain-container"
+                    class="text-xs font-medium text-primary hover:underline"
+                  >
+                    Go to chain →
+                  </a>
+                </:action>
+              </.setup_item>
+              <.setup_item n={4} done={setup.request} label="Send your first request">
+                <:action>
+                  <a href="#connect" class="text-xs font-medium text-primary hover:underline">
+                    See code snippets →
+                  </a>
+                </:action>
+              </.setup_item>
+            </ol>
           </div>
-          <ol class="space-y-1">
-            <.setup_item n={1} done={setup.keys} label="Add a provider API key">
-              <:action>
-                <.link
-                  navigate={~p"/providers"}
-                  class="text-xs font-medium text-primary hover:underline"
-                >
-                  Open Providers →
-                </.link>
-              </:action>
-            </.setup_item>
-            <.setup_item n={2} done={setup.steps} label="Add a routing step (provider + model)">
-              <:action>
-                <.link
-                  patch={~p"/routers/#{@router}/routing"}
-                  class="text-xs font-medium text-primary hover:underline"
-                >
-                  Add step →
-                </.link>
-              </:action>
-            </.setup_item>
-            <.setup_item n={3} done={setup.assigned} label="Assign an API key to every step">
-              <:action>
-                <a
-                  :if={setup.steps}
-                  href="#routing-chain-container"
-                  class="text-xs font-medium text-primary hover:underline"
-                >
-                  Go to chain →
-                </a>
-              </:action>
-            </.setup_item>
-            <.setup_item n={4} done={setup.request} label="Send your first request">
-              <:action>
-                <a href="#connect" class="text-xs font-medium text-primary hover:underline">
-                  See code snippets →
-                </a>
-              </:action>
-            </.setup_item>
-          </ol>
-        </div>
-        
+          
     <!-- Stats -->
-        <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-8">
-          <div class="stat-card">
-            <div class="stat-label">Requests (24h)</div>
-            <div class="stat-value">{@stats.total_requests}</div>
+          <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-8">
+            <Charts.stat_tile
+              id="router-requests"
+              label="Requests (24h)"
+              value={to_string(@stats.total_requests)}
+              spark={Enum.map(@timeseries, & &1.total)}
+            />
+            <Charts.stat_tile
+              id="router-success"
+              label="Success Rate"
+              value={success_rate(@stats)}
+              value_class={success_color(@stats)}
+            />
+            <Charts.stat_tile
+              id="router-tokens"
+              label="Tokens Used"
+              value={format_number(@stats.total_tokens)}
+              spark={Enum.map(@timeseries, &(&1.total_tokens || 0))}
+            />
+            <Charts.stat_tile
+              id="router-latency"
+              label="p95 Latency"
+              value={Charts.format_ms(@latency_percentiles.p95)}
+              subtext={"p50 #{Charts.format_ms(@latency_percentiles.p50)}"}
+            />
           </div>
-          <div class="stat-card">
-            <div class="stat-label">Success Rate</div>
-            <div class={["stat-value", success_color(@stats)]}>{success_rate(@stats)}</div>
-          </div>
-          <div class="stat-card">
-            <div class="stat-label">Tokens Used</div>
-            <div class="stat-value">{format_number(@stats.total_tokens)}</div>
-          </div>
-          <div class="stat-card">
-            <div class="stat-label">Avg Latency</div>
-            <div class="stat-value">{format_latency(@stats.avg_latency_ms)}</div>
-          </div>
-        </div>
-        
+          
     <!-- Connect -->
-        <div id="connect" class="card-bordered mb-8">
-          <div class="flex items-center justify-between mb-0">
-            <button
-              phx-click="toggle_connect"
-              class="flex items-center gap-2 group"
-            >
-              <h2 class="section-title mb-0 group-hover:text-primary transition-colors">Connect</h2>
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                class={"h-4 w-4 text-base-content/40 transition-transform duration-200 #{if @connect_collapsed, do: "-rotate-90", else: ""}"}
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-              >
-                <path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  stroke-width="2"
-                  d="M19 9l-7 7-7-7"
-                />
-              </svg>
-            </button>
-          </div>
-
-          <div :if={!@connect_collapsed} class="mt-3 space-y-4">
-            <!-- Format selector -->
-            <div class="flex bg-base-200 rounded-lg p-1 gap-1">
+          <div id="connect" class="card-bordered mb-8">
+            <div class="flex items-center justify-between mb-0">
               <button
-                phx-click="set_api_format"
-                phx-value-format="openai_chat"
-                class={"px-3 py-1 rounded text-sm transition-colors #{if @api_format == "openai_chat", do: "bg-base-100 text-base-content", else: "text-base-content/60 hover:text-base-content"}"}
+                phx-click="toggle_connect"
+                class="flex items-center gap-2 group"
               >
-                OpenAI Chat
-              </button>
-              <button
-                phx-click="set_api_format"
-                phx-value-format="openai_responses"
-                class={"px-3 py-1 rounded text-sm transition-colors #{if @api_format == "openai_responses", do: "bg-base-100 text-base-content", else: "text-base-content/60 hover:text-base-content"}"}
-              >
-                OpenAI Responses
-              </button>
-              <button
-                phx-click="set_api_format"
-                phx-value-format="anthropic"
-                class={"px-3 py-1 rounded text-sm transition-colors #{if @api_format == "anthropic", do: "bg-base-100 text-base-content", else: "text-base-content/60 hover:text-base-content"}"}
-              >
-                Anthropic
-              </button>
-            </div>
-            
-    <!-- Endpoint URL -->
-            <div class="p-3 rounded-lg bg-base-200/50 border border-base-300/30">
-              <div class="flex items-center gap-2 mb-1.5">
-                <span class={"px-2 py-0.5 rounded text-xs font-medium #{format_badge_class(@api_format)}"}>
-                  {format_label(@api_format)}
-                </span>
-                <span class="text-sm font-medium text-base-content/80">
-                  {format_name(@api_format)}
-                </span>
-              </div>
-              <code class="block p-2.5 bg-base-300 rounded-lg font-mono text-sm text-base-content/70 break-all">
-                {endpoint_url(@api_format, base_url(), @router.slug)}
-              </code>
-            </div>
-            
-    <!-- Language selector -->
-            <div class="flex items-center justify-between">
-              <div class="flex bg-base-200 rounded-lg p-1 gap-1">
-                <button
-                  phx-click="set_code_language"
-                  phx-value-language="curl"
-                  class={"px-3 py-1 rounded text-sm transition-colors #{if @code_language == "curl", do: "bg-base-100 text-base-content", else: "text-base-content/60 hover:text-base-content"}"}
-                >
-                  cURL
-                </button>
-                <button
-                  phx-click="set_code_language"
-                  phx-value-language="python"
-                  class={"px-3 py-1 rounded text-sm transition-colors #{if @code_language == "python", do: "bg-base-100 text-base-content", else: "text-base-content/60 hover:text-base-content"}"}
-                >
-                  Python
-                </button>
-                <button
-                  phx-click="set_code_language"
-                  phx-value-language="node"
-                  class={"px-3 py-1 rounded text-sm transition-colors #{if @code_language == "node", do: "bg-base-100 text-base-content", else: "text-base-content/60 hover:text-base-content"}"}
-                >
-                  Node.js
-                </button>
-              </div>
-            </div>
-            
-    <!-- Code snippet -->
-            <div class="code-block relative group/snippet">
-              <button
-                id="copy-snippet"
-                phx-hook="CopyButton"
-                data-copy={snippet(@api_format, @code_language, base_url(), @router.slug)}
-                class="absolute top-2 right-2 flex items-center gap-1 px-2 py-1 rounded-md bg-base-100/80 border border-base-300/50 text-[11px] text-base-content/60 hover:text-base-content transition-colors"
-                title="Copy snippet"
-              >
-                <.icon name="hero-clipboard" class="size-3.5" /> Copy
-              </button>
-              <pre class="text-xs text-base-content/80"><code><%= raw(snippet(@api_format, @code_language, base_url(), @router.slug)) %></code></pre>
-            </div>
-
-            <p class="text-sm text-base-content/50">
-              Replace <code class="text-primary font-medium">YOUR_API_KEY</code>
-              with your router API key:
-              <code class="font-mono text-base-content/70">{@router.api_key_prefix}...</code>
-              <.link navigate={~p"/api-keys"} class="text-accent hover:underline ml-1">
-                Manage keys
-              </.link>
-            </p>
-          </div>
-        </div>
-        
-    <!-- Routing Chain -->
-        <div class="card-bordered mb-8" id="routing-chain-container" phx-hook="RequestFlowAnimation">
-          <div class="flex items-center justify-between mb-3">
-            <div class="flex items-center gap-3">
-              <h2 class="section-title mb-0">Routing Chain</h2>
-              <div
-                :if={@active_request}
-                class="flex items-center gap-2 px-2.5 py-1 bg-green-500/25 rounded-full text-xs font-medium text-green-400"
-              >
-                <span class="request-flow-pulse w-2 h-2 rounded-full bg-green-400"></span>
-                Processing...
-              </div>
-            </div>
-            <div class="flex items-center gap-4">
-              <form phx-change="toggle_fail_on_context_overflow" class="flex items-center gap-2">
-                <label class="relative inline-flex items-center cursor-pointer">
-                  <input
-                    type="checkbox"
-                    name="fail_on_context_overflow"
-                    value="true"
-                    checked={@router.fail_on_context_overflow}
-                    class="sr-only peer"
-                  />
-                  <div class="w-9 h-5 bg-base-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-primary">
-                  </div>
-                  <span class="ml-2 text-sm text-base-content/70">
-                    Skip fallback on context overflow
-                  </span>
-                </label>
-                <div class="relative group">
-                  <.icon
-                    name="hero-question-mark-circle"
-                    class="size-4 text-base-content/40 cursor-help"
-                  />
-                  <div class="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden group-hover:block w-64 p-2 text-xs bg-base-100 border border-base-300 rounded-lg shadow-lg text-base-content/80 z-50">
-                    When enabled, requests that exceed a model's context window will skip the fallback chain and fail immediately.
-                  </div>
-                </div>
-              </form>
-              <.link patch={~p"/routers/#{@router}/routing"} class="btn btn-primary btn-sm">
-                Add Step
-              </.link>
-            </div>
-          </div>
-          <div id="routing-steps" phx-update="stream" class="relative">
-            <div
-              :for={{dom_id, step} <- @streams.routing_steps}
-              id={dom_id}
-              data-step-id={step.id}
-              data-step-index={step.position}
-              class="step-card-wrapper"
-            >
-              <!-- The step card itself -->
-              <div class="step-card flex items-center gap-4 relative overflow-hidden">
-                <!-- Animated border glow overlay -->
-                <div class="step-glow-overlay"></div>
-                <!-- Step number with status ring -->
-                <div class="step-number-ring" data-step-number={step.position + 1}>
-                  <div class="w-8 h-8 rounded-full bg-primary/20 text-primary flex items-center justify-center font-bold text-sm flex-shrink-0 relative z-10">
-                    {step.position + 1}
-                  </div>
-                </div>
-                <div class="flex-1 min-w-0">
-                  <div class="flex items-center gap-2 flex-wrap">
-                    <div class="w-5 h-5 rounded flex items-center justify-center shrink-0 bg-base-200">
-                      <.provider_logo
-                        slug={Registry.to_key_slug(step.provider, step.plan_type)}
-                        class="w-3.5 h-3.5"
-                      />
-                    </div>
-                    <span class="font-medium text-base-content/90">{step.provider}</span>
-                    <span class="text-base-content/40">/</span>
-                    <span class="font-mono text-sm text-base-content/70">{step.model}</span>
-                    <span
-                      :if={step.plan_type == "coding"}
-                      class="px-1.5 py-0.5 rounded text-xs bg-secondary/20 text-secondary"
-                    >
-                      coding
-                    </span>
-                    <span
-                      :if={step.reasoning_effort}
-                      class="px-1.5 py-0.5 rounded text-xs bg-accent/20 text-accent"
-                      title="Reasoning effort"
-                    >
-                      thinking: {step.reasoning_effort}
-                    </span>
-                    <span
-                      :if={is_nil(step.reasoning_effort) and step.thinking_enabled}
-                      class="px-1.5 py-0.5 rounded text-xs bg-accent/20 text-accent"
-                    >
-                      thinking
-                    </span>
-                  </div>
-                  <div class="mt-2">
-                    <.form for={%{}} phx-change="assign_key">
-                      <input type="hidden" name="step_id" value={step.id} />
-                      <select
-                        name="key_id"
-                        class={"text-sm py-1.5 px-3 rounded-lg border transition-colors appearance-none bg-no-repeat bg-right pr-8 #{if step.provider_key_id, do: "bg-base-200/50 border-base-300/30 text-base-content/70", else: "bg-warning/5 border-warning/30 text-warning"}"}
-                        style="background-image: url('data:image/svg+xml;charset=UTF-8,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 20 20%22 fill=%22%236b7280%22%3E%3Cpath fill-rule=%22evenodd%22 d=%22M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z%22 clip-rule=%22evenodd%22/%3E%3C/svg%3E');"
-                      >
-                        <option value="">-- Select API Key --</option>
-                        <%= for key <- matching_keys(@provider_keys, step) do %>
-                          <option value={key.id} selected={step.provider_key_id == key.id}>
-                            {key.label} ({Providers.compact_key_hint(key.key_hint)}){key_status_suffix(
-                              key
-                            )}
-                          </option>
-                        <% end %>
-                      </select>
-                    </.form>
-                    <p
-                      :if={selected_key_problem(@provider_keys, step)}
-                      class="mt-1.5 text-xs text-error flex items-center gap-1"
-                    >
-                      <.icon name="hero-x-circle" class="size-3.5 shrink-0" />
-                      {selected_key_problem(@provider_keys, step)}
-                      <.link navigate={~p"/providers"} class="underline">Fix in Providers</.link>
-                    </p>
-                  </div>
-                </div>
-                <div class="flex flex-col gap-1">
-                  <button
-                    phx-click="move_step_up"
-                    phx-value-id={step.id}
-                    class="p-1 rounded hover:bg-base-300 text-base-content/40 hover:text-base-content transition-colors"
-                    title="Move up"
-                  >
-                    <svg
-                      xmlns="http://www.w3.org/2000/svg"
-                      class="h-4 w-4"
-                      fill="none"
-                      viewBox="0 0 24 24"
-                      stroke="currentColor"
-                    >
-                      <path
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                        stroke-width="2"
-                        d="M5 15l7-7 7 7"
-                      />
-                    </svg>
-                  </button>
-                  <button
-                    phx-click="move_step_down"
-                    phx-value-id={step.id}
-                    class="p-1 rounded hover:bg-base-300 text-base-content/40 hover:text-base-content transition-colors"
-                    title="Move down"
-                  >
-                    <svg
-                      xmlns="http://www.w3.org/2000/svg"
-                      class="h-4 w-4"
-                      fill="none"
-                      viewBox="0 0 24 24"
-                      stroke="currentColor"
-                    >
-                      <path
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                        stroke-width="2"
-                        d="M19 9l-7 7-7-7"
-                      />
-                    </svg>
-                  </button>
-                </div>
-                <.link
-                  patch={~p"/routers/#{@router}/routing/#{step.id}/edit"}
-                  class="p-2 rounded-lg hover:bg-base-300 text-base-content/40 hover:text-base-content transition-colors"
-                  title="Edit step"
-                >
-                  <.icon name="hero-pencil" class="size-4" />
-                </.link>
-                <button
-                  phx-click="delete_step"
-                  phx-value-id={step.id}
-                  class="p-2 rounded-lg hover:bg-error/10 text-base-content/40 hover:text-error transition-colors"
-                  data-confirm="Remove this step?"
-                >
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    class="h-4 w-4"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                  >
-                    <path
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                      stroke-width="2"
-                      d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-                    />
-                  </svg>
-                </button>
-              </div>
-            </div>
-          </div>
-          <p :if={!@has_routing_steps} class="empty-state py-8">
-            No routing steps configured. Add one to start proxying requests.
-          </p>
-        </div>
-        
-    <!-- Recent Logs -->
-        <div class="card-bordered mb-8" id="recent-logs-card">
-          <div class="flex items-center justify-between mb-3">
-            <h2 class="section-title mb-0">Recent Logs</h2>
-            <.link
-              navigate={~p"/logs?router_id=#{@router.id}"}
-              class="text-sm text-primary hover:underline"
-            >
-              View all logs
-            </.link>
-          </div>
-          <div id="recent-logs" phx-update="stream" phx-hook="LogEntryAnimations" class="space-y-2">
-            <.link
-              :for={{dom_id, log} <- @streams.recent_logs}
-              id={dom_id}
-              navigate={
-                if log.status != "pending",
-                  do:
-                    ~p"/logs/#{log}" <> "?return_to=" <> URI.encode_www_form("/routers/#{@router.id}"),
-                  else: nil
-              }
-              class={[
-                "block p-3 rounded-lg text-sm transition-colors",
-                log.status == "pending" && "bg-info/10 animate-pulse",
-                log.status == "success" && "bg-success/10 hover:bg-success/20",
-                log.status == "fallback" && "bg-warning/10 hover:bg-warning/20",
-                log.status == "error" && "bg-error/10 hover:bg-error/20"
-              ]}
-            >
-              <div class="flex items-center justify-between">
-                <div class="flex items-center gap-3">
-                  <span class={[
-                    "w-2 h-2 rounded-full shrink-0",
-                    log.status == "pending" && "bg-info",
-                    log.status == "success" && "bg-success",
-                    log.status == "fallback" && "bg-warning",
-                    log.status == "error" && "bg-error"
-                  ]}>
-                  </span>
-                  <div class="flex items-center gap-2">
-                    <div class="w-4 h-4 rounded flex items-center justify-center shrink-0 bg-base-200">
-                      <.provider_logo slug={normalize_slug(log.final_provider)} class="w-3 h-3" />
-                    </div>
-                    <span class="font-mono text-base-content/80">
-                      {log.final_provider}/{log.final_model}
-                    </span>
-                  </div>
-                  <span
-                    :if={log.call_type}
-                    class="px-1.5 py-0.5 rounded text-xs font-medium bg-base-300/50 text-base-content/70"
-                  >
-                    {call_type_name(log.call_type)}
-                  </span>
-                  <span class={[
-                    "px-1.5 py-0.5 rounded text-xs font-medium",
-                    status_badge_class(log.status)
-                  ]}>
-                    {log.status}
-                  </span>
-                </div>
-                <div class="flex items-center gap-4 text-base-content/50 text-sm shrink-0">
-                  <%= if Map.get(log, :cache_read_tokens) && log.cache_read_tokens > 0 do %>
-                    <span class="inline-flex items-center gap-1 text-[10px] text-success bg-success/10 px-1.5 py-0.5 rounded">
-                      <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path
-                          stroke-linecap="round"
-                          stroke-linejoin="round"
-                          stroke-width="2"
-                          d="M13 10V3L4 14h7v7l9-11h-7z"
-                        />
-                      </svg>
-                      {cache_pct(log)}
-                    </span>
-                  <% end %>
-                  <span :if={Map.get(log, :latency_ms)} class="font-mono">{log.latency_ms}ms</span>
-                  <span class="font-mono text-xs">{format_time(log.inserted_at)}</span>
-                </div>
-              </div>
-              <div
-                :if={last_message_preview(log)}
-                class="mt-2 text-xs text-base-content/60 truncate pl-5"
-              >
-                {last_message_preview(log)}
-              </div>
-            </.link>
-          </div>
-          <p :if={!@has_logs} class="empty-state py-8">
-            No requests yet. Expand the Connect section above to see how to make your first request.
-          </p>
-        </div>
-        
-    <!-- Live Events -->
-        <div :if={length(@recent_events) > 0} class="card-bordered">
-          <div class="flex items-center gap-3 mb-3">
-            <h2 class="section-title mb-0">Recent Events</h2>
-            <span class="flex items-center gap-1.5 px-2 py-0.5 bg-success/10 rounded text-xs font-medium text-success">
-              <span class="live-dot"></span> Live
-            </span>
-          </div>
-          <div class="space-y-2">
-            <div
-              :for={event <- @recent_events}
-              class={"flex items-center justify-between p-3 rounded-lg text-sm #{event_class(event)}"}
-            >
-              <div class="flex items-center gap-3">
-                <span class={"w-2 h-2 rounded-full #{event_dot_class(event)}"}></span>
-                <div class="flex items-center gap-2">
-                  <div class="w-4 h-4 rounded flex items-center justify-center shrink-0 bg-base-200">
-                    <.provider_logo slug={normalize_slug(event.provider)} class="w-3 h-3" />
-                  </div>
-                  <span class="font-mono text-base-content/80">{event.provider}/{event.model}</span>
-                </div>
-                <span
-                  :if={event.had_fallback}
-                  class="px-1.5 py-0.5 bg-warning/20 text-warning rounded text-xs"
-                >
-                  fallback
-                </span>
-              </div>
-              <span class="text-base-content/50 font-mono">{event.latency_ms}ms</span>
-            </div>
-          </div>
-        </div>
-        
-    <!-- Routing Modal -->
-        <.modal
-          :if={@live_action in [:routing, :edit_step]}
-          id="routing-modal"
-          show
-          on_cancel={JS.patch(~p"/routers/#{@router}")}
-        >
-          <h3 class="text-lg font-semibold mb-6">
-            {if @editing_step, do: "Edit Routing Step", else: "Add Routing Step"}
-          </h3>
-          <form
-            phx-submit={if @editing_step, do: "update_step", else: "add_step"}
-            phx-change="update_step_form"
-            class="space-y-5"
-          >
-            <div>
-              <label class="block text-sm font-medium text-base-content/70 mb-2">Provider</label>
-              <select
-                name="step[key_slug]"
-                class="w-full py-2.5 px-3 bg-base-200 border border-base-300/50 rounded-lg"
-                required
-              >
-                <%= for slug <- step_slug_options() do %>
-                  <option value={slug} selected={@step_key_slug == slug}>
-                    {@provider_info[slug][:name] || slug}
-                  </option>
-                <% end %>
-              </select>
-              <input type="hidden" name="step[provider]" value={@step_provider} />
-              <input type="hidden" name="step[plan_type]" value={plan_type_for_slug(@step_key_slug)} />
-              <%= case keys_with_slug(@provider_keys, @step_key_slug) do %>
-                <% [] -> %>
-                  <p
-                    id="step-provider-no-keys"
-                    class="text-xs text-warning mt-1.5 flex items-center gap-1.5"
-                  >
-                    <.icon name="hero-exclamation-triangle" class="size-3.5 shrink-0" />
-                    <span>
-                      You haven't added an API key for this provider —
-                      <.link
-                        navigate={~p"/providers?return_to=/routers/#{@router.id}"}
-                        class="underline font-medium"
-                      >
-                        add one in Providers
-                      </.link>
-                      so this step can serve requests.
-                    </span>
-                  </p>
-                <% [key | _] -> %>
-                  <p id="step-key-hint" class="text-xs text-base-content/50 mt-1.5">
-                    Will use your key
-                    <span class="font-mono">
-                      {key.label} ({Providers.compact_key_hint(key.key_hint)})
-                    </span>
-                    — change it on the chain afterwards if needed.
-                  </p>
-              <% end %>
-            </div>
-            <div>
-              <label class="block text-sm font-medium text-base-content/70 mb-2">Model</label>
-              <select
-                :if={not @step_model_custom}
-                name="step[model]"
-                class="w-full py-2.5 px-3 bg-base-200 border border-base-300/50 rounded-lg"
-              >
-                <option value="" disabled selected={@step_model == ""}>
-                  Select a model…
-                </option>
-                <%= for model <- model_options(@step_provider) do %>
-                  <option value={model} selected={@step_model == model}>
-                    {model}
-                  </option>
-                <% end %>
-                <option value="__custom__" selected={@step_model_custom}>
-                  Custom…
-                </option>
-              </select>
-              <input
-                :if={@step_model_custom}
-                type="text"
-                name="step[model]"
-                value={@step_model}
-                placeholder="Enter exact model name"
-                class="w-full py-2.5 px-3 bg-base-200 border border-base-300/50 rounded-lg"
-                required
-              />
-              <p class="text-xs text-base-content/50 mt-1.5">
-                Pick a known model or choose <span class="font-medium">Custom…</span>
-                to enter any model id.
-              </p>
-            </div>
-            <div>
-              <label class="block text-sm font-medium text-base-content/70 mb-2">
-                Reasoning Effort
-              </label>
-              <select
-                name="step[reasoning_effort]"
-                class="w-full py-2.5 px-3 bg-base-200 border border-base-300/50 rounded-lg"
-              >
-                <option
-                  value=""
-                  selected={is_nil(@editing_step) or is_nil(@editing_step.reasoning_effort)}
-                >
-                  Default (provider decides)
-                </option>
-                <%= for effort <- @step_efforts do %>
-                  <option
-                    value={effort}
-                    selected={@editing_step && @editing_step.reasoning_effort == effort}
-                  >
-                    {effort_label(effort)}
-                  </option>
-                <% end %>
-              </select>
-              <p :if={@step_efforts_known} class="text-xs text-base-content/50 mt-1.5">
-                Levels this model supports (from models.dev), translated into whatever depth control the provider actually takes — a level for OpenAI-family and Anthropic, a token budget for Gemini, on/off for providers with only a switch. Leave unset to honor the client request or provider default.
-              </p>
-              <p :if={!@step_efforts_known} class="text-xs text-base-content/50 mt-1.5">
-                Supported levels unknown for this model — the level is translated into the provider's own depth control and an unsupported one will error visibly in the logs rather than being silently downgraded. Leave unset to honor the client request or provider default.
-              </p>
-            </div>
-            <%!-- z.ai specific options --%>
-            <details
-              class="group rounded-lg border border-base-300/40 bg-base-200/30"
-              open={@editing_step && (@editing_step.temperature || @editing_step.max_tokens)}
-            >
-              <summary class="cursor-pointer list-none px-4 py-3 flex items-center justify-between text-sm font-medium text-base-content/70 select-none">
-                Advanced
+                <h2 class="section-title mb-0 group-hover:text-primary transition-colors">Connect</h2>
                 <svg
                   xmlns="http://www.w3.org/2000/svg"
-                  class="h-4 w-4 text-base-content/40 transition-transform group-open:rotate-180"
+                  class={"h-4 w-4 text-base-content/40 transition-transform duration-200 #{if @connect_collapsed, do: "-rotate-90", else: ""}"}
                   fill="none"
                   viewBox="0 0 24 24"
                   stroke="currentColor"
@@ -1170,75 +633,655 @@ defmodule DodoRouterWeb.RouterLive.Show do
                     d="M19 9l-7 7-7-7"
                   />
                 </svg>
-              </summary>
-              <div class="px-4 pb-4 pt-1 grid grid-cols-2 gap-4">
-                <div>
-                  <label class="block text-sm font-medium text-base-content/70 mb-2">
-                    Temperature
-                  </label>
-                  <input
-                    type="number"
-                    name="step[temperature]"
-                    step="0.1"
-                    min="0"
-                    max="2"
-                    placeholder="Optional"
-                    value={@editing_step && @editing_step.temperature}
-                    class="w-full py-2.5 px-3 bg-base-200 border border-base-300/50 rounded-lg"
-                  />
-                </div>
-                <div>
-                  <label class="block text-sm font-medium text-base-content/70 mb-2">
-                    Max Tokens
-                  </label>
-                  <input
-                    type="number"
-                    name="step[max_tokens]"
-                    min="1"
-                    placeholder="Optional"
-                    value={@editing_step && @editing_step.max_tokens}
-                    class="w-full py-2.5 px-3 bg-base-200 border border-base-300/50 rounded-lg"
-                  />
-                </div>
-                <p class="col-span-2 text-xs text-base-content/50">
-                  Optional overrides. Most requests forward the client's values automatically.
-                </p>
-              </div>
-            </details>
-            <div class="flex justify-end gap-3 pt-4 border-t border-base-300/50">
-              <button
-                type="button"
-                phx-click={JS.patch(~p"/routers/#{@router}")}
-                class="btn btn-ghost"
-              >
-                Cancel
-              </button>
-              <button type="submit" class="btn btn-primary">
-                {if @editing_step, do: "Save Changes", else: "Add Step"}
               </button>
             </div>
-          </form>
+
+            <div :if={!@connect_collapsed} class="mt-3 space-y-4">
+              <!-- Format selector -->
+              <div class="flex bg-base-200 rounded-lg p-1 gap-1">
+                <button
+                  phx-click="set_api_format"
+                  phx-value-format="openai_chat"
+                  class={"px-3 py-1 rounded text-sm transition-colors #{if @api_format == "openai_chat", do: "bg-base-100 text-base-content", else: "text-base-content/60 hover:text-base-content"}"}
+                >
+                  OpenAI Chat
+                </button>
+                <button
+                  phx-click="set_api_format"
+                  phx-value-format="openai_responses"
+                  class={"px-3 py-1 rounded text-sm transition-colors #{if @api_format == "openai_responses", do: "bg-base-100 text-base-content", else: "text-base-content/60 hover:text-base-content"}"}
+                >
+                  OpenAI Responses
+                </button>
+                <button
+                  phx-click="set_api_format"
+                  phx-value-format="anthropic"
+                  class={"px-3 py-1 rounded text-sm transition-colors #{if @api_format == "anthropic", do: "bg-base-100 text-base-content", else: "text-base-content/60 hover:text-base-content"}"}
+                >
+                  Anthropic
+                </button>
+              </div>
+              
+    <!-- Endpoint URL -->
+              <div class="p-3 rounded-lg bg-base-200/50 border border-base-300/30">
+                <div class="flex items-center gap-2 mb-1.5">
+                  <span class={"px-2 py-0.5 rounded text-xs font-medium #{format_badge_class(@api_format)}"}>
+                    {format_label(@api_format)}
+                  </span>
+                  <span class="text-sm font-medium text-base-content/80">
+                    {format_name(@api_format)}
+                  </span>
+                </div>
+                <code class="block p-2.5 bg-base-300 rounded-lg font-mono text-sm text-base-content/70 break-all">
+                  {endpoint_url(@api_format, base_url(), @router.slug)}
+                </code>
+              </div>
+              
+    <!-- Language selector -->
+              <div class="flex items-center justify-between">
+                <div class="flex bg-base-200 rounded-lg p-1 gap-1">
+                  <button
+                    phx-click="set_code_language"
+                    phx-value-language="curl"
+                    class={"px-3 py-1 rounded text-sm transition-colors #{if @code_language == "curl", do: "bg-base-100 text-base-content", else: "text-base-content/60 hover:text-base-content"}"}
+                  >
+                    cURL
+                  </button>
+                  <button
+                    phx-click="set_code_language"
+                    phx-value-language="python"
+                    class={"px-3 py-1 rounded text-sm transition-colors #{if @code_language == "python", do: "bg-base-100 text-base-content", else: "text-base-content/60 hover:text-base-content"}"}
+                  >
+                    Python
+                  </button>
+                  <button
+                    phx-click="set_code_language"
+                    phx-value-language="node"
+                    class={"px-3 py-1 rounded text-sm transition-colors #{if @code_language == "node", do: "bg-base-100 text-base-content", else: "text-base-content/60 hover:text-base-content"}"}
+                  >
+                    Node.js
+                  </button>
+                </div>
+              </div>
+              
+    <!-- Code snippet -->
+              <div class="code-block relative group/snippet">
+                <button
+                  id="copy-snippet"
+                  phx-hook="CopyButton"
+                  data-copy={snippet(@api_format, @code_language, base_url(), @router.slug)}
+                  class="absolute top-2 right-2 flex items-center gap-1 px-2 py-1 rounded-md bg-base-100/80 border border-base-300/50 text-[11px] text-base-content/60 hover:text-base-content transition-colors"
+                  title="Copy snippet"
+                >
+                  <.icon name="hero-clipboard" class="size-3.5" /> Copy
+                </button>
+                <pre class="text-xs text-base-content/80"><code><%= raw(snippet(@api_format, @code_language, base_url(), @router.slug)) %></code></pre>
+              </div>
+
+              <p class="text-sm text-base-content/50">
+                Replace <code class="text-primary font-medium">YOUR_API_KEY</code>
+                with your router API key:
+                <code class="font-mono text-base-content/70">{@router.api_key_prefix}...</code>
+                <.link navigate={~p"/api-keys"} class="text-accent hover:underline ml-1">
+                  Manage keys
+                </.link>
+              </p>
+            </div>
+          </div>
+          
+    <!-- Routing Chain -->
+          <div class="card-bordered mb-8" id="routing-chain-container" phx-hook="RequestFlowAnimation">
+            <div class="flex items-center justify-between mb-3">
+              <div class="flex items-center gap-3">
+                <h2 class="section-title mb-0">Routing Chain</h2>
+                <span
+                  :if={@has_routing_steps}
+                  class="text-xs text-base-content/40"
+                  title="Share of served requests and error rate per step, last 24h"
+                >
+                  traffic share · last 24h
+                </span>
+                <div
+                  :if={@active_request}
+                  class="flex items-center gap-2 px-2.5 py-1 bg-green-500/25 rounded-full text-xs font-medium text-green-400"
+                >
+                  <span class="request-flow-pulse w-2 h-2 rounded-full bg-green-400"></span>
+                  Processing...
+                </div>
+              </div>
+              <div class="flex items-center gap-4">
+                <form phx-change="toggle_fail_on_context_overflow" class="flex items-center gap-2">
+                  <label class="relative inline-flex items-center cursor-pointer">
+                    <input
+                      type="checkbox"
+                      name="fail_on_context_overflow"
+                      value="true"
+                      checked={@router.fail_on_context_overflow}
+                      class="sr-only peer"
+                    />
+                    <div class="w-9 h-5 bg-base-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-primary">
+                    </div>
+                    <span class="ml-2 text-sm text-base-content/70">
+                      Skip fallback on context overflow
+                    </span>
+                  </label>
+                  <div class="relative group">
+                    <.icon
+                      name="hero-question-mark-circle"
+                      class="size-4 text-base-content/40 cursor-help"
+                    />
+                    <div class="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden group-hover:block w-64 p-2 text-xs bg-base-100 border border-base-300 rounded-lg shadow-lg text-base-content/80 z-50">
+                      When enabled, requests that exceed a model's context window will skip the fallback chain and fail immediately.
+                    </div>
+                  </div>
+                </form>
+                <.link patch={~p"/routers/#{@router}/routing"} class="btn btn-primary btn-sm">
+                  Add Step
+                </.link>
+              </div>
+            </div>
+            <div id="routing-steps" phx-update="stream" class="relative">
+              <div
+                :for={{dom_id, step} <- @streams.routing_steps}
+                id={dom_id}
+                data-step-id={step.id}
+                data-step-index={step.position}
+                class="step-card-wrapper"
+              >
+                <!-- The step card itself -->
+                <div class="step-card flex items-center gap-4 relative overflow-hidden">
+                  <!-- Animated border glow overlay -->
+                  <div class="step-glow-overlay"></div>
+                  <!-- Step number with status ring -->
+                  <div class="step-number-ring" data-step-number={step.position + 1}>
+                    <div class="w-8 h-8 rounded-full bg-primary/20 text-primary flex items-center justify-center font-bold text-sm flex-shrink-0 relative z-10">
+                      {step.position + 1}
+                    </div>
+                  </div>
+                  <div class="flex-1 min-w-0">
+                    <div class="flex items-center gap-2 flex-wrap">
+                      <div class="w-5 h-5 rounded flex items-center justify-center shrink-0 bg-base-200">
+                        <.provider_logo
+                          slug={Registry.to_key_slug(step.provider, step.plan_type)}
+                          class="w-3.5 h-3.5"
+                        />
+                      </div>
+                      <span class="font-medium text-base-content/90">{step.provider}</span>
+                      <span class="text-base-content/40">/</span>
+                      <span class="font-mono text-sm text-base-content/70">{step.model}</span>
+                      <span
+                        :if={step.plan_type == "coding"}
+                        class="px-1.5 py-0.5 rounded text-xs bg-secondary/20 text-secondary"
+                      >
+                        coding
+                      </span>
+                      <span
+                        :if={step.reasoning_effort}
+                        class="px-1.5 py-0.5 rounded text-xs bg-accent/20 text-accent"
+                        title="Reasoning effort"
+                      >
+                        thinking: {step.reasoning_effort}
+                      </span>
+                      <span
+                        :if={is_nil(step.reasoning_effort) and step.thinking_enabled}
+                        class="px-1.5 py-0.5 rounded text-xs bg-accent/20 text-accent"
+                      >
+                        thinking
+                      </span>
+                    </div>
+                    <.step_traffic_indicator
+                      step={step}
+                      traffic={Map.get(@step_traffic, step.id)}
+                      total_served={step_traffic_total(@step_traffic)}
+                    />
+                    <div class="mt-2">
+                      <.form for={%{}} phx-change="assign_key">
+                        <input type="hidden" name="step_id" value={step.id} />
+                        <select
+                          name="key_id"
+                          class={"text-sm py-1.5 px-3 rounded-lg border transition-colors appearance-none bg-no-repeat bg-right pr-8 #{if step.provider_key_id, do: "bg-base-200/50 border-base-300/30 text-base-content/70", else: "bg-warning/5 border-warning/30 text-warning"}"}
+                          style="background-image: url('data:image/svg+xml;charset=UTF-8,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 20 20%22 fill=%22%236b7280%22%3E%3Cpath fill-rule=%22evenodd%22 d=%22M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z%22 clip-rule=%22evenodd%22/%3E%3C/svg%3E');"
+                        >
+                          <option value="">-- Select API Key --</option>
+                          <%!-- Same label as every other provider-key picker. --%>
+                          <%= for key <- matching_keys(@provider_keys, step) do %>
+                            <option value={key.id} selected={step.provider_key_id == key.id}>
+                              {DodoRouterWeb.ProviderComponents.provider_key_option_label(key)}
+                            </option>
+                          <% end %>
+                        </select>
+                      </.form>
+                      <p
+                        :if={selected_key_problem(@provider_keys, step)}
+                        class="mt-1.5 text-xs text-error flex items-center gap-1"
+                      >
+                        <.icon name="hero-x-circle" class="size-3.5 shrink-0" />
+                        {selected_key_problem(@provider_keys, step)}
+                        <.link navigate={~p"/providers"} class="underline">Fix in Providers</.link>
+                      </p>
+                    </div>
+                  </div>
+                  <div class="flex flex-col gap-1">
+                    <button
+                      phx-click="move_step_up"
+                      phx-value-id={step.id}
+                      class="p-1 rounded hover:bg-base-300 text-base-content/40 hover:text-base-content transition-colors"
+                      title="Move up"
+                    >
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        class="h-4 w-4"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        stroke="currentColor"
+                      >
+                        <path
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                          stroke-width="2"
+                          d="M5 15l7-7 7 7"
+                        />
+                      </svg>
+                    </button>
+                    <button
+                      phx-click="move_step_down"
+                      phx-value-id={step.id}
+                      class="p-1 rounded hover:bg-base-300 text-base-content/40 hover:text-base-content transition-colors"
+                      title="Move down"
+                    >
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        class="h-4 w-4"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        stroke="currentColor"
+                      >
+                        <path
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                          stroke-width="2"
+                          d="M19 9l-7 7-7-7"
+                        />
+                      </svg>
+                    </button>
+                  </div>
+                  <.link
+                    patch={~p"/routers/#{@router}/routing/#{step.id}/edit"}
+                    class="p-2 rounded-lg hover:bg-base-300 text-base-content/40 hover:text-base-content transition-colors"
+                    title="Edit step"
+                  >
+                    <.icon name="hero-pencil" class="size-4" />
+                  </.link>
+                  <button
+                    phx-click="delete_step"
+                    phx-value-id={step.id}
+                    class="p-2 rounded-lg hover:bg-error/10 text-base-content/40 hover:text-error transition-colors"
+                    data-confirm="Remove this step?"
+                  >
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      class="h-4 w-4"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                    >
+                      <path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="2"
+                        d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                      />
+                    </svg>
+                  </button>
+                </div>
+              </div>
+            </div>
+            <p :if={!@has_routing_steps} class="empty-state py-8">
+              No routing steps configured. Add one to start proxying requests.
+            </p>
+          </div>
+          
+    <!-- Recent Logs -->
+          <div class="card-bordered mb-8" id="recent-logs-card">
+            <div class="flex items-center justify-between mb-3">
+              <h2 class="section-title mb-0">Recent Logs</h2>
+              <.link
+                navigate={~p"/logs?router_id=#{@router.id}"}
+                class="text-sm text-primary hover:underline"
+              >
+                View all logs
+              </.link>
+            </div>
+            <div id="recent-logs" phx-update="stream" phx-hook="LogEntryAnimations" class="space-y-2">
+              <.link
+                :for={{dom_id, log} <- @streams.recent_logs}
+                id={dom_id}
+                navigate={
+                  if log.status != "pending",
+                    do:
+                      ~p"/logs/#{log}" <>
+                        "?return_to=" <> URI.encode_www_form("/routers/#{@router.id}"),
+                    else: nil
+                }
+                class={[
+                  "block p-3 rounded-lg text-sm transition-colors",
+                  log.status == "pending" && "bg-info/10 animate-pulse",
+                  log.status == "success" && "bg-success/10 hover:bg-success/20",
+                  log.status == "fallback" && "bg-warning/10 hover:bg-warning/20",
+                  log.status == "error" && "bg-error/10 hover:bg-error/20"
+                ]}
+              >
+                <div class="flex items-center justify-between">
+                  <div class="flex items-center gap-3">
+                    <span class={[
+                      "w-2 h-2 rounded-full shrink-0",
+                      log.status == "pending" && "bg-info",
+                      log.status == "success" && "bg-success",
+                      log.status == "fallback" && "bg-warning",
+                      log.status == "error" && "bg-error"
+                    ]}>
+                    </span>
+                    <div class="flex items-center gap-2">
+                      <div class="w-4 h-4 rounded flex items-center justify-center shrink-0 bg-base-200">
+                        <.provider_logo slug={normalize_slug(log.final_provider)} class="w-3 h-3" />
+                      </div>
+                      <span class="font-mono text-base-content/80">
+                        {log.final_provider}/{log.final_model}
+                      </span>
+                    </div>
+                    <span
+                      :if={log.call_type}
+                      class="px-1.5 py-0.5 rounded text-xs font-medium bg-base-300/50 text-base-content/70"
+                    >
+                      {call_type_name(log.call_type)}
+                    </span>
+                    <span class={[
+                      "px-1.5 py-0.5 rounded text-xs font-medium",
+                      status_badge_class(log.status)
+                    ]}>
+                      {log.status}
+                    </span>
+                  </div>
+                  <div class="flex items-center gap-4 text-base-content/50 text-sm shrink-0">
+                    <%= if Map.get(log, :cache_read_tokens) && log.cache_read_tokens > 0 do %>
+                      <span class="inline-flex items-center gap-1 text-[10px] text-success bg-success/10 px-1.5 py-0.5 rounded">
+                        <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path
+                            stroke-linecap="round"
+                            stroke-linejoin="round"
+                            stroke-width="2"
+                            d="M13 10V3L4 14h7v7l9-11h-7z"
+                          />
+                        </svg>
+                        {cache_pct(log)}
+                      </span>
+                    <% end %>
+                    <span :if={Map.get(log, :latency_ms)} class="font-mono">{log.latency_ms}ms</span>
+                    <span class="font-mono text-xs">{format_time(log.inserted_at)}</span>
+                  </div>
+                </div>
+                <div
+                  :if={last_message_preview(log)}
+                  class="mt-2 text-xs text-base-content/60 truncate pl-5"
+                >
+                  {last_message_preview(log)}
+                </div>
+              </.link>
+            </div>
+            <p :if={!@has_logs} class="empty-state py-8">
+              No requests yet. Expand the Connect section above to see how to make your first request.
+            </p>
+          </div>
+          
+    <!-- Live Events -->
+          <div :if={length(@recent_events) > 0} class="card-bordered">
+            <div class="flex items-center gap-3 mb-3">
+              <h2 class="section-title mb-0">Recent Events</h2>
+              <span class="flex items-center gap-1.5 px-2 py-0.5 bg-success/10 rounded text-xs font-medium text-success">
+                <span class="live-dot"></span> Live
+              </span>
+            </div>
+            <div class="space-y-2">
+              <div
+                :for={event <- @recent_events}
+                class={"flex items-center justify-between p-3 rounded-lg text-sm #{event_class(event)}"}
+              >
+                <div class="flex items-center gap-3">
+                  <span class={"w-2 h-2 rounded-full #{event_dot_class(event)}"}></span>
+                  <div class="flex items-center gap-2">
+                    <div class="w-4 h-4 rounded flex items-center justify-center shrink-0 bg-base-200">
+                      <.provider_logo slug={normalize_slug(event.provider)} class="w-3 h-3" />
+                    </div>
+                    <span class="font-mono text-base-content/80">{event.provider}/{event.model}</span>
+                  </div>
+                  <span
+                    :if={event.had_fallback}
+                    class="px-1.5 py-0.5 bg-warning/20 text-warning rounded text-xs"
+                  >
+                    fallback
+                  </span>
+                </div>
+                <span class="text-base-content/50 font-mono">{event.latency_ms}ms</span>
+              </div>
+            </div>
+          </div>
+          
+    <!-- Routing Modal -->
+          <.modal
+            :if={@live_action in [:routing, :edit_step]}
+            id="routing-modal"
+            show
+            on_cancel={JS.patch(~p"/routers/#{@router}")}
+          >
+            <h3 class="text-lg font-semibold mb-6">
+              {if @editing_step, do: "Edit Routing Step", else: "Add Routing Step"}
+            </h3>
+            <form
+              phx-submit={if @editing_step, do: "update_step", else: "add_step"}
+              phx-change="update_step_form"
+              class="space-y-5"
+            >
+              <div>
+                <label class="block text-sm font-medium text-base-content/70 mb-2">Provider</label>
+                <select
+                  name="step[key_slug]"
+                  class="w-full py-2.5 px-3 bg-base-200 border border-base-300/50 rounded-lg"
+                  required
+                >
+                  <%= for slug <- step_slug_options() do %>
+                    <option value={slug} selected={@step_key_slug == slug}>
+                      {@provider_info[slug][:name] || slug}
+                    </option>
+                  <% end %>
+                </select>
+                <input type="hidden" name="step[provider]" value={@step_provider} />
+                <input
+                  type="hidden"
+                  name="step[plan_type]"
+                  value={plan_type_for_slug(@step_key_slug)}
+                />
+                <%= case keys_with_slug(@provider_keys, @step_key_slug) do %>
+                  <% [] -> %>
+                    <p
+                      id="step-provider-no-keys"
+                      class="text-xs text-warning mt-1.5 flex items-center gap-1.5"
+                    >
+                      <.icon name="hero-exclamation-triangle" class="size-3.5 shrink-0" />
+                      <span>
+                        You haven't added an API key for this provider —
+                        <.link
+                          navigate={~p"/providers?return_to=/routers/#{@router.id}"}
+                          class="underline font-medium"
+                        >
+                          add one in Providers
+                        </.link>
+                        so this step can serve requests.
+                      </span>
+                    </p>
+                  <% [key | _] -> %>
+                    <p id="step-key-hint" class="text-xs text-base-content/50 mt-1.5">
+                      Will use your key
+                      <span class="font-mono">
+                        {key.label} ({Providers.compact_key_hint(key.key_hint)})
+                      </span>
+                      — change it on the chain afterwards if needed.
+                    </p>
+                <% end %>
+              </div>
+              <div>
+                <label class="block text-sm font-medium text-base-content/70 mb-2">Model</label>
+                <select
+                  :if={not @step_model_custom}
+                  name="step[model]"
+                  class="w-full py-2.5 px-3 bg-base-200 border border-base-300/50 rounded-lg"
+                >
+                  <option value="" disabled selected={@step_model == ""}>
+                    Select a model…
+                  </option>
+                  <%= for model <- model_options(@step_provider) do %>
+                    <option value={model} selected={@step_model == model}>
+                      {model}
+                    </option>
+                  <% end %>
+                  <option value="__custom__" selected={@step_model_custom}>
+                    Custom…
+                  </option>
+                </select>
+                <input
+                  :if={@step_model_custom}
+                  type="text"
+                  name="step[model]"
+                  value={@step_model}
+                  placeholder="Enter exact model name"
+                  class="w-full py-2.5 px-3 bg-base-200 border border-base-300/50 rounded-lg"
+                  required
+                />
+                <p class="text-xs text-base-content/50 mt-1.5">
+                  Pick a known model or choose <span class="font-medium">Custom…</span>
+                  to enter any model id.
+                </p>
+              </div>
+              <div>
+                <label class="block text-sm font-medium text-base-content/70 mb-2">
+                  Reasoning Effort
+                </label>
+                <select
+                  name="step[reasoning_effort]"
+                  class="w-full py-2.5 px-3 bg-base-200 border border-base-300/50 rounded-lg"
+                >
+                  <option
+                    value=""
+                    selected={is_nil(@editing_step) or is_nil(@editing_step.reasoning_effort)}
+                  >
+                    Default (provider decides)
+                  </option>
+                  <%= for effort <- @step_efforts do %>
+                    <option
+                      value={effort}
+                      selected={@editing_step && @editing_step.reasoning_effort == effort}
+                    >
+                      {effort_label(effort)}
+                    </option>
+                  <% end %>
+                </select>
+                <p :if={@step_efforts_known} class="text-xs text-base-content/50 mt-1.5">
+                  Levels this model supports (from models.dev), translated into whatever depth control the provider actually takes — a level for OpenAI-family and Anthropic, a token budget for Gemini, on/off for providers with only a switch. Leave unset to honor the client request or provider default.
+                </p>
+                <p :if={!@step_efforts_known} class="text-xs text-base-content/50 mt-1.5">
+                  Supported levels unknown for this model — the level is translated into the provider's own depth control and an unsupported one will error visibly in the logs rather than being silently downgraded. Leave unset to honor the client request or provider default.
+                </p>
+              </div>
+              <%!-- z.ai specific options --%>
+              <details
+                class="group rounded-lg border border-base-300/40 bg-base-200/30"
+                open={@editing_step && (@editing_step.temperature || @editing_step.max_tokens)}
+              >
+                <summary class="cursor-pointer list-none px-4 py-3 flex items-center justify-between text-sm font-medium text-base-content/70 select-none">
+                  Advanced
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    class="h-4 w-4 text-base-content/40 transition-transform group-open:rotate-180"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                  >
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="2"
+                      d="M19 9l-7 7-7-7"
+                    />
+                  </svg>
+                </summary>
+                <div class="px-4 pb-4 pt-1 grid grid-cols-2 gap-4">
+                  <div>
+                    <label class="block text-sm font-medium text-base-content/70 mb-2">
+                      Temperature
+                    </label>
+                    <input
+                      type="number"
+                      name="step[temperature]"
+                      step="0.1"
+                      min="0"
+                      max="2"
+                      placeholder="Optional"
+                      value={@editing_step && @editing_step.temperature}
+                      class="w-full py-2.5 px-3 bg-base-200 border border-base-300/50 rounded-lg"
+                    />
+                  </div>
+                  <div>
+                    <label class="block text-sm font-medium text-base-content/70 mb-2">
+                      Max Tokens
+                    </label>
+                    <input
+                      type="number"
+                      name="step[max_tokens]"
+                      min="1"
+                      placeholder="Optional"
+                      value={@editing_step && @editing_step.max_tokens}
+                      class="w-full py-2.5 px-3 bg-base-200 border border-base-300/50 rounded-lg"
+                    />
+                  </div>
+                  <p class="col-span-2 text-xs text-base-content/50">
+                    Optional overrides. Most requests forward the client's values automatically.
+                  </p>
+                </div>
+              </details>
+              <div class="flex justify-end gap-3 pt-4 border-t border-base-300/50">
+                <button
+                  type="button"
+                  phx-click={JS.patch(~p"/routers/#{@router}")}
+                  class="btn btn-ghost"
+                >
+                  Cancel
+                </button>
+                <button type="submit" class="btn btn-primary">
+                  {if @editing_step, do: "Save Changes", else: "Add Step"}
+                </button>
+              </div>
+            </form>
+          </.modal>
+        </div>
+        <!-- close content z-10 wrapper -->
+
+        <.modal
+          :if={@live_action == :edit}
+          id="router-edit-modal"
+          show
+          on_cancel={JS.patch(~p"/routers/#{@router}")}
+        >
+          <.live_component
+            module={DodoRouterWeb.RouterLive.FormComponent}
+            id={@router.id}
+            title="Edit Router"
+            action={:edit}
+            router={@router}
+            current_user={@current_user}
+            patch={~p"/routers/#{@router}"}
+          />
         </.modal>
       </div>
-      <!-- close content z-10 wrapper -->
-
-      <.modal
-        :if={@live_action == :edit}
-        id="router-edit-modal"
-        show
-        on_cancel={JS.patch(~p"/routers/#{@router}")}
-      >
-        <.live_component
-          module={DodoRouterWeb.RouterLive.FormComponent}
-          id={@router.id}
-          title="Edit Router"
-          action={:edit}
-          router={@router}
-          current_user={@current_user}
-          patch={~p"/routers/#{@router}"}
-        />
-      </.modal>
-    </div>
+    </Layouts.app>
     """
   end
 
@@ -1273,10 +1316,6 @@ defmodule DodoRouterWeb.RouterLive.Show do
   defp format_number(n) when n >= 1_000_000, do: "#{Float.round(n / 1_000_000, 1)}M"
   defp format_number(n) when n >= 1_000, do: "#{Float.round(n / 1_000, 1)}K"
   defp format_number(n), do: to_string(n)
-
-  defp format_latency(nil), do: "-"
-  defp format_latency(%Decimal{} = ms), do: "#{ms |> Decimal.round(0) |> Decimal.to_integer()}ms"
-  defp format_latency(ms), do: "#{round(ms)}ms"
 
   defp event_class(%{status: :success}), do: "bg-success/10"
   defp event_class(%{status: :fallback}), do: "bg-warning/10"
@@ -1567,6 +1606,56 @@ defmodule DodoRouterWeb.RouterLive.Show do
     setup.keys and setup.steps and setup.assigned and setup.request
   end
 
+  # A chain where step 1 serves 100% and one where step 1 500s every
+  # request used to render identically — this is the ambient-awareness fix
+  # (dodo_router-f6v.6): share of served requests plus an error-rate pill,
+  # for the same 24h window as the page's other stat cards. A step absent
+  # from `traffic` (no attempts at all in the window) is dimmed rather than
+  # shown as "0%" — that's a distinct, worse signal (dead or unreachable
+  # step) from "reached but never served".
+  attr :step, :map, required: true
+  attr :traffic, :map, default: nil
+  attr :total_served, :integer, required: true
+
+  defp step_traffic_indicator(assigns) do
+    ~H"""
+    <div
+      :if={@traffic}
+      class="mt-1.5 flex items-center gap-2 text-xs"
+      data-step-share={"#{step_share_pct(@traffic, @total_served)}%"}
+      data-step-errors={@traffic.errors}
+    >
+      <span class="font-medium text-base-content/70">
+        {step_share_pct(@traffic, @total_served)}% of traffic
+      </span>
+      <span
+        :if={@traffic.errors > 0}
+        class="px-1.5 py-0.5 rounded-full bg-error/15 text-error font-medium"
+        title={"#{@traffic.errors} error#{if @traffic.errors == 1, do: "", else: "s"} in the last 24h"}
+      >
+        {@traffic.errors} error{if @traffic.errors == 1, do: "", else: "s"}
+      </span>
+    </div>
+    <div
+      :if={!@traffic}
+      class="mt-1.5 text-xs text-base-content/30"
+      data-step-share="0%"
+    >
+      no traffic in 24h
+    </div>
+    """
+  end
+
+  defp step_share_pct(_traffic, 0), do: 0
+  defp step_share_pct(%{served: served}, total_served), do: round(served / total_served * 100)
+
+  defp step_traffic_total(step_traffic) do
+    step_traffic
+    |> Map.values()
+    |> Enum.map(& &1.served)
+    |> Enum.sum()
+  end
+
   attr :n, :integer, required: true
   attr :done, :boolean, required: true
   attr :label, :string, required: true
@@ -1593,21 +1682,16 @@ defmodule DodoRouterWeb.RouterLive.Show do
 
   # Synced model catalog first, adapter's built-in list as fallback/extras.
   defp model_options(provider) do
-    synced =
-      provider
-      |> normalize_models_provider()
-      |> Models.list_models_by_provider()
-      |> Enum.map(& &1.model_id)
-
-    Enum.uniq(synced ++ Registry.available_models(provider))
+    # The adapter's hardcoded list is a fallback for a provider with no
+    # catalog, not an addition to one that has been synced.
+    provider
+    |> normalize_models_provider()
+    |> Models.offerable_model_ids(Registry.available_models(provider))
+    |> Enum.uniq()
   end
 
   defp normalize_models_provider("openai-codex"), do: "openai"
   defp normalize_models_provider(slug), do: slug
-
-  defp key_status_suffix(%{status: "invalid"}), do: " — invalid"
-  defp key_status_suffix(%{status: "quota_exceeded"}), do: " — out of credits"
-  defp key_status_suffix(_), do: ""
 
   defp selected_key_problem(provider_keys, step) do
     case Enum.find(provider_keys, &(&1.id == step.provider_key_id)) do

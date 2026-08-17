@@ -8,6 +8,8 @@ defmodule DodoRouter.Providers do
   alias DodoRouter.Repo
   alias DodoRouter.Providers.ProviderKey
   alias DodoRouter.Accounts.User
+  alias DodoRouter.Routers.Router
+  alias DodoRouter.Routers.RoutingStep
 
   @doc """
   Lists all provider keys for a user.
@@ -98,13 +100,155 @@ defmodule DodoRouter.Providers do
 
   @doc """
   Deletes a provider key and its stored secret.
-  """
-  def delete_provider_key(%ProviderKey{} = provider_key) do
-    # Delete from Infisical first
-    delete_api_key(provider_key.user_id, provider_key.key_ref)
 
-    # Then delete from database
-    Repo.delete(provider_key)
+  Returns `{:error, :in_use}` when an evaluation still references the key,
+  as its judge or as one of its candidates. Both keep an evaluation
+  re-runnable, so neither may be silently orphaned. Pass
+  `reassign_to: %ProviderKey{}` to move every reference to another key of
+  the same provider first; the move and the delete share a transaction, so
+  a refused delete never leaves an evaluation pointing at a key the user
+  did not choose.
+
+  Only the judge reference is enforced by the database
+  (`evaluations_judge_provider_key_id_fkey`, `ON DELETE RESTRICT`).
+  Candidates live in a JSON column with no foreign key, so they are checked
+  here — a delete Postgres is happy to accept still breaks the next re-run.
+
+  The row goes first and the secret second. The other order destroys the
+  credential behind a key that is still there when the delete is refused —
+  the key stays listed, looks fine, and can never authenticate again.
+  """
+  def delete_provider_key(%ProviderKey{} = provider_key, opts \\ []) do
+    result =
+      Repo.transaction(fn ->
+        with :ok <- reassign_references(provider_key, opts[:reassign_to]),
+             :ok <- check_unreferenced(provider_key),
+             {:ok, deleted} <- Repo.delete(delete_changeset(provider_key)) do
+          deleted
+        else
+          {:error, reason} -> Repo.rollback(reason)
+        end
+      end)
+
+    case result do
+      {:ok, deleted} ->
+        delete_api_key(provider_key.user_id, provider_key.key_ref)
+        {:ok, deleted}
+
+      {:error, %Ecto.Changeset{}} ->
+        {:error, :in_use}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp reassign_references(_provider_key, nil), do: :ok
+
+  defp reassign_references(%ProviderKey{} = provider_key, %ProviderKey{} = replacement) do
+    # Cross-context on purpose: the references being moved belong to
+    # Evaluations, and only that context knows what a judge or a candidate
+    # target is.
+    DodoRouter.Evaluations.reassign_provider_key(provider_key, replacement)
+  end
+
+  # Runs after any reassignment, so it sees what is actually left.
+  defp check_unreferenced(%ProviderKey{} = provider_key) do
+    case DodoRouter.Evaluations.reference_counts(provider_key) do
+      %{judge: 0, candidate: 0} -> :ok
+      _ -> {:error, :in_use}
+    end
+  end
+
+  defp delete_changeset(%ProviderKey{} = provider_key) do
+    provider_key
+    |> Ecto.Changeset.change()
+    |> Ecto.Changeset.foreign_key_constraint(:id,
+      name: :evaluations_judge_provider_key_id_fkey,
+      message: "is the judge for existing evaluations"
+    )
+  end
+
+  @doc """
+  The blast radius of deleting a provider key, for every key in `key_ids` at
+  once — a destructive confirmation needs this stated, not left to a hover
+  tooltip, and a page listing many keys must not run one query per key.
+
+  Returns `%{key_id => %{routing_step_count:, router_names:, request_count_24h:}}`.
+  `routing_step_count`/`router_names` come from the exact `provider_key_id`
+  foreign key on `routing_steps`. `request_count_24h` is an exact count of
+  distinct requests whose `attempted_steps` snapshot named this key — the
+  denormalized record of which key an attempt actually used, not an
+  approximation via the key's current routing steps (a request may have
+  used a key a routing step no longer references).
+  """
+  def usage_summary_for_keys(key_ids, opts \\ [])
+  def usage_summary_for_keys([], _opts), do: %{}
+
+  def usage_summary_for_keys(key_ids, opts) do
+    hours = Keyword.get(opts, :hours, 24)
+    since = DateTime.add(DateTime.utc_now(), -hours * 3600, :second)
+
+    step_rows =
+      from(rs in RoutingStep,
+        join: r in Router,
+        on: rs.router_id == r.id,
+        where: rs.provider_key_id in ^key_ids,
+        group_by: rs.provider_key_id,
+        select: {rs.provider_key_id, count(rs.id), fragment("array_agg(DISTINCT ?)", r.name)}
+      )
+      |> Repo.all()
+      |> Map.new(fn {key_id, count, names} -> {key_id, {count, names}} end)
+
+    request_counts = request_counts_since(key_ids, since)
+
+    Map.new(key_ids, fn key_id ->
+      {step_count, router_names} = Map.get(step_rows, key_id, {0, []})
+
+      {key_id,
+       %{
+         routing_step_count: step_count,
+         router_names: router_names,
+         request_count_24h: Map.get(request_counts, key_id, 0)
+       }}
+    end)
+  end
+
+  # `attempted_steps` is jsonb, not a foreign key, so this is a raw query
+  # over `jsonb_array_elements` rather than Ecto's query DSL. Grouped once
+  # for every key in `key_ids`, not one query per key.
+  defp request_counts_since(key_ids, since) do
+    ids = Enum.map(key_ids, &to_string/1)
+
+    {:ok, %{rows: rows}} =
+      Ecto.Adapters.SQL.query(
+        Repo,
+        """
+        SELECT step->>'provider_key_id' AS provider_key_id, count(DISTINCT l.id)
+        FROM request_logs l, jsonb_array_elements(l.attempted_steps) AS step
+        WHERE l.inserted_at >= $1
+          AND step->>'provider_key_id' = ANY($2)
+        GROUP BY step->>'provider_key_id'
+        """,
+        [since, ids]
+      )
+
+    Map.new(rows, fn [key_id, count] -> {Ecto.UUID.cast!(key_id), count} end)
+  end
+
+  @doc """
+  Keys of the same provider the user could move a judge reference to.
+
+  Same provider only: an evaluation records `judge_model` alongside the key,
+  so pointing it at another provider's credential would claim a model judged
+  it that never ran there.
+  """
+  def reassignment_candidates(%ProviderKey{} = provider_key) do
+    ProviderKey
+    |> where(user_id: ^provider_key.user_id, provider_slug: ^provider_key.provider_slug)
+    |> where([pk], pk.id != ^provider_key.id)
+    |> order_by([pk], pk.label)
+    |> Repo.all()
   end
 
   @doc """
@@ -276,4 +420,40 @@ defmodule DodoRouter.Providers do
   """
   def compact_key_hint(nil), do: ""
   def compact_key_hint(hint), do: String.replace(hint, ~r/•{5,}/u, "••••")
+
+  # Keys that bill against a subscription or coding plan rather than metered
+  # API credit. Enumerated explicitly rather than inferred, because the obvious
+  # heuristics are both wrong: "slug contains coding" misses `anthropic_oauth`
+  # and `openai-codex`, while "key slug differs from the adapter slug" wrongly
+  # flags `zai_standard`, which is metered. A short honest list beats a rule
+  # that quietly misclassifies.
+  #
+  # `Replays.plan_type_for/1` delegates to `subscription_key?/1` (rather than
+  # keeping its own "coding" substring check) — see dodo_router-uuh.
+  @subscription_key_slugs ~w(
+    anthropic_oauth
+    openai-codex
+    moonshot_coding
+    zai_coding
+    test_provider_coding
+  )
+
+  @doc """
+  Whether this key draws on a subscription/plan rather than metered API credit.
+
+  Matters beyond cost reporting: plan credentials are provisioned for a
+  vendor's own coding environment and can refuse or throttle traffic that did
+  not originate there. For a judge — which has to answer for a benchmark to
+  produce a score at all — that is a failed run, not a cheaper one.
+  """
+  def subscription_key?(%ProviderKey{provider_slug: slug}), do: slug in @subscription_key_slugs
+  def subscription_key?(%{provider_slug: slug}), do: slug in @subscription_key_slugs
+  def subscription_key?(slug) when is_binary(slug), do: slug in @subscription_key_slugs
+  def subscription_key?(_key), do: false
+
+  @doc "Billing model of a key, for display: `:subscription` or `:metered`."
+  def billing(key), do: if(subscription_key?(key), do: :subscription, else: :metered)
+
+  @doc "The subscription key slugs, for UI copy and tests."
+  def subscription_key_slugs, do: @subscription_key_slugs
 end

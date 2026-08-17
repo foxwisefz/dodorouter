@@ -19,8 +19,6 @@ defmodule DodoRouter.Proxy.Adapters.ResponsesAPI do
   alias DodoRouter.Proxy.Adapter
   alias DodoRouter.Routers.RoutingStep
 
-  @timeout_ms 120_000
-
   @doc """
   Synchronous call.  The Responses API always requires streaming, so this
   internally streams and accumulates the full response.
@@ -91,7 +89,7 @@ defmodule DodoRouter.Proxy.Adapters.ResponsesAPI do
       Req.post(endpoint,
         headers: headers,
         json: body,
-        receive_timeout: @timeout_ms,
+        receive_timeout: Adapter.receive_timeout(),
         into: into_fun
       )
 

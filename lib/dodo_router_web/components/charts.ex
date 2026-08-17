@@ -22,6 +22,13 @@ defmodule DodoRouterWeb.Components.Charts do
   @doc """
   KPI stat tile: label, compact value, optional subtext and 12-point sparkline
   (de-emphasis stroke, accent end-dot on the current period).
+
+  `:delta` is an optional period-over-period comparison, e.g.
+  `%{text: "+12% vs prev 24h", direction: :up, polarity: :good}`. `direction`
+  (`:up` | `:down` | `:flat`) picks the arrow glyph; `polarity`
+  (`:good` | `:bad` | `:neutral`) picks the color — up isn't always good
+  (spend up is a warning, success rate up is positive), so callers decide
+  polarity per metric rather than the component assuming "up = green".
   """
   attr :id, :string, required: true
   attr :label, :string, required: true
@@ -29,6 +36,7 @@ defmodule DodoRouterWeb.Components.Charts do
   attr :subtext, :string, default: nil
   attr :value_class, :string, default: "text-base-content"
   attr :spark, :list, default: nil
+  attr :delta, :map, default: nil
 
   def stat_tile(assigns) do
     ~H"""
@@ -36,6 +44,13 @@ defmodule DodoRouterWeb.Components.Charts do
       <p class="text-xs font-medium text-base-content/50">{@label}</p>
       <p class={["mt-0.5 text-lg font-semibold", @value_class]}>{@value}</p>
       <p :if={@subtext} class="mt-0.5 text-xs text-base-content/40 truncate">{@subtext}</p>
+      <p
+        :if={@delta}
+        data-kpi-delta={@delta.text}
+        class={["mt-0.5 text-xs truncate", delta_color(@delta[:polarity])]}
+      >
+        {delta_arrow(@delta[:direction])} {@delta.text}
+      </p>
       <div :if={spark_visible?(@spark)} class="absolute right-3 top-3 h-7 w-16">
         <svg viewBox="0 0 100 100" preserveAspectRatio="none" class="h-full w-full overflow-visible">
           <path
@@ -303,7 +318,14 @@ defmodule DodoRouterWeb.Components.Charts do
   Identity is carried by the legend/table the caller renders alongside.
   """
   attr :id, :string, required: true
-  attr :segments, :list, required: true, doc: "%{name, value, display, color}"
+
+  attr :segments, :list,
+    required: true,
+    doc: "%{name, value, display, color, key (optional, for data-timing-segment/test hooks)}"
+
+  attr :tip_suffix, :string,
+    default: "of spend",
+    doc: "trailing words in the hover tooltip, e.g. \"of spend\" or \"of total time\""
 
   def share_bar(assigns) do
     total = assigns.segments |> Enum.map(& &1.value) |> Enum.sum()
@@ -317,7 +339,8 @@ defmodule DodoRouterWeb.Components.Charts do
           :if={seg.value > 0}
           class="viz-slot h-full min-w-[3px]"
           tabindex="0"
-          data-viz-tip={share_tip(seg, @total)}
+          data-viz-tip={share_tip(seg, @total, @tip_suffix)}
+          data-timing-segment={Map.get(seg, :key)}
           style={"flex-grow: #{seg.value}; flex-basis: 0"}
         >
           <div class="viz-seg h-full w-full" style={"background: #{seg.color}"}></div>
@@ -394,6 +417,14 @@ defmodule DodoRouterWeb.Components.Charts do
   def format_unit(v, :ms), do: format_ms(v)
 
   # ---- internals ----
+
+  defp delta_arrow(:up), do: "▲"
+  defp delta_arrow(:down), do: "▼"
+  defp delta_arrow(_), do: "•"
+
+  defp delta_color(:good), do: "text-success"
+  defp delta_color(:bad), do: "text-warning"
+  defp delta_color(_), do: "text-base-content/40"
 
   defp spark_visible?(nil), do: false
 
@@ -578,12 +609,12 @@ defmodule DodoRouterWeb.Components.Charts do
     Jason.encode!(%{title: row.name, rows: rows})
   end
 
-  defp share_tip(seg, total) do
+  defp share_tip(seg, total, suffix) do
     pct = Float.round(seg.value / total * 100, 1)
 
     Jason.encode!(%{
       title: seg.name,
-      rows: [%{label: "#{pct}% of spend", value: seg.display, color: seg.color}]
+      rows: [%{label: "#{pct}% #{suffix}", value: seg.display, color: seg.color}]
     })
   end
 end
