@@ -119,11 +119,21 @@ ATTESTO_AUDIENCE=https://router.example.com/mcp
 
 If unset, the issuer defaults to `https://` plus the endpoint's own public host (`PHX_HOST`), and the audience defaults to `<issuer>/mcp` — so a correctly configured `PHX_HOST` alone is often enough, and no release needs to be rebuilt just to change these.
 
+**Behind a TLS-terminating reverse proxy** (Caddy, nginx, Traefik), the app itself receives plain HTTP, and the proxy's `X-Forwarded-Proto: https` header is the only evidence a request arrived over TLS. That header is believed only when it comes from a trusted peer — otherwise any plain-HTTP client could claim it. A proxy on the same machine (loopback) is trusted out of the box. A proxy that reaches the app across a network — a Docker bridge, a separate box — must be listed explicitly, as comma-separated IPs or CIDRs:
+
+```bash
+ATTESTO_TRUSTED_PROXIES=172.16.0.0/12
+```
+
+Get this wrong and every OAuth endpoint answers `400` with *"the request must be made over TLS"*, even though your clients are connecting over HTTPS — registration fails, so no agent can connect at all.
+
 For local development, `mix attesto_phoenix.gen.dev_https` (with [mkcert](https://github.com/FiloSottile/mkcert) installed) generates a locally-trusted certificate and the app serves TLS on port 4443 alongside the plain HTTP dashboard on 4000.
 
 ## Troubleshooting
 
 **The agent connects but every tool says "UNAVAILABLE".** It is missing permissions. Reconnect and tick the ones it needs on the consent screen — the tool description names them.
+
+**Every OAuth request fails with "the request must be made over TLS", but the URL is https.** TLS terminates at your reverse proxy, and the app is not trusting that proxy's `X-Forwarded-Proto` header. A loopback proxy is trusted by default; anything else must be listed in `ATTESTO_TRUSTED_PROXIES` — see [Self-hosting](#self-hosting) above.
 
 **`POST /mcp` returns 401 with a `WWW-Authenticate` challenge.** That is the flow working: the challenge points the client at the discovery document so it can start the OAuth exchange. If the client stops there, check that `ATTESTO_ISSUER` matches the URL actually being served.
 

@@ -60,6 +60,16 @@ config :dodo_router, AttestoPhoenix.Config,
   dpop_enabled: true,
   dpop_nonce_required: false,
   require_https: true,
+  # Production terminates TLS at Caddy on the same box and reaches the app over
+  # plain HTTP on loopback, so `x-forwarded-proto: https` is the only evidence
+  # of TLS attesto ever sees. Forwarded headers are honored solely for peers on
+  # this list (fail-closed; default `[]`) — without it every OAuth endpoint,
+  # registration and token included, refused real HTTPS traffic with "the
+  # request must be made over TLS". `:loopback` covers 127.0.0.0/8 and ::1 and
+  # nothing else; a proxy reaching the app across a network (e.g. a Docker
+  # bridge) is configured per deployment via ATTESTO_TRUSTED_PROXIES in
+  # config/runtime.exs.
+  trusted_proxies: [:loopback],
   # A desktop assistant cannot be pre-registered — nobody knows its loopback
   # callback port until it starts — so RFC 7591 self-registration is the only
   # way it can connect at all. Registering grants nothing on its own: a client

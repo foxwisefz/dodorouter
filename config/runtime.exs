@@ -116,7 +116,20 @@ if config_env() == :prod do
   attesto_issuer = System.get_env("ATTESTO_ISSUER") || "https://#{host}"
   attesto_audience = System.get_env("ATTESTO_AUDIENCE") || "#{attesto_issuer}/mcp"
 
+  # Which peers' X-Forwarded-* headers attesto believes. TLS terminates at the
+  # edge proxy, so this is how a request over plain loopback HTTP proves it
+  # arrived over HTTPS; with an empty list every OAuth endpoint refuses with
+  # "the request must be made over TLS". Defaults to loopback (Caddy on the
+  # same box); a proxy reaching the app across a network sets its CIDRs here,
+  # comma-separated: ATTESTO_TRUSTED_PROXIES=172.16.0.0/12,10.0.0.5
+  attesto_trusted_proxies =
+    case System.get_env("ATTESTO_TRUSTED_PROXIES") do
+      nil -> [:loopback]
+      value -> value |> String.split(",", trim: true) |> Enum.map(&String.trim/1)
+    end
+
   config :dodo_router, AttestoPhoenix.Config,
     issuer: attesto_issuer,
-    audience: attesto_audience
+    audience: attesto_audience,
+    trusted_proxies: attesto_trusted_proxies
 end
