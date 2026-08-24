@@ -54,6 +54,12 @@ There is no hierarchy: granting `logs:read_bodies` does not imply `logs:read`. E
 
 Refusing a permission is not the same as an error. The agent still connects; the tools it cannot use say so, naming the permission that would have worked, so it can tell you what to grant.
 
+### Which routers
+
+Below the permissions, the same screen decides **which routers** they apply to. The default is every router your account has — including ones you create later, which is why it is an explicit choice rather than a silent default. Pick *"Only the routers ticked below"* to limit the agent to specific routers: an agent working on one product then cannot read another product's traffic, however its permissions are set.
+
+The limit travels with the connection — reconnecting or refreshing keeps it, and the consent screen shows the previous selection when an agent asks again. Tools answer honestly from inside the limit: `list_routers` shows only what the connection reaches, and a router granted to an agent but later deleted or transferred simply stops being reachable.
+
 ## The tools
 
 | Tool | What it does | Needs |

@@ -153,6 +153,66 @@ defmodule DodoRouterWeb.OAuthConsentHTML do
               </p>
             </div>
 
+            <%!-- Reach, not permissions: which routers the granted permissions
+                  apply to. "All" is deliberately unbounded — routers created
+                  later are included — which is why it is an explicit choice
+                  rather than what an empty selection happens to mean. --%>
+            <div :if={@routers != []} class="mt-4 border-t border-base-300/60 pt-3">
+              <p class="text-[11px] font-semibold uppercase tracking-wider text-base-content/40">
+                Which routers
+              </p>
+              <div class="mt-1.5 space-y-1.5">
+                <label class="flex cursor-pointer items-center gap-2.5 text-sm">
+                  <input
+                    type="radio"
+                    name="router_access"
+                    value="all"
+                    checked={@selected_router_ids == []}
+                    form="consent-approve"
+                    class="size-4 border-base-300"
+                  />
+                  <span>
+                    All routers
+                    <span class="text-xs text-base-content/55">
+                      — including ones you create later
+                    </span>
+                  </span>
+                </label>
+                <label class="flex cursor-pointer items-center gap-2.5 text-sm">
+                  <input
+                    type="radio"
+                    name="router_access"
+                    value="selected"
+                    checked={@selected_router_ids != []}
+                    form="consent-approve"
+                    class="size-4 border-base-300"
+                  />
+                  <span>Only the routers ticked below</span>
+                </label>
+                <div class="ml-6 mt-1 space-y-1">
+                  <label
+                    :for={router <- @routers}
+                    class="flex cursor-pointer items-center gap-2.5 text-sm text-base-content/80"
+                  >
+                    <input
+                      type="checkbox"
+                      name="granted_routers[]"
+                      value={router.id}
+                      checked={router.id in @selected_router_ids}
+                      form="consent-approve"
+                      class="size-3.5 rounded border-base-300"
+                    />
+                    <span class="min-w-0 truncate">
+                      {router.name}
+                      <code class="ml-1 font-mono text-[11px] text-base-content/35">
+                        {router.slug}
+                      </code>
+                    </span>
+                  </label>
+                </div>
+              </div>
+            </div>
+
             <div :if={@session_scopes != []} class="mt-4 border-t border-base-300/60 pt-3">
               <p class="text-[11px] font-semibold uppercase tracking-wider text-base-content/40">
                 Sign-in
