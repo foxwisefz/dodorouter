@@ -46,6 +46,36 @@ defmodule DodoRouter.Agents.Scopes do
 
   @names Enum.map(@scopes, & &1.name)
 
+  # Per-router narrowing rides the same rail as the permission scopes: consent
+  # appends one of these per selected router, the grant and every refresh
+  # rotation carry them like any other scope, and `Principal.from_oauth` reads
+  # them back. The id, not the slug, because a rename must not silently sever
+  # a grant. No scope of this shape means the deliberate unbounded case —
+  # every router the owner has, now and later (see `Principal`).
+  @router_scope_prefix "router:"
+
+  @doc "The scope that narrows a token to one router, by id."
+  def router_scope(router_id) when is_binary(router_id), do: @router_scope_prefix <> router_id
+
+  @doc "Whether this scope name is a per-router narrowing rather than a permission."
+  def router_scope?(name) when is_binary(name),
+    do: String.starts_with?(name, @router_scope_prefix)
+
+  def router_scope?(_name), do: false
+
+  @doc """
+  The router ids a scope list narrows to. Empty means no narrowing was granted.
+
+  Malformed ids are dropped rather than kept: downstream compares these against
+  real router ids, so a mangled entry could never match anything anyway — the
+  place that refuses them loudly is `AuthZ.ScopePolicy`, at grant time.
+  """
+  def router_ids(scopes) when is_list(scopes) do
+    for @router_scope_prefix <> id <- scopes,
+        match?({:ok, _}, Ecto.UUID.cast(id)),
+        do: id
+  end
+
   @doc "Every scope, in the order the UI should offer them."
   def all, do: @scopes
 

@@ -18,6 +18,7 @@ defmodule DodoRouterWeb.OAuthConsentController do
   alias DodoRouter.AuthZ.{Client, PrincipalStore}
   alias DodoRouter.Agents.Scopes
   alias DodoRouter.Repo
+  alias DodoRouter.Routers
 
   # Long enough to read the screen, short enough that an abandoned tab cannot
   # be completed by somebody else later.
@@ -32,31 +33,45 @@ defmodule DodoRouterWeb.OAuthConsentController do
   def create(conn, %{"decision" => "approve"} = params) do
     user = conn.assigns.current_scope.user
     subject = PrincipalStore.subject_for(user)
-    granted = params |> Map.get("granted_scopes", []) |> List.wrap()
+
+    # The picker only ever adds router scopes itself, so any arriving through
+    # the permission checkboxes is form tampering and is dropped.
+    granted =
+      params
+      |> Map.get("granted_scopes", [])
+      |> List.wrap()
+      |> Enum.reject(&Scopes.router_scope?/1)
 
     # The granted set is what was ticked, not what was asked for. It replaces
     # `scope` before the binding is computed, so the single-use grant is bound
     # to the narrowed request — approving cannot later be redeemed for the
-    # wider scope the client originally sent.
-    authorize_params =
-      params
-      |> Map.drop(~w(decision _csrf_token granted_scopes))
-      |> Map.put("scope", Enum.join(granted, " "))
-
+    # wider scope the client originally sent. Router narrowing rides the same
+    # scope string, so it is bound and persisted the same way.
     cond do
       granted == [] ->
         render_consent(conn, params, "Pick at least one permission, or refuse.")
 
       true ->
-        binding = ConsentGrant.binding_from_params(authorize_params, subject)
+        case granted_router_scopes(user, params) do
+          {:error, message} ->
+            render_consent(conn, params, message)
 
-        case consent_grant_store().mint(binding, @grant_ttl_seconds) do
-          {:ok, token} ->
-            query = authorize_params |> Map.put("consent_token", token) |> URI.encode_query()
-            redirect(conn, to: "/oauth/authorize?" <> query)
+          {:ok, router_scopes} ->
+            authorize_params =
+              params
+              |> Map.drop(~w(decision _csrf_token granted_scopes router_access granted_routers))
+              |> Map.put("scope", Enum.join(granted ++ router_scopes, " "))
 
-          {:error, _reason} ->
-            render_consent(conn, params, "Could not record that approval. Try again.")
+            binding = ConsentGrant.binding_from_params(authorize_params, subject)
+
+            case consent_grant_store().mint(binding, @grant_ttl_seconds) do
+              {:ok, token} ->
+                query = authorize_params |> Map.put("consent_token", token) |> URI.encode_query()
+                redirect(conn, to: "/oauth/authorize?" <> query)
+
+              {:error, _reason} ->
+                render_consent(conn, params, "Could not record that approval. Try again.")
+            end
         end
     end
   end
@@ -65,15 +80,58 @@ defmodule DodoRouterWeb.OAuthConsentController do
     # A refusal has to go back to the client as access_denied rather than
     # leaving it waiting — re-entering without a grant lets attesto produce the
     # RFC 6749 §4.1.2.1 error on the redirect URI it already validated.
-    query = params |> Map.drop(~w(decision _csrf_token granted_scopes)) |> URI.encode_query()
+    query =
+      params
+      |> Map.drop(~w(decision _csrf_token granted_scopes router_access granted_routers))
+      |> URI.encode_query()
+
     redirect(conn, to: "/oauth/authorize?" <> query <> "&prompt=none")
+  end
+
+  # Which routers the approval reaches. "all" is the deliberate unbounded case
+  # and adds no scope; "selected" grants one `router:<id>` scope per ticked
+  # router. Ids are intersected with the user's own routers so a tampered form
+  # cannot mint a grant naming somebody else's router — it would be refused at
+  # every call anyway (`Principal.allows_router?/2` re-checks ownership), but a
+  # grant that looks wider than it is would still be a lie on screen.
+  defp granted_router_scopes(user, params) do
+    case Map.get(params, "router_access", "all") do
+      "selected" ->
+        owned = Routers.list_routers(user) |> MapSet.new(& &1.id)
+
+        selected =
+          params
+          |> Map.get("granted_routers", [])
+          |> List.wrap()
+          |> Enum.filter(&MapSet.member?(owned, &1))
+
+        case selected do
+          [] -> {:error, "Pick at least one router, or grant access to all of them."}
+          ids -> {:ok, Enum.map(ids, &Scopes.router_scope/1)}
+        end
+
+      _all ->
+        {:ok, []}
+    end
   end
 
   defp render_consent(conn, params, error \\ nil) do
     client = load_client(params["client_id"])
+    user = conn.assigns.current_scope.user
 
-    scopes =
-      params |> Map.get("scope", "") |> String.split(" ", trim: true) |> Enum.map(&scope_detail/1)
+    requested = params |> Map.get("scope", "") |> String.split(" ", trim: true)
+
+    # A client replaying a previous grant re-requests the router scopes it was
+    # given. They are reach, not permissions — rendered as the picker's
+    # preselection, never as permission rows.
+    {router_scopes, permission_names} = Enum.split_with(requested, &Scopes.router_scope?/1)
+    scopes = Enum.map(permission_names, &scope_detail/1)
+
+    routers = Routers.list_routers(user)
+    requested_router_ids = Scopes.router_ids(router_scopes)
+
+    selected_router_ids =
+      Enum.filter(requested_router_ids, fn id -> Enum.any?(routers, &(&1.id == id)) end)
 
     # Protocol scopes are not data access and must not sit at the same visual
     # weight as one. `openid` only asks for an identity assertion this API never
@@ -93,9 +151,12 @@ defmodule DodoRouterWeb.OAuthConsentController do
       client_id: params["client_id"],
       scopes: permissions,
       session_scopes: session,
-      user: conn.assigns.current_scope.user,
+      routers: routers,
+      selected_router_ids: selected_router_ids,
+      user: user,
       error: error,
-      authorize_params: Map.drop(params, ~w(decision granted_scopes))
+      authorize_params:
+        Map.drop(params, ~w(decision granted_scopes router_access granted_routers))
     )
   end
 

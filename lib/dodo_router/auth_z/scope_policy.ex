@@ -19,7 +19,13 @@ defmodule DodoRouter.AuthZ.ScopePolicy do
 
   @impl true
   def authorize_scope(_client, requested) when is_list(requested) do
-    {known, unknown} = Enum.split_with(requested, &known?/1)
+    # Per-router narrowing scopes (`router:<uuid>`) are granted by the consent
+    # screen and re-requested by clients replaying a previous grant; validated
+    # here by shape only. Ownership is deliberately not checked at grant time —
+    # `Principal.allows_router?/2` re-checks it on every call, so a router that
+    # changed hands is unreachable through an old grant either way.
+    {router_scopes, permission_scopes} = Enum.split_with(requested, &Scopes.router_scope?/1)
+    {known, unknown} = Enum.split_with(permission_scopes, &known?/1)
 
     cond do
       unknown != [] ->
@@ -28,15 +34,24 @@ defmodule DodoRouter.AuthZ.ScopePolicy do
         # authorization endpoint, not at the first tool call.
         {:error, :invalid_scope}
 
+      Scopes.router_ids(router_scopes) != Enum.map(router_scopes, &router_id/1) ->
+        # A router scope that is not a UUID can never match a router; minting
+        # it would look like narrowing and actually grant nothing.
+        {:error, :invalid_scope}
+
       known == [] ->
+        # Router scopes alone name reach with no permissions — a token that can
+        # do nothing anywhere. Same loud failure as an empty request.
         {:error, :invalid_scope}
 
       true ->
-        {:ok, known}
+        {:ok, known ++ router_scopes}
     end
   end
 
   def authorize_scope(_client, _requested), do: {:error, :invalid_scope}
 
   defp known?(scope), do: Scopes.valid?(scope) or scope in @identity_scopes
+
+  defp router_id("router:" <> id), do: id
 end
