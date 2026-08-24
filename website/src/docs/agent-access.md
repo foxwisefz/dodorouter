@@ -145,4 +145,6 @@ For local development, `mix attesto_phoenix.gen.dev_https` (with [mkcert](https:
 
 **The consent screen never appears.** The agent must be able to reach `/oauth/authorize` in a browser on the same host you are signed in to. A mismatch between the issuer and the address you visit means you are signed in to one origin and consenting on another.
 
+**Consent works, then the token exchange returns a 500.** The server has no signing key. Everything up to the callback runs unsigned, so a missing key surfaces only at the final step — set `ATTESTO_SIGNING_KEY_PATH` (see [Self-hosting environment variables](/docs/self-hosting/#environment-variables)) and restart.
+
 **Nothing to evaluate.** `list_logs` only shows requests your router actually served, and only some are replayable — `evaluable` and `not_evaluable_because` say which and why. A request whose stored body was truncated cannot be replayed.

@@ -83,6 +83,7 @@ Verified: `GET /health` returns `{"status":"ok"}` once the DB connection is heal
 | `ATTESTO_ISSUER` | No | OAuth issuer URL for the [agent surface](/docs/agent-access/#self-hosting). Defaults to `https://` + `PHX_HOST`. Read at boot, so changing it just needs a restart |
 | `ATTESTO_AUDIENCE` | No | OAuth resource identifier. Defaults to `<issuer>/mcp` |
 | `ATTESTO_TRUSTED_PROXIES` | No | Comma-separated IPs/CIDRs of TLS-terminating proxies whose `X-Forwarded-Proto` the OAuth endpoints believe. Defaults to loopback, which covers a reverse proxy on the same machine; set it when the proxy reaches the app [across a network](/docs/agent-access/#self-hosting) |
+| `ATTESTO_SIGNING_KEY_PATH` | For the agent surface | Absolute path to the EC P-256 PEM that signs OAuth access tokens: `openssl ecparam -name prime256v1 -genkey -noout -out oauth_signing_key.pem && chmod 600 oauth_signing_key.pem`. Without it, the whole OAuth flow works up to the final token exchange, which then fails — consent screens render, tokens never mint. (`ATTESTO_SIGNING_KEY_PEM` also works for environments that can pass a multi-line value inline; systemd's `EnvironmentFile` cannot) |
 
 For deploy specifics (hot code upgrades, systemd, Castle release management), see the project's own `AGENTS.md` in the repo — those are maintainer-facing operational details rather than user-facing setup, so we won't duplicate them here. See also [Deployment](/docs/deployment/) for a minimal production boot sequence.
 

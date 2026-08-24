@@ -14,13 +14,42 @@ defmodule DodoRouter.AuthZ.Keystore do
   @behaviour Attesto.Keystore
 
   @env_var "ATTESTO_SIGNING_KEY_PEM"
+  @path_var "ATTESTO_SIGNING_KEY_PATH"
   @dev_path "priv/dev/oauth_signing_key.pem"
 
   @impl true
   def signing_pem do
     case System.get_env(@env_var) do
       pem when is_binary(pem) and pem != "" -> pem
-      _ -> dev_pem()
+      _ -> path_pem() || dev_pem()
+    end
+  end
+
+  # A PEM is multi-line and systemd's EnvironmentFile cannot carry multi-line
+  # values, so the inline variable can never travel through the production
+  # unit's ~/.env — this path variant is how production configures the key.
+  # Read on every call rather than cached: signing happens at token mint, which
+  # is rare, and a cache would be one more copy to go stale across upgrades.
+  defp path_pem do
+    case System.get_env(@path_var) do
+      path when is_binary(path) and path != "" ->
+        case File.read(path) do
+          {:ok, pem} when pem != "" ->
+            pem
+
+          other ->
+            raise """
+            #{@path_var} is set to #{path}, but the key could not be read \
+            (#{inspect(other)}).
+
+            A signing key that half-exists must not fall through to any other \
+            source: tokens signed with a different key than the operator \
+            intended would all be invalidated when the mistake is found.
+            """
+        end
+
+      _ ->
+        nil
     end
   end
 
@@ -35,14 +64,17 @@ defmodule DodoRouter.AuthZ.Keystore do
   defp dev_pem do
     unless Application.get_env(:dodo_router, :env) in [:dev, :test] do
       raise """
-      #{@env_var} is not set.
+      Neither #{@env_var} nor #{@path_var} is set.
 
       The authorization server needs a stable signing key. Generate one with:
 
-          openssl ecparam -name prime256v1 -genkey -noout
+          openssl ecparam -name prime256v1 -genkey -noout -out oauth_signing_key.pem
+          chmod 600 oauth_signing_key.pem
 
-      and set it as #{@env_var}. Do not let production fall back to a generated
-      key: tokens would not survive a restart, and no two nodes would agree.
+      and set #{@path_var} to its absolute path (a PEM is multi-line, which
+      systemd's EnvironmentFile cannot express inline). Do not let production
+      fall back to a generated key: tokens would not survive a restart, and no
+      two nodes would agree.
       """
     end
 
