@@ -48,6 +48,24 @@ defmodule DodoRouterWeb.OAuthTransportTest do
              json_response(conn, 400)
   end
 
+  test "the /mcp challenge advertises the configured https resource metadata URL", %{conn: conn} do
+    # The WWW-Authenticate challenge is the first thing an MCP client ever
+    # reads, and SDKs hard-reject a non-TLS resource_metadata URL before even
+    # attempting registration. Behind the TLS-terminating edge the raw
+    # conn.scheme is http, so the URL must be pinned to the configured
+    # audience origin, never derived from the request.
+    conn =
+      conn
+      |> put_req_header("content-type", "application/json")
+      |> post(~p"/mcp", Jason.encode!(%{jsonrpc: "2.0", id: 1, method: "tools/list"}))
+
+    assert conn.status == 401
+    assert [challenge] = get_resp_header(conn, "www-authenticate")
+
+    assert challenge =~
+             ~s(resource_metadata="https://localhost/.well-known/oauth-protected-resource/mcp")
+  end
+
   test "a forwarded scheme from an untrusted peer is still refused", %{conn: conn} do
     conn =
       %{conn | remote_ip: {203, 0, 113, 9}}

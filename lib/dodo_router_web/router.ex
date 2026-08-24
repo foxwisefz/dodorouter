@@ -53,9 +53,14 @@ defmodule DodoRouterWeb.Router do
     plug :accepts, ["json"]
     plug DodoRouterWeb.Plugs.AgentAudit, interface: "mcp"
 
+    # `origin` pins the WWW-Authenticate resource_metadata URL to the
+    # configured audience origin. Without it the URL derives from conn.scheme,
+    # which is http behind the TLS-terminating edge — and MCP SDKs refuse a
+    # non-TLS metadata URL before ever reaching registration.
     plug AttestoMCP.Plug.Authenticate,
       config: &DodoRouter.AuthZ.resource_config/0,
-      resource_path: "/mcp"
+      resource_path: "/mcp",
+      origin: {DodoRouter.AuthZ, :resource_origin}
 
     plug DodoRouterWeb.Plugs.OAuthPrincipal
   end
