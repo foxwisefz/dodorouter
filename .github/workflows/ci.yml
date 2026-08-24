@@ -1,10 +1,13 @@
 name: CI
 
+# PR-only: every change lands via PR, and branch protection requires the
+# branch to be up to date before merging, so the PR run tests exactly the
+# tree that reaches main. A second run on push to main would re-test the
+# identical tree; the release build on main does not gate on it either.
 on:
-  push:
-    branches: [main]
   pull_request:
     branches: [main]
+  workflow_dispatch:
 
 env:
   MIX_ENV: test
