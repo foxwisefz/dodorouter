@@ -57,6 +57,28 @@ defmodule DodoRouter.AuthZ do
   """
   def principal_kinds, do: [Attesto.PrincipalKind.new("user", PrincipalStore.prefix())]
 
+  @doc """
+  The resource server's own origin, for pinning URLs derived per request.
+
+  TLS terminates at the edge proxy, so `conn.scheme` is `:http` and anything
+  built from the live request origin advertises `http://` URLs — which MCP
+  SDKs hard-reject during OAuth discovery before ever attempting registration.
+  Derived from the configured audience (the canonical `https://host/mcp`
+  resource identifier) rather than a second setting, so the advertised
+  metadata URL and the audience tokens are minted for cannot disagree.
+
+  Takes and ignores a conn: `AttestoMCP.Plug.Authenticate`'s `:origin` pin
+  invokes `{module, fun}` with the conn prepended.
+  """
+  def resource_origin(_conn \\ nil) do
+    uri = URI.parse(server_config().audience)
+
+    port_suffix =
+      if uri.port == URI.default_port(uri.scheme), do: "", else: ":#{uri.port}"
+
+    "#{uri.scheme}://#{uri.host}#{port_suffix}"
+  end
+
   @doc false
   def reset_config do
     :persistent_term.erase({__MODULE__, :config})

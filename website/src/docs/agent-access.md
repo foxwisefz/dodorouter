@@ -133,7 +133,7 @@ For local development, `mix attesto_phoenix.gen.dev_https` (with [mkcert](https:
 
 **The agent connects but every tool says "UNAVAILABLE".** It is missing permissions. Reconnect and tick the ones it needs on the consent screen — the tool description names them.
 
-**Every OAuth request fails with "the request must be made over TLS", but the URL is https.** TLS terminates at your reverse proxy, and the app is not trusting that proxy's `X-Forwarded-Proto` header. A loopback proxy is trusted by default; anything else must be listed in `ATTESTO_TRUSTED_PROXIES` — see [Self-hosting](#self-hosting) above.
+**Every OAuth request fails with "the request must be made over TLS", but the URL is https.** TLS terminates at your reverse proxy, and the app is not trusting that proxy's `X-Forwarded-Proto` header. A loopback proxy is trusted by default; anything else must be listed in `ATTESTO_TRUSTED_PROXIES` — see [Self-hosting](#self-hosting) above. Some MCP SDKs raise the same error on their side when the `WWW-Authenticate` challenge on `/mcp` advertises an `http://` metadata URL — check that header with `curl -si -X POST <base>/mcp`; a current DodoRouter pins it to the configured `https` audience origin.
 
 **`POST /mcp` returns 401 with a `WWW-Authenticate` challenge.** That is the flow working: the challenge points the client at the discovery document so it can start the OAuth exchange. If the client stops there, check that `ATTESTO_ISSUER` matches the URL actually being served.
 
