@@ -82,6 +82,7 @@ Verified: `GET /health` returns `{"status":"ok"}` once the DB connection is heal
 | `POOL_SIZE` | No | Ecto pool size, defaults to 10 |
 | `ATTESTO_ISSUER` | No | OAuth issuer URL for the [agent surface](/docs/agent-access/#self-hosting). Defaults to `https://` + `PHX_HOST`. Read at boot, so changing it just needs a restart |
 | `ATTESTO_AUDIENCE` | No | OAuth resource identifier. Defaults to `<issuer>/mcp` |
+| `ATTESTO_TRUSTED_PROXIES` | No | Comma-separated IPs/CIDRs of TLS-terminating proxies whose `X-Forwarded-Proto` the OAuth endpoints believe. Defaults to loopback, which covers a reverse proxy on the same machine; set it when the proxy reaches the app [across a network](/docs/agent-access/#self-hosting) |
 
 For deploy specifics (hot code upgrades, systemd, Castle release management), see the project's own `AGENTS.md` in the repo — those are maintainer-facing operational details rather than user-facing setup, so we won't duplicate them here. See also [Deployment](/docs/deployment/) for a minimal production boot sequence.
 
