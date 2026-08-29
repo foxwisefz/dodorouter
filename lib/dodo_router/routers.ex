@@ -49,7 +49,13 @@ defmodule DodoRouter.Routers do
 
   def get_router_by_api_key(api_key) do
     hash = Router.hash_api_key(api_key)
-    Repo.get_by(Router, api_key_hash: hash)
+
+    Repo.one(
+      from r in Router,
+        where: r.api_key_hash == ^hash,
+        join: u in assoc(r, :user),
+        preload: [user: u]
+    )
   end
 
   def create_router(%User{} = user, attrs) do

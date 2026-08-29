@@ -7,6 +7,7 @@ defmodule DodoRouterWeb.Plugs.ApiAuth do
   """
 
   import Plug.Conn
+  alias DodoRouter.Billing
   alias DodoRouter.Routers
 
   def init(opts), do: opts
@@ -14,7 +15,25 @@ defmodule DodoRouterWeb.Plugs.ApiAuth do
   def call(conn, _opts) do
     with {:ok, api_key} <- extract_bearer_token(conn),
          %{} = router <- get_router(conn, api_key) do
-      assign(conn, :current_router, router)
+      if Billing.subscribed?(router.user) do
+        assign(conn, :current_router, router)
+      else
+        conn
+        |> put_resp_content_type("application/json")
+        |> send_resp(
+          402,
+          Jason.encode!(%{
+            error: %{
+              message:
+                "An active subscription is required to use this router. " <>
+                  "Visit your DodoRouter billing page to subscribe.",
+              type: "billing_error",
+              code: "payment_required"
+            }
+          })
+        )
+        |> halt()
+      end
     else
       _ ->
         conn

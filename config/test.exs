@@ -58,3 +58,14 @@ config :dodo_router, :eval_rate_limit_backoff_ms, [0, 0]
 # The scheduler is off under the sandbox anyway; explicit here so a change to
 # that guard can't quietly start a timer that writes during the suite.
 config :dodo_router, :models_sync_enabled, false
+
+# Billing in tests: enabled so paywall paths are exercised; Stripe API calls
+# go through the stub client. Webhook secret is a fixed test value used to
+# sign synthetic webhook payloads in tests.
+config :dodo_router, :billing,
+  enabled: true,
+  webhook_secret: "whsec_test_secret",
+  price_lookup_key: "dodo_router_monthly_19",
+  trial_days: 0
+
+config :dodo_router, :stripe_client, DodoRouter.Billing.StripeClient.Stub

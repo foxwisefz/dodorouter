@@ -15,6 +15,11 @@ defmodule DodoRouter.Accounts.User do
     field :sidebar_collapsed, :boolean, default: false
     field :theme, :string, default: "light"
 
+    field :stripe_customer_id, :string
+    field :stripe_subscription_id, :string
+    field :subscription_status, :string
+    field :subscription_current_period_end, :utc_datetime
+
     timestamps(type: :utc_datetime)
   end
 

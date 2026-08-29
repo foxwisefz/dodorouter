@@ -1785,6 +1785,31 @@ defmodule DodoRouterWeb.MCPControllerTest do
     end
   end
 
+  describe "billing paywall" do
+    # The proxy returns 402 when the router owner is unpaid; a valid OAuth
+    # token must not be a side door around the same paywall. tools/list stays
+    # readable — a billing problem should look like a billing problem, not a
+    # missing feature.
+    test "tools/call refuses when the token's owner is unsubscribed", %{conn: conn} do
+      user = AccountsFixtures.unsubscribed_user_fixture()
+      RoutersFixtures.router_fixture(user)
+      token = AuthZFixtures.access_token(user)
+
+      body = call_tool(conn, token, "list_routers") |> json_response(200)
+
+      assert body["result"]["isError"] == true
+      assert hd(body["result"]["content"])["text"] =~ "subscription"
+    end
+
+    test "tools/list still answers for an unsubscribed owner", %{conn: conn} do
+      user = AccountsFixtures.unsubscribed_user_fixture()
+      token = AuthZFixtures.access_token(user)
+
+      tools = json_response(rpc(conn, token, "tools/list"), 200)["result"]["tools"]
+      assert Enum.any?(tools, &(&1["name"] == "list_routers"))
+    end
+  end
+
   describe "credential separation" do
     test "a router's proxy key is not an agent credential", %{
       conn: conn,
