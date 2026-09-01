@@ -8,16 +8,19 @@
 has_old_tag = System.cmd("git", ["tag", "-l", "v#{old_vsn}"]) |> elem(0) |> String.trim() != ""
 has_new_tag = System.cmd("git", ["tag", "-l", "v#{new_vsn}"]) |> elem(0) |> String.trim() != ""
 
-range = cond do
-  has_old_tag and has_new_tag -> "v#{old_vsn}..v#{new_vsn}"
-  has_old_tag -> "v#{old_vsn}..HEAD"
-  has_new_tag -> "HEAD..v#{new_vsn}"
-  true -> "HEAD"
-end
+range =
+  cond do
+    has_old_tag and has_new_tag -> "v#{old_vsn}..v#{new_vsn}"
+    has_old_tag -> "v#{old_vsn}..HEAD"
+    has_new_tag -> "HEAD..v#{new_vsn}"
+    true -> "HEAD"
+  end
 
 # Get changed files between versions
 {output, 0} = System.cmd("git", ["diff", "--name-only", range, "--", "lib/"])
-{added_output, 0} = System.cmd("git", ["diff", "--diff-filter=A", "--name-only", range, "--", "lib/"])
+
+{added_output, 0} =
+  System.cmd("git", ["diff", "--diff-filter=A", "--name-only", range, "--", "lib/"])
 
 changed_files = String.split(output, "\n")
 added_files = String.split(added_output, "\n") |> MapSet.new()
@@ -53,11 +56,32 @@ heex_modules =
       String.contains?(file, "components/layouts/") ->
         ["DodoRouterWeb.Layouts"]
 
-      # Controller templates: controllers/user_session_html/new.html.heex → DodoRouterWeb.UserSessionHtml
+      # Controller templates: controllers/billing_html/show.html.heex compiles
+      # into the module defined in controllers/billing_html.ex — read the real
+      # name from that file's defmodule line. Guessing it by capitalizing path
+      # segments produced DodoRouterWeb.BillingHtml for a module Phoenix names
+      # DodoRouterWeb.BillingHTML; systools:make_relup then failed the whole
+      # relup with {:no_such_module, ...} and v0.1.129 shipped without one
+      # (dodo_router-5kk).
       Regex.match?(~r|controllers/(.+)_html/|, file) ->
-        [[_, dir]] = Regex.scan(~r|controllers/(.+)_html/|, file)
-        module_name = dir |> String.split("_") |> Enum.map(&String.capitalize/1) |> Enum.join()
-        ["DodoRouterWeb.#{module_name}Html"]
+        [[_, parent]] = Regex.scan(~r|^(.*controllers/.+_html)/|, file)
+        ex_file = parent <> ".ex"
+
+        case File.read(ex_file) do
+          {:ok, content} ->
+            Regex.scan(~r/^defmodule\s+([A-Za-z0-9._]+)\s+do/m, content)
+            |> Enum.map(fn [_, mod] -> mod end)
+
+          _ ->
+            # Parent module file unreadable (e.g. deleted): fall back to the
+            # path-derived guess rather than dropping the template silently.
+            [[_, dir]] = Regex.scan(~r|controllers/(.+)_html/|, file)
+
+            module_name =
+              dir |> String.split("_") |> Enum.map(&String.capitalize/1) |> Enum.join()
+
+            ["DodoRouterWeb.#{module_name}Html"]
+        end
 
       true ->
         []
@@ -70,8 +94,13 @@ modules =
     {mod, added} when is_boolean(added) -> {mod, added}
     mod -> {mod, false}
   end)
+  # One entry per module name. A new controller whose templates also changed
+  # yields the same module twice — {mod, true} from the added .ex and
+  # {mod, false} from the .heex — and tuple-level uniq kept both, emitting
+  # add_module AND load_module for one module. added wins: the module is new.
+  |> Enum.group_by(fn {mod, _added} -> mod end, fn {_mod, added} -> added end)
+  |> Enum.map(fn {mod, addeds} -> {mod, Enum.any?(addeds)} end)
   |> Enum.sort()
-  |> Enum.uniq()
 
 # Categorize: new modules need add_module, changed need load_module/update
 # For stateful modules (GenServer, Agent, LiveView), use {update, ..., {advanced, []}}
@@ -81,7 +110,9 @@ modules =
   modules
   |> Enum.split_with(fn {mod, _added} ->
     case Map.get(module_contents, mod) do
-      nil -> false
+      nil ->
+        false
+
       content ->
         String.contains?(content, "use GenServer") or
           String.contains?(content, "use Agent") or
@@ -97,13 +128,13 @@ instructions =
       "      {:load_module, #{mod}}"
     end
   end) ++
-  Enum.map(genserver_modules, fn {mod, added} ->
-    if added do
-      "      {:add_module, #{mod}}"
-    else
-      "      {:update, #{mod}, {:advanced, []}}"
-    end
-  end)
+    Enum.map(genserver_modules, fn {mod, added} ->
+      if added do
+        "      {:add_module, #{mod}}"
+      else
+        "      {:update, #{mod}, {:advanced, []}}"
+      end
+    end)
 
 # Downgrade instructions: reverse of upgrade
 # add_module -> delete_module, delete_module -> add_module, load_module stays, update stays
@@ -115,13 +146,13 @@ downgrade_instructions =
       "      {:load_module, #{mod}}"
     end
   end) ++
-  Enum.map(genserver_modules, fn {mod, added} ->
-    if added do
-      "      {:delete_module, #{mod}}"
-    else
-      "      {:update, #{mod}, {:advanced, []}}"
-    end
-  end)
+    Enum.map(genserver_modules, fn {mod, added} ->
+      if added do
+        "      {:delete_module, #{mod}}"
+      else
+        "      {:update, #{mod}, {:advanced, []}}"
+      end
+    end)
 
 instructions_str = instructions |> Enum.join(",\n")
 downgrade_instructions_str = downgrade_instructions |> Enum.join(",\n")
