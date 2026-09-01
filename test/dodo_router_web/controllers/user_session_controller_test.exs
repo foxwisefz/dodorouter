@@ -187,6 +187,9 @@ defmodule DodoRouterWeb.UserSessionControllerTest do
 
       assert Accounts.get_user!(user.id).confirmed_at
 
+      # the app behind the paywall requires a subscription
+      set_subscription_status(user, "active")
+
       conn = get(recycle(conn), ~p"/routers")
       response = html_response(conn, 200)
       assert response =~ user.email

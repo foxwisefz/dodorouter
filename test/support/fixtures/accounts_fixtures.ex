@@ -39,7 +39,20 @@ defmodule DodoRouter.AccountsFixtures do
     {:ok, {user, _expired_tokens}} =
       Accounts.login_user_by_magic_link(token)
 
+    # Billing is enabled in the test env with a hard paywall, so the default
+    # test persona is a subscribed user. Use unsubscribed_user_fixture/1 (or
+    # set_subscription_status/2) to exercise paywall behavior.
+    set_subscription_status(user, "active")
+  end
+
+  def unsubscribed_user_fixture(attrs \\ %{}) do
+    attrs |> user_fixture() |> set_subscription_status(nil)
+  end
+
+  def set_subscription_status(user, status) do
     user
+    |> Ecto.Changeset.change(subscription_status: status)
+    |> DodoRouter.Repo.update!()
   end
 
   def user_scope_fixture do

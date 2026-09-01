@@ -121,13 +121,15 @@ defmodule DodoRouterWeb.Router do
     get "/terms", TermsController, :index
   end
 
-  # Dashboard (requires auth)
+  # Dashboard (requires auth + active subscription; unpaid users are
+  # redirected to /billing, which lives in the auth-only scope below)
   scope "/", DodoRouterWeb do
-    pipe_through [:browser, :require_authenticated_user]
+    pipe_through [:browser, :require_authenticated_user, :require_subscribed_user]
 
     live_session :authenticated,
       on_mount: [
         {DodoRouterWeb.UserAuth, :ensure_authenticated},
+        {DodoRouterWeb.UserAuth, :ensure_subscribed},
         {DodoRouterWeb.NavHooks, :load_routers},
         {DodoRouterWeb.NavHooks, :load_providers}
       ] do
@@ -190,6 +192,12 @@ defmodule DodoRouterWeb.Router do
     pipe_through [:browser, :require_authenticated_user]
 
     put "/preferences", PreferencesController, :update
+
+    # Billing stays outside the subscribed scope: unpaid users need it to
+    # subscribe, and Stripe redirects land here after checkout.
+    get "/billing", BillingController, :show
+    post "/billing/checkout", BillingController, :checkout
+    post "/billing/portal", BillingController, :portal
 
     get "/users/settings", UserSettingsController, :edit
     put "/users/settings", UserSettingsController, :update

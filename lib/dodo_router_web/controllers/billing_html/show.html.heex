@@ -1,0 +1,131 @@
+<Layouts.app flash={@flash} current_scope={@current_scope}>
+  <div class="mx-auto max-w-xl space-y-8">
+    <div class="text-center">
+      <.header>
+        Billing
+        <:subtitle>Your DodoRouter subscription</:subtitle>
+      </.header>
+    </div>
+
+    <div
+      :if={@checkout_status == "success"}
+      id="billing-checkout-success"
+      class="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-4 text-sm text-emerald-700 dark:text-emerald-300"
+    >
+      <div class="flex items-start gap-2">
+        <.icon name="hero-check-circle" class="mt-0.5 h-5 w-5 shrink-0" />
+        <p>
+          Thanks for subscribing! Your payment is being confirmed — access unlocks within a few
+          seconds. If this page still shows the plan, refresh it.
+        </p>
+      </div>
+    </div>
+
+    <div
+      :if={@checkout_status == "canceled"}
+      id="billing-checkout-canceled"
+      class="rounded-xl border border-base-300/50 bg-base-100 p-4 text-sm text-base-content/70"
+    >
+      Checkout was canceled — no charge was made. You can subscribe whenever you're ready.
+    </div>
+
+    <div
+      :if={!@billing_enabled?}
+      class="rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-700 dark:text-amber-300"
+    >
+      Billing is not configured in this environment, so all features are available.
+    </div>
+
+    <%= if @subscribed? do %>
+      <div class="rounded-xl border border-base-300/50 bg-base-100 p-6 space-y-4">
+        <div class="flex items-center justify-between">
+          <div>
+            <h2 class="text-sm font-semibold text-base-content">DodoRouter Monthly</h2>
+            <p class="text-xs text-base-content/50 mt-0.5">$19 / month</p>
+          </div>
+          <span class={[
+            "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium",
+            @subscription_status in ["active", "trialing"] &&
+              "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
+            @subscription_status == "past_due" &&
+              "bg-amber-500/10 text-amber-700 dark:text-amber-300"
+          ]}>
+            <span class="h-1.5 w-1.5 rounded-full bg-current"></span>
+            {String.replace(@subscription_status || "active", "_", " ")}
+          </span>
+        </div>
+
+        <p :if={@period_end} class="text-xs text-base-content/50">
+          Current period ends {Calendar.strftime(@period_end, "%B %-d, %Y")}.
+        </p>
+
+        <p
+          :if={@subscription_status == "past_due"}
+          class="text-sm text-amber-700 dark:text-amber-300"
+        >
+          Your last payment failed. Update your card to keep access — Stripe will retry
+          automatically.
+        </p>
+
+        <.form
+          :if={@has_customer?}
+          for={%{}}
+          action={~p"/billing/portal"}
+          id="billing-portal-form"
+        >
+          <.button variant="primary">Manage subscription</.button>
+        </.form>
+        <p class="text-xs text-base-content/40">
+          Update your card, download invoices, or cancel — handled securely by Stripe.
+        </p>
+      </div>
+    <% else %>
+      <div class="rounded-xl border border-base-300/50 bg-base-100 p-6 space-y-5">
+        <div>
+          <h2 class="text-base font-semibold text-base-content">DodoRouter Monthly</h2>
+          <p class="mt-2">
+            <span class="text-3xl font-bold text-base-content">$19</span>
+            <span class="text-sm text-base-content/50">/ month</span>
+          </p>
+        </div>
+
+        <ul class="space-y-2 text-sm text-base-content/70">
+          <li class="flex items-center gap-2">
+            <.icon name="hero-check" class="h-4 w-4 text-emerald-500" /> Unlimited routers
+          </li>
+          <li class="flex items-center gap-2">
+            <.icon name="hero-check" class="h-4 w-4 text-emerald-500" />
+            Automatic provider fallbacks
+          </li>
+          <li class="flex items-center gap-2">
+            <.icon name="hero-check" class="h-4 w-4 text-emerald-500" />
+            Request logs, sessions &amp; replays
+          </li>
+          <li class="flex items-center gap-2">
+            <.icon name="hero-check" class="h-4 w-4 text-emerald-500" />
+            OpenAI &amp; Anthropic compatible endpoints
+          </li>
+        </ul>
+
+        <.form for={%{}} action={~p"/billing/checkout"} id="billing-subscribe-form">
+          <.button variant="primary" class="w-full">Subscribe — $19/month</.button>
+        </.form>
+
+        <.form
+          :if={@has_customer?}
+          for={%{}}
+          action={~p"/billing/portal"}
+          id="billing-portal-form"
+        >
+          <button class="text-xs text-base-content/50 underline hover:text-base-content">
+            Open billing portal (past invoices)
+          </button>
+        </.form>
+
+        <p class="text-xs text-base-content/40">
+          Payments are processed by Stripe. Cancel anytime from this page.
+        </p>
+      </div>
+    <% end %>
+  </div>
+</Layouts.app>

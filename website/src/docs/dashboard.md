@@ -60,3 +60,10 @@ Evaluations are immutable — a changed rubric or candidate list is a new evalua
 When a verdict holds, **Route here** on a ranking row applies it: the routing step that served the benchmark's incumbent is updated to the winning candidate (provider, key and model change; temperature, token limits and reasoning effort stay as you set them — the benchmark didn't measure changing those). Every applied change is recorded against the benchmark batch that justified it and listed on the evaluation page, where one click reverts it. If routing has been edited since the benchmark ran and no step unambiguously serves the incumbent anymore, the apply refuses and tells you to edit the step directly rather than guessing.
 
 A downgrade decision is only valid for the traffic it was measured on, so an applied change offers **Keep honest**: the same rubric and judge score a few live answers a day (judge cost only — the answers were already served), and when the rolling live average sits below the benchmark baseline for two sweeps in a row the evaluation raises a *below baseline* alert. The alert clears on its own when scores recover, and monitoring can be paused any time.
+
+
+## Billing
+
+Hosted service only. **Billing** (under your account menu, or `/billing`) shows your subscription status and carries two buttons: **Subscribe** opens Stripe Checkout for the $19/month plan, and **Manage subscription** opens the Stripe Billing Portal, where you change the card, download invoices, or cancel. Stripe is the source of truth — status changes (payment failure, cancellation) reach DodoRouter over webhooks within seconds.
+
+While the account has no active subscription, the dashboard redirects to the billing page, proxy requests answer [`402`](/docs/api/#error-responses), and [agent-access](/docs/agent-access/) tools refuse to run; settings and log-out stay reachable. Self-hosted instances have billing disabled unless you set `STRIPE_SECRET_KEY` — see [Self-hosting](/docs/self-hosting/#environment-variables).

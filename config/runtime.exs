@@ -20,6 +20,19 @@ if System.get_env("PHX_SERVER") do
   config :dodo_router, DodoRouterWeb.Endpoint, server: true
 end
 
+# Stripe billing — applies to all environments. Billing is disabled when
+# STRIPE_SECRET_KEY is unset (the default in dev/test): paywall checks
+# pass through and no Stripe calls are made.
+if stripe_secret_key = System.get_env("STRIPE_SECRET_KEY") do
+  config :stripity_stripe, api_key: stripe_secret_key
+
+  config :dodo_router, :billing,
+    enabled: true,
+    webhook_secret: System.get_env("STRIPE_WEBHOOK_SECRET"),
+    price_lookup_key: System.get_env("BILLING_PRICE_LOOKUP_KEY", "dodo_router_monthly_19"),
+    trial_days: String.to_integer(System.get_env("BILLING_TRIAL_DAYS", "0"))
+end
+
 if config_env() == :prod do
   database_url =
     System.get_env("DATABASE_URL") ||

@@ -50,6 +50,12 @@ defmodule DodoRouterWeb.Endpoint do
   plug :quiet_health_checks
   plug Plug.Telemetry, event_prefix: [:phoenix, :endpoint]
 
+  # Must run before Plug.Parsers: signature verification needs the raw body.
+  plug Stripe.WebhookPlug,
+    at: "/webhooks/stripe",
+    handler: DodoRouterWeb.StripeWebhookHandler,
+    secret: {DodoRouter.Billing, :webhook_secret, []}
+
   plug Plug.Parsers,
     parsers: [:urlencoded, :multipart, :json],
     pass: ["*/*"],

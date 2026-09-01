@@ -8,7 +8,14 @@ defmodule DodoRouterWeb.UserAuth do
   alias DodoRouter.Accounts.Scope
 
   @doc """
-  LiveView on_mount callback to ensure user is authenticated.
+  LiveView on_mount callbacks.
+
+  * `:ensure_authenticated` — redirects to log-in when there is no user.
+  * `:mount_current_user` — assigns `current_user` without enforcement.
+  * `:ensure_subscribed` — redirects to the billing page unless the user has
+    an active subscription. Must run after `:ensure_authenticated`. The
+    billing page deliberately lives outside the subscribed live_session so
+    unpaid users can reach checkout.
   """
   def on_mount(:ensure_authenticated, _params, session, socket) do
     socket = mount_current_user(socket, session)
@@ -27,6 +34,14 @@ defmodule DodoRouterWeb.UserAuth do
 
   def on_mount(:mount_current_user, _params, session, socket) do
     {:cont, mount_current_user(socket, session)}
+  end
+
+  def on_mount(:ensure_subscribed, _params, _session, socket) do
+    if DodoRouter.Billing.subscribed?(socket.assigns.current_user) do
+      {:cont, socket}
+    else
+      {:halt, Phoenix.LiveView.redirect(socket, to: ~p"/billing")}
+    end
   end
 
   defp mount_current_user(socket, session) do
@@ -255,4 +270,20 @@ defmodule DodoRouterWeb.UserAuth do
   end
 
   defp maybe_store_return_to(conn), do: conn
+
+  @doc """
+  Plug for routes that require an active subscription.
+
+  Must run after `require_authenticated_user`. Sends unpaid users to the
+  billing page instead of the app.
+  """
+  def require_subscribed_user(conn, _opts) do
+    if DodoRouter.Billing.subscribed?(conn.assigns.current_scope.user) do
+      conn
+    else
+      conn
+      |> redirect(to: ~p"/billing")
+      |> halt()
+    end
+  end
 end
