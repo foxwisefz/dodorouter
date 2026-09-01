@@ -31,11 +31,7 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
 
   @response_passthrough_key Adapter.response_passthrough_key()
 
-  # TEMPORARY — midstream-failover demo: route Anthropic traffic through the
-  # local chaos proxy (scripts/chaos_zai_proxy.py with UPSTREAM_HOST=api.anthropic.com),
-  # which relays the real stream and kills it after N chunks.
-  # REVERT to https://api.anthropic.com/v1 before committing anything.
-  @base_url "http://localhost:9911/v1"
+  @base_url "https://api.anthropic.com/v1"
   @api_version "2023-06-01"
   @oauth_beta "oauth-2025-04-20"
 

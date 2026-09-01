@@ -1154,7 +1154,17 @@ defmodule DodoRouterWeb.LogLive.Show do
         "One hop — served on the first attempt."
 
       true ->
-        "Fell back through #{count} providers before one answered."
+        base = "Fell back through #{count} providers before one answered."
+
+        # A midstream handoff is a different event from a clean pre-stream
+        # fallback: the client had already received part of an earlier answer,
+        # and the next provider continued that same response.
+        if Enum.any?(log.attempted_steps || [], & &1["streamed_to_client"]) do
+          base <>
+            " The handoff happened mid-stream — the client had already received part of an earlier answer, and the next provider continued it."
+        else
+          base
+        end
     end
   end
 
@@ -1340,6 +1350,15 @@ defmodule DodoRouterWeb.LogLive.Show do
                 ✗ {@attempt["http_status"]} {@attempt["error"]}
               </span>
             <% end %>
+            <span
+              :if={@attempt["streamed_to_client"]}
+              id={"trace-midstream-badge-#{@hop.index}"}
+              class="badge badge-sm badge-warning badge-outline gap-1"
+              title={"The client had already received #{@attempt["partial_content_length"] || "some"} characters of this answer when the provider failed — the next attempt continued the same response mid-stream."}
+            >
+              <.icon name="hero-bolt" class="w-3 h-3" />
+              mid-stream handoff · {@attempt["partial_content_length"]} chars streamed
+            </span>
           </div>
           <span class="font-mono text-base-content/60 shrink-0">
             {fmt_ms(@attempt["latency_ms"])}

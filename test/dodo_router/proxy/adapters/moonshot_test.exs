@@ -4,6 +4,63 @@ defmodule DodoRouter.Proxy.Adapters.MoonshotTest do
   alias DodoRouter.Proxy.Adapters.Moonshot
   alias DodoRouter.Routers.RoutingStep
 
+  describe "build_request_body/2 (partial mode)" do
+    # Moonshot's native continuation: "partial": true on a trailing assistant
+    # message makes the model continue that content exactly (mid-word
+    # included) instead of starting a new turn. A trailing assistant message
+    # is what FallbackChain's midstream reconstruction appends — without the
+    # flag Kimi restarts the answer and the client sees it twice — and it is
+    # also what Anthropic-style prefill converts to, where "continue" was
+    # always the intended semantic.
+    test "marks a trailing assistant message as partial" do
+      request = %{
+        "messages" => [
+          %{"role" => "user", "content" => "Why is the sky blue?"},
+          %{"role" => "assistant", "content" => "The sky is blue because of Ray"}
+        ]
+      }
+
+      step = %RoutingStep{provider: "moonshot", model: "kimi-k2.6"}
+      body = Moonshot.build_request_body(request, step)
+
+      assert [_user, assistant] = body["messages"]
+      assert assistant["partial"] == true
+      assert assistant["content"] == "The sky is blue because of Ray"
+    end
+
+    test "does not mark a conversation that ends with a user message" do
+      request = %{
+        "messages" => [
+          %{"role" => "assistant", "content" => "Hello"},
+          %{"role" => "user", "content" => "Why is the sky blue?"}
+        ]
+      }
+
+      step = %RoutingStep{provider: "moonshot", model: "kimi-k2.6"}
+      body = Moonshot.build_request_body(request, step)
+
+      refute Enum.any?(body["messages"], &Map.has_key?(&1, "partial"))
+    end
+
+    test "does not mark a trailing assistant tool call with empty content" do
+      request = %{
+        "messages" => [
+          %{"role" => "user", "content" => "Use a tool"},
+          %{
+            "role" => "assistant",
+            "content" => "",
+            "tool_calls" => [%{"id" => "call_1", "function" => %{"name" => "test"}}]
+          }
+        ]
+      }
+
+      step = %RoutingStep{provider: "moonshot", model: "kimi-k2.6"}
+      body = Moonshot.build_request_body(request, step)
+
+      refute Enum.any?(body["messages"], &Map.has_key?(&1, "partial"))
+    end
+  end
+
   describe "build_request_body/2" do
     test "adds reasoning_content to assistant messages with tool_calls when thinking enabled" do
       request = %{
