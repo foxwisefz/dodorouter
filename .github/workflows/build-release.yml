@@ -130,12 +130,21 @@ jobs:
             --target "_build/prod/rel/dodo_router/releases/${CURR_VERSION}/dodo_router" \
             --fromto "$FROMTO"
           
-          # Verify relup was generated
+          # A missing relup means systools:make_relup failed — its error is in
+          # the output above (mix forecastle.relup ignores the return value).
+          # Publishing the tarball anyway ships a release whose hot upgrade is
+          # guaranteed to fail on the server, which is how v0.1.129 deployed
+          # into {:no_matching_relup, ...} (dodo_router-5kk). Fail here, where
+          # the systools error is visible. A deliberate OTP/ERTS bump doesn't
+          # trip this: make_relup still succeeds (with restart_new_emulator),
+          # and per the pin comment above the first deploy after it runs with
+          # full_install=true.
           if [ -f "relup" ]; then
             cp relup "_build/prod/rel/dodo_router/releases/${CURR_VERSION}/relup"
             echo "Generated relup file"
           else
-            echo "WARNING: relup file not generated"
+            echo "ERROR: relup file not generated — see systools output above"
+            exit 1
           fi
 
       - name: Rebuild tarball with relup

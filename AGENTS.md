@@ -882,7 +882,7 @@ Releases are configured in `mix.exs` under the `releases:` key:
 1. Push to `main` triggers `.github/workflows/build-release.yml`
 2. Version is auto-bumped (patch level) via `.github/scripts/bump-version.sh`, which also **auto-generates `appup.ex`** from the git diff
 3. GitHub Actions builds the release with `MIX_ENV=prod mix release`
-4. If a previous release exists, an upgrade tarball is also built with `mix release --upgrade`
+4. If a previous release exists, a relup is generated against it (`mix forecastle.relup`) and baked into the tarball. **The build fails if the relup cannot be generated** — before it failed loudly, v0.1.129 shipped without one (the appup named a phantom module, see below) and the deploy died on the server with `{:no_matching_relup, ...}`, which is strictly worse than a red build
 5. Release is published as a GitHub Release with attached tarball
 
 ### Deployment Process
@@ -1004,7 +1004,7 @@ If your changes touch any GenServer, Agent, or Supervisor, you **MUST** implemen
 
 **Important considerations:**
 - **Formatting-only changes** (e.g., whitespace, line breaks) may create harmless false positives in the auto-generated appup. Including them with `{load_module}` is safe but unnecessary.
-- **Non-standard template paths** — if you add `.html.heex` files outside `components/layouts/` or `controllers/*_html/`, the script may miss them. In this case, add the parent module manually to `appup.ex` before pushing.
+- **Non-standard template paths** — if you add `.html.heex` files outside `components/layouts/` or `controllers/*_html/`, the script may miss them. In this case, add the parent module manually to `appup.ex` before pushing. (Controller templates resolve to the real `defmodule` name in the sibling `*_html.ex` — the script no longer guesses casing from the path, which is how `billing_html/` once became a phantom `BillingHtml` in the appup and sank the v0.1.129 relup.)
 - **GenServer state migrations** — If a GenServer's state structure changes (new fields, type changes), implement `code_change/3` with migration logic. If the migration is complex or risky, flag it for a full restart instead of hot upgrade.
 
 **Verify locally (optional):**
