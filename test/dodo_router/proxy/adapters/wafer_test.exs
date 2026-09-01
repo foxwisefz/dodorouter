@@ -48,22 +48,50 @@ defmodule DodoRouter.Proxy.Adapters.WaferTest do
   end
 
   describe "usage seam" do
-    test "OpenAI-style cached token reporting reaches extract_usage" do
-      # Wafer's surface is OpenAI-compatible and OpenAICompatible passes the
-      # usage object through untouched, so cache extraction must find the
-      # OpenAI field names without any renaming step in between.
+    test "Wafer's observed cached token reporting reaches extract_usage" do
+      # Verbatim shape from a live cache-hit probe (2026-09-02,
+      # scripts/wafer_probe.sh): OpenAI-style prompt_tokens_details plus a
+      # redundant top-level cached_tokens. OpenAICompatible passes usage
+      # through untouched, so extraction must find it with no renaming step.
       response = %{
         "usage" => %{
-          "prompt_tokens" => 100,
-          "completion_tokens" => 20,
-          "total_tokens" => 120,
-          "prompt_tokens_details" => %{"cached_tokens" => 80}
+          "prompt_tokens" => 23_010,
+          "completion_tokens" => 5,
+          "total_tokens" => 23_015,
+          "cached_tokens" => 22_528,
+          "completion_tokens_details" => %{"reasoning_tokens" => 1},
+          "prompt_tokens_details" => %{"cached_tokens" => 22_528}
         }
       }
 
       usage = Adapter.extract_usage(response)
-      assert usage.prompt_tokens == 100
-      assert usage.cache_read_tokens == 80
+      assert usage.prompt_tokens == 23_010
+      assert usage.cache_read_tokens == 22_528
+    end
+  end
+
+  describe "context overflow (not detectable on Wafer)" do
+    # Verbatim body from a live oversized-prompt probe (2026-09-02,
+    # scripts/wafer_probe.sh). Wafer returns this exact code and message for
+    # ANY model-side rejection — an invalid role and a bad tool_choice combo
+    # produce it too — so mapping it to :context_overflow would misclassify
+    # real client errors. It must stay :bad_request, which still falls back;
+    # see AGENTS.md's Known Provider Patterns.
+    @wafer_rejection %{
+      "error" => %{
+        "message" => "The model request was rejected. Check the request and try again.",
+        "type" => "invalid_request_error",
+        "param" => nil,
+        "code" => "model_request_rejected"
+      }
+    }
+
+    test "the generic rejection stays :bad_request, never :context_overflow" do
+      assert Adapter.categorize_error(400, @wafer_rejection) == :bad_request
+    end
+
+    test "and :bad_request still advances the fallback chain" do
+      assert Adapter.should_fallback?(:bad_request)
     end
   end
 

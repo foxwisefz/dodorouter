@@ -14,6 +14,14 @@ defmodule DodoRouter.Proxy.Adapters.Wafer do
 
   Streaming note: Wafer delivers tool_calls in a single chunk rather than
   argument-by-argument; the shared accumulator handles both shapes.
+
+  Context overflow is NOT detectable on this provider: an oversized prompt
+  returns the same generic 400 (`code: "model_request_rejected"`) Wafer uses
+  for any model-side rejection, so it deliberately stays `:bad_request` —
+  which still falls back — rather than being guessed into
+  `:context_overflow`. Cached tokens arrive OpenAI-style under
+  `prompt_tokens_details.cached_tokens`. Both probed 2026-09-02 via
+  `scripts/wafer_probe.sh`; observed patterns documented in AGENTS.md.
   """
 
   use DodoRouter.Proxy.Adapter.Registry,
