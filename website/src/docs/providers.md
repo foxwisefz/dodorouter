@@ -23,6 +23,7 @@ Each row is a distinct adapter. Where a provider offers both a pay-as-you-go API
 | DeepSeek | `deepseek` | Bearer | deepseek-chat, deepseek-reasoner |
 | Moonshot / Kimi | `moonshot` | Bearer | Pay-as-you-go API |
 | Moonshot / Kimi Code | `moonshot_coding` | Bearer | Flat-rate coding subscription plan, $0 marginal cost |
+| Wafer | `wafer` | Bearer | Open models (GLM, Kimi, MiniMax, Qwen) on Wafer's serverless API; OpenAI-compatible |
 | xAI (Grok) | `xai` | Bearer | Grok family |
 | z.ai (GLM) | `zai_standard` | Bearer | Pay-as-you-go API |
 | z.ai Coding Plan | `zai_coding` | Bearer | Flat-rate coding subscription plan, $0 marginal cost |

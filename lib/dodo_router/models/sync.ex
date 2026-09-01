@@ -27,6 +27,9 @@ defmodule DodoRouter.Models.Sync do
     "cohere" => "cohere",
     "moonshotai" => "moonshot",
     "zai" => "zai",
+    # models.dev keys Wafer under "wafer.ai" — the dot stays on their side;
+    # our slug is the bare "wafer".
+    "wafer.ai" => "wafer",
     # Coding-plan catalogs live under the provider-KEY slug so their model
     # ids/pricing don't collide with the provider's global entries
     "kimi-for-coding" => "moonshot_coding",
