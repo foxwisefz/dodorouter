@@ -523,6 +523,18 @@ Context limit / context window overflow errors are **not standardized** across L
 
 **Anthropic** — Returns message: `"prompt is too long"`.
 
+**Wafer** — **Indistinguishable.** Overflow returns HTTP 400 with the same generic body Wafer uses for *any* model-side rejection — an invalid message role, a bad `tool_choice` combination and a 400k-token prompt all produce byte-identical code and message (probed 2026-09-02 with `scripts/wafer_probe.sh`):
+```json
+{
+  "error": {
+    "message": "The model request was rejected. Check the request and try again.",
+    "type": "invalid_request_error",
+    "code": "model_request_rejected"
+  }
+}
+```
+Deliberately **not** mapped to `:context_overflow`: the code is generic, so mapping it would misclassify real client errors as overflow. It categorizes as `:bad_request`, which still falls back to the next step; what cannot apply to a Wafer overflow is the overflow-specific behavior — "Skip fallback on context overflow" and the standardized `context_length_exceeded` error when every step fails (the client gets Wafer's own 400 instead).
+
 **Other common patterns** — `"exceeds the context window"`, `"maximum context length is N tokens"`, `"reduce the length of the messages"`, HTTP 413, or generic 400 with no body.
 
 ### Adding a New Model
@@ -627,6 +639,17 @@ Every adapter's final response `usage` map **must** use OpenAI Chat Completions 
 }
 ```
 The `ResponsesAPI.convert_usage/1` must rename `input_tokens_details` → `prompt_tokens_details` so the existing extraction works.
+
+**Wafer** — OpenAI-style, no renaming needed (probed 2026-09-02 with `scripts/wafer_probe.sh`): `prompt_tokens_details.cached_tokens`, plus a redundant top-level `cached_tokens` carrying the same value. OpenAI-family semantics — `prompt_tokens` is the total input and the cached figure is a subset of it (observed: 22,528 cached of a 23,010-token prompt):
+```json
+{
+  "usage": {
+    "prompt_tokens": 23010,
+    "cached_tokens": 22528,
+    "prompt_tokens_details": { "cached_tokens": 22528 }
+  }
+}
+```
 
 ### Adding a New Adapter
 

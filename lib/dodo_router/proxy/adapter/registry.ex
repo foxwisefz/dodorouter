@@ -24,6 +24,7 @@ defmodule DodoRouter.Proxy.Adapter.Registry do
     DodoRouter.Proxy.Adapters.Cohere,
     DodoRouter.Proxy.Adapters.Moonshot,
     DodoRouter.Proxy.Adapters.Zai,
+    DodoRouter.Proxy.Adapters.Wafer,
     DodoRouter.Proxy.Adapters.TestProvider
   ]
 
