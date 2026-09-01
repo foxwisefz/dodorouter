@@ -366,11 +366,18 @@ defmodule DodoRouterWeb.AnthropicProxyController do
       |> put_resp_header("x-request-id", request_id)
 
     Process.put(:__stream_conn__, conn)
-    Process.put(:anthropic_sse_state, AnthropicFormat.new_sse_state())
     Process.put(:__anthropic_serving_model__, openai_params["model"] || "unknown")
-    # Keep-alive means the next request may land in this same process.
+    # Keep-alive means the next request may land in this same process. The
+    # reframing state is deliberately NOT seeded here: its lazy creation in
+    # handle_stream_data/2 is what detects a reframed step joining a stream a
+    # passthrough step already started, so an eager empty state would make
+    # every midstream fallback look like a fresh reframed stream.
+    Process.delete(:anthropic_sse_state)
     Process.delete(:__stream_opened__)
     Process.delete(:__anthropic_passthrough_active__)
+    Process.delete(:__anthropic_native_blocks__)
+    Process.delete(:__anthropic_pending_join__)
+    Process.delete(:__anthropic_reframe_joined__)
     Adapter.reset_stream_response_headers()
 
     send_chunk = &raw_send_chunk/1
@@ -410,6 +417,9 @@ defmodule DodoRouterWeb.AnthropicProxyController do
     Process.delete(:__stream_conn__)
     Process.delete(:__stream_opened__)
     Process.delete(:__anthropic_passthrough_active__)
+    Process.delete(:__anthropic_native_blocks__)
+    Process.delete(:__anthropic_pending_join__)
+    Process.delete(:__anthropic_reframe_joined__)
     conn
   end
 
@@ -422,22 +432,81 @@ defmodule DodoRouterWeb.AnthropicProxyController do
     # own message lifecycle is already on the wire, so no synthetic
     # message_start/content_block_start and no reframing.
     Process.put(:__anthropic_passthrough_active__, true)
+    track_native_block(native_sse_data)
     ensure_stream_head()
     raw_send_chunk(native_sse_data)
     :ok
   end
 
   def handle_stream_data(openai_sse_data, request_id) do
-    state = Process.get(:anthropic_sse_state) || AnthropicFormat.new_sse_state()
+    state = Process.get(:anthropic_sse_state) || new_reframe_state()
     {anthropic_events, state} = AnthropicFormat.convert_sse_chunk(openai_sse_data, state)
     Process.put(:anthropic_sse_state, state)
 
     if anthropic_events != [] do
       open_stream(request_id)
+      emit_pending_join()
       Enum.each(anthropic_events, &raw_send_chunk/1)
     end
 
     :ok
+  end
+
+  # The reframe join needs to know which content block a dead passthrough
+  # step left open on the client's wire, and the highest index the client
+  # has seen — the continuing provider's blocks must extend that numbering,
+  # not collide with it. The adapter serializes one native event per chunk,
+  # so matching on the event line is exact, not a substring guess.
+  defp track_native_block("event: content_block_start\ndata: " <> json) do
+    case Jason.decode(String.trim_trailing(json)) do
+      {:ok, %{"index" => index}} when is_integer(index) ->
+        blocks = native_blocks()
+        Process.put(:__anthropic_native_blocks__, %{open: index, max: max(blocks.max, index)})
+
+      _ ->
+        :ok
+    end
+  end
+
+  defp track_native_block("event: content_block_stop\n" <> _) do
+    Process.put(:__anthropic_native_blocks__, %{native_blocks() | open: nil})
+    :ok
+  end
+
+  defp track_native_block(_native_sse_data), do: :ok
+
+  defp native_blocks, do: Process.get(:__anthropic_native_blocks__, %{open: nil, max: -1})
+
+  # First reframed data after a passthrough step died midstream: another
+  # provider's message lifecycle is already on the client's wire, killed
+  # without its terminator. Continue that message legally — close whatever
+  # block was left open, open a fresh text block above every index the
+  # client has seen, and reframe into it. The join events are parked until
+  # the first converted event actually flows, so a continuation that
+  # produces nothing does not juggle blocks for an empty message.
+  defp new_reframe_state do
+    if Process.get(:__anthropic_passthrough_active__) == true do
+      %{open: open, max: max} = native_blocks()
+      base = max + 1
+      Process.put(:__anthropic_pending_join__, %{close: open, base: base})
+      Process.put(:__anthropic_reframe_joined__, true)
+      AnthropicFormat.new_sse_state(base)
+    else
+      AnthropicFormat.new_sse_state()
+    end
+  end
+
+  defp emit_pending_join do
+    case Process.get(:__anthropic_pending_join__) do
+      nil ->
+        :ok
+
+      %{close: open, base: base} ->
+        Process.delete(:__anthropic_pending_join__)
+        if open != nil, do: raw_send_chunk(anthropic_content_block_stop_event(open))
+        raw_send_chunk(anthropic_content_block_start_event(base))
+        :ok
+    end
   end
 
   # Anthropic's stream lifecycle requires message_start and content_block_start
@@ -499,10 +568,13 @@ defmodule DodoRouterWeb.AnthropicProxyController do
   end
 
   def finish_stream({:ok, openai_response, timing}, sse_state, request_id, send_chunk) do
-    if Process.get(:__anthropic_passthrough_active__) == true do
+    if Process.get(:__anthropic_passthrough_active__) == true and
+         Process.get(:__anthropic_reframe_joined__) != true do
       # The provider's own content_block_stop / message_delta / message_stop
       # were already relayed verbatim; a synthetic tail here would append a
-      # second terminator to a finished message.
+      # second terminator to a finished message. A reframed join is the
+      # exception: the passthrough step died without its terminator and the
+      # continuing step's stream owes the client a real tail.
       Process.get(:__stream_conn__)
     else
       finish_reframed_stream(openai_response, timing, sse_state, request_id, send_chunk)
@@ -560,6 +632,10 @@ defmodule DodoRouterWeb.AnthropicProxyController do
     # A successful request that produced no content still owes the client a
     # well-formed, empty message rather than a bare 200 with no body.
     open_stream(request_id)
+    # A joined continuation that produced no events still owes the client a
+    # closed lifecycle: the join's block juggling is parked until something
+    # flows, so flush it before closing the block it opens.
+    emit_pending_join()
 
     :ok = send_chunk.(anthropic_content_block_stop_event(sse_state.open_block))
 
@@ -608,10 +684,10 @@ defmodule DodoRouterWeb.AnthropicProxyController do
     "event: message_start\ndata: #{Jason.encode!(event_data)}\n\n"
   end
 
-  defp anthropic_content_block_start_event do
+  defp anthropic_content_block_start_event(index \\ 0) do
     event_data = %{
       "type" => "content_block_start",
-      "index" => 0,
+      "index" => index,
       "content_block" => %{
         "type" => "text",
         "text" => ""

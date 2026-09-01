@@ -16,10 +16,16 @@ defmodule DodoRouterWeb.AnthropicStreamingPassthroughTest do
   setup do
     conn = Plug.Test.conn(:post, "/r/test/v1/messages")
     Process.put(:__stream_conn__, conn)
-    Process.put(:anthropic_sse_state, AnthropicFormat.new_sse_state())
     Process.put(:__anthropic_serving_model__, "claude-fable-5")
+    # As production does: the reframing state is created lazily by
+    # handle_stream_data/2, never seeded up front — lazy creation is what
+    # detects a reframed step joining a passthrough-started stream.
+    Process.delete(:anthropic_sse_state)
     Process.delete(:__stream_opened__)
     Process.delete(:__anthropic_passthrough_active__)
+    Process.delete(:__anthropic_native_blocks__)
+    Process.delete(:__anthropic_pending_join__)
+    Process.delete(:__anthropic_reframe_joined__)
 
     on_exit(fn ->
       Process.delete(:__stream_conn__)
@@ -27,6 +33,9 @@ defmodule DodoRouterWeb.AnthropicStreamingPassthroughTest do
       Process.delete(:__anthropic_serving_model__)
       Process.delete(:__stream_opened__)
       Process.delete(:__anthropic_passthrough_active__)
+      Process.delete(:__anthropic_native_blocks__)
+      Process.delete(:__anthropic_pending_join__)
+      Process.delete(:__anthropic_reframe_joined__)
     end)
 
     :ok
@@ -88,6 +97,111 @@ defmodule DodoRouterWeb.AnthropicStreamingPassthroughTest do
     )
 
     assert sent_body() == before
+  end
+
+  defp parse_wire(wire) do
+    ~r/event: (\S+)\ndata: (.*?)\n\n/s
+    |> Regex.scan(wire)
+    |> Enum.map(fn [_, _type, json] -> Jason.decode!(json) end)
+  end
+
+  test "a reframed fallback joining a dead passthrough stream continues the block lifecycle" do
+    # The midstream-failover seam: an Anthropic step relayed native events
+    # (a thinking block, then an open text block), then died; FallbackChain
+    # reconstructs and an OpenAI-family step continues the same client
+    # stream, reframed. The client's wire must stay legal Anthropic SSE —
+    # close the block the dead provider left open, continue at fresh
+    # indexes, and finish with a real tail (the native terminator never
+    # flowed). Regression: the continuation used to land text_deltas on
+    # index 0 — the thinking block — and Claude Code aborted with
+    # "Content block is not a text block".
+    native_events = [
+      %{
+        "type" => "message_start",
+        "message" => %{"id" => "msg_01real", "model" => "claude-opus-4-8"}
+      },
+      %{
+        "type" => "content_block_start",
+        "index" => 0,
+        "content_block" => %{"type" => "thinking", "thinking" => ""}
+      },
+      %{
+        "type" => "content_block_delta",
+        "index" => 0,
+        "delta" => %{"type" => "thinking_delta", "thinking" => "hm"}
+      },
+      %{"type" => "content_block_stop", "index" => 0},
+      %{
+        "type" => "content_block_start",
+        "index" => 1,
+        "content_block" => %{"type" => "text", "text" => ""}
+      },
+      %{
+        "type" => "content_block_delta",
+        "index" => 1,
+        "delta" => %{"type" => "text_delta", "text" => "The sky is "}
+      }
+    ]
+
+    for event <- native_events do
+      :ok = AnthropicProxyController.handle_stream_data(native(event), "req-1")
+    end
+
+    chunk =
+      "data: " <>
+        Jason.encode!(%{"choices" => [%{"index" => 0, "delta" => %{"content" => "blue."}}]}) <>
+        "\n\n"
+
+    :ok = AnthropicProxyController.handle_stream_data(chunk, "req-1")
+
+    tail_fun = fn data ->
+      Process.put(:__test_tail__, Process.get(:__test_tail__, "") <> data)
+      :ok
+    end
+
+    AnthropicProxyController.finish_stream(
+      {:ok,
+       %{
+         "choices" => [%{"index" => 0, "finish_reason" => "stop", "message" => %{}}],
+         "usage" => %{"prompt_tokens" => 5, "completion_tokens" => 7}
+       }, %{}},
+      Process.get(:anthropic_sse_state),
+      "req-1",
+      tail_fun
+    )
+
+    body = sent_body()
+    native_wire = Enum.map_join(native_events, "", &native/1)
+
+    # The native part reached the client verbatim, and only the provider's
+    # message_start is on the wire — the join must not open a second message.
+    assert String.starts_with?(body, native_wire)
+    assert length(String.split(body, "event: message_start")) == 2
+
+    joined = parse_wire(String.replace_prefix(body, native_wire, ""))
+
+    assert [
+             %{"type" => "content_block_stop", "index" => 1},
+             %{
+               "type" => "content_block_start",
+               "index" => 2,
+               "content_block" => %{"type" => "text"}
+             },
+             %{
+               "type" => "content_block_delta",
+               "index" => 2,
+               "delta" => %{"type" => "text_delta", "text" => "blue."}
+             }
+           ] = joined
+
+    tail = parse_wire(Process.get(:__test_tail__, ""))
+    Process.delete(:__test_tail__)
+
+    assert [
+             %{"type" => "content_block_stop", "index" => 2},
+             %{"type" => "message_delta"},
+             %{"type" => "message_stop"}
+           ] = Enum.map(tail, &Map.take(&1, ["type", "index"]))
   end
 
   test "OpenAI chunks still get the synthetic lifecycle (reframe unchanged)" do

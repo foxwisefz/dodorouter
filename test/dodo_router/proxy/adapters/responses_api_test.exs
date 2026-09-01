@@ -29,6 +29,40 @@ defmodule DodoRouter.Proxy.Adapters.ResponsesAPITest do
       assert [%{"type" => "input_text", "text" => "Hello"}] = user["content"]
     end
 
+    test "converts multi-block system content to input_text parts" do
+      # AnthropicFormat carries multi-block system content as a parts array
+      # (with per-part cache_control) so Anthropic steps keep their cache
+      # breakpoints. When such a request falls back to a Responses step, the
+      # parts must become input_text — the API rejects type "text" on input.
+      request = %{
+        "messages" => [
+          %{
+            "role" => "system",
+            "content" => [
+              %{
+                "type" => "text",
+                "text" => "You are helpful",
+                "cache_control" => %{"type" => "ephemeral"}
+              },
+              %{"type" => "text", "text" => "Env info"}
+            ]
+          },
+          %{"role" => "user", "content" => "Hello"}
+        ]
+      }
+
+      step = %RoutingStep{model: "gpt-5.5"}
+      body = ResponsesAPI.build_request_body(request, step)
+
+      [system | _] = body["input"]
+      assert system["role"] == "system"
+
+      assert system["content"] == [
+               %{"type" => "input_text", "text" => "You are helpful"},
+               %{"type" => "input_text", "text" => "Env info"}
+             ]
+    end
+
     test "converts assistant messages with content" do
       request = %{
         "messages" => [

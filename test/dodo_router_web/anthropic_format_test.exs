@@ -391,6 +391,42 @@ defmodule DodoRouterWeb.AnthropicFormatTest do
       assert state.open_block == 0
     end
 
+    test "a based state indexes above blocks the client already saw" do
+      # Midstream fallback: a passthrough step died with blocks 0..1 already
+      # on the wire, so the reframed continuation must claim indexes from 2 up.
+      chunks = [
+        openai_chunk(%{"content" => "continued"}),
+        openai_chunk(%{
+          "tool_calls" => [
+            %{
+              "index" => 0,
+              "id" => "toolu_01",
+              "function" => %{"name" => "read", "arguments" => "{}"}
+            }
+          ]
+        })
+      ]
+
+      {events, state} =
+        Enum.reduce(chunks, {[], AnthropicFormat.new_sse_state(2)}, fn chunk,
+                                                                       {events, state} ->
+          {new_events, state} = AnthropicFormat.convert_sse_chunk(chunk, state)
+          {events ++ new_events, state}
+        end)
+
+      parsed = parse_events(events)
+
+      assert %{"index" => 2, "delta" => %{"type" => "text_delta", "text" => "continued"}} =
+               Enum.find(parsed, &(get_in(&1, ["delta", "type"]) == "text_delta"))
+
+      assert %{"index" => 2} = Enum.find(parsed, &(&1["type"] == "content_block_stop"))
+
+      start_event = Enum.find(parsed, &(&1["type"] == "content_block_start"))
+      assert start_event["index"] == 3
+      assert start_event["content_block"]["type"] == "tool_use"
+      assert state.open_block == 3
+    end
+
     test "adapter tool_call chunks round-trip to Anthropic tool_use events (seam)" do
       anthropic_events = [
         %{

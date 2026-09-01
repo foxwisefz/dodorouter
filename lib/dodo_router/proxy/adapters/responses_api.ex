@@ -221,6 +221,10 @@ defmodule DodoRouter.Proxy.Adapters.ResponsesAPI do
     Enum.flat_map(messages, &convert_message/1)
   end
 
+  defp convert_message(%{"role" => "system", "content" => content}) when is_list(content) do
+    [%{"role" => "system", "content" => convert_input_parts(content)}]
+  end
+
   defp convert_message(%{"role" => "system", "content" => content}) do
     [%{"role" => "system", "content" => content}]
   end
@@ -230,15 +234,7 @@ defmodule DodoRouter.Proxy.Adapters.ResponsesAPI do
   end
 
   defp convert_message(%{"role" => "user", "content" => content}) when is_list(content) do
-    converted =
-      Enum.map(content, fn part ->
-        case part["type"] do
-          "text" -> %{"type" => "input_text", "text" => part["text"]}
-          _ -> part
-        end
-      end)
-
-    [%{"role" => "user", "content" => converted}]
+    [%{"role" => "user", "content" => convert_input_parts(content)}]
   end
 
   defp convert_message(%{"role" => "assistant"} = msg) do
@@ -283,6 +279,20 @@ defmodule DodoRouter.Proxy.Adapters.ResponsesAPI do
 
   defp convert_message(%{"role" => _} = msg) do
     [%{"role" => msg["role"], "content" => msg["content"]}]
+  end
+
+  # Multi-block content arrives as Anthropic-style text parts (the ingress
+  # keeps them as arrays so cache_control breakpoints survive on Anthropic
+  # steps). Input to the Responses API names the type input_text, and the
+  # cache_control key must not travel — Responses providers reject unknown
+  # fields on content parts.
+  defp convert_input_parts(content) do
+    Enum.map(content, fn part ->
+      case part["type"] do
+        "text" -> %{"type" => "input_text", "text" => part["text"]}
+        _ -> part
+      end
+    end)
   end
 
   # ── SSE parsing ────────────────────────────────────────────────────────────

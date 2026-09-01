@@ -31,7 +31,11 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
 
   @response_passthrough_key Adapter.response_passthrough_key()
 
-  @base_url "https://api.anthropic.com/v1"
+  # TEMPORARY — midstream-failover demo: route Anthropic traffic through the
+  # local chaos proxy (scripts/chaos_zai_proxy.py with UPSTREAM_HOST=api.anthropic.com),
+  # which relays the real stream and kills it after N chunks.
+  # REVERT to https://api.anthropic.com/v1 before committing anything.
+  @base_url "http://localhost:9911/v1"
   @api_version "2023-06-01"
   @oauth_beta "oauth-2025-04-20"
 
@@ -261,6 +265,7 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
         into: into_fun
       )
 
+    partial_acc = Process.get(:__anthropic_stream_acc__)
     Process.delete(:__anthropic_stream_acc__)
 
     case result do
@@ -285,11 +290,34 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
          %{status: status, body: body, latency_ms: latency(start_time), headers: resp_headers}}
 
       {:error, %Req.TransportError{reason: :timeout}} ->
-        {:error, :timeout, %{latency_ms: latency(start_time)}}
+        {:error, :timeout, build_stream_error_details(partial_acc, start_time)}
 
       {:error, reason} ->
-        {:error, :unknown, %{reason: reason, latency_ms: latency(start_time)}}
+        {:error, :unknown, build_stream_error_details(partial_acc, start_time, %{reason: reason})}
     end
+  end
+
+  @doc false
+  # Midstream deaths carry what already reached the client: FallbackChain keys
+  # reconstruction on partial_content/chunks_sent, so the next provider
+  # continues the answer rather than restarting it (same contract as the z.ai
+  # and Moonshot adapters). Only forwarded text counts — a stream that died in
+  # a thinking block has sent the client nothing continuable.
+  def build_stream_error_details(partial_acc, start_time, extra \\ %{})
+
+  def build_stream_error_details(nil, start_time, extra) do
+    Map.merge(%{latency_ms: latency(start_time)}, extra)
+  end
+
+  def build_stream_error_details(partial_acc, start_time, extra) do
+    Map.merge(
+      %{
+        latency_ms: latency(start_time),
+        partial_content: partial_acc.content,
+        chunks_sent: partial_acc.content != ""
+      },
+      extra
+    )
   end
 
   @count_tokens_fields ~w(messages system tools tool_choice thinking)
