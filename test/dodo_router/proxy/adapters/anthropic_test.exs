@@ -1070,7 +1070,8 @@ defmodule DodoRouter.Proxy.Adapters.AnthropicTest do
         }
       ]
 
-      {acc, _wire} = Anthropic.passthrough_anthropic_events(Anthropic.initial_stream_acc(), events)
+      {acc, _wire} =
+        Anthropic.passthrough_anthropic_events(Anthropic.initial_stream_acc(), events)
 
       details = Anthropic.build_stream_error_details(acc, System.monotonic_time(:millisecond))
 

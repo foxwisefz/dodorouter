@@ -408,8 +408,7 @@ defmodule DodoRouterWeb.AnthropicFormatTest do
       ]
 
       {events, state} =
-        Enum.reduce(chunks, {[], AnthropicFormat.new_sse_state(2)}, fn chunk,
-                                                                       {events, state} ->
+        Enum.reduce(chunks, {[], AnthropicFormat.new_sse_state(2)}, fn chunk, {events, state} ->
           {new_events, state} = AnthropicFormat.convert_sse_chunk(chunk, state)
           {events ++ new_events, state}
         end)

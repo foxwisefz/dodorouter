@@ -5,6 +5,7 @@ defmodule DodoRouterWeb.LogLive.Index do
 
   alias DodoRouter.{Logs, Routers}
   alias DodoRouter.Logs.MessageNormalizer
+  alias DodoRouter.Logs.PendingLog
   alias DodoRouter.Proxy.Adapter.Registry
   alias DodoRouter.Usage
 
@@ -77,6 +78,7 @@ defmodule DodoRouterWeb.LogLive.Index do
 
         logs = Logs.list_logs(router, list_opts)
         count = Logs.count_logs(router, list_opts)
+        pending = mount_pending(failures_only, [router.id])
 
         # Percentiles are per-router; the all-routers view has no single
         # baseline to compare against, so latency coloring is skipped there.
@@ -104,12 +106,14 @@ defmodule DodoRouterWeb.LogLive.Index do
         |> assign(:log_count, count)
         |> assign(:log_shown_count, length(logs))
         |> assign(:latency_percentiles, latency_percentiles)
-        |> stream(:logs, logs, reset: true)
+        |> assign(:pending_by_request, Map.new(pending, &{&1.request_id, &1}))
+        |> stream(:logs, pending_rows(pending) ++ logs, reset: true)
       else
         # Show all logs across all routers
 
         logs = Logs.list_logs_for_user(socket.assigns.current_user, list_opts)
         count = Logs.count_logs_for_user(socket.assigns.current_user, list_opts)
+        pending = mount_pending(failures_only, Enum.map(socket.assigns.routers, & &1.id))
         # Subscribe to all routers
         if connected?(socket) && !was_all do
           subscribe_all_routers(socket)
@@ -128,7 +132,8 @@ defmodule DodoRouterWeb.LogLive.Index do
         |> assign(:log_count, count)
         |> assign(:log_shown_count, length(logs))
         |> assign(:latency_percentiles, nil)
-        |> stream(:logs, logs, reset: true)
+        |> assign(:pending_by_request, Map.new(pending, &{&1.request_id, &1}))
+        |> stream(:logs, pending_rows(pending) ++ logs, reset: true)
       end
 
     {:noreply, socket}
@@ -144,6 +149,16 @@ defmodule DodoRouterWeb.LogLive.Index do
     do: [from: DateTime.add(DateTime.utc_now(), -@failure_window_hours * 3600, :second)]
 
   defp failures_window_opts(_), do: []
+
+  # Requests already in flight have no request_logs row yet, and their
+  # :log_pending broadcast fired before this stream (re)build — Activity holds
+  # their payloads. Skipped under the failures filter, matching the
+  # :log_pending handler: a pending request has no terminal status yet.
+  defp mount_pending(true = _failures_only, _router_ids), do: []
+  defp mount_pending(false, router_ids), do: DodoRouter.Activity.list_pending(router_ids)
+
+  # Use request_id as stream key so the completed log replaces the row in place
+  defp pending_rows(pending), do: Enum.map(pending, &Map.put(&1, :id, &1.request_id))
 
   defp subscribe_all_routers(socket) do
     Enum.each(socket.assigns.routers, fn router ->
@@ -199,22 +214,7 @@ defmodule DodoRouterWeb.LogLive.Index do
         {:noreply, socket}
 
       pending ->
-        steps =
-          pending.attempted_steps
-          |> List.update_at(-1, &Map.put(&1, "status", "error"))
-          |> Kernel.++([
-            %{
-              "provider" => update.provider,
-              "model" => update.model,
-              "plan_type" => update.plan_type
-            }
-          ])
-
-        pending =
-          pending
-          |> Map.put(:final_provider, update.provider)
-          |> Map.put(:final_model, update.model)
-          |> Map.put(:attempted_steps, steps)
+        pending = PendingLog.apply_fallback(pending, update)
 
         socket =
           socket

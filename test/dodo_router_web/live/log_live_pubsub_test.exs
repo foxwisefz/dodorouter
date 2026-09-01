@@ -124,4 +124,93 @@ defmodule DodoRouterWeb.LogLivePubSubTest do
       assert html =~ "completed-provider"
     end
   end
+
+  describe "in-flight requests at mount" do
+    test "a request started before mount appears as a pending row and still tracks fallbacks", %{
+      conn: conn,
+      user: user
+    } do
+      {router, _api_key} = RoutersFixtures.router_fixture(user)
+      request_id = Ecto.UUID.generate()
+
+      pending =
+        DodoRouter.Logs.PendingLog.build(
+          router,
+          request_id,
+          %{provider: "anthropic", model: "claude-opus-4-8"},
+          false
+        )
+
+      DodoRouter.Activity.request_started(router.id, request_id, pending)
+      wait_until(fn -> DodoRouter.Activity.list_pending([router.id]) != [] end)
+
+      # Router-filtered view: the pending row must come from Activity, since
+      # the :log_pending broadcast fired before this LiveView existed.
+      {:ok, live, html} = live(conn, ~p"/logs?router_id=#{router.id}")
+      assert has_element?(live, "#logs-#{request_id}")
+      assert html =~ "claude-opus-4-8"
+
+      # The merged row must be tracked in pending_by_request so a fallback
+      # firing after mount still moves it to the backup step.
+      Phoenix.PubSub.broadcast(
+        DodoRouter.PubSub,
+        "router:#{router.id}:logs",
+        {:log_pending_update,
+         %{
+           router_id: router.id,
+           request_id: request_id,
+           provider: "moonshot",
+           model: "kimi-k2.6",
+           plan_type: "coding",
+           step_index: 1,
+           timestamp: DateTime.utc_now()
+         }}
+      )
+
+      assert render(live) =~ "kimi-k2.6"
+
+      # All-routers view sees it too.
+      {:ok, live_all, _html} = live(conn, ~p"/logs")
+      assert has_element?(live_all, "#logs-#{request_id}")
+
+      DodoRouter.Activity.request_completed(router.id, request_id)
+    end
+
+    test "the failures view does not show in-flight requests", %{conn: conn, user: user} do
+      {router, _api_key} = RoutersFixtures.router_fixture(user)
+      request_id = Ecto.UUID.generate()
+
+      pending =
+        DodoRouter.Logs.PendingLog.build(
+          router,
+          request_id,
+          %{provider: "anthropic", model: "claude-opus-4-8"},
+          false
+        )
+
+      DodoRouter.Activity.request_started(router.id, request_id, pending)
+      wait_until(fn -> DodoRouter.Activity.list_pending([router.id]) != [] end)
+
+      {:ok, live, _html} = live(conn, ~p"/logs?router_id=#{router.id}&failures=true")
+      refute has_element?(live, "#logs-#{request_id}")
+
+      DodoRouter.Activity.request_completed(router.id, request_id)
+    end
+  end
+
+  defp wait_until(fun, timeout_ms \\ 2_000) do
+    deadline = System.monotonic_time(:millisecond) + timeout_ms
+
+    cond do
+      fun.() ->
+        :ok
+
+      System.monotonic_time(:millisecond) > deadline ->
+        flunk("condition not met within timeout")
+
+      true ->
+        Process.sleep(20)
+        wait_until(fun, deadline - System.monotonic_time(:millisecond))
+    end
+  end
 end

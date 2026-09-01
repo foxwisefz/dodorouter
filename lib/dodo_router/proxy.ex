@@ -569,23 +569,11 @@ defmodule DodoRouter.Proxy do
   defp normalize_for_json(value), do: value
 
   defp broadcast_request_started(router, request_id, first_step, streaming) do
-    DodoRouter.Activity.request_started(router.id, request_id)
+    pending_log = DodoRouter.Logs.PendingLog.build(router, request_id, first_step, streaming)
 
-    pending_log = %{
-      id: nil,
-      request_id: request_id,
-      router_id: router.id,
-      user_id: router.user_id,
-      router: router,
-      status: "pending",
-      call_type: nil,
-      final_provider: first_step.provider,
-      final_model: first_step.model,
-      streaming: streaming,
-      inserted_at: DateTime.utc_now(),
-      # Fields needed for display - use string keys to match template expectations
-      attempted_steps: [%{"provider" => first_step.provider, "model" => first_step.model}]
-    }
+    # Stored so LiveViews that mount after this broadcast can still list the
+    # in-flight row (Activity.list_pending/1).
+    DodoRouter.Activity.request_started(router.id, request_id, pending_log)
 
     Phoenix.PubSub.broadcast(
       DodoRouter.PubSub,

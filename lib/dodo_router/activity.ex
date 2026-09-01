@@ -9,15 +9,21 @@ defmodule DodoRouter.Activity do
   during hot upgrade, client abort), its entries are dropped automatically
   so the counts can never leak.
 
+  Each entry also carries the request's pending-log display payload (see
+  `DodoRouter.Logs.PendingLog`), so a LiveView mounting mid-request can list
+  the in-flight rows it missed the `:log_pending` broadcast for.
+
   State shape:
 
       %{
-        routers: %{router_id => %{request_id => :primary | :fallback}},
+        routers: %{router_id => %{request_id => %{status: :primary | :fallback, log: map() | nil}}},
         owners: %{pid => %{ref: reference(), entries: MapSet.t({router_id, request_id})}}
       }
   """
 
   use GenServer
+
+  alias DodoRouter.Logs.PendingLog
 
   def start_link(_opts) do
     GenServer.start_link(__MODULE__, %{}, name: __MODULE__)
@@ -26,18 +32,25 @@ defmodule DodoRouter.Activity do
   @doc """
   Track a new request as active on primary provider.
 
+  `pending_log` is the display payload served back by `list_pending/1` while
+  the request is in flight.
+
   The calling process is monitored; entries whose owner dies are removed
   automatically.
   """
-  def request_started(router_id, request_id) do
-    GenServer.cast(__MODULE__, {:request_started, router_id, request_id, self()})
+  def request_started(router_id, request_id, pending_log \\ nil) do
+    GenServer.cast(__MODULE__, {:request_started, router_id, request_id, pending_log, self()})
   end
 
   @doc """
   Transition a request from primary to fallback status.
+
+  `step_info` (`%{provider:, model:, plan_type:}`) moves the stored pending
+  log onto the step now serving, so a list built mid-fallback doesn't name a
+  provider that already failed.
   """
-  def step_started(router_id, request_id, step_index) when step_index > 0 do
-    GenServer.cast(__MODULE__, {:step_started, router_id, request_id, step_index})
+  def step_started(router_id, request_id, step_index, step_info \\ nil) when step_index > 0 do
+    GenServer.cast(__MODULE__, {:step_started, router_id, request_id, step_index, step_info})
   end
 
   @doc """
@@ -70,14 +83,25 @@ defmodule DodoRouter.Activity do
     GenServer.call(__MODULE__, {:get_total_active, router_ids})
   end
 
+  @doc """
+  Pending-log payloads for every in-flight request on the given routers,
+  newest first. Entries tracked without a payload are omitted.
+  """
+  def list_pending(router_ids) do
+    GenServer.call(__MODULE__, {:list_pending, router_ids})
+  end
+
   @impl true
   def init(_state) do
     {:ok, %{routers: %{}, owners: %{}}}
   end
 
   @impl true
-  def handle_cast({:request_started, router_id, request_id, owner}, state) do
-    router_map = state.routers |> Map.get(router_id, %{}) |> Map.put(request_id, :primary)
+  def handle_cast({:request_started, router_id, request_id, pending_log, owner}, state) do
+    router_map =
+      state.routers
+      |> Map.get(router_id, %{})
+      |> Map.put(request_id, %{status: :primary, log: pending_log})
 
     {:noreply,
      %{
@@ -88,13 +112,12 @@ defmodule DodoRouter.Activity do
   end
 
   @impl true
-  def handle_cast({:step_started, router_id, request_id, _step_index}, state) do
+  def handle_cast({:step_started, router_id, request_id, _step_index, step_info}, state) do
     router_map =
       state.routers
       |> Map.get(router_id, %{})
-      |> Map.update(request_id, :fallback, fn
-        :primary -> :fallback
-        status -> status
+      |> Map.update(request_id, %{status: :fallback, log: nil}, fn entry ->
+        %{entry | status: :fallback, log: apply_step_info(entry.log, step_info)}
       end)
 
     {:noreply, %{state | routers: Map.put(state.routers, router_id, router_map)}}
@@ -130,8 +153,8 @@ defmodule DodoRouter.Activity do
   def handle_call({:get_router_counts, router_id}, _from, state) do
     requests = Map.get(state.routers, router_id, %{})
 
-    primary = Enum.count(requests, fn {_, status} -> status == :primary end)
-    fallback = Enum.count(requests, fn {_, status} -> status == :fallback end)
+    primary = Enum.count(requests, fn {_, entry} -> entry.status == :primary end)
+    fallback = Enum.count(requests, fn {_, entry} -> entry.status == :fallback end)
 
     {:reply, {primary, fallback}, state}
   end
@@ -142,13 +165,29 @@ defmodule DodoRouter.Activity do
       Enum.into(router_ids, %{}, fn router_id ->
         requests = Map.get(state.routers, router_id, %{})
 
-        primary = Enum.count(requests, fn {_, status} -> status == :primary end)
-        fallback = Enum.count(requests, fn {_, status} -> status == :fallback end)
+        primary = Enum.count(requests, fn {_, entry} -> entry.status == :primary end)
+        fallback = Enum.count(requests, fn {_, entry} -> entry.status == :fallback end)
 
         {router_id, {primary, fallback}}
       end)
 
     {:reply, result, state}
+  end
+
+  @impl true
+  def handle_call({:list_pending, router_ids}, _from, state) do
+    logs =
+      router_ids
+      |> Enum.flat_map(fn router_id ->
+        state.routers
+        |> Map.get(router_id, %{})
+        |> Map.values()
+        |> Enum.map(& &1.log)
+        |> Enum.reject(&is_nil/1)
+      end)
+      |> Enum.sort_by(& &1.inserted_at, {:desc, DateTime})
+
+    {:reply, logs, state}
   end
 
   @impl true
@@ -164,17 +203,32 @@ defmodule DodoRouter.Activity do
 
   @impl true
   def code_change(_old_vsn, state, _extra) do
-    # Hot upgrade from the legacy shape %{router_id => %{request_id => status}}.
-    # Legacy entries carry no owner pid, so they are only removed by an explicit
-    # request_completed: requests in flight during the upgrade still resolve
-    # normally, while entries already leaked before the upgrade must be cleared
-    # manually (:sys.replace_state).
-    if Map.has_key?(state, :routers) do
-      {:ok, state}
-    else
-      {:ok, %{routers: state, owners: %{}}}
-    end
+    # Hot upgrades from two legacy shapes: the bare %{router_id => %{request_id
+    # => status}} map (pre-owners), and entries holding a status atom instead of
+    # %{status:, log:}. Bare-map entries carry no owner pid, so they are only
+    # removed by an explicit request_completed: requests in flight during the
+    # upgrade still resolve normally, while entries already leaked before the
+    # upgrade must be cleared manually (:sys.replace_state). Migrated entries
+    # have no stored pending log; list_pending simply omits them until they
+    # resolve.
+    state =
+      if Map.has_key?(state, :routers), do: state, else: %{routers: state, owners: %{}}
+
+    routers =
+      Map.new(state.routers, fn {router_id, requests} ->
+        {router_id,
+         Map.new(requests, fn
+           {request_id, status} when is_atom(status) -> {request_id, %{status: status, log: nil}}
+           {request_id, entry} -> {request_id, entry}
+         end)}
+      end)
+
+    {:ok, %{state | routers: routers}}
   end
+
+  defp apply_step_info(nil, _step_info), do: nil
+  defp apply_step_info(log, nil), do: log
+  defp apply_step_info(log, step_info), do: PendingLog.apply_fallback(log, step_info)
 
   defp add_owner_entry(owners, owner, entry) do
     case owners do

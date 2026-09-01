@@ -25,6 +25,34 @@ defmodule DodoRouterWeb.RouterShowLiveTest do
   end
 
   describe "Show" do
+    test "a request already in flight when the page mounts shows as a pending row", %{
+      conn: conn,
+      router: router
+    } do
+      request_id = Ecto.UUID.generate()
+
+      pending =
+        DodoRouter.Logs.PendingLog.build(
+          router,
+          request_id,
+          %{provider: "anthropic", model: "claude-opus-4-8"},
+          false
+        )
+
+      DodoRouter.Activity.request_started(router.id, request_id, pending)
+      wait_until(fn -> DodoRouter.Activity.list_pending([router.id]) != [] end)
+
+      {:ok, live, html} = live(conn, ~p"/routers/#{router.id}")
+
+      # The request started before this LiveView existed, so no :log_pending
+      # broadcast reached it and no request_logs row exists yet — the row must
+      # come from Activity's stored pending payload.
+      assert has_element?(live, "#recent_logs-#{request_id}")
+      assert html =~ "claude-opus-4-8"
+
+      DodoRouter.Activity.request_completed(router.id, request_id)
+    end
+
     test "shows router details", %{conn: conn, router: router} do
       {:ok, _live, html} = live(conn, ~p"/routers/#{router.id}")
 
@@ -424,6 +452,23 @@ defmodule DodoRouterWeb.RouterShowLiveTest do
       assert step.provider == "zai"
       assert step.model == "custom-model"
       assert step.reasoning_effort == "xhigh"
+    end
+  end
+
+  # Activity casts are async, so registration must be confirmed before mounting.
+  defp wait_until(fun, timeout_ms \\ 2_000) do
+    deadline = System.monotonic_time(:millisecond) + timeout_ms
+
+    cond do
+      fun.() ->
+        :ok
+
+      System.monotonic_time(:millisecond) > deadline ->
+        flunk("condition not met within timeout")
+
+      true ->
+        Process.sleep(20)
+        wait_until(fun, deadline - System.monotonic_time(:millisecond))
     end
   end
 end

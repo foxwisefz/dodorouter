@@ -23,7 +23,15 @@ defmodule DodoRouterWeb.RouterLive.Show do
     end
 
     provider_keys = Providers.list_provider_keys(socket.assigns.current_user)
-    recent_logs = Logs.list_logs(router, limit: 10)
+
+    # Requests already in flight have no request_logs row yet, and their
+    # :log_pending broadcast fired before this LiveView existed — merge them
+    # in from Activity so the list agrees with the sidebar's activity count.
+    pending_logs =
+      DodoRouter.Activity.list_pending([router.id])
+      |> Enum.map(&Map.put(&1, :id, &1.request_id))
+
+    recent_logs = pending_logs ++ Logs.list_logs(router, limit: 10)
 
     socket =
       socket
