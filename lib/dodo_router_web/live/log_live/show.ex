@@ -1460,10 +1460,30 @@ defmodule DodoRouterWeb.LogLive.Show do
           </.trace_section>
 
           <.trace_section
-            :if={@attempt["error_body"] || @attempt["response_body"] || @attempt["response_headers"]}
+            :if={
+              @attempt["error_body"] || @attempt["response_body"] ||
+                @attempt["response_headers"] || @attempt["partial_content"] not in [nil, ""]
+            }
             icon="hero-arrow-down-tray"
             label={"Received from #{@attempt["provider"]}"}
           >
+            <%!-- The text this provider streamed to the client before the
+                 connection died — the midstream partial the next attempt
+                 continued. Recorded on the attempt because it is otherwise
+                 recoverable only by slicing the final response. --%>
+            <.trace_toggle
+              :if={@attempt["partial_content"] not in [nil, ""]}
+              id={"trace-partial-content-#{@hop.index}"}
+              open
+              label="Streamed to the client before the failure"
+              meta={"#{@attempt["partial_content_length"]} chars"}
+            >
+              <pre
+                id={"trace-partial-#{@hop.index}"}
+                class="text-xs whitespace-pre-wrap break-words bg-base-200/50 rounded p-2"
+              >{@attempt["partial_content"]}</pre>
+            </.trace_toggle>
+
             <%!-- error_body is `details[:body]`, straight off the wire — the one
                  response artifact on an attempt the provider itself wrote, and
                  the reason this attempt is on the page, so it opens itself. --%>

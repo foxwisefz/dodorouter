@@ -1415,6 +1415,40 @@ defmodule DodoRouterWeb.LogLiveTest do
       assert html =~ "mid-stream"
     end
 
+    test "the failed attempt shows the partial text it streamed", %{conn: conn, user: user} do
+      {router, _api_key} = RoutersFixtures.router_fixture(user)
+
+      log =
+        LogsFixtures.log_fixture(router, %{
+          status: "fallback",
+          attempted_steps: [
+            %{
+              "position" => 0,
+              "provider" => "anthropic",
+              "model" => "claude-opus-4-8",
+              "status" => "error",
+              "error" => "unknown",
+              "streamed_to_client" => true,
+              "partial_content" => "The sky is blue because of Ray",
+              "partial_content_length" => 30
+            },
+            %{
+              "position" => 1,
+              "provider" => "moonshot",
+              "model" => "kimi-k2.6",
+              "status" => "success"
+            }
+          ]
+        })
+
+      {:ok, live, _html} = live(conn, ~p"/logs/#{log.request_id}")
+      html = live |> element("[role=tab][phx-value-tab=trace]") |> render_click()
+
+      assert has_element?(live, "#trace-partial-content-0")
+      assert html =~ "The sky is blue because of Ray"
+      assert html =~ "Streamed to the client before the failure"
+    end
+
     test "a clean fallback shows no midstream badge", %{conn: conn, user: user} do
       {router, _api_key} = RoutersFixtures.router_fixture(user)
 

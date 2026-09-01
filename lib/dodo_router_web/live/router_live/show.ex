@@ -413,6 +413,13 @@ defmodule DodoRouterWeb.RouterLive.Show do
      |> stream_insert(:recent_logs, pending, at: 0, limit: 10)}
   end
 
+  def handle_info({:log_pending_update, _update}, socket) do
+    # A fallback moved an in-flight request to its backup step. The recent-logs
+    # stream can't be read back to rebuild the row here; the terminal
+    # :log_created replaces it moments later.
+    {:noreply, socket}
+  end
+
   def handle_info({:log_created, log}, socket) do
     # Use request_id as key to replace pending entry in place
     log = Map.put(log, :id, log.request_id)

@@ -81,6 +81,13 @@ defmodule DodoRouter.Proxy.Adapters.TestProvider do
   # A kimi/DeepSeek-style thinker: the message carries reasoning_content,
   # which cross-format egresses have no representation for.
   @reasoning_model "reasoning-model"
+  # A stream that dies after part of the answer already reached the client —
+  # the shape the zai/moonshot/anthropic adapters report when the upstream
+  # connection drops midstream. The details carry partial_content/chunks_sent,
+  # which is what FallbackChain keys midstream reconstruction on; without a
+  # double for it, the midstream path is untestable end to end.
+  @midstream_fail_model "midstream-fail-model"
+  @midstream_partial "Hello from mid"
   @call_table :dodo_test_provider_calls
 
   @impl Adapter
@@ -268,11 +275,35 @@ defmodule DodoRouter.Proxy.Adapters.TestProvider do
     maybe_crash(request)
     _ = simulate_upstream_request(request, api_key, client_headers)
 
-    if step.model == @failing_model do
-      simulated_failure()
-    else
-      do_stream(step, send_chunk)
+    case step.model do
+      @failing_model -> simulated_failure()
+      @midstream_fail_model -> midstream_failure(send_chunk)
+      _ -> do_stream(step, send_chunk)
     end
+  end
+
+  defp midstream_failure(send_chunk) do
+    Adapter.record_stream_response_headers([
+      {"content-type", "text/event-stream"} | @ratelimit_headers
+    ])
+
+    for word <- ["Hello ", "from ", "mid"] do
+      chunk = %{
+        "choices" => [
+          %{"index" => 0, "delta" => %{"content" => word}, "finish_reason" => nil}
+        ]
+      }
+
+      send_chunk.("data: " <> Jason.encode!(chunk) <> "\n\n")
+    end
+
+    {:error, :unknown,
+     %{
+       reason: :closed,
+       latency_ms: 1,
+       partial_content: @midstream_partial,
+       chunks_sent: true
+     }}
   end
 
   defp do_stream(%RoutingStep{} = step, send_chunk) do

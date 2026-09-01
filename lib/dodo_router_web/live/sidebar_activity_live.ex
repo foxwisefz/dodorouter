@@ -127,6 +127,13 @@ defmodule DodoRouterWeb.SidebarActivityLive do
   end
 
   @impl true
+  def handle_info({:log_pending_update, _update}, socket) do
+    # A fallback moved an in-flight request to its backup step; the sidebar
+    # shows only counts, which don't change.
+    {:noreply, socket}
+  end
+
+  @impl true
   def handle_info({:step_started, _}, socket) do
     {:noreply, refresh_activity(socket)}
   end

@@ -28,6 +28,60 @@ defmodule DodoRouterWeb.LogLivePubSubTest do
       assert render(live) =~ "live-test-provider"
     end
 
+    test "a pending row moves to the backup step when a fallback fires", %{
+      conn: conn,
+      user: user
+    } do
+      {router, _api_key} = RoutersFixtures.router_fixture(user)
+
+      {:ok, live, _html} = live(conn, ~p"/logs?router_id=#{router.id}")
+
+      request_id = Ecto.UUID.generate()
+
+      Phoenix.PubSub.broadcast(
+        DodoRouter.PubSub,
+        "router:#{router.id}:logs",
+        {:log_pending,
+         %{
+           request_id: request_id,
+           status: "pending",
+           inserted_at: DateTime.utc_now(),
+           final_provider: "anthropic",
+           final_model: "claude-opus-4-8",
+           latency_ms: nil,
+           total_tokens: nil,
+           attempted_steps: [%{"provider" => "anthropic", "model" => "claude-opus-4-8"}]
+         }}
+      )
+
+      assert render(live) =~ "claude-opus-4-8"
+
+      # FallbackChain broadcasts this when it starts a step past the first —
+      # the row must show the backup actually serving, not the dead provider.
+      Phoenix.PubSub.broadcast(
+        DodoRouter.PubSub,
+        "router:#{router.id}:logs",
+        {:log_pending_update,
+         %{
+           router_id: router.id,
+           request_id: request_id,
+           provider: "moonshot",
+           model: "kimi-k2.6",
+           plan_type: "coding",
+           step_index: 1,
+           timestamp: DateTime.utc_now()
+         }}
+      )
+
+      html = render(live)
+      # The hop chain shows both providers, and the model line names the
+      # backup now serving instead of the provider that died.
+      assert html =~ "moonshot"
+      assert html =~ "anthropic"
+      assert html =~ "kimi-k2.6"
+      refute html =~ "claude-opus-4-8"
+    end
+
     test "shows pending log then completed log", %{conn: conn, user: user} do
       {router, _api_key} = RoutersFixtures.router_fixture(user)
 

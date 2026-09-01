@@ -19,6 +19,40 @@ defmodule DodoRouter.Proxy.FallbackChainTest do
     |> Repo.insert!()
   end
 
+  # Writes the secret straight into the ETS cache the way
+  # proxy_integration_test does, so key resolution succeeds without Infisical.
+  defp store_provider_key_in_cache(user_id, key_ref, api_key) do
+    case :ets.whereis(:dodo_secrets_cache) do
+      :undefined ->
+        try do
+          :ets.new(:dodo_secrets_cache, [:named_table, :public, read_concurrency: true])
+        rescue
+          ArgumentError -> :ok
+        end
+
+      _ ->
+        :ok
+    end
+
+    cache_key = "provider_key/#{user_id}/#{key_ref}"
+    expires_at = System.system_time(:millisecond) + 3_600_000
+    :ets.insert(:dodo_secrets_cache, {cache_key, api_key, expires_at})
+  end
+
+  defp create_resolvable_step(router, user, provider, model, provider_slug, label) do
+    pk = insert_provider_key(user, provider_slug, label)
+    store_provider_key_in_cache(user.id, pk.key_ref, "test-api-key")
+
+    {:ok, step} =
+      Routers.create_routing_step(router, %{
+        "provider" => provider,
+        "model" => model,
+        "provider_key_id" => pk.id
+      })
+
+    Repo.preload(step, :provider_key)
+  end
+
   defp create_step_with_key(router, user, provider, model, provider_slug, label) do
     pk = insert_provider_key(user, provider_slug, label)
 
@@ -266,6 +300,85 @@ defmodule DodoRouter.Proxy.FallbackChainTest do
       assert attempt.error != nil
       assert attempt.error_body != nil
       assert is_integer(attempt.latency_ms)
+    end
+  end
+
+  describe "execute/4 midstream fallback" do
+    setup do
+      user = AccountsFixtures.user_fixture()
+      {router, _api_key} = RoutersFixtures.router_fixture(user)
+
+      step1 =
+        create_resolvable_step(
+          router,
+          user,
+          "test_provider",
+          "midstream-fail-model",
+          "test_provider",
+          "midstream key"
+        )
+
+      step2 =
+        create_resolvable_step(
+          router,
+          user,
+          "test_provider",
+          "test-model",
+          "test_provider",
+          "backup key"
+        )
+
+      %{router: router, steps: [step1, step2]}
+    end
+
+    test "records the partial text on the failed attempt and continues past it", %{
+      router: router,
+      steps: steps
+    } do
+      result =
+        FallbackChain.execute(
+          %{"messages" => [%{"role" => "user", "content" => "hi"}], "model" => "test"},
+          steps,
+          router.id,
+          stream: true,
+          send_chunk: fn _ -> :ok end,
+          request_id: "req-midstream-1"
+        )
+
+      assert result.status == :fallback
+      [failed, backup] = result.attempted_steps
+
+      assert failed.streamed_to_client == true
+      # The text itself, not just its length — the Trace shows what the client
+      # had already received when this provider died.
+      assert failed.partial_content == "Hello from mid"
+      assert failed.partial_content_length == 14
+      assert backup.status == "success"
+
+      content = get_in(result.final_response, ["choices", Access.at(0), "message", "content"])
+      assert String.starts_with?(content, "Hello from mid")
+    end
+
+    test "announces the switch to the backup step on the logs topic", %{
+      router: router,
+      steps: steps
+    } do
+      Phoenix.PubSub.subscribe(DodoRouter.PubSub, "router:#{router.id}:logs")
+
+      FallbackChain.execute(
+        %{"messages" => [%{"role" => "user", "content" => "hi"}], "model" => "test"},
+        steps,
+        router.id,
+        stream: true,
+        send_chunk: fn _ -> :ok end,
+        request_id: "req-midstream-2"
+      )
+
+      assert_receive {:log_pending_update, update}
+      assert update.request_id == "req-midstream-2"
+      assert update.provider == "test_provider"
+      assert update.model == "test-model"
+      assert update.step_index == 1
     end
   end
 
