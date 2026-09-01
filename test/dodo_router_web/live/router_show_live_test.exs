@@ -50,7 +50,75 @@ defmodule DodoRouterWeb.RouterShowLiveTest do
       assert has_element?(live, "#recent_logs-#{request_id}")
       assert html =~ "claude-opus-4-8"
 
+      # A fallback firing after mount must still move the merged row to the
+      # backup step, so it needs to be tracked like a broadcast-delivered one.
+      Phoenix.PubSub.broadcast(
+        DodoRouter.PubSub,
+        "router:#{router.id}:logs",
+        {:log_pending_update,
+         %{
+           router_id: router.id,
+           request_id: request_id,
+           provider: "moonshot",
+           model: "kimi-k2.6",
+           plan_type: "coding",
+           step_index: 1,
+           timestamp: DateTime.utc_now()
+         }}
+      )
+
+      html = render(live)
+      assert html =~ "kimi-k2.6"
+      refute html =~ "claude-opus-4-8"
+
       DodoRouter.Activity.request_completed(router.id, request_id)
+    end
+
+    test "a pending row moves to the backup step when a fallback fires", %{
+      conn: conn,
+      router: router
+    } do
+      {:ok, live, _html} = live(conn, ~p"/routers/#{router.id}")
+
+      request_id = Ecto.UUID.generate()
+
+      # The same payload the proxy broadcasts (and stores in Activity)
+      pending =
+        DodoRouter.Logs.PendingLog.build(
+          router,
+          request_id,
+          %{provider: "anthropic", model: "claude-opus-4-8"},
+          false
+        )
+
+      Phoenix.PubSub.broadcast(
+        DodoRouter.PubSub,
+        "router:#{router.id}:logs",
+        {:log_pending, pending}
+      )
+
+      assert render(live) =~ "claude-opus-4-8"
+
+      Phoenix.PubSub.broadcast(
+        DodoRouter.PubSub,
+        "router:#{router.id}:logs",
+        {:log_pending_update,
+         %{
+           router_id: router.id,
+           request_id: request_id,
+           provider: "moonshot",
+           model: "kimi-k2.6",
+           plan_type: "coding",
+           step_index: 1,
+           timestamp: DateTime.utc_now()
+         }}
+      )
+
+      # The row must name the step actually serving, not the provider that
+      # already failed.
+      html = render(live)
+      assert html =~ "kimi-k2.6"
+      refute html =~ "claude-opus-4-8"
     end
 
     test "shows router details", %{conn: conn, router: router} do
