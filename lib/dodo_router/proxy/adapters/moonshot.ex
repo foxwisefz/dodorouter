@@ -268,6 +268,7 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
       |> sanitize_tool_names()
       |> maybe_put_thinking(step)
       |> maybe_transform_kimi_reasoning(step)
+      |> mark_trailing_assistant_partial()
 
     assistant_debug =
       (body["messages"] || [])
@@ -286,6 +287,28 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
 
     body
   end
+
+  # Moonshot's partial mode: "partial": true on a trailing assistant message
+  # makes the model continue that content exactly — mid-word included —
+  # instead of opening a new turn. A trailing assistant message only reaches
+  # this adapter as a continuation request: FallbackChain's midstream
+  # reconstruction appends one, and Anthropic-style prefill converts to one;
+  # both mean "continue", and without the flag Kimi restarts the answer, so
+  # a midstream fallback showed the client the beginning twice.
+  defp mark_trailing_assistant_partial(%{"messages" => messages} = body)
+       when is_list(messages) and messages != [] do
+    case List.last(messages) do
+      %{"role" => "assistant", "content" => content} = last
+      when is_binary(content) and content != "" ->
+        updated = List.replace_at(messages, -1, Map.put(last, "partial", true))
+        %{body | "messages" => updated}
+
+      _ ->
+        body
+    end
+  end
+
+  defp mark_trailing_assistant_partial(body), do: body
 
   # Only set default if client didn't provide a value
   defp maybe_default(map, _key, nil), do: map

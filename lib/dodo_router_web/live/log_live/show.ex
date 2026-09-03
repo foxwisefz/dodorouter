@@ -1154,7 +1154,17 @@ defmodule DodoRouterWeb.LogLive.Show do
         "One hop — served on the first attempt."
 
       true ->
-        "Fell back through #{count} providers before one answered."
+        base = "Fell back through #{count} providers before one answered."
+
+        # A midstream handoff is a different event from a clean pre-stream
+        # fallback: the client had already received part of an earlier answer,
+        # and the next provider continued that same response.
+        if Enum.any?(log.attempted_steps || [], & &1["streamed_to_client"]) do
+          base <>
+            " The handoff happened mid-stream — the client had already received part of an earlier answer, and the next provider continued it."
+        else
+          base
+        end
     end
   end
 
@@ -1340,6 +1350,15 @@ defmodule DodoRouterWeb.LogLive.Show do
                 ✗ {@attempt["http_status"]} {@attempt["error"]}
               </span>
             <% end %>
+            <span
+              :if={@attempt["streamed_to_client"]}
+              id={"trace-midstream-badge-#{@hop.index}"}
+              class="badge badge-sm badge-warning badge-outline gap-1"
+              title={"The client had already received #{@attempt["partial_content_length"] || "some"} characters of this answer when the provider failed — the next attempt continued the same response mid-stream."}
+            >
+              <.icon name="hero-bolt" class="w-3 h-3" />
+              mid-stream handoff · {@attempt["partial_content_length"]} chars streamed
+            </span>
           </div>
           <span class="font-mono text-base-content/60 shrink-0">
             {fmt_ms(@attempt["latency_ms"])}
@@ -1441,10 +1460,30 @@ defmodule DodoRouterWeb.LogLive.Show do
           </.trace_section>
 
           <.trace_section
-            :if={@attempt["error_body"] || @attempt["response_body"] || @attempt["response_headers"]}
+            :if={
+              @attempt["error_body"] || @attempt["response_body"] ||
+                @attempt["response_headers"] || @attempt["partial_content"] not in [nil, ""]
+            }
             icon="hero-arrow-down-tray"
             label={"Received from #{@attempt["provider"]}"}
           >
+            <%!-- The text this provider streamed to the client before the
+                 connection died — the midstream partial the next attempt
+                 continued. Recorded on the attempt because it is otherwise
+                 recoverable only by slicing the final response. --%>
+            <.trace_toggle
+              :if={@attempt["partial_content"] not in [nil, ""]}
+              id={"trace-partial-content-#{@hop.index}"}
+              open
+              label="Streamed to the client before the failure"
+              meta={"#{@attempt["partial_content_length"]} chars"}
+            >
+              <pre
+                id={"trace-partial-#{@hop.index}"}
+                class="text-xs whitespace-pre-wrap break-words bg-base-200/50 rounded p-2"
+              >{@attempt["partial_content"]}</pre>
+            </.trace_toggle>
+
             <%!-- error_body is `details[:body]`, straight off the wire — the one
                  response artifact on an attempt the provider itself wrote, and
                  the reason this attempt is on the page, so it opens itself. --%>

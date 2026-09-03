@@ -90,13 +90,104 @@ defmodule DodoRouter.ActivityTest do
     wait_until(fn -> Activity.get_router_counts(router_id) == {0, 0} end)
   end
 
-  test "code_change migrates the legacy state shape" do
+  test "stores pending logs and lists them newest-first until completion" do
+    router_id = Ecto.UUID.generate()
+
+    older = pending_log(router_id, "req-1", DateTime.add(DateTime.utc_now(), -60, :second))
+    newer = pending_log(router_id, "req-2", DateTime.utc_now())
+
+    Activity.request_started(router_id, "req-1", older)
+    Activity.request_started(router_id, "req-2", newer)
+
+    wait_until(fn ->
+      match?([%{request_id: "req-2"}, %{request_id: "req-1"}], Activity.list_pending([router_id]))
+    end)
+
+    Activity.request_completed(router_id, "req-2")
+    wait_until(fn -> match?([%{request_id: "req-1"}], Activity.list_pending([router_id])) end)
+
+    Activity.request_completed(router_id, "req-1")
+    wait_until(fn -> Activity.list_pending([router_id]) == [] end)
+  end
+
+  test "step_started moves the stored pending log to the backup step" do
+    router_id = Ecto.UUID.generate()
+
+    Activity.request_started(router_id, "req-1", pending_log(router_id, "req-1"))
+    wait_until(fn -> length(Activity.list_pending([router_id])) == 1 end)
+
+    Activity.step_started(router_id, "req-1", 1, %{
+      provider: "moonshot",
+      model: "kimi-k2.6",
+      plan_type: "coding"
+    })
+
+    wait_until(fn ->
+      case Activity.list_pending([router_id]) do
+        [
+          %{
+            final_provider: "moonshot",
+            final_model: "kimi-k2.6",
+            attempted_steps: [first, second]
+          }
+        ] ->
+          first["status"] == "error" and second["provider"] == "moonshot"
+
+        _ ->
+          false
+      end
+    end)
+  end
+
+  test "owner death clears stored pending logs" do
+    router_id = Ecto.UUID.generate()
+    test_pid = self()
+
+    pid =
+      spawn(fn ->
+        Activity.request_started(router_id, "doomed-req", pending_log(router_id, "doomed-req"))
+        send(test_pid, :registered)
+
+        receive do
+          :never -> :ok
+        end
+      end)
+
+    assert_receive :registered
+    wait_until(fn -> length(Activity.list_pending([router_id])) == 1 end)
+
+    Process.exit(pid, :kill)
+
+    wait_until(fn -> Activity.list_pending([router_id]) == [] end)
+  end
+
+  test "code_change migrates the legacy state shapes" do
     legacy = %{"router-id" => %{"req-id" => :primary}}
+    migrated = %{"router-id" => %{"req-id" => %{status: :primary, log: nil}}}
 
-    assert {:ok, %{routers: ^legacy, owners: %{}}} = Activity.code_change(:legacy, legacy, nil)
+    # Pre-owners shape: bare routers map with atom statuses
+    assert {:ok, %{routers: ^migrated, owners: %{}}} = Activity.code_change(:legacy, legacy, nil)
 
-    migrated = %{routers: legacy, owners: %{}}
-    assert {:ok, ^migrated} = Activity.code_change(:legacy, migrated, nil)
+    # Owners present but entries still atoms
+    assert {:ok, %{routers: ^migrated, owners: %{}}} =
+             Activity.code_change(:legacy, %{routers: legacy, owners: %{}}, nil)
+
+    # Current shape passes through unchanged
+    current = %{routers: migrated, owners: %{}}
+    assert {:ok, ^current} = Activity.code_change(:legacy, current, nil)
+  end
+
+  defp pending_log(router_id, request_id, inserted_at \\ DateTime.utc_now()) do
+    %{
+      id: nil,
+      request_id: request_id,
+      router_id: router_id,
+      status: "pending",
+      final_provider: "anthropic",
+      final_model: "claude-opus-4-8",
+      inserted_at: inserted_at,
+      attempted_steps: [%{"provider" => "anthropic", "model" => "claude-opus-4-8"}]
+    }
   end
 
   defp wait_until(fun, timeout_ms \\ 2_000) do

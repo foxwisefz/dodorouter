@@ -5,6 +5,7 @@ defmodule DodoRouterWeb.LogLive.Index do
 
   alias DodoRouter.{Logs, Routers}
   alias DodoRouter.Logs.MessageNormalizer
+  alias DodoRouter.Logs.PendingLog
   alias DodoRouter.Proxy.Adapter.Registry
   alias DodoRouter.Usage
 
@@ -26,6 +27,10 @@ defmodule DodoRouterWeb.LogLive.Index do
       |> assign(:log_count, 0)
       |> assign(:log_shown_count, 0)
       |> assign(:latency_percentiles, nil)
+      # In-flight rows by request_id: LiveView streams can't be read back, so
+      # a :log_pending_update (a fallback firing mid-request) rebuilds the row
+      # from this copy. Entries leave when the terminal :log_created arrives.
+      |> assign(:pending_by_request, %{})
       |> stream(:logs, [])
 
     {:ok, socket}
@@ -73,6 +78,7 @@ defmodule DodoRouterWeb.LogLive.Index do
 
         logs = Logs.list_logs(router, list_opts)
         count = Logs.count_logs(router, list_opts)
+        pending = mount_pending(failures_only, [router.id])
 
         # Percentiles are per-router; the all-routers view has no single
         # baseline to compare against, so latency coloring is skipped there.
@@ -100,12 +106,14 @@ defmodule DodoRouterWeb.LogLive.Index do
         |> assign(:log_count, count)
         |> assign(:log_shown_count, length(logs))
         |> assign(:latency_percentiles, latency_percentiles)
-        |> stream(:logs, logs, reset: true)
+        |> assign(:pending_by_request, Map.new(pending, &{&1.request_id, &1}))
+        |> stream(:logs, pending_rows(pending) ++ logs, reset: true)
       else
         # Show all logs across all routers
 
         logs = Logs.list_logs_for_user(socket.assigns.current_user, list_opts)
         count = Logs.count_logs_for_user(socket.assigns.current_user, list_opts)
+        pending = mount_pending(failures_only, Enum.map(socket.assigns.routers, & &1.id))
         # Subscribe to all routers
         if connected?(socket) && !was_all do
           subscribe_all_routers(socket)
@@ -124,7 +132,8 @@ defmodule DodoRouterWeb.LogLive.Index do
         |> assign(:log_count, count)
         |> assign(:log_shown_count, length(logs))
         |> assign(:latency_percentiles, nil)
-        |> stream(:logs, logs, reset: true)
+        |> assign(:pending_by_request, Map.new(pending, &{&1.request_id, &1}))
+        |> stream(:logs, pending_rows(pending) ++ logs, reset: true)
       end
 
     {:noreply, socket}
@@ -141,10 +150,24 @@ defmodule DodoRouterWeb.LogLive.Index do
 
   defp failures_window_opts(_), do: []
 
+  # Requests already in flight have no request_logs row yet, and their
+  # :log_pending broadcast fired before this stream (re)build — Activity holds
+  # their payloads. Skipped under the failures filter, matching the
+  # :log_pending handler: a pending request has no terminal status yet.
+  defp mount_pending(true = _failures_only, _router_ids), do: []
+  defp mount_pending(false, router_ids), do: DodoRouter.Activity.list_pending(router_ids)
+
+  # Use request_id as stream key so the completed log replaces the row in place
+  defp pending_rows(pending), do: Enum.map(pending, &Map.put(&1, :id, &1.request_id))
+
   defp subscribe_all_routers(socket) do
     Enum.each(socket.assigns.routers, fn router ->
       Logs.subscribe_to_logs(router.id)
     end)
+  end
+
+  defp drop_pending(socket, request_id) do
+    assign(socket, :pending_by_request, Map.delete(socket.assigns.pending_by_request, request_id))
   end
 
   defp unsubscribe_all_routers(socket) do
@@ -164,7 +187,45 @@ defmodule DodoRouterWeb.LogLive.Index do
   def handle_info({:log_pending, pending}, socket) do
     # Use request_id as stream key so completed log replaces it in place
     pending = Map.put(pending, :id, pending.request_id)
-    {:noreply, stream_insert(socket, :logs, pending, at: 0)}
+
+    socket =
+      socket
+      |> assign(
+        :pending_by_request,
+        Map.put(socket.assigns.pending_by_request, pending.request_id, pending)
+      )
+      |> stream_insert(:logs, pending, at: 0)
+
+    {:noreply, socket}
+  end
+
+  def handle_info({:log_pending_update, _update}, %{assigns: %{failures_only: true}} = socket) do
+    # The pending row was never shown under this filter, so there is nothing
+    # to move to the backup provider.
+    {:noreply, socket}
+  end
+
+  def handle_info({:log_pending_update, update}, socket) do
+    # A fallback fired mid-request: the row announced with the first step's
+    # provider is now being served by the backup. Mark the failed hop and show
+    # the step actually running, so the switch is visible while in flight.
+    case socket.assigns.pending_by_request[update.request_id] do
+      nil ->
+        {:noreply, socket}
+
+      pending ->
+        pending = PendingLog.apply_fallback(pending, update)
+
+        socket =
+          socket
+          |> assign(
+            :pending_by_request,
+            Map.put(socket.assigns.pending_by_request, update.request_id, pending)
+          )
+          |> stream_insert(:logs, pending)
+
+        {:noreply, socket}
+    end
   end
 
   def handle_info({:log_created, log}, %{assigns: %{failures_only: true}} = socket) do
@@ -179,6 +240,7 @@ defmodule DodoRouterWeb.LogLive.Index do
         socket
         |> assign(:log_count, socket.assigns.log_count + 1)
         |> assign(:log_shown_count, socket.assigns.log_shown_count + 1)
+        |> drop_pending(log.request_id)
         |> stream_insert(:logs, log)
 
       {:noreply, socket}
@@ -195,6 +257,7 @@ defmodule DodoRouterWeb.LogLive.Index do
       socket
       |> assign(:log_count, socket.assigns.log_count + 1)
       |> assign(:log_shown_count, socket.assigns.log_shown_count + 1)
+      |> drop_pending(log.request_id)
       |> stream_insert(:logs, log)
 
     {:noreply, socket}
@@ -468,7 +531,9 @@ defmodule DodoRouterWeb.LogLive.Index do
                           <span class={[
                             "text-xs px-1.5 py-0.5 rounded-full",
                             step["status"] == "success" && "bg-green-50 text-success",
-                            step["status"] != "success" && "bg-red-50 text-error line-through"
+                            step["status"] == "error" && "bg-red-50 text-error line-through",
+                            step["status"] not in ["success", "error"] &&
+                              "bg-base-200 text-base-content/70"
                           ]}>
                             {step["provider"]}
                           </span>

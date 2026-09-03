@@ -182,6 +182,10 @@ defmodule DodoRouter.Proxy.FallbackChain do
               error_body_fallback(reason, details),
           latency_ms: details[:latency_ms] || latency(start_time),
           streamed_to_client: streamed_to_client,
+          # The text itself, not just its length: it went to the client but is
+          # otherwise recoverable only by slicing the final response, and the
+          # Trace shows it on the attempt that actually streamed it.
+          partial_content: partial_content,
           partial_content_length:
             if(is_binary(partial_content), do: String.length(partial_content), else: nil),
           fidelity_changes: attribute(fidelity, step),
@@ -219,7 +223,28 @@ defmodule DodoRouter.Proxy.FallbackChain do
 
   defp broadcast_step_started(router_id, request_id, step, step_index) do
     if step_index > 0 do
-      DodoRouter.Activity.step_started(router_id, request_id, step_index)
+      update = %{
+        router_id: router_id,
+        request_id: request_id,
+        provider: step.provider,
+        model: step.model,
+        plan_type: step.plan_type,
+        step_index: step_index,
+        timestamp: DateTime.utc_now()
+      }
+
+      # The pending row in the logs list was announced with the first step's
+      # provider. Without this, a fallback is invisible while the request is
+      # in flight — the row keeps naming a provider that already failed until
+      # the terminal log replaces it. Activity gets the same update so its
+      # stored copy stays true for LiveViews that mount mid-fallback.
+      DodoRouter.Activity.step_started(router_id, request_id, step_index, update)
+
+      Phoenix.PubSub.broadcast(
+        DodoRouter.PubSub,
+        "router:#{router_id}:logs",
+        {:log_pending_update, update}
+      )
     end
 
     Phoenix.PubSub.broadcast(

@@ -1040,6 +1040,54 @@ defmodule DodoRouter.Proxy.Adapters.AnthropicTest do
     end
   end
 
+  describe "stream error details (midstream fallback)" do
+    # When the upstream connection dies after text already reached the client,
+    # the error details must carry partial_content/chunks_sent — that is what
+    # FallbackChain keys midstream reconstruction on, so the next provider
+    # continues the answer instead of restarting it. Seam test: the same
+    # accumulator stream/5 parks while forwarding, piped into the details
+    # builder its error path uses.
+    test "carries the partial text a killed stream already forwarded" do
+      events = [
+        %{
+          "type" => "message_start",
+          "message" => %{"id" => "msg_01x", "model" => "claude-opus-4-8", "content" => []}
+        },
+        %{
+          "type" => "content_block_start",
+          "index" => 0,
+          "content_block" => %{"type" => "text", "text" => ""}
+        },
+        %{
+          "type" => "content_block_delta",
+          "index" => 0,
+          "delta" => %{"type" => "text_delta", "text" => "The sky is "}
+        },
+        %{
+          "type" => "content_block_delta",
+          "index" => 0,
+          "delta" => %{"type" => "text_delta", "text" => "blue because"}
+        }
+      ]
+
+      {acc, _wire} =
+        Anthropic.passthrough_anthropic_events(Anthropic.initial_stream_acc(), events)
+
+      details = Anthropic.build_stream_error_details(acc, System.monotonic_time(:millisecond))
+
+      assert details.partial_content == "The sky is blue because"
+      assert details.chunks_sent == true
+      assert is_integer(details.latency_ms)
+    end
+
+    test "no partial keys when the stream died before any chunk" do
+      details = Anthropic.build_stream_error_details(nil, System.monotonic_time(:millisecond))
+
+      refute Map.has_key?(details, :partial_content)
+      refute Map.has_key?(details, :chunks_sent)
+    end
+  end
+
   describe "parse_anthropic_sse/2" do
     test "a message_delta sharing a frame with message_stop is not discarded" do
       data =

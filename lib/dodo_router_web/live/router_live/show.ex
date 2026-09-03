@@ -8,6 +8,7 @@ defmodule DodoRouterWeb.RouterLive.Show do
   alias DodoRouter.Routers.RoutingStep
   alias DodoRouter.Logs
   alias DodoRouter.Logs.MessageNormalizer
+  alias DodoRouter.Logs.PendingLog
   alias DodoRouter.Providers
   alias DodoRouter.Proxy.Adapter.Registry
   alias DodoRouter.Usage
@@ -23,11 +24,23 @@ defmodule DodoRouterWeb.RouterLive.Show do
     end
 
     provider_keys = Providers.list_provider_keys(socket.assigns.current_user)
-    recent_logs = Logs.list_logs(router, limit: 10)
+
+    # Requests already in flight have no request_logs row yet, and their
+    # :log_pending broadcast fired before this LiveView existed — merge them
+    # in from Activity so the list agrees with the sidebar's activity count.
+    pending_logs =
+      DodoRouter.Activity.list_pending([router.id])
+      |> Enum.map(&Map.put(&1, :id, &1.request_id))
+
+    recent_logs = pending_logs ++ Logs.list_logs(router, limit: 10)
 
     socket =
       socket
       |> assign(:router, router)
+      # In-flight rows by request_id: LiveView streams can't be read back, so
+      # a :log_pending_update (a fallback firing mid-request) rebuilds the row
+      # from this copy. Entries leave when the terminal :log_created arrives.
+      |> assign(:pending_by_request, Map.new(pending_logs, &{&1.request_id, &1}))
       |> assign(:stats, Logs.stats(router))
       |> assign(:latency_percentiles, Logs.latency_percentiles(router))
       |> assign(:step_traffic, Logs.step_traffic(router))
@@ -410,7 +423,32 @@ defmodule DodoRouterWeb.RouterLive.Show do
     {:noreply,
      socket
      |> assign(:has_logs, true)
+     |> assign(
+       :pending_by_request,
+       Map.put(socket.assigns.pending_by_request, pending.request_id, pending)
+     )
      |> stream_insert(:recent_logs, pending, at: 0, limit: 10)}
+  end
+
+  def handle_info({:log_pending_update, update}, socket) do
+    # A fallback moved an in-flight request to its backup step: rebuild the
+    # row from the tracked copy so it names the step actually serving, not
+    # the provider that already failed.
+    case socket.assigns.pending_by_request[update.request_id] do
+      nil ->
+        {:noreply, socket}
+
+      pending ->
+        pending = PendingLog.apply_fallback(pending, update)
+
+        {:noreply,
+         socket
+         |> assign(
+           :pending_by_request,
+           Map.put(socket.assigns.pending_by_request, update.request_id, pending)
+         )
+         |> stream_insert(:recent_logs, pending)}
+    end
   end
 
   def handle_info({:log_created, log}, socket) do
@@ -420,6 +458,10 @@ defmodule DodoRouterWeb.RouterLive.Show do
     {:noreply,
      socket
      |> assign(:has_logs, true)
+     |> assign(
+       :pending_by_request,
+       Map.delete(socket.assigns.pending_by_request, log.request_id)
+     )
      |> stream_insert(:recent_logs, log)}
   end
 

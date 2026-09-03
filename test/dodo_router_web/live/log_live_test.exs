@@ -1374,6 +1374,111 @@ defmodule DodoRouterWeb.LogLiveTest do
       assert html =~ "partial so far"
     end
 
+    test "a midstream handoff is labeled on the attempt that streamed to the client", %{
+      conn: conn,
+      user: user
+    } do
+      # streamed_to_client means the client had already received part of this
+      # attempt's answer when it failed — the next attempt continued the same
+      # response mid-stream. That is a materially different event from a clean
+      # pre-stream fallback and the Trace must say so.
+      {router, _api_key} = RoutersFixtures.router_fixture(user)
+
+      log =
+        LogsFixtures.log_fixture(router, %{
+          status: "fallback",
+          attempted_steps: [
+            %{
+              "position" => 0,
+              "provider" => "anthropic",
+              "model" => "claude-opus-4-8",
+              "status" => "error",
+              "error" => "unknown",
+              "streamed_to_client" => true,
+              "partial_content_length" => 324
+            },
+            %{
+              "position" => 1,
+              "provider" => "moonshot",
+              "model" => "kimi-k2.6",
+              "status" => "success"
+            }
+          ]
+        })
+
+      {:ok, live, _html} = live(conn, ~p"/logs/#{log.request_id}")
+      html = live |> element("[role=tab][phx-value-tab=trace]") |> render_click()
+
+      assert has_element?(live, "#trace-midstream-badge-0")
+      refute has_element?(live, "#trace-midstream-badge-1")
+      assert html =~ "324"
+      assert html =~ "mid-stream"
+    end
+
+    test "the failed attempt shows the partial text it streamed", %{conn: conn, user: user} do
+      {router, _api_key} = RoutersFixtures.router_fixture(user)
+
+      log =
+        LogsFixtures.log_fixture(router, %{
+          status: "fallback",
+          attempted_steps: [
+            %{
+              "position" => 0,
+              "provider" => "anthropic",
+              "model" => "claude-opus-4-8",
+              "status" => "error",
+              "error" => "unknown",
+              "streamed_to_client" => true,
+              "partial_content" => "The sky is blue because of Ray",
+              "partial_content_length" => 30
+            },
+            %{
+              "position" => 1,
+              "provider" => "moonshot",
+              "model" => "kimi-k2.6",
+              "status" => "success"
+            }
+          ]
+        })
+
+      {:ok, live, _html} = live(conn, ~p"/logs/#{log.request_id}")
+      html = live |> element("[role=tab][phx-value-tab=trace]") |> render_click()
+
+      assert has_element?(live, "#trace-partial-content-0")
+      assert html =~ "The sky is blue because of Ray"
+      assert html =~ "Streamed to the client before the failure"
+    end
+
+    test "a clean fallback shows no midstream badge", %{conn: conn, user: user} do
+      {router, _api_key} = RoutersFixtures.router_fixture(user)
+
+      log =
+        LogsFixtures.log_fixture(router, %{
+          status: "fallback",
+          attempted_steps: [
+            %{
+              "position" => 0,
+              "provider" => "anthropic",
+              "model" => "claude-opus-4-8",
+              "status" => "error",
+              "error" => "rate_limited"
+            },
+            %{
+              "position" => 1,
+              "provider" => "moonshot",
+              "model" => "kimi-k2.6",
+              "status" => "success"
+            }
+          ]
+        })
+
+      {:ok, live, _html} = live(conn, ~p"/logs/#{log.request_id}")
+      html = live |> element("[role=tab][phx-value-tab=trace]") |> render_click()
+
+      refute has_element?(live, "#trace-midstream-badge-0")
+      refute html =~ "mid-stream"
+    end
+
     test "a payload renders as text and is upgraded to a tree", %{conn: conn, user: user} do
       # The tree is built client-side from the <pre> the server renders, so the
       # markup has to keep carrying the text: that is what a payload which is

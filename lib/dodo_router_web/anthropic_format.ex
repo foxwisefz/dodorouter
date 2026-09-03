@@ -248,7 +248,15 @@ defmodule DodoRouterWeb.AnthropicFormat do
     end)
   end
 
-  def new_sse_state, do: %{open_block: 0, tool_blocks: %{}}
+  @doc """
+  Fresh reframing state. `base_index` is the first content-block index this
+  reframing may claim: 0 normally, and the next unused index when the
+  reframed stream joins a message another provider already started on the
+  client's wire (midstream fallback after a passthrough step died) — reusing
+  an index the client has seen lands deltas on a block of the wrong type.
+  """
+  def new_sse_state(base_index \\ 0),
+    do: %{open_block: base_index, base_index: base_index, tool_blocks: %{}}
 
   defp convert_openai_chunk_to_anthropic_events(chunk, state) do
     delta = get_in(chunk, ["choices", Access.at(0), "delta"]) || %{}
@@ -259,7 +267,7 @@ defmodule DodoRouterWeb.AnthropicFormat do
         [
           sse_event("content_block_delta", %{
             "type" => "content_block_delta",
-            "index" => 0,
+            "index" => state.base_index,
             "delta" => %{"type" => "text_delta", "text" => content}
           })
         ]
@@ -279,7 +287,7 @@ defmodule DodoRouterWeb.AnthropicFormat do
         if Map.has_key?(state.tool_blocks, openai_idx) do
           {[], state}
         else
-          block_idx = map_size(state.tool_blocks) + 1
+          block_idx = state.base_index + map_size(state.tool_blocks) + 1
 
           stop_event =
             sse_event("content_block_stop", %{
