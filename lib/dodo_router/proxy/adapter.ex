@@ -376,21 +376,37 @@ defmodule DodoRouter.Proxy.Adapter do
   # System parts arrays come from the Anthropic endpoint's block-preserving
   # conversion; OpenAI-family providers cache by prefix automatically, so
   # flattening (and dropping the embedded cache_control keys) is safe here.
-  defp normalize_message_content(%{"content" => content, "role" => role} = msg)
-       when is_list(content) and role in ["tool", "user", "system"] do
-    normalized =
-      content
-      |> Enum.map(fn
-        %{"type" => "text", "text" => text} -> text
-        %{"text" => text} -> text
-        other -> Jason.encode!(other)
-      end)
-      |> Enum.join("\n")
+  #
+  # A user parts array that carries something other than text (an image, a
+  # file) stays an array: the OpenAI chat format has no other way to send an
+  # image, and flattening it JSON-encoded the image into prose the model then
+  # read as a string — a 200 that silently answered a different question.
+  defp normalize_message_content(%{"content" => content, "role" => "user"} = msg)
+       when is_list(content) do
+    if all_text_content?(content),
+      do: Map.put(msg, "content", flatten_parts(content)),
+      else: Map.put(msg, "content", Enum.map(content, &drop_cache_control/1))
+  end
 
-    Map.put(msg, "content", normalized)
+  defp normalize_message_content(%{"content" => content, "role" => role} = msg)
+       when is_list(content) and role in ["tool", "system"] do
+    Map.put(msg, "content", flatten_parts(content))
   end
 
   defp normalize_message_content(msg), do: msg
+
+  defp drop_cache_control(part) when is_map(part), do: Map.delete(part, "cache_control")
+  defp drop_cache_control(part), do: part
+
+  defp flatten_parts(content) do
+    content
+    |> Enum.map(fn
+      %{"type" => "text", "text" => text} -> text
+      %{"text" => text} -> text
+      other -> Jason.encode!(other)
+    end)
+    |> Enum.join("\n")
+  end
 
   @doc """
   Merges consecutive messages with the same role into a single message.

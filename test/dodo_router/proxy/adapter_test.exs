@@ -516,5 +516,44 @@ defmodule DodoRouter.Proxy.AdapterTest do
       [sys_msg | _] = Adapter.sanitize_request(request)["messages"]
       assert sys_msg["content"] == "IDENTITY\nBIG PROMPT"
     end
+
+    # OpenAI-family chat APIs take a parts array on user messages precisely
+    # so an image can ride alongside text. Flattening that array turned the
+    # image into a JSON string the model read as prose — a request that
+    # asked "what is in this picture?" got a 200 describing some JSON.
+    test "keeps a user parts array that carries an image" do
+      image = %{"type" => "image_url", "image_url" => %{"url" => "data:image/png;base64,AAAA"}}
+
+      request = %{
+        "model" => "m",
+        "messages" => [
+          %{
+            "role" => "user",
+            "content" => [%{"type" => "text", "text" => "What is this?"}, image]
+          }
+        ]
+      }
+
+      [user_msg] = Adapter.sanitize_request(request)["messages"]
+      assert user_msg["content"] == [%{"type" => "text", "text" => "What is this?"}, image]
+    end
+
+    test "still flattens a text-only user parts array" do
+      request = %{
+        "model" => "m",
+        "messages" => [
+          %{
+            "role" => "user",
+            "content" => [
+              %{"type" => "text", "text" => "one"},
+              %{"type" => "text", "text" => "two", "cache_control" => %{"type" => "ephemeral"}}
+            ]
+          }
+        ]
+      }
+
+      [user_msg] = Adapter.sanitize_request(request)["messages"]
+      assert user_msg["content"] == "one\ntwo"
+    end
   end
 end
