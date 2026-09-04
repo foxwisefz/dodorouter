@@ -4,6 +4,7 @@ defmodule DodoRouter.Proxy.Adapters.ResponsesAPITest do
   alias DodoRouter.Proxy.Adapter
   alias DodoRouter.Proxy.Adapters.ResponsesAPI
   alias DodoRouter.Routers.RoutingStep
+  alias DodoRouterWeb.AnthropicFormat
 
   describe "build_request_body/2" do
     test "converts messages to Responses API input format" do
@@ -193,7 +194,10 @@ defmodule DodoRouter.Proxy.Adapters.ResponsesAPITest do
             "role" => "user",
             "content" => [
               %{"type" => "text", "text" => "What's in this image?"},
-              %{"type" => "image_url", "image_url" => %{"url" => "http://example.com/img.png"}}
+              %{
+                "type" => "image_url",
+                "image_url" => %{"url" => "http://example.com/img.png", "detail" => "high"}
+              }
             ]
           }
         ]
@@ -208,7 +212,45 @@ defmodule DodoRouter.Proxy.Adapters.ResponsesAPITest do
       [text_part, image_part] = user["content"]
       assert text_part["type"] == "input_text"
       assert text_part["text"] == "What's in this image?"
-      assert image_part["type"] == "image_url"
+
+      assert image_part == %{
+               "type" => "input_image",
+               "image_url" => "http://example.com/img.png",
+               "detail" => "high"
+             }
+    end
+
+    test "converts Anthropic image content through the Responses API seam" do
+      request =
+        AnthropicFormat.to_openai_params(%{
+          "model" => "claude-fable-5-1",
+          "max_tokens" => 1024,
+          "messages" => [
+            %{
+              "role" => "user",
+              "content" => [
+                %{"type" => "text", "text" => "Describe this image"},
+                %{
+                  "type" => "image",
+                  "source" => %{
+                    "type" => "base64",
+                    "media_type" => "image/png",
+                    "data" => "iVBORw0KGgo="
+                  }
+                }
+              ]
+            }
+          ]
+        })
+
+      body = ResponsesAPI.build_request_body(request, %RoutingStep{model: "gpt-5.6-sol"})
+
+      [user] = body["input"]
+
+      assert Enum.at(user["content"], 1) == %{
+               "type" => "input_image",
+               "image_url" => "data:image/png;base64,iVBORw0KGgo="
+             }
     end
 
     test "strips max_tokens (unsupported by Responses API)" do
