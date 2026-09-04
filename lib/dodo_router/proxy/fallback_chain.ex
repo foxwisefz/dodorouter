@@ -478,7 +478,7 @@ defmodule DodoRouter.Proxy.FallbackChain do
   # named alongside the category rather than dropped, so a transport failure
   # says what the transport saw ("unknown (%Req.TransportError{...}: socket
   # closed)") instead of only which bucket it fell into.
-  defp describe_reason(reason, detail) when is_binary(detail), do: detail
+  defp describe_reason(_reason, detail) when is_binary(detail), do: detail
   defp describe_reason(reason, nil), do: to_string(reason)
 
   defp describe_reason(reason, %{__exception__: true} = exception) do
