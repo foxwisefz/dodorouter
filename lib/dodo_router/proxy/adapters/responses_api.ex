@@ -289,8 +289,17 @@ defmodule DodoRouter.Proxy.Adapters.ResponsesAPI do
   defp convert_input_parts(content) do
     Enum.map(content, fn part ->
       case part["type"] do
-        "text" -> %{"type" => "input_text", "text" => part["text"]}
-        _ -> part
+        "text" ->
+          %{"type" => "input_text", "text" => part["text"]}
+
+        "image_url" ->
+          image = part["image_url"] || %{}
+
+          %{"type" => "input_image", "image_url" => image["url"]}
+          |> maybe_put("detail", image["detail"])
+
+        _ ->
+          part
       end
     end)
   end
