@@ -255,6 +255,7 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
       request
       |> Adapter.sanitize_request()
       |> Adapter.flatten_content_to_string()
+      |> consolidate_system_messages()
       |> Map.put("model", step.model)
       |> maybe_default("temperature", step.temperature)
       |> maybe_default("max_tokens", step.max_tokens)
@@ -270,23 +271,56 @@ defmodule DodoRouter.Proxy.Adapters.Moonshot do
       |> maybe_transform_kimi_reasoning(step)
       |> mark_trailing_assistant_partial()
 
-    assistant_debug =
+    assistant_stats =
       (body["messages"] || [])
-      |> Enum.with_index()
-      |> Enum.filter(fn {msg, _i} -> msg["role"] == "assistant" end)
-      |> Enum.map(fn {msg, i} ->
-        has_tc = Map.has_key?(msg, "tool_calls")
-        has_rc = Map.has_key?(msg, "reasoning_content")
-        "[#{i}: tc=#{has_tc} rc=#{has_rc}]"
+      |> Enum.reduce(%{total: 0, tool_calls: 0, reasoning: 0}, fn msg, stats ->
+        if msg["role"] == "assistant" do
+          %{
+            total: stats.total + 1,
+            tool_calls: stats.tool_calls + if(Map.has_key?(msg, "tool_calls"), do: 1, else: 0),
+            reasoning:
+              stats.reasoning + if(Map.has_key?(msg, "reasoning_content"), do: 1, else: 0)
+          }
+        else
+          stats
+        end
       end)
-      |> Enum.join(", ")
 
     Logger.info(
-      "[Moonshot] Sending request model=#{body["model"]} msg_count=#{length(body["messages"] || [])} thinking=#{inspect(body["thinking"])} assistants=[#{assistant_debug}]"
+      "[Moonshot] Sending request model=#{body["model"]} msg_count=#{length(body["messages"] || [])} " <>
+        "thinking=#{inspect(body["thinking"])} assistants=#{assistant_stats.total} " <>
+        "tool_call_assistants=#{assistant_stats.tool_calls} reasoning_assistants=#{assistant_stats.reasoning}"
     )
 
     body
   end
+
+  # Kimi accepts at most one system message, and it must be first. Anthropic
+  # clients can supply both the top-level system field and a system-role
+  # message; the format conversion preserves both, so consolidate them here.
+  defp consolidate_system_messages(%{"messages" => messages} = body) when is_list(messages) do
+    {system_messages, other_messages} = Enum.split_with(messages, &(&1["role"] == "system"))
+
+    case system_messages do
+      [] ->
+        body
+
+      [system] ->
+        Map.put(body, "messages", [system | other_messages])
+
+      [first | rest] ->
+        content =
+          [first | rest]
+          |> Enum.map(&(&1["content"] || ""))
+          |> Enum.reject(&(&1 == ""))
+          |> Enum.join("\n\n")
+
+        system = Map.put(first, "content", content)
+        Map.put(body, "messages", [system | other_messages])
+    end
+  end
+
+  defp consolidate_system_messages(body), do: body
 
   # Moonshot's partial mode: "partial": true on a trailing assistant message
   # makes the model continue that content exactly — mid-word included —
