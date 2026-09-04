@@ -3,6 +3,7 @@ defmodule DodoRouter.Proxy.Adapters.MoonshotTest do
 
   alias DodoRouter.Proxy.Adapters.Moonshot
   alias DodoRouter.Routers.RoutingStep
+  alias DodoRouterWeb.AnthropicFormat
 
   describe "build_request_body/2 (partial mode)" do
     # Moonshot's native continuation: "partial": true on a trailing assistant
@@ -62,6 +63,30 @@ defmodule DodoRouter.Proxy.Adapters.MoonshotTest do
   end
 
   describe "build_request_body/2" do
+    test "consolidates Anthropic top-level and message system prompts" do
+      request =
+        AnthropicFormat.to_openai_params(%{
+          "model" => "claude-fable-5-1",
+          "system" => "You are Claude Code.",
+          "messages" => [
+            %{"role" => "system", "content" => "Follow the repository instructions."},
+            %{"role" => "user", "content" => "Fix the bug"}
+          ],
+          "max_tokens" => 1024
+        })
+
+      step = %RoutingStep{provider: "moonshot", model: "kimi-k2.6"}
+
+      body = Moonshot.build_request_body(request, step)
+
+      assert [system, %{"role" => "user"}] = body["messages"]
+
+      assert system == %{
+               "role" => "system",
+               "content" => "You are Claude Code.\n\nFollow the repository instructions."
+             }
+    end
+
     test "adds reasoning_content to assistant messages with tool_calls when thinking enabled" do
       request = %{
         "messages" => [

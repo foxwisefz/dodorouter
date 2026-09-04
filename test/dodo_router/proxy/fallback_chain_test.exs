@@ -405,6 +405,25 @@ defmodule DodoRouter.Proxy.FallbackChainTest do
       result = DodoRouter.Proxy.FallbackChain.error_body_fallback(:auth_error, %{status: 403})
       assert result == "HTTP 403: auth_error"
     end
+
+    # A transport failure used to be logged as the single word "unknown":
+    # the adapter had the exception in hand and the chain threw it away. A
+    # Gemini stream that dropped after 51 seconds read exactly the same as
+    # any other failure, which is no help deciding what to do about it.
+    test "names the transport error behind an :unknown failure" do
+      result =
+        DodoRouter.Proxy.FallbackChain.error_body_fallback(:unknown, %{
+          reason: %Req.TransportError{reason: :closed}
+        })
+
+      assert result =~ "unknown"
+      assert result =~ "closed"
+    end
+
+    test "names an atom reason behind an :unknown failure" do
+      result = DodoRouter.Proxy.FallbackChain.error_body_fallback(:unknown, %{reason: :closed})
+      assert result == "unknown (closed)"
+    end
   end
 
   describe "should_fallback?/3" do

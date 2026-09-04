@@ -61,6 +61,13 @@ When a verdict holds, **Route here** on a ranking row applies it: the routing st
 
 A downgrade decision is only valid for the traffic it was measured on, so an applied change offers **Keep honest**: the same rubric and judge score a few live answers a day (judge cost only — the answers were already served), and when the rolling live average sits below the benchmark baseline for two sweeps in a row the evaluation raises a *below baseline* alert. The alert clears on its own when scores recover, and monitoring can be paused any time.
 
+## Playground
+
+**Playground** (in the sidebar, or the Playground button on a router's page) is a conversation thread you can point at any configured provider key × model, one turn at a time. Pick a key and a model, say something, and the answer streams back with what it cost, how long it took, its token counts, and a link to the request log. Switch the model between turns and the thread continues on the new one — each answer is labelled with the model that gave it — or press **Ask again** to send the last question to whatever model is now selected, which is the quickest way to put two models side by side on the same prompt.
+
+Attach up to four images to a turn to try a model's image support. The picker shows what the [model catalog](/docs/models/) says the selected model can do — images, tools, reasoning, prompt caching, context window, list prices — and warns when you attach an image to a model the catalog says doesn't take them; it sends anyway, because the provider's own answer is the point. A model the catalog doesn't know can still be typed in by id.
+
+Every turn is a real dispatch through the proxy pipeline, so what the model receives is exactly what a client sending that request would have had forwarded, and each turn is stored as a request log with its bodies, fidelity record and cost. Playground turns are filed under the router chosen at the top of the page (**Log under**) but tagged as playground traffic, so they never count toward that router's request, spend or latency figures. The thread itself lives in the page: reload and it starts empty, while its turns remain in the logs.
 
 ## Billing
 

@@ -253,6 +253,20 @@
               <span class="sidebar-label truncate">Evaluations</span>
             </a>
             <a
+              href={~p"/playground"}
+              title="Playground"
+              class={[
+                "sidebar-item flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm transition-colors",
+                String.starts_with?(@conn.request_path, "/playground") &&
+                  "font-medium text-accent bg-accent/10",
+                !String.starts_with?(@conn.request_path, "/playground") &&
+                  "text-base-content/60 hover:bg-secondary"
+              ]}
+            >
+              <.icon name="hero-chat-bubble-left-right" class="size-4 shrink-0" />
+              <span class="sidebar-label truncate">Playground</span>
+            </a>
+            <a
               href={~p"/routers"}
               title="Routers"
               class={[
@@ -419,6 +433,18 @@
               ]}
             >
               <.icon name="hero-beaker" class="size-4" /> Evaluations
+            </a>
+            <a
+              href={~p"/playground"}
+              class={[
+                "flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm transition-colors",
+                String.starts_with?(@conn.request_path, "/playground") &&
+                  "font-medium text-accent bg-accent/10",
+                !String.starts_with?(@conn.request_path, "/playground") &&
+                  "text-base-content/60 hover:bg-secondary"
+              ]}
+            >
+              <.icon name="hero-chat-bubble-left-right" class="size-4" /> Playground
             </a>
             <a
               href={~p"/routers"}

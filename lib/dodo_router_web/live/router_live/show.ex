@@ -526,6 +526,13 @@ defmodule DodoRouterWeb.RouterLive.Show do
               >
                 <.icon name="hero-video-camera" class="size-4" /> Sessions
               </.link>
+              <.link
+                id="router-playground-link"
+                navigate={~p"/playground?router_id=#{@router.id}"}
+                class="btn btn-sm bg-base-200 border-base-300/50 hover:bg-base-300 gap-2"
+              >
+                <.icon name="hero-chat-bubble-left-right" class="size-4" /> Playground
+              </.link>
             </div>
           </div>
           

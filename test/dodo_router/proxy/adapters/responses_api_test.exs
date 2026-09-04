@@ -328,6 +328,54 @@ defmodule DodoRouter.Proxy.Adapters.ResponsesAPITest do
       assert hd(chunks) =~ "tool_calls"
     end
 
+    test "correlates argument deltas by output item id" do
+      acc = %{
+        model: "gpt-5.5",
+        content: "",
+        tool_calls: %{},
+        usage: nil,
+        finish_reason: nil,
+        first_chunk_time: 1,
+        sse_buffer: ""
+      }
+
+      events = [
+        %{
+          "type" => "response.output_item.added",
+          "item" => %{
+            "type" => "function_call",
+            "id" => "fc_abc",
+            "call_id" => "call_abc",
+            "name" => "get_weather"
+          }
+        },
+        %{
+          "type" => "response.function_call_arguments.delta",
+          "item_id" => "fc_abc",
+          "delta" => ~s({"city":)
+        },
+        %{
+          "type" => "response.function_call_arguments.delta",
+          "item_id" => "fc_abc",
+          "delta" => ~s("SF"})
+        }
+      ]
+
+      {new_acc, chunks} = ResponsesAPI.process_events(acc, events)
+
+      assert get_in(new_acc.tool_calls, [0, "id"]) == "call_abc"
+      assert get_in(new_acc.tool_calls, [0, "function", "arguments"]) == ~s({"city":"SF"})
+      assert Enum.any?(chunks, &String.contains?(&1, ~s("arguments":"{\\"city\\":")))
+
+      [tool_call] =
+        ResponsesAPI.build_final_response(new_acc, %{})["choices"]
+        |> hd()
+        |> get_in(["message", "tool_calls"])
+
+      assert tool_call["id"] == "call_abc"
+      refute Map.has_key?(tool_call, :item_id)
+    end
+
     test "ignores unrelated event types" do
       acc = %{
         model: "gpt-5.5",

@@ -470,9 +470,23 @@ defmodule DodoRouter.Proxy.FallbackChain do
 
   def error_body_fallback(reason, details) do
     status = details[:status]
-    base = if is_binary(details[:reason]), do: details[:reason], else: to_string(reason)
+    base = describe_reason(reason, details[:reason])
     if status, do: "HTTP #{status}: #{base}", else: base
   end
+
+  # The adapter's own detail wins when it is prose; an exception or atom is
+  # named alongside the category rather than dropped, so a transport failure
+  # says what the transport saw ("unknown (%Req.TransportError{...}: socket
+  # closed)") instead of only which bucket it fell into.
+  defp describe_reason(_reason, detail) when is_binary(detail), do: detail
+  defp describe_reason(reason, nil), do: to_string(reason)
+
+  defp describe_reason(reason, %{__exception__: true} = exception) do
+    "#{reason} (#{inspect(exception)}: #{Exception.message(exception)})"
+  end
+
+  defp describe_reason(reason, detail) when is_atom(detail), do: "#{reason} (#{detail})"
+  defp describe_reason(reason, detail), do: "#{reason} (#{inspect(detail)})"
 
   # Accumulate partial content from a failed streaming attempt
   defp accumulate_partial_content(state, %{partial_content: content})

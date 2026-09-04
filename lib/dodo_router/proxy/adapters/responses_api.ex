@@ -350,7 +350,8 @@ defmodule DodoRouter.Proxy.Adapters.ResponsesAPI do
               entry = %{
                 "id" => call_id,
                 "type" => "function",
-                "function" => %{"name" => name, "arguments" => ""}
+                "function" => %{"name" => name, "arguments" => ""},
+                item_id: item["id"] || call_id
               }
 
               new_acc = put_in(sacc.tool_calls[idx], entry)
@@ -374,11 +375,13 @@ defmodule DodoRouter.Proxy.Adapters.ResponsesAPI do
           end
 
         "response.function_call_arguments.delta" ->
-          call_id = event["item_id"] || event["call_id"]
+          event_id = event["item_id"] || event["call_id"]
           args_delta = event["delta"]
 
           {idx, entry} =
-            Enum.find(sacc.tool_calls, fn {_i, e} -> e["id"] == call_id end) ||
+            Enum.find(sacc.tool_calls, fn {_i, e} ->
+              e[:item_id] == event_id or e["id"] == event_id
+            end) ||
               {map_size(sacc.tool_calls), nil}
 
           if entry do
@@ -462,7 +465,7 @@ defmodule DodoRouter.Proxy.Adapters.ResponsesAPI do
     tool_calls_list =
       acc.tool_calls
       |> Enum.sort_by(fn {idx, _} -> idx end)
-      |> Enum.map(fn {_, tc} -> tc end)
+      |> Enum.map(fn {_, tc} -> Map.delete(tc, :item_id) end)
 
     message =
       %{"role" => "assistant", "content" => acc.content}
