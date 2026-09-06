@@ -74,7 +74,12 @@ function runTurn(path, pair, turn, session) {
   // Prevent endpoint/API-key overrides from silently changing the direct baseline.
   delete env.OPENAI_BASE_URL;
   delete env.OPENAI_API_KEY;
-  if (path === "direct") delete env[values["key-env"]];
+  if (path === "direct") {
+    delete env[values["key-env"]];
+    // The localhost CA is for the proxy only. Applying it to OpenAI's public
+    // WebSocket endpoint causes UnknownIssuer retries and corrupts timings.
+    delete env.SSL_CERT_FILE;
+  }
   const started = Date.now();
   const child = spawnSync("codex", args, {
     cwd: runDir, env, input: turns[turn][0], encoding: "utf8",

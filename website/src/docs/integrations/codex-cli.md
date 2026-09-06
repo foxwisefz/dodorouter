@@ -30,6 +30,11 @@ Earlier smoke tests verified streamed `pong` responses and usage recording. An e
 
 ## Compare DodoRouter with direct Codex
 
+For a local HTTPS proxy, set `SSL_CERT_FILE` to its trusted CA certificate.
+The comparison runner passes it only to DodoRouter's Codex process; the direct
+baseline uses its normal public trust roots. Passing a local-only CA to the
+direct process can cause WebSocket certificate failures and inflate timings.
+
 Current Codex versions can send `additional_tools` and other non-message input
 items. Responses-format upstream routes preserve these items instead of turning
 them into developer messages with null content. See [typed input items](/docs/api/responses/#typed-input-items)

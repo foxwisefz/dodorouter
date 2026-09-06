@@ -32,6 +32,7 @@ const args = process.argv.slice(2);
 const prompt = fs.readFileSync(0, "utf8");
 const dodo = args.includes('model_provider="dodorouter"');
 assert.equal(Boolean(process.env.DODO_API_KEY_CODEX), dodo);
+assert.equal(process.env.SSL_CERT_FILE, dodo ? "/test/local-ca.pem" : undefined);
 assert.ok(args.includes("--ignore-user-config"));
 assert.ok(args.includes('sandbox_mode="read-only"'));
 assert.ok(!args.some(arg => arg.startsWith("model_reasoning_effort=")));
@@ -42,7 +43,7 @@ console.log(JSON.stringify({type:"item.completed", item:{type:"agent_message",te
 console.log(JSON.stringify({type:"turn.completed",usage:{input_tokens:1000,cached_input_tokens:800,output_tokens:5}}));
 `, { mode: 0o700 });
   const result = spawnSync(process.execPath, [script, ...args], {
-    encoding: "utf8", env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, DODO_API_KEY_CODEX: "test-secret" },
+    encoding: "utf8", env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, DODO_API_KEY_CODEX: "test-secret", SSL_CERT_FILE: "/test/local-ca.pem" },
   });
   assert.equal(result.status, 0, result.stderr);
   const dir = result.stdout.split("\n")[0].replace("Results: ", "");
