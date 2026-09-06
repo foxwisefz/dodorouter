@@ -640,6 +640,12 @@ Every adapter's final response `usage` map **must** use OpenAI Chat Completions 
 ```
 The `ResponsesAPI.convert_usage/1` must rename `input_tokens_details` → `prompt_tokens_details` so the existing extraction works.
 
+It also carries `output_tokens_details` as `completion_tokens_details`.
+`ResponsesFormat.from_openai_response/3` reverses both names on egress so Codex
+receives cached-input and reasoning-token details, not just headline counts.
+Test provider usage → normalization → Responses egress, including reported zero
+and successive per-response counts (`responses_usage_fidelity_test.exs`).
+
 When the provider includes `input_tokens_details.cache_write_tokens`, that nested field must also survive conversion and be extracted from `prompt_tokens_details.cache_write_tokens`. Preserve zero as a reported zero; absent remains nil. The Responses adapter seam test covers both read and write counts. This feeds cost accounting as well as cache diagnostics.
 
 **Wafer** — OpenAI-style, no renaming needed (probed 2026-09-02 with `scripts/wafer_probe.sh`): `prompt_tokens_details.cached_tokens`, plus a redundant top-level `cached_tokens` carrying the same value. OpenAI-family semantics — `prompt_tokens` is the total input and the cached figure is a subset of it (observed: 22,528 cached of a 23,010-token prompt):
@@ -718,7 +724,16 @@ One known limit: a same-format adapter pointed at a merely Claude-*compatible* t
 
 **The contract:** a field that is a real parameter of the upstream API belongs in `@allowed_request_fields`. `Map.take/2` means an allowed field only travels when the client actually sent it, so allowing one costs nothing for clients that don't use it. Getting this wrong is asymmetric and invisible: `parallel_tool_calls` was honoured on an Anthropic step and silently dropped on every OpenAI-family fallback of the same request.
 
+**Responses input is a tagged union, not a list of messages.** Match non-`message` string `type` values before any `role`/`content` clauses in both `ResponsesFormat` and `ResponsesAPI`. Codex `additional_tools` has a developer role but no content; role-first conversion fabricates `content: null` and discards its tools. Reasoning and function-call history may have no role at all. Preserve non-message items and their order on Responses upstreams, including unfamiliar types; do not synthesize text or silently discard their payload. This does not establish cross-format fallback compatibility. Test the ingress-to-adapter seam with additional tools, opaque items with role/content, and roleless reasoning/tool history (`responses_input_fidelity_test.exs`).
+
 ### 3. The response names the provider that answered
+
+Responses ingress also carries the full `reasoning` object, not just its derived
+`reasoning_effort`. The Responses adapter already honors that object; keeping
+only effort breaks Codex Responses-Lite's `reasoning.context` contract. A nil
+step effort injects nothing. Test full-object preservation and provider-default
+steps at the ingress-to-adapter seam; never synthesize context or remove the
+corresponding client header to hide a conversion loss.
 
 `FallbackChain` stamps `"model"` onto the final response — a provider reporting its own resolved snapshot wins, but a **blank claim (`""`/nil) is not a claim** and is overwritten with the step's model (a misbehaving backend's empty string once made clients fall back to the requested model for provenance, silently wrong exactly when a fallback fired — dodo_router-bnn). Streaming egress that must announce the model before the first chunk — Anthropic's `message_start` — takes it from the `:on_step_start` callback on `Proxy.dispatch_streaming/4`; the reframed OpenAI-shaped chunks repeat the resolved model off the native `message_start` on every chunk, the way real OpenAI chunks do. Idempotent replays of bodies logged before stamping existed backfill the model from the row's `final_model`.
 

@@ -8,6 +8,41 @@ order: 19
 
 # Troubleshooting & FAQ
 
+### Codex shows zero cache reads while Dodo's logs show hits
+
+Earlier Responses egress returned only input/output/total tokens, dropping
+`input_tokens_details.cached_tokens`. It also omitted output reasoning details.
+The formatter now restores both detail objects. Update DodoRouter if the final
+`response.completed` usage omits details present in the provider's usage.
+
+### Codex resume: `content[0].text` received an array
+
+Earlier Responses conversion wrapped structured assistant output blocks inside
+`output_text.text`, which must be a string. Assistant content arrays now remain
+arrays of blocks. This fixes a case where a single-turn smoke test passed but
+the next turn of the same session failed.
+
+### Codex Responses-Lite requires `reasoning.context` to be `all_turns`
+
+Earlier Responses ingress kept only the client's reasoning effort, losing
+`context` while forwarding the Responses-Lite header. The full client reasoning
+object now survives conversion. Update DodoRouter if this field disappears
+between the incoming and outbound requests; do not strip the header or hardcode
+context as a workaround. Provider-default routing does not erase client settings.
+
+### Codex: `input[0].content` is null
+
+Earlier DodoRouter versions treated Codex's `additional_tools` input item as a
+normal developer message, replacing its type and tools with `content: null`.
+The Responses conversion now preserves non-message typed input items. If the
+outbound request shows this corruption, update DodoRouter; do not work around it
+by deleting the client's tools or inserting empty text.
+
+Inspect each attempt in the request's Trace: the last fallback's error can be
+different from the initial provider's rejection. A final `developer`-role error
+does not explain an earlier Responses `invalid_type` error. A fallback to a
+different API format may still be incompatible with native Responses items.
+
 ### "No routing configured for router '…'"
 
 The router has zero routing steps. Add at least one on the router's page under Routing Chain.

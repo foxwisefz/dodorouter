@@ -72,6 +72,7 @@ defmodule DodoRouterWeb.ResponsesFormat do
     |> maybe_put("tool_choice", responses_params["tool_choice"])
     |> maybe_put("parallel_tool_calls", responses_params["parallel_tool_calls"])
     |> maybe_put("metadata", responses_params["metadata"])
+    |> maybe_put("reasoning", responses_params["reasoning"])
     |> maybe_put("reasoning_effort", client_reasoning_effort(responses_params))
   end
 
@@ -113,11 +114,14 @@ defmodule DodoRouterWeb.ResponsesFormat do
       "model" => model,
       "status" => "completed",
       "output" => output,
-      "usage" => %{
-        "input_tokens" => usage["prompt_tokens"] || 0,
-        "output_tokens" => usage["completion_tokens"] || 0,
-        "total_tokens" => usage["total_tokens"] || 0
-      },
+      "usage" =>
+        %{
+          "input_tokens" => usage["prompt_tokens"] || 0,
+          "output_tokens" => usage["completion_tokens"] || 0,
+          "total_tokens" => usage["total_tokens"] || 0
+        }
+        |> maybe_put("input_tokens_details", usage["prompt_tokens_details"])
+        |> maybe_put("output_tokens_details", usage["completion_tokens_details"]),
       "error" => nil,
       "incomplete_details" => nil,
       "instructions" => nil,
@@ -305,6 +309,12 @@ defmodule DodoRouterWeb.ResponsesFormat do
 
   defp convert_input_to_messages(input) when is_list(input) do
     Enum.map(input, fn
+      # Responses input is a tagged union, not just chat messages. In particular,
+      # Codex additional_tools has a role but no content. Preserve opaque items
+      # before matching role/content so their type and payload survive the IR.
+      %{"type" => type} = item when is_binary(type) and type != "message" ->
+        item
+
       %{"type" => "message", "role" => role, "content" => content} ->
         %{"role" => role, "content" => content}
 
