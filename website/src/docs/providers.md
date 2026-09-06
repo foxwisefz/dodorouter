@@ -8,6 +8,10 @@ order: 9
 
 # Supported providers
 
+Responses-format adapters preserve the client's full `reasoning` object and
+explicit `parallel_tool_calls` setting. This includes Codex Responses-Lite's
+`context` setting; provider-default routing does not remove client choices.
+
 The OpenAI Codex adapter preserves non-message [Responses input items](/docs/api/responses/#typed-input-items), including `additional_tools` and tool history. This same-format preservation does not imply support for those items on other providers' API formats.
 
 When supplied, OpenAI-compatible nested cache-write counts are normalized alongside cache reads. For the Codex Responses format, `input_tokens_details.cache_write_tokens` becomes the logged cache-write count; an explicit zero stays zero, while an absent count remains unknown. These figures feed [cache evidence](/docs/agent-access/#cache-evidence-without-prompt-access) and cost accounting.

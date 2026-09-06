@@ -153,6 +153,7 @@ defmodule DodoRouter.Proxy.Adapters.ResponsesAPI do
     |> Map.put("store", false)
     |> maybe_put("temperature", request["temperature"])
     |> maybe_put("top_p", request["top_p"])
+    |> maybe_put("parallel_tool_calls", request["parallel_tool_calls"])
     |> maybe_put_tools(request["tools"])
     |> put_reasoning(request)
     |> Adapter.inject_reasoning_effort(step.reasoning_effort, :responses)
@@ -252,7 +253,7 @@ defmodule DodoRouter.Proxy.Adapters.ResponsesAPI do
           [
             %{
               "role" => "assistant",
-              "content" => [%{"type" => "output_text", "text" => msg["content"]}]
+              "content" => assistant_content_parts(msg["content"])
             }
           ]
       else
@@ -286,6 +287,15 @@ defmodule DodoRouter.Proxy.Adapters.ResponsesAPI do
   defp convert_message(%{"role" => _} = msg) do
     [%{"role" => msg["role"], "content" => msg["content"]}]
   end
+
+  defp assistant_content_parts(content) when is_list(content) do
+    Enum.map(content, fn
+      %{"type" => "text"} = part -> Map.put(part, "type", "output_text")
+      part -> part
+    end)
+  end
+
+  defp assistant_content_parts(content), do: [%{"type" => "output_text", "text" => content}]
 
   # Multi-block content arrives as Anthropic-style text parts (the ingress
   # keeps them as arrays so cache_control breakpoints survive on Anthropic

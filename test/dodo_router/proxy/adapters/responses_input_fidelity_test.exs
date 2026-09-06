@@ -5,6 +5,87 @@ defmodule DodoRouter.Proxy.Adapters.ResponsesInputFidelityTest do
   alias DodoRouter.Routers.RoutingStep
   alias DodoRouterWeb.ResponsesFormat
 
+  test "resumed assistant output blocks remain blocks instead of nested text arrays" do
+    content = [%{"type" => "output_text", "text" => "pong", "annotations" => []}]
+
+    body =
+      round_trip([
+        %{"type" => "message", "role" => "assistant", "content" => content},
+        %{"role" => "user", "content" => "next"}
+      ])
+
+    assert hd(body["input"])["content"] == content
+  end
+
+  test "preserves an explicit false parallel_tool_calls through the Responses seam" do
+    request =
+      ResponsesFormat.to_openai_params(%{"input" => "pong", "parallel_tool_calls" => false})
+
+    body = ResponsesAPI.build_request_body(request, %RoutingStep{model: "test"})
+    assert Map.fetch!(body, "parallel_tool_calls") == false
+  end
+
+  test "preserves the full reasoning object through ingress and provider construction" do
+    reasoning = %{"effort" => "low", "context" => "all_turns", "summary" => "auto"}
+
+    request = ResponsesFormat.to_openai_params(%{"input" => "pong", "reasoning" => reasoning})
+    assert request["reasoning_effort"] == "low"
+
+    body =
+      ResponsesAPI.build_request_body(request, %RoutingStep{
+        model: "test",
+        reasoning_effort: "high"
+      })
+
+    assert body["reasoning"] == reasoning
+  end
+
+  test "does not invent reasoning context when the client omits it" do
+    request = ResponsesFormat.to_openai_params(%{"input" => "pong"})
+
+    body =
+      ResponsesAPI.build_request_body(request, %RoutingStep{
+        model: "test",
+        reasoning_effort: "high"
+      })
+
+    assert body["reasoning"] == %{"effort" => "high"}
+  end
+
+  test "preserves an explicit reasoning object without effort" do
+    reasoning = %{"context" => "all_turns", "summary" => "auto"}
+    request = ResponsesFormat.to_openai_params(%{"input" => "pong", "reasoning" => reasoning})
+
+    body =
+      ResponsesAPI.build_request_body(request, %RoutingStep{
+        model: "test",
+        reasoning_effort: "high"
+      })
+
+    assert body["reasoning"] == reasoning
+  end
+
+  test "provider-default step preserves client reasoning without injecting effort" do
+    for reasoning <- [%{"context" => "all_turns"}, %{"context" => "all_turns", "effort" => "low"}] do
+      request = ResponsesFormat.to_openai_params(%{"input" => "pong", "reasoning" => reasoning})
+
+      body =
+        ResponsesAPI.build_request_body(request, %RoutingStep{
+          model: "test",
+          reasoning_effort: nil
+        })
+
+      assert body["reasoning"] == reasoning
+    end
+
+    request = ResponsesFormat.to_openai_params(%{"input" => "pong"})
+
+    body =
+      ResponsesAPI.build_request_body(request, %RoutingStep{model: "test", reasoning_effort: nil})
+
+    refute Map.has_key?(body, "reasoning")
+  end
+
   defp round_trip(input) do
     %{"model" => "client-alias", "input" => input}
     |> ResponsesFormat.to_openai_params()

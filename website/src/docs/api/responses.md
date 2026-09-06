@@ -18,6 +18,16 @@ curl {base_url}/r/{router}/v1/responses \
 
 ## Typed input items
 
+Assistant message content arrays also retain their output blocks on resumed
+sessions; arrays are not wrapped inside a string-valued `text` field.
+
+The client's full `reasoning` object is preserved on Responses upstreams,
+including `context`, `summary` and `effort`. A routing step set to provider
+default does not inject an effort or context value. Client-supplied reasoning
+still passes through; if both client and step omit it, the provider decides.
+Explicit `parallel_tool_calls` values also survive the round-trip, including
+`false`, which Codex Responses-Lite requires.
+
 On Responses-format upstream routes (including OpenAI Codex), non-message
 `input` items retain their type, payload and order. This includes Codex
 `additional_tools`, reasoning items, function calls and function-call outputs.

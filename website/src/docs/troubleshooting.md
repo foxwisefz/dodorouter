@@ -8,6 +8,21 @@ order: 19
 
 # Troubleshooting & FAQ
 
+### Codex resume: `content[0].text` received an array
+
+Earlier Responses conversion wrapped structured assistant output blocks inside
+`output_text.text`, which must be a string. Assistant content arrays now remain
+arrays of blocks. This fixes a case where a single-turn smoke test passed but
+the next turn of the same session failed.
+
+### Codex Responses-Lite requires `reasoning.context` to be `all_turns`
+
+Earlier Responses ingress kept only the client's reasoning effort, losing
+`context` while forwarding the Responses-Lite header. The full client reasoning
+object now survives conversion. Update DodoRouter if this field disappears
+between the incoming and outbound requests; do not strip the header or hardcode
+context as a workaround. Provider-default routing does not erase client settings.
+
 ### Codex: `input[0].content` is null
 
 Earlier DodoRouter versions treated Codex's `additional_tools` input item as a

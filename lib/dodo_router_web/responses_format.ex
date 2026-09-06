@@ -72,6 +72,7 @@ defmodule DodoRouterWeb.ResponsesFormat do
     |> maybe_put("tool_choice", responses_params["tool_choice"])
     |> maybe_put("parallel_tool_calls", responses_params["parallel_tool_calls"])
     |> maybe_put("metadata", responses_params["metadata"])
+    |> maybe_put("reasoning", responses_params["reasoning"])
     |> maybe_put("reasoning_effort", client_reasoning_effort(responses_params))
   end
 

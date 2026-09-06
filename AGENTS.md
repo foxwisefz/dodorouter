@@ -722,6 +722,13 @@ One known limit: a same-format adapter pointed at a merely Claude-*compatible* t
 
 ### 3. The response names the provider that answered
 
+Responses ingress also carries the full `reasoning` object, not just its derived
+`reasoning_effort`. The Responses adapter already honors that object; keeping
+only effort breaks Codex Responses-Lite's `reasoning.context` contract. A nil
+step effort injects nothing. Test full-object preservation and provider-default
+steps at the ingress-to-adapter seam; never synthesize context or remove the
+corresponding client header to hide a conversion loss.
+
 `FallbackChain` stamps `"model"` onto the final response — a provider reporting its own resolved snapshot wins, but a **blank claim (`""`/nil) is not a claim** and is overwritten with the step's model (a misbehaving backend's empty string once made clients fall back to the requested model for provenance, silently wrong exactly when a fallback fired — dodo_router-bnn). Streaming egress that must announce the model before the first chunk — Anthropic's `message_start` — takes it from the `:on_step_start` callback on `Proxy.dispatch_streaming/4`; the reframed OpenAI-shaped chunks repeat the resolved model off the native `message_start` on every chunk, the way real OpenAI chunks do. Idempotent replays of bodies logged before stamping existed backfill the model from the row's `final_model`.
 
 **Why it matters:** streaming used to echo the *requested* model, so a silent fallback was invisible from outside. An entire Claude Code session once ran on Kimi unnoticed after Anthropic 429'd, and per-agent rollups inherit whatever the response claims.
