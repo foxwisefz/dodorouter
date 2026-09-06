@@ -221,6 +221,12 @@ defmodule DodoRouter.Proxy.Adapters.ResponsesAPI do
     Enum.flat_map(messages, &convert_message/1)
   end
 
+  # Typed non-message Responses items are already in the upstream format.
+  # Looking at role first turns additional_tools into a null developer message;
+  # requiring a role also crashes on reasoning and function-call history.
+  defp convert_message(%{"type" => type} = item) when is_binary(type) and type != "message",
+    do: [item]
+
   defp convert_message(%{"role" => "system", "content" => content}) when is_list(content) do
     [%{"role" => "system", "content" => convert_input_parts(content)}]
   end

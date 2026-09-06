@@ -16,6 +16,19 @@ curl {base_url}/r/{router}/v1/responses \
   -d '{"model": "default", "input": "Reply with exactly the word: pong"}'
 ```
 
+## Typed input items
+
+On Responses-format upstream routes (including OpenAI Codex), non-message
+`input` items retain their type, payload and order. This includes Codex
+`additional_tools`, reasoning items, function calls and function-call outputs.
+An item's `role` does not make it a message: `additional_tools` can have a
+`developer` role without a `content` field, and DodoRouter must not fabricate
+`content: null` for it. Ordinary messages still use the message conversion path.
+
+This preserves the request representation; the selected upstream must still
+support the item types. It does not add translations of these native items for
+Chat Completions, Anthropic or Gemini fallback routes.
+
 ## Streaming event sequence
 
 With `"stream": true`, DodoRouter emits the full item lifecycle a strict Responses-API client expects:

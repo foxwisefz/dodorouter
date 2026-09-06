@@ -305,6 +305,12 @@ defmodule DodoRouterWeb.ResponsesFormat do
 
   defp convert_input_to_messages(input) when is_list(input) do
     Enum.map(input, fn
+      # Responses input is a tagged union, not just chat messages. In particular,
+      # Codex additional_tools has a role but no content. Preserve opaque items
+      # before matching role/content so their type and payload survive the IR.
+      %{"type" => type} = item when is_binary(type) and type != "message" ->
+        item
+
       %{"type" => "message", "role" => role, "content" => content} ->
         %{"role" => role, "content" => content}
 

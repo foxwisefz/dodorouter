@@ -8,6 +8,19 @@ order: 19
 
 # Troubleshooting & FAQ
 
+### Codex: `input[0].content` is null
+
+Earlier DodoRouter versions treated Codex's `additional_tools` input item as a
+normal developer message, replacing its type and tools with `content: null`.
+The Responses conversion now preserves non-message typed input items. If the
+outbound request shows this corruption, update DodoRouter; do not work around it
+by deleting the client's tools or inserting empty text.
+
+Inspect each attempt in the request's Trace: the last fallback's error can be
+different from the initial provider's rejection. A final `developer`-role error
+does not explain an earlier Responses `invalid_type` error. A fallback to a
+different API format may still be incompatible with native Responses items.
+
 ### "No routing configured for router '…'"
 
 The router has zero routing steps. Add at least one on the router's page under Routing Chain.
