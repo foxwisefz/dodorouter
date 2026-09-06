@@ -36,14 +36,13 @@ defmodule DodoRouter.Logs do
     DodoRouter.BackgroundTask.start(fn -> create_log(attrs) end)
   end
 
-  # Compare only within the caller's router/session/branch. The most recent
+  # Compare only within the caller's router/session. The most recent
   # completed row is evidence available at write time, not a global cache
   # inventory. A provider/model switch is left visible to the classifier.
   defp add_cache_diagnosis(%{cache_fingerprint: %{} = fingerprint} = attrs) do
     previous =
       if is_binary(attrs[:session_id]) and attrs.session_id != "" and
            attrs[:traffic_type] in [nil, "proxy"] and is_nil(attrs[:replayed_from_id]) do
-        branch = fingerprint["branch"]
         started = fingerprint["started_at_ms"]
 
         query =
@@ -64,13 +63,6 @@ defmodule DodoRouter.Logs do
               cache_write_tokens: l.cache_write_tokens
             }
           )
-
-        query =
-          if branch do
-            where(query, [l], fragment("?->>'branch'", l.cache_fingerprint) == ^branch)
-          else
-            where(query, [l], is_nil(fragment("?->>'branch'", l.cache_fingerprint)))
-          end
 
         query =
           if is_integer(started) do

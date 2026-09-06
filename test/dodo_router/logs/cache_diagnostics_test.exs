@@ -84,7 +84,7 @@ defmodule DodoRouter.Logs.CacheDiagnosticsTest do
     assert diagnosis["first_change"]["component"] == "parameters"
   end
 
-  test "missing usage, baseline, changed routing, branch, or secret never imply a cache miss cause" do
+  test "missing usage, baseline, changed routing, or secret never imply a cache miss cause" do
     baseline = log(fingerprint(body()))
 
     assert CacheDiagnostics.diagnose(log(fingerprint(body()), read: nil), baseline)["observation"] ==
@@ -94,7 +94,6 @@ defmodule DodoRouter.Logs.CacheDiagnosticsTest do
 
     for opts <- [
           [routing: {"p", "another-key", "endpoint"}],
-          [branch: "fork"],
           [secret: "rotated"]
         ] do
       assert CacheDiagnostics.diagnose(log(fingerprint(body(), opts)), baseline)["cause"] ==

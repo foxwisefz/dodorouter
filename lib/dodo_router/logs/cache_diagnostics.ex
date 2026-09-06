@@ -41,8 +41,6 @@ defmodule DodoRouter.Logs.CacheDiagnostics do
           hash(key, Map.take(body, ~w(prompt_cache_options prompt_cache_retention))),
         "requested_retention" => safe_retention(body),
         "cache_headers" => header_hashes(key, opts[:outbound_headers]),
-        "branch" => optional_hash(key, opts[:branch]),
-        "turn" => optional_hash(key, opts[:turn]),
         "started_at_ms" => opts[:started_at_ms],
         "finished_at_ms" => opts[:finished_at_ms],
         "other_in_flight_router_requests" => opts[:other_in_flight_router_requests],
@@ -237,9 +235,6 @@ defmodule DodoRouter.Logs.CacheDiagnostics do
 
       a["version"] != b["version"] or a["key_id"] != b["key_id"] ->
         explain(base, "Fingerprint version or signing key changed; comparison unavailable.")
-
-      a["branch"] != b["branch"] ->
-        explain(base, "Branch changed; these requests are not comparable.")
 
       a["routing"] != b["routing"] or a["model"] != b["model"] or
           a["served_model"] != b["served_model"] ->
