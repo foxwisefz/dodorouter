@@ -290,7 +290,17 @@ defmodule DodoRouterWeb.SessionLive.Show do
           </div>
         </details>
 
-        <p :if={!@diff} class="text-xs text-base-content/50 mt-3">
+        <p
+          :if={Map.get(@finding.diverged_at, :cache_diagnosis)}
+          id="cache-diagnosis"
+          class="text-sm text-base-content/80 mt-3"
+        >
+          {@finding.diverged_at.cache_diagnosis["message"]}
+        </p>
+        <p
+          :if={!@diff && !Map.get(@finding.diverged_at, :cache_diagnosis)}
+          class="text-xs text-base-content/50 mt-3"
+        >
           No prefix diff to show — the request bodies were not recorded, or the shared region is
           unchanged and the breakpoint moved for a reason outside the messages (a changed tool
           list, system prompt, or model).

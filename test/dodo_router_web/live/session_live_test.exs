@@ -342,5 +342,33 @@ defmodule DodoRouterWeb.SessionLiveTest do
 
       refute html =~ "The prompt cache stopped hitting"
     end
+
+    test "explains a structural change even after bodies have been removed", %{
+      conn: conn,
+      router: router
+    } do
+      regressed_session(router, "fingerprinted-session")
+      logs = DodoRouter.Logs.list_logs_by_session(router, "fingerprinted-session")
+
+      for {log, index} <- Enum.with_index(logs) do
+        diagnosis =
+          if index == 2,
+            do: %{
+              "message" => "User message 2 changed or was removed.",
+              "cause" => "prefix_changed"
+            }
+
+        log
+        |> Ecto.Changeset.change(
+          request_body: nil,
+          response_body: nil,
+          cache_diagnosis: diagnosis
+        )
+        |> DodoRouter.Repo.update!()
+      end
+
+      {:ok, view, _} = live(conn, ~p"/routers/#{router.id}/sessions/fingerprinted-session")
+      assert has_element?(view, "#cache-diagnosis", "User message 2 changed")
+    end
   end
 end

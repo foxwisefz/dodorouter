@@ -512,6 +512,19 @@ defmodule DodoRouter.Proxy.Adapters.ResponsesAPITest do
   end
 
   describe "convert_usage/1" do
+    test "provider cache writes survive conversion into log and diagnostic usage" do
+      for write <- [0, 200] do
+        usage =
+          ResponsesAPI.convert_usage(%{
+            "input_tokens" => 1000,
+            "output_tokens" => 20,
+            "input_tokens_details" => %{"cached_tokens" => 800, "cache_write_tokens" => write}
+          })
+
+        assert Adapter.extract_usage(%{"usage" => usage}).cache_write_tokens == write
+      end
+    end
+
     test "maps Responses API usage fields to OpenAI format" do
       usage = %{
         "input_tokens" => 100,

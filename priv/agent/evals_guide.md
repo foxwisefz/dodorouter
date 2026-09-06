@@ -309,6 +309,28 @@ and quality questions without a benchmark:
   (no provider tokenizer is public), so trust the shares; treat per-bucket
   absolutes as estimates.
 - `get_spend { "hours": 24 }` — spend grouped by served model.
+- `get_log.cache_diagnosis` explains structural cache evidence without
+  `logs:read_bodies`. Start with `list_logs` filtered by `session_id`, then
+  inspect the affected requests. `observation` separates zero reported reads,
+  positive cache reads, and unreported usage. `first_change` names a component
+  and one-based item index; appending messages is normal prefix growth.
+  `prefix_changed` is observed, not proof of provider causality. Expiry is
+  only likely (uniform explicit requested TTL); overlapping requests support
+  only a possible race. `provider_no_hit` means unchanged shared prefix with
+  zero reads, not a provider defect; eligibility, shard and actual expiry
+  remain unknown. Comparison is to the latest earlier-starting already-recorded
+  successful request in the same router/session/branch, available at write
+  time; `previous_log_id` identifies it. Model/provider/key/endpoint changes
+  make comparison incompatible. Old rows return null. Fingerprints survive
+  body removal but are not exposed by MCP; they cannot locate exact tokens.
+  `current`/`previous` carry provider-key identity, hashed endpoint/cache key,
+  serving model, requested retention, attempt start/end times (Unix ms), and
+  other in-flight requests on this router/node. `changes` names differing
+  routing/settings/header fields; `matched_messages` out of
+  `previous_message_count` describes the shared prefix. Tracked headers are
+  anthropic-beta/version, openai-beta, chatgpt-account-id, session_id,
+  conversation_id, and x-session-id; no raw header values are exposed.
+  A router's concurrent-request count alone does not establish a cache race.
 - `get_cache_stats { "hours": 24 }` — prompt-cache hit rate and token
   volumes. A falling hit rate on an agent workload usually means something
   volatile slipped into the cached prefix.

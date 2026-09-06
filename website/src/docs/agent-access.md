@@ -137,6 +137,14 @@ For local development, `mix attesto_phoenix.gen.dev_https` (with [mkcert](https:
 
 ## Troubleshooting
 
+### Cache evidence without prompt access
+
+`get_log` includes `cache_diagnosis` with `logs:read`, even when bodies are withheld. It contains `observation` (`zero_read`, `cache_read`, or `unreported`), `cause`, `confidence`, a human-readable `message`, `first_change` (component and one-based item index where available), and `previous_log_id`. Comparison is session/branch scoped and computed when the row is written. New message appends are normal growth. Full fingerprints are not returned through MCP.
+
+`current` and `previous` report provider/key identity, a router-scoped endpoint hash, resolved serving model, hashed `prompt_cache_key` when present, explicit requested retention, attempt start/end timestamps (Unix milliseconds), and `other_in_flight_router_requests` (other active requests on this DodoRouter node, across the router). `changes` names routing, cache-key, retention, tracked-header, and component differences; `matched_messages` and `previous_message_count` give the unchanged-prefix numerator and denominator. No raw header values, endpoint URLs, or cache-key text are exposed. Header comparison covers `anthropic-beta`, `anthropic-version`, `openai-beta`, `chatgpt-account-id`, `session_id`, `conversation_id`, and `x-session-id`; other headers are not compared. Actual provider shard/expiry are null. The previous request is selected by start time, among completed logs already available when the row is written.
+
+`prefix_changed` is an observed structural difference, not proof of provider causality. Expiry is only likely and a concurrency race only possible. `provider_no_hit` reports zero reads with an unchanged shared prefix; provider eligibility, shard and actual expiry remain unknown. Existing rows without fingerprints return a null diagnosis. Use `list_logs` filtered by `session_id`, then `get_log` for individual explanations. See [cache troubleshooting](/docs/troubleshooting/#why-did-my-prompt-cache-stop-hitting).
+
 **Every tool refuses with "no active subscription".** Hosted service only: the account that owns the connection has no active subscription, so tools list but will not run — the same paywall that makes the proxy answer `402`. The account owner subscribes on their [billing page](/docs/dashboard/#billing); the connection itself is fine and starts working the moment they do. Not applicable to self-hosted instances unless billing was enabled there.
 
 **The agent connects but every tool says "UNAVAILABLE".** It is missing permissions. Reconnect and tick the ones it needs on the consent screen — the tool description names them.

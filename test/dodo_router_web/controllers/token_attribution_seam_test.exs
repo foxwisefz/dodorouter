@@ -88,5 +88,24 @@ defmodule DodoRouterWeb.TokenAttributionSeamTest do
       # Zero buckets stay out of the panel.
       refute has_element?(live, "#token-attribution", "File contents")
     end
+
+    test "shows cache evidence without retained bodies", %{conn: conn, user: user} do
+      {router, _} = RoutersFixtures.router_fixture(user)
+      previous = DodoRouter.LogsFixtures.log_fixture(router)
+
+      log =
+        DodoRouter.LogsFixtures.log_fixture(router, %{
+          request_body: nil,
+          response_body: nil,
+          cache_diagnosis: %{
+            "message" => "Tools changed at item 2 (including order).",
+            "previous_log_id" => previous.id
+          }
+        })
+
+      {:ok, view, _} = live(conn, ~p"/logs/#{log.id}")
+      assert has_element?(view, "#cache-diagnosis", "Tools changed at item 2")
+      assert has_element?(view, "#cache-diagnosis a[href='/logs/#{previous.id}']")
+    end
   end
 end

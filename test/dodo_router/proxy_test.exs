@@ -75,6 +75,80 @@ defmodule DodoRouter.ProxyTest do
       assert Logs.list_replays(original) |> Enum.map(& &1.id) == [log.id]
     end
 
+    test "fingerprints the provider payload before retained bodies are truncated", ctx do
+      text = String.duplicate("private context ", 20_000)
+      request = put_in(ctx.request, ["messages", Access.at(0), "content"], text)
+
+      assert {:ok, _, %{log: log}} =
+               Proxy.dispatch(ctx.router, request,
+                 steps: [ctx.step],
+                 log_mode: :sync,
+                 client_headers: [
+                   {"x-dodo-branch-id", "private-branch"},
+                   {"x-dodo-turn-id", "private-turn"}
+                 ]
+               )
+
+      assert log.cache_fingerprint["messages"] |> hd() |> Map.fetch!("bytes") > byte_size(text)
+      refute Jason.encode!(log.cache_fingerprint) =~ "private"
+      assert is_integer(log.cache_fingerprint["started_at_ms"])
+      assert log.cache_fingerprint["finished_at_ms"] >= log.cache_fingerprint["started_at_ms"]
+      assert log.cache_diagnosis["cause"] == "unknown"
+
+      assert log.cache_diagnosis["current"]["routing_context"]["provider_key_id"] ==
+               ctx.step.provider_key_id
+
+      assert log.cache_diagnosis["current"]["served_model"] == "test-model"
+
+      # Logging retention does not affect the signature or diagnosis.
+      updated =
+        log
+        |> Ecto.Changeset.change(request_body: nil, response_body: nil, attempted_steps: [])
+        |> Repo.update!()
+
+      assert updated.cache_fingerprint == log.cache_fingerprint
+      assert updated.cache_diagnosis == log.cache_diagnosis
+    end
+
+    test "counts other in-flight requests on this router without claiming a cache race", ctx do
+      other = Ecto.UUID.generate()
+      DodoRouter.Activity.request_started(ctx.router.id, other)
+
+      try do
+        assert {:ok, _, %{log: log}} =
+                 Proxy.dispatch(ctx.router, ctx.request, steps: [ctx.step], log_mode: :sync)
+
+        assert log.cache_diagnosis["current"]["other_in_flight_router_requests"] == 1
+        refute log.cache_diagnosis["cause"] == "parallel_race"
+      after
+        DodoRouter.Activity.request_completed(ctx.router.id, other)
+      end
+    end
+
+    test "fallback fingerprints the serving attempt, and streaming also records it", ctx do
+      failed = %{ctx.step | model: "fail-model", id: Ecto.UUID.generate()}
+
+      assert {:ok, _, %{log: log}} =
+               Proxy.dispatch(ctx.router, ctx.request, steps: [failed, ctx.step], log_mode: :sync)
+
+      expected =
+        DodoRouter.Logs.CacheDiagnostics.fingerprint(
+          Jason.decode!(List.last(log.attempted_steps)["outbound_body"]),
+          ctx.router.id
+        )
+
+      assert log.cache_fingerprint["model"] == expected["model"]
+      assert log.cache_fingerprint["messages"] == expected["messages"]
+
+      assert {:ok, _, %{log: streamed}} =
+               Proxy.dispatch_streaming(ctx.router, ctx.request, fn _chunk -> :ok end,
+                 steps: [ctx.step],
+                 log_mode: :sync
+               )
+
+      assert streamed.cache_fingerprint["messages"] == log.cache_fingerprint["messages"]
+    end
+
     test "key health is recorded before dispatch returns", ctx do
       assert {:ok, _response, _meta} = Proxy.dispatch(ctx.router, ctx.request, steps: [ctx.step])
 

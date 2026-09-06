@@ -43,3 +43,11 @@ DodoRouter tracks key health from real dispatch outcomes. Fix or replace the key
 ### Do I need to send a real model name?
 
 No — see [The model field is ignored](/docs/api/#the-model-field-is-ignored). DodoRouter always uses the model configured on the routing step it's attempting.
+
+### Why did my prompt cache stop hitting?
+
+Open the diverging request's **Cache evidence** or read `get_log.cache_diagnosis` through MCP. `prefix_changed` names the first changed component and one-based item index (tools, system prompt, or conversation message); breakpoint changes are reported separately. The signatures contain no prompt text or tool names and survive body truncation/removal. They identify a structural change, not a proven provider cache invalidation.
+
+With an unchanged shared prefix, `cache_expired` means the gap exceeded a uniform, explicitly requested TTL (likely); `parallel_race` means the compared request overlapped this one (possible). `provider_no_hit` means zero reported cache-read tokens with no structural difference found, not a confirmed provider defect. `unknown` covers missing baselines, routing changes, and parameter changes whose cache effects are unknown. Missing cache usage is `unreported`, never an assumed zero.
+
+The comparison sees only completed logs available when this row was written. It cannot see provider shards, exact expiry, all concurrent requests, or external traffic; it does not invent a `different_shard` diagnosis. Mixed or omitted TTLs do not establish an expiry. Branchless concurrent or forked traffic may compare unrelated turns: send distinct session or branch IDs. Sessionless global prefix lookup and exact token-offset localization are not included.

@@ -216,7 +216,14 @@ defmodule DodoRouter.MCP.Tools do
           "token_attribution buckets the input tokens by what the context was made of " <>
           "(system / tools / history / tool_results with a by_tool split / file_contents) " <>
           "and by cache position — allocated pro-rata against the billed total, so shares " <>
-          "are trustworthy; per-bucket absolutes are estimates, not tokenizer output.",
+          "are trustworthy; per-bucket absolutes are estimates, not tokenizer output. " <>
+          "cache_diagnosis reports privacy-safe structural changes against an earlier request " <>
+          "in the same session/branch, with observation, cause, confidence, first_change " <>
+          "(one-based item index), and previous_log_id. It does not require body access. " <>
+          "current/previous include provider-key identity, endpoint and cache-key hashes, " <>
+          "requested retention, actual attempt times and other in-flight router request counts; " <>
+          "changes names differing routing/settings fields and matched_messages counts the unchanged prefix. " <>
+          "Expiry and races are inferences; zero cache reads do not prove cache eligibility.",
       scopes: ["logs:read"],
       schema: %{
         "type" => "object",
@@ -856,7 +863,8 @@ defmodule DodoRouter.MCP.Tools do
          # tools / history / tool_results with by_tool / file_contents) and
          # by cache position. Pro-rata allocation against the billed total,
          # not tokenizer output. nil on rows predating the feature.
-         token_attribution: log.token_attribution
+         token_attribution: log.token_attribution,
+         cache_diagnosis: log.cache_diagnosis
        }), %{returned_bodies: bodies?, target_type: "request_log", target_id: log.id}}
     end
   end

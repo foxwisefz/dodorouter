@@ -92,6 +92,9 @@ defmodule DodoRouter.Proxy.FallbackChain do
     step_index = length(state.attempted_steps)
     broadcast_step_started(state.router_id, state.request_id, step, step_index)
     start_time = System.monotonic_time(:millisecond)
+    started_at_ms = System.system_time(:millisecond)
+    {primary_count, fallback_count} = DodoRouter.Activity.get_router_counts(state.router_id)
+    other_in_flight = max(0, primary_count + fallback_count - 1)
     endpoint = endpoint_for(step)
 
     require Logger
@@ -124,6 +127,9 @@ defmodule DodoRouter.Proxy.FallbackChain do
           provider_key_label: key_label_for(step),
           provider_key_slug: key_slug_for(step),
           status: "success",
+          started_at_ms: started_at_ms,
+          other_in_flight_router_requests: other_in_flight,
+          finished_at_ms: System.system_time(:millisecond),
           latency_ms: latency(start_time),
           cache_read_tokens: step_usage.cache_read_tokens,
           cache_write_tokens: step_usage.cache_write_tokens,
@@ -175,6 +181,9 @@ defmodule DodoRouter.Proxy.FallbackChain do
           provider_key_label: key_label_for(step),
           provider_key_slug: key_slug_for(step),
           status: "error",
+          started_at_ms: started_at_ms,
+          finished_at_ms: System.system_time(:millisecond),
+          other_in_flight_router_requests: other_in_flight,
           error: to_string(reason),
           http_status: details[:status],
           error_body:
