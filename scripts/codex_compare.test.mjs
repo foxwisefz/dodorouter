@@ -34,6 +34,7 @@ const dodo = args.includes('model_provider="dodorouter"');
 assert.equal(Boolean(process.env.DODO_API_KEY_CODEX), dodo);
 assert.ok(args.includes("--ignore-user-config"));
 assert.ok(args.includes('sandbox_mode="read-only"'));
+assert.ok(!args.some(arg => arg.startsWith("model_reasoning_effort=")));
 if (args[1] === "resume") assert.ok(args.includes(dodo ? "dodo-session" : "direct-session"));
 const i = Number([...prompt.matchAll(/record-(\\d+)\\?/g)].at(-1)[1]);
 console.log(JSON.stringify({type:"thread.started", thread_id:dodo ? "dodo-session" : "direct-session"}));

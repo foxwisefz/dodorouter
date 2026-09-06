@@ -40,7 +40,7 @@ const turns = [
 const plan = {
   model: values.model, dodo_base_url: base.href, pairs,
   planned_cli_turns: pairs * 2 * turns.length,
-  note: "Same synthetic workload and reasoning effort; resumed sessions; alternate pair order. Initial turns are not guaranteed cold. Elapsed time includes CLI startup. Usage is CLI-reported, not a count of upstream attempts. Confirm Dodo's served model and provider account through logs before drawing conclusions.",
+  note: "Same synthetic workload; no explicit CLI reasoning-effort override; resumed sessions; alternate pair order. Codex may supply its own model default. Initial turns are not guaranteed cold. Elapsed time includes CLI startup. Usage is CLI-reported, not a count of upstream attempts. Confirm Dodo's served model, reasoning settings and provider account through logs before drawing conclusions.",
 };
 if (values["dry-run"]) {
   console.log(JSON.stringify(plan, null, 2));
@@ -55,7 +55,7 @@ function runTurn(path, pair, turn, session) {
   const args = ["exec", ...(session ? ["resume"] : []),
     "--ignore-user-config", "--skip-git-repo-check", "--json", "-m", values.model,
     "-c", 'sandbox_mode="read-only"', "-c", 'approval_policy="never"',
-    "-c", 'model_reasoning_effort="low"', "-c", 'web_search="disabled"',
+    "-c", 'web_search="disabled"',
     "-c", `shell_environment_policy.exclude=[${JSON.stringify(values["key-env"])}]`,
   ];
   if (path === "dodo") {
@@ -97,7 +97,7 @@ function runTurn(path, pair, turn, session) {
     started_at: new Date(started).toISOString(), elapsed_ms: elapsed,
     exit_code: child.status, error: child.error?.code ?? null,
     correct: answer === turns[turn][1], completed: completed.length === 1,
-    usage, answer: redact(answer),
+    usage, usage_scope: "raw_codex_counter_may_be_session_cumulative", answer: redact(answer),
   };
   results.push(result);
   writeFileSync(join(runDir, "results.json"), JSON.stringify(results, null, 2));

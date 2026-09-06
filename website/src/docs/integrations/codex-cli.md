@@ -59,13 +59,20 @@ loaded by direnv, prefix the command with `direnv exec .`.
 
 The default is two pairs of four-turn sessions (16 CLI turns), with alternating
 path order and the same synthetic catalog questions. Sessions are resumed to
-exercise growing prefixes. Each answer has an exact correctness check. Results
+exercise growing prefixes. The runner does not override Codex's reasoning
+effort; Codex may still send its own model default, which provider-default
+routing preserves. Check outbound reasoning settings when comparing runs.
+Each answer has an exact correctness check. Results
 and raw CLI events are saved in a printed temporary directory; synthetic session
 history is also stored by Codex so it can resume. Each CLI turn has a two-minute
 timeout, and the probe stops on a failed or incorrect turn. Codex may internally
 retry requests, so 16 CLI turns is not an upstream-request or spending cap.
 
-Compare CLI-reported `cached_input_tokens / input_tokens`, correctness and
+Codex's JSONL `turn.completed.usage` can represent cumulative session totals
+on resumed custom-provider sessions. Do not sum those totals as per-turn usage.
+For per-turn comparisons, use `last_token_usage` from the corresponding saved
+Codex session's `token_count` events, and cross-check Dodo's request logs.
+Compare `cached_input_tokens / input_tokens`, correctness and
 `elapsed_ms`, separating initial turns from follow-ups. Initial turns are not
 guaranteed cache-cold; elapsed time includes CLI startup and is not time to first
 token or isolated proxy overhead. The direct default transport may differ from
