@@ -15,6 +15,8 @@ defmodule DodoRouter.Logs do
   # Logging
 
   def create_log(attrs) do
+    attrs = add_cache_diagnosis(attrs)
+
     result =
       %RequestLog{}
       |> RequestLog.changeset(Map.put(attrs, :inserted_at, DateTime.utc_now()))
@@ -33,6 +35,68 @@ defmodule DodoRouter.Logs do
   def create_log_async(attrs) do
     DodoRouter.BackgroundTask.start(fn -> create_log(attrs) end)
   end
+
+  # Compare only within the caller's router/session/branch. The most recent
+  # completed row is evidence available at write time, not a global cache
+  # inventory. A provider/model switch is left visible to the classifier.
+  defp add_cache_diagnosis(%{cache_fingerprint: %{} = fingerprint} = attrs) do
+    previous =
+      if is_binary(attrs[:session_id]) and attrs.session_id != "" and
+           attrs[:traffic_type] in [nil, "proxy"] and is_nil(attrs[:replayed_from_id]) do
+        branch = fingerprint["branch"]
+        started = fingerprint["started_at_ms"]
+
+        query =
+          from(l in RequestLog,
+            where: l.router_id == ^attrs.router_id and l.session_id == ^attrs.session_id,
+            where: l.traffic_type == "proxy" and l.status in ["success", "fallback"],
+            where: is_nil(l.idempotent_replay_of_id) and is_nil(l.replayed_from_id),
+            order_by: [
+              desc_nulls_last: fragment("(?->>'started_at_ms')::bigint", l.cache_fingerprint),
+              desc: l.inserted_at,
+              desc: l.id
+            ],
+            limit: 1,
+            select: %{
+              id: l.id,
+              cache_fingerprint: l.cache_fingerprint,
+              cache_read_tokens: l.cache_read_tokens,
+              cache_write_tokens: l.cache_write_tokens
+            }
+          )
+
+        query =
+          if branch do
+            where(query, [l], fragment("?->>'branch'", l.cache_fingerprint) == ^branch)
+          else
+            where(query, [l], is_nil(fragment("?->>'branch'", l.cache_fingerprint)))
+          end
+
+        query =
+          if is_integer(started) do
+            where(
+              query,
+              [l],
+              is_nil(l.cache_fingerprint) or
+                fragment("(?->>'started_at_ms')::bigint", l.cache_fingerprint) < ^started
+            )
+          else
+            query
+          end
+
+        Repo.one(query)
+      end
+
+    current = %{
+      cache_fingerprint: fingerprint,
+      cache_read_tokens: attrs[:cache_read_tokens],
+      cache_write_tokens: attrs[:cache_write_tokens]
+    }
+
+    Map.put(attrs, :cache_diagnosis, DodoRouter.Logs.CacheDiagnostics.diagnose(current, previous))
+  end
+
+  defp add_cache_diagnosis(attrs), do: attrs
 
   defp broadcast_log_created(log) do
     # Preload router for display in live view

@@ -222,7 +222,8 @@ defmodule DodoRouter.Proxy.Adapter do
     # Anthropic: cache_creation_input_tokens
     # Already-normalized by adapter (cache_write_tokens)
     usage["cache_creation_input_tokens"] ||
-      usage["cache_write_tokens"]
+      usage["cache_write_tokens"] ||
+      get_in(usage, ["prompt_tokens_details", "cache_write_tokens"])
   end
 
   @doc """

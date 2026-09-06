@@ -60,6 +60,8 @@ defmodule DodoRouter.Logs.RequestLog do
     # position — see DodoRouter.Logs.TokenAttribution. Computed at log
     # time; nil on rows from before the column or with nothing to compute.
     field :token_attribution, :map
+    field :cache_fingerprint, :map
+    field :cache_diagnosis, :map
 
     # Truncation metadata
     field :truncation_flags, {:array, :string}, default: []
@@ -131,6 +133,8 @@ defmodule DodoRouter.Logs.RequestLog do
       :idempotency_key,
       :idempotent_replay_of_id,
       :token_attribution,
+      :cache_fingerprint,
+      :cache_diagnosis,
       :truncation_flags,
       :fidelity_changes,
       :favorite,

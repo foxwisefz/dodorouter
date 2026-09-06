@@ -511,6 +511,21 @@ defmodule DodoRouterWeb.LogLive.Show do
                     <span class="font-mono">{@log.cache_write_tokens}</span>
                   </div>
                 <% end %>
+                <div
+                  :if={Map.get(@log, :cache_diagnosis)}
+                  id="cache-diagnosis"
+                  class="rounded-lg bg-base-200/60 p-3 text-xs leading-relaxed"
+                >
+                  <p class="font-medium mb-1">Cache evidence</p>
+                  <p class="text-base-content/70">{@log.cache_diagnosis["message"]}</p>
+                  <.link
+                    :if={@log.cache_diagnosis["previous_log_id"]}
+                    navigate={~p"/logs/#{@log.cache_diagnosis["previous_log_id"]}"}
+                    class="link mt-2 inline-block"
+                  >
+                    Compared with previous request
+                  </.link>
+                </div>
                 <div :if={@log.completion_tokens} class="flex justify-between">
                   <span class="text-base-content/60">Output</span>
                   <span class="font-mono">{@log.completion_tokens}</span>

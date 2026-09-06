@@ -469,6 +469,10 @@ defmodule DodoRouterWeb.MCPControllerTest do
     } do
       log =
         LogsFixtures.log_fixture(router, %{
+          cache_diagnosis: %{
+            "cause" => "prefix_changed",
+            "first_change" => %{"component" => "messages", "index" => 2}
+          },
           request_body:
             Jason.encode!(%{"messages" => [%{"role" => "user", "content" => "secret"}]})
         })
@@ -480,6 +484,8 @@ defmodule DodoRouterWeb.MCPControllerTest do
 
       assert payload["total_tokens"] == 150
       assert payload["request_body"]["withheld"] =~ "logs:read_bodies"
+      assert payload["cache_diagnosis"]["first_change"]["index"] == 2
+      refute Map.has_key?(payload, "cache_fingerprint")
       refute inspect(payload) =~ "secret"
     end
 

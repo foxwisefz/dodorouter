@@ -8,6 +8,8 @@ order: 9
 
 # Supported providers
 
+When supplied, OpenAI-compatible nested cache-write counts are normalized alongside cache reads. For the Codex Responses format, `input_tokens_details.cache_write_tokens` becomes the logged cache-write count; an explicit zero stays zero, while an absent count remains unknown. These figures feed [cache evidence](/docs/agent-access/#cache-evidence-without-prompt-access) and cost accounting.
+
 Each row is a distinct adapter. Where a provider offers both a pay-as-you-go API and a flat-rate coding subscription, they're listed as separate key types since they use different base URLs and pricing.
 
 | Provider | Key type(s) | Auth | Notes |

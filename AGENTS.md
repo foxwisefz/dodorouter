@@ -640,6 +640,8 @@ Every adapter's final response `usage` map **must** use OpenAI Chat Completions 
 ```
 The `ResponsesAPI.convert_usage/1` must rename `input_tokens_details` → `prompt_tokens_details` so the existing extraction works.
 
+When the provider includes `input_tokens_details.cache_write_tokens`, that nested field must also survive conversion and be extracted from `prompt_tokens_details.cache_write_tokens`. Preserve zero as a reported zero; absent remains nil. The Responses adapter seam test covers both read and write counts. This feeds cost accounting as well as cache diagnostics.
+
 **Wafer** — OpenAI-style, no renaming needed (probed 2026-09-02 with `scripts/wafer_probe.sh`): `prompt_tokens_details.cached_tokens`, plus a redundant top-level `cached_tokens` carrying the same value. OpenAI-family semantics — `prompt_tokens` is the total input and the cached figure is a subset of it (observed: 22,528 cached of a 23,010-token prompt):
 ```json
 {
@@ -772,6 +774,8 @@ Use `Fidelity.record_header_rewrite/2` when a header is transformed rather than 
 Measured 2026-08-11, the edge adds exactly `via: 2.0 Caddy`, `x-forwarded-for`, `x-forwarded-host`, `x-forwarded-proto` — and `accept-encoding: gzip` when the caller sent none, which is why that drop is legitimate even though the header looks client-supplied. `forwarded`, `x-real-ip`, `x-original-*` and `cf-*` were not observed and are hedges.
 
 ## Prompt Cache Fidelity Through Format Conversion
+
+Cache diagnostics fingerprint the final attempt's untruncated `outbound_body`, never the intermediate client-format request. `Logs.CacheDiagnostics` retains router-scoped keyed signatures, ordered component sizes, safe routing/settings evidence, and actual attempt start/end timestamps; `Logs.create_log/1` compares the latest preceding start among successful logs already written in the same router/session/branch. No provider defaults, exact token offsets, global concurrency, shard identity, or expiry timestamps are invented. Cache metadata is extracted only from native request/tool/message/content-block positions: a JSON Schema property named `cache_control` is tool content, not a breakpoint. Test both sync/streaming dispatch through persistence, including fallback, body removal, and out-of-order completion. Full component hashes stay out of MCP; `get_log.cache_diagnosis` exposes the safe comparison evidence with `logs:read`.
 
 Anthropic prompt caching only hits when the request is a byte-stable prefix extension of a previous request, up to a `cache_control` breakpoint that sits at the same position. The Anthropic-endpoint conversion (`AnthropicFormat.to_openai_params` → `Adapters.Anthropic.build_anthropic_request`) must therefore obey two invariants:
 
