@@ -474,13 +474,9 @@ defmodule DodoRouter.Proxy.Adapters.ResponsesAPI do
       "total_tokens" => usage["total_tokens"]
     }
 
-    case usage do
-      %{"input_tokens_details" => details} ->
-        Map.put(base, "prompt_tokens_details", details)
-
-      _ ->
-        base
-    end
+    base
+    |> maybe_put("prompt_tokens_details", usage["input_tokens_details"])
+    |> maybe_put("completion_tokens_details", usage["output_tokens_details"])
   end
 
   # ── Final response builder ────────────────────────────────────────────────

@@ -18,6 +18,12 @@ curl {base_url}/r/{router}/v1/responses \
 
 ## Typed input items
 
+Responses usage includes reported `input_tokens_details` (including cached
+tokens) and `output_tokens_details` (including reasoning tokens). These details
+survive provider normalization and the final `response.completed` event as well
+as synchronous responses. Reported zero remains zero; missing details are not
+invented.
+
 Assistant message content arrays also retain their output blocks on resumed
 sessions; arrays are not wrapped inside a string-valued `text` field.
 

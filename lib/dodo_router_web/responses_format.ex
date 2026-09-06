@@ -114,11 +114,14 @@ defmodule DodoRouterWeb.ResponsesFormat do
       "model" => model,
       "status" => "completed",
       "output" => output,
-      "usage" => %{
-        "input_tokens" => usage["prompt_tokens"] || 0,
-        "output_tokens" => usage["completion_tokens"] || 0,
-        "total_tokens" => usage["total_tokens"] || 0
-      },
+      "usage" =>
+        %{
+          "input_tokens" => usage["prompt_tokens"] || 0,
+          "output_tokens" => usage["completion_tokens"] || 0,
+          "total_tokens" => usage["total_tokens"] || 0
+        }
+        |> maybe_put("input_tokens_details", usage["prompt_tokens_details"])
+        |> maybe_put("output_tokens_details", usage["completion_tokens_details"]),
       "error" => nil,
       "incomplete_details" => nil,
       "instructions" => nil,

@@ -7,6 +7,10 @@ order: 10
 
 # Models & pricing
 
+On Responses routes, client-visible usage retains reported cached-input and
+reasoning-token details. A missing cache count is distinct from a reported zero;
+check the provider's recorded usage before interpreting a client display.
+
 For Responses routes, a step's provider-default reasoning setting injects
 nothing. Reasoning fields supplied by the client still pass through unchanged;
 the provider decides only when the client also leaves the setting unspecified.

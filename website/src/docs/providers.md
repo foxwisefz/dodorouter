@@ -8,6 +8,10 @@ order: 9
 
 # Supported providers
 
+Responses provider usage preserves both input/cache details and output/reasoning
+details through normalization. Responses clients receive those details back,
+not just the three headline token counts.
+
 Responses-format adapters preserve the client's full `reasoning` object and
 explicit `parallel_tool_calls` setting. This includes Codex Responses-Lite's
 `context` setting; provider-default routing does not remove client choices.

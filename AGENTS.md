@@ -640,6 +640,12 @@ Every adapter's final response `usage` map **must** use OpenAI Chat Completions 
 ```
 The `ResponsesAPI.convert_usage/1` must rename `input_tokens_details` → `prompt_tokens_details` so the existing extraction works.
 
+It also carries `output_tokens_details` as `completion_tokens_details`.
+`ResponsesFormat.from_openai_response/3` reverses both names on egress so Codex
+receives cached-input and reasoning-token details, not just headline counts.
+Test provider usage → normalization → Responses egress, including reported zero
+and successive per-response counts (`responses_usage_fidelity_test.exs`).
+
 When the provider includes `input_tokens_details.cache_write_tokens`, that nested field must also survive conversion and be extracted from `prompt_tokens_details.cache_write_tokens`. Preserve zero as a reported zero; absent remains nil. The Responses adapter seam test covers both read and write counts. This feeds cost accounting as well as cache diagnostics.
 
 **Wafer** — OpenAI-style, no renaming needed (probed 2026-09-02 with `scripts/wafer_probe.sh`): `prompt_tokens_details.cached_tokens`, plus a redundant top-level `cached_tokens` carrying the same value. OpenAI-family semantics — `prompt_tokens` is the total input and the cached figure is a subset of it (observed: 22,528 cached of a 23,010-token prompt):

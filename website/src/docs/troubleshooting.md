@@ -8,6 +8,13 @@ order: 19
 
 # Troubleshooting & FAQ
 
+### Codex shows zero cache reads while Dodo's logs show hits
+
+Earlier Responses egress returned only input/output/total tokens, dropping
+`input_tokens_details.cached_tokens`. It also omitted output reasoning details.
+The formatter now restores both detail objects. Update DodoRouter if the final
+`response.completed` usage omits details present in the provider's usage.
+
 ### Codex resume: `content[0].text` received an array
 
 Earlier Responses conversion wrapped structured assistant output blocks inside
