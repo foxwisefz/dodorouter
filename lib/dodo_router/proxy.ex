@@ -308,9 +308,7 @@ defmodule DodoRouter.Proxy do
           outbound_headers: last_step[:outbound_headers],
           other_in_flight_router_requests: last_step[:other_in_flight_router_requests],
           started_at_ms: last_step[:started_at_ms],
-          finished_at_ms: last_step[:finished_at_ms],
-          branch: header_value(client_headers, "x-dodo-branch-id"),
-          turn: header_value(client_headers, "x-dodo-turn-id")
+          finished_at_ms: last_step[:finished_at_ms]
         ),
       # Computed from the request still in memory — the full body, not the
       # truncated copy that gets stored — against the billed input total.
@@ -335,12 +333,6 @@ defmodule DodoRouter.Proxy do
         _ = Logs.create_log_async(log_attrs)
         nil
     end
-  end
-
-  defp header_value(headers, name) do
-    Enum.find_value(headers, fn {key, value} ->
-      if String.downcase(key) == name, do: value
-    end)
   end
 
   # The load-bearing half of the request-fidelity policy: whatever the proxy

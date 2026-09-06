@@ -319,7 +319,7 @@ and quality questions without a benchmark:
   only a possible race. `provider_no_hit` means unchanged shared prefix with
   zero reads, not a provider defect; eligibility, shard and actual expiry
   remain unknown. Comparison is to the latest earlier-starting already-recorded
-  successful request in the same router/session/branch, available at write
+  successful request in the same router/session, available at write
   time; `previous_log_id` identifies it. Model/provider/key/endpoint changes
   make comparison incompatible. Old rows return null. Fingerprints survive
   body removal but are not exposed by MCP; they cannot locate exact tokens.

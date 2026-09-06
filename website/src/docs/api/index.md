@@ -38,9 +38,9 @@ A missing or invalid key returns `401` with `{"error":{"message":"Invalid API ke
 
 Every proxy response also carries `x-request-id`, `x-timing-total-ms`, and `x-timing-provider-ms` response headers.
 
-## Cache-diagnostic correlation headers
+## Cache diagnostics
 
-Alongside your router's session header (default `x-session-id`), all proxy formats accept optional `x-dodo-branch-id` and `x-dodo-turn-id` headers. Keep the branch ID stable within a branch and give each turn its own ID. These are correlation metadata, not cache-key components. The diagnostic snapshot stores keyed hashes of these IDs; branch separates comparisons, turn does not. OpenCode clients must supply these headers explicitly; DodoRouter does not infer their internal branch/turn IDs. The headers still follow the normal forwarding and log-header retention policy, so use opaque IDs, not secrets.
+Cache diagnostics group requests using your router's existing session header (default `x-session-id`). No additional client headers are needed. DodoRouter does not infer a client's internal branch or turn identifiers.
 
 Diagnostics use router-scoped HMAC-SHA256 derived from the deployment's `secret_key_base`. Rotating that secret makes comparisons across the rotation unavailable. Signatures and diagnosis metadata live and expire with the request log; body removal alone does not remove them. Component byte sizes and bounded item signatures are retained, not exact token counts or token offsets. Requests over 4,096 combined message/tool/system items have no fingerprint. Provider cache-read/write token totals remain the provider's reported usage.
 

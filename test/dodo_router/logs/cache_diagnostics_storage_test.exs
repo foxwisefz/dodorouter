@@ -10,7 +10,11 @@ defmodule DodoRouter.Logs.CacheDiagnosticsStorageTest do
     fp =
       CacheDiagnostics.fingerprint(
         %{"messages" => [%{"role" => "user", "content" => content}]},
-        router.id, started_at_ms: start, finished_at_ms: start + 10, routing: "same")
+        router.id,
+        started_at_ms: start,
+        finished_at_ms: start + 10,
+        routing: "same"
+      )
 
     LogsFixtures.valid_log_attributes(
       router,
@@ -40,15 +44,13 @@ defmodule DodoRouter.Logs.CacheDiagnosticsStorageTest do
     assert current.cache_diagnosis["previous_log_id"] == first.id
   end
 
-  test "sessionless traffic, replay rows, and different branches are not baselines" do
+  test "sessionless traffic and replay rows are not baselines" do
     {router, _} = RoutersFixtures.router_fixture()
     {:ok, first} = Logs.create_log(attrs(router, "before", 1000))
 
     {:ok, _} =
       Logs.create_log(attrs(router, "replayed", 1500, %{idempotent_replay_of_id: first.id}))
 
-    fork = attrs(router, "fork", 1500) |> put_in([:cache_fingerprint, "branch"], "different")
-    {:ok, _} = Logs.create_log(fork)
     {:ok, current} = Logs.create_log(attrs(router, "after", 2000))
     assert current.cache_diagnosis["previous_log_id"] == first.id
     {:ok, no_session} = Logs.create_log(attrs(router, "after", 3000, %{session_id: nil}))

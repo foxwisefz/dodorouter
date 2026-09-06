@@ -82,15 +82,13 @@ defmodule DodoRouter.ProxyTest do
       assert {:ok, _, %{log: log}} =
                Proxy.dispatch(ctx.router, request,
                  steps: [ctx.step],
-                 log_mode: :sync,
-                 client_headers: [
-                   {"x-dodo-branch-id", "private-branch"},
-                   {"x-dodo-turn-id", "private-turn"}
-                 ]
+                 log_mode: :sync
                )
 
       assert log.cache_fingerprint["messages"] |> hd() |> Map.fetch!("bytes") > byte_size(text)
       refute Jason.encode!(log.cache_fingerprint) =~ "private"
+      refute Map.has_key?(log.cache_fingerprint, "branch")
+      refute Map.has_key?(log.cache_fingerprint, "turn")
       assert is_integer(log.cache_fingerprint["started_at_ms"])
       assert log.cache_fingerprint["finished_at_ms"] >= log.cache_fingerprint["started_at_ms"]
       assert log.cache_diagnosis["cause"] == "unknown"

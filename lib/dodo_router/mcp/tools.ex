@@ -218,7 +218,7 @@ defmodule DodoRouter.MCP.Tools do
           "and by cache position — allocated pro-rata against the billed total, so shares " <>
           "are trustworthy; per-bucket absolutes are estimates, not tokenizer output. " <>
           "cache_diagnosis reports privacy-safe structural changes against an earlier request " <>
-          "in the same session/branch, with observation, cause, confidence, first_change " <>
+          "in the same session, with observation, cause, confidence, first_change " <>
           "(one-based item index), and previous_log_id. It does not require body access. " <>
           "current/previous include provider-key identity, endpoint and cache-key hashes, " <>
           "requested retention, actual attempt times and other in-flight router request counts; " <>
