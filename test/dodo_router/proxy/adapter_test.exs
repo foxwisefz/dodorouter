@@ -538,6 +538,46 @@ defmodule DodoRouter.Proxy.AdapterTest do
       assert user_msg["content"] == [%{"type" => "text", "text" => "What is this?"}, image]
     end
 
+    test "keeps a user parts array that carries a file" do
+      file = %{
+        "type" => "file",
+        "file" => %{"file_data" => "data:application/pdf;base64,JVBERi0xLjQ="}
+      }
+
+      request = %{
+        "model" => "m",
+        "messages" => [
+          %{
+            "role" => "user",
+            "content" => [file, %{"type" => "text", "text" => "read this"}]
+          }
+        ]
+      }
+
+      [user_msg] = Adapter.sanitize_request(request)["messages"]
+      assert user_msg["content"] == [file, %{"type" => "text", "text" => "read this"}]
+    end
+
+    test "keeps a user parts array that carries a verbatim document block" do
+      document = %{
+        "type" => "document",
+        "source" => %{"type" => "url", "url" => "https://x/y.pdf"}
+      }
+
+      request = %{
+        "model" => "m",
+        "messages" => [
+          %{
+            "role" => "user",
+            "content" => [document, %{"type" => "text", "text" => "summarize"}]
+          }
+        ]
+      }
+
+      [user_msg] = Adapter.sanitize_request(request)["messages"]
+      assert user_msg["content"] == [document, %{"type" => "text", "text" => "summarize"}]
+    end
+
     test "still flattens a text-only user parts array" do
       request = %{
         "model" => "m",

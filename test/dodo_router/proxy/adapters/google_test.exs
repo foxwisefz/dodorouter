@@ -307,6 +307,30 @@ defmodule DodoRouter.Proxy.Adapters.GoogleTest do
       assert inline_part["inlineData"]["mimeType"] == "image/png"
       assert inline_part["inlineData"]["data"] == "iVBORw0KGgo="
     end
+
+    test "converts a file part with base64 data URI to inlineData" do
+      request = %{
+        "messages" => [
+          %{
+            "role" => "user",
+            "content" => [
+              %{
+                "type" => "file",
+                "file" => %{"file_data" => "data:application/pdf;base64,JVBERi0xLjQ="}
+              },
+              %{"type" => "text", "text" => "read this"}
+            ]
+          }
+        ]
+      }
+
+      result = Google.build_gemini_request(request)
+      parts = hd(result["contents"])["parts"]
+
+      inline_part = Enum.find(parts, &Map.has_key?(&1, "inlineData"))
+      assert inline_part["inlineData"]["mimeType"] == "application/pdf"
+      assert inline_part["inlineData"]["data"] == "JVBERi0xLjQ="
+    end
   end
 
   describe "safety settings" do

@@ -9,6 +9,8 @@ order: 7
 
 Full bidirectional conversion, including tool_use / tool_result blocks, system prompts (string or block array, with `cache_control` preserved), and multi-block content.
 
+Images and PDFs (`image` and `document` content blocks, base64 or URL source) are forwarded to the provider that serves the request. On an Anthropic-format step they arrive byte-identical to what you sent; on OpenAI-family steps they travel as `image_url` / `file` content parts, and on Gemini as inline data.
+
 ```bash
 curl {base_url}/r/{router}/v1/messages \
   -H "Authorization: Bearer sk-dodo-YOUR_KEY" \

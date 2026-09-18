@@ -288,6 +288,9 @@ defmodule DodoRouter.Proxy.Adapters.Google do
       %{"type" => "image_url", "image_url" => %{"url" => url}} ->
         convert_image_url_to_gemini(url)
 
+      %{"type" => "file", "file" => %{"file_data" => "data:" <> _ = data_url}} ->
+        convert_image_url_to_gemini(data_url)
+
       _ ->
         nil
     end)

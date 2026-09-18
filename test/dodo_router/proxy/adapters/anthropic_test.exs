@@ -21,6 +21,65 @@ defmodule DodoRouter.Proxy.Adapters.AnthropicTest do
       assert "system" not in roles
     end
 
+    test "converts OpenAI file parts back to document blocks" do
+      request = %{
+        "messages" => [
+          %{
+            "role" => "user",
+            "content" => [
+              %{
+                "type" => "file",
+                "file" => %{
+                  "file_data" => "data:application/pdf;base64,JVBERi0xLjQ=",
+                  "filename" => "drawing.pdf"
+                }
+              },
+              %{"type" => "text", "text" => "read this"}
+            ]
+          }
+        ]
+      }
+
+      step = %RoutingStep{model: "claude-sonnet-4-20250514"}
+      body = Anthropic.build_anthropic_request(request, step)
+
+      [user_msg] = body["messages"]
+
+      assert Enum.at(user_msg["content"], 0) == %{
+               "type" => "document",
+               "title" => "drawing.pdf",
+               "source" => %{
+                 "type" => "base64",
+                 "media_type" => "application/pdf",
+                 "data" => "JVBERi0xLjQ="
+               }
+             }
+    end
+
+    test "converts file_id parts to Anthropic file-source document blocks" do
+      request = %{
+        "messages" => [
+          %{
+            "role" => "user",
+            "content" => [
+              %{"type" => "file", "file" => %{"file_id" => "file_abc123"}},
+              %{"type" => "text", "text" => "read this"}
+            ]
+          }
+        ]
+      }
+
+      step = %RoutingStep{model: "claude-sonnet-4-20250514"}
+      body = Anthropic.build_anthropic_request(request, step)
+
+      [user_msg] = body["messages"]
+
+      assert Enum.at(user_msg["content"], 0) == %{
+               "type" => "document",
+               "source" => %{"type" => "file", "file_id" => "file_abc123"}
+             }
+    end
+
     test "extracts system message with content blocks to top-level system field" do
       request = %{
         "messages" => [
