@@ -390,19 +390,19 @@ defmodule DodoRouterWeb.AnthropicFormat do
               else: tool_msg
           end)
 
-        # OpenAI tool messages can't carry images, so images inside
-        # tool_result content are surfaced as a user message right after —
-        # the Anthropic adapter merges consecutive user messages back into
-        # one turn, so they end up alongside the tool_result again.
-        tool_result_image_parts =
+        # OpenAI tool messages can't carry attachments, so images and
+        # documents inside tool_result content are surfaced as a user message
+        # right after — the Anthropic adapter merges consecutive user messages
+        # back into one turn, so they end up alongside the tool_result again.
+        tool_result_attachment_parts =
           tool_results
           |> Enum.flat_map(fn block -> List.wrap(block["content"]) end)
           |> Enum.filter(&is_map/1)
-          |> Enum.map(&image_block_to_openai_part/1)
+          |> Enum.map(&attachment_block_to_openai_part/1)
           |> Enum.reject(&is_nil/1)
 
         tool_image_messages =
-          case tool_result_image_parts do
+          case tool_result_attachment_parts do
             [] -> []
             parts -> [%{"role" => "user", "content" => parts}]
           end
@@ -507,7 +507,7 @@ defmodule DodoRouterWeb.AnthropicFormat do
   # representation change would alter the rendered bytes of an unchanged
   # message and bust the prompt cache at that point.
   defp user_content_from_blocks(blocks) do
-    kept = Enum.filter(blocks, &(&1["type"] in ["text", "image"]))
+    kept = Enum.filter(blocks, &(&1["type"] in ["text", "image", "document"]))
 
     case kept do
       [] ->
@@ -521,13 +521,44 @@ defmodule DodoRouterWeb.AnthropicFormat do
           blocks
           |> Enum.map(fn
             %{"type" => "text"} = block -> Map.take(block, ["type", "text", "cache_control"])
-            %{"type" => "image"} = block -> image_block_to_openai_part(block)
+            block -> attachment_block_to_openai_part(block)
           end)
           |> Enum.reject(&is_nil/1)
 
         if parts == [], do: nil, else: {:parts, parts}
     end
   end
+
+  defp attachment_block_to_openai_part(%{"type" => "image"} = block),
+    do: image_block_to_openai_part(block)
+
+  defp attachment_block_to_openai_part(%{"type" => "document"} = block),
+    do: document_block_to_openai_part(block)
+
+  defp attachment_block_to_openai_part(_block), do: nil
+
+  # A base64 document becomes an OpenAI `file` part (the chat-completions
+  # spelling of an embedded file, with `title` carried as `filename`); the
+  # Anthropic adapter parses the data URI back into a document block, so a
+  # same-format round trip is byte-identical. OpenAI has no shape for the
+  # other document sources (url, text, content, Files API), so those ride the
+  # IR verbatim — Anthropic-format steps pass them through untouched and an
+  # OpenAI-family step rejects them with its own 400 rather than a silent drop.
+  defp document_block_to_openai_part(
+         %{
+           "type" => "document",
+           "source" => %{"type" => "base64", "media_type" => media_type, "data" => data}
+         } = block
+       ) do
+    file =
+      %{"file_data" => "data:#{media_type};base64,#{data}"}
+      |> maybe_put("filename", block["title"])
+
+    %{"type" => "file", "file" => file}
+    |> maybe_put("cache_control", block["cache_control"])
+  end
+
+  defp document_block_to_openai_part(%{"type" => "document"} = block), do: block
 
   defp image_block_to_openai_part(
          %{
