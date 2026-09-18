@@ -4,7 +4,7 @@
 
 **Product:** Dodo Router — an OpenAI-compatible LLM proxy with automatic fallback across providers. Drop-in replacement: change your base URL, then manage routing chains, providers, and models from a dashboard.
 
-**Live URL:** https://dodorouter.com  
+**Live URL:** https://www.dodorouter.com  
 **API Base:** https://api.dodorouter.com  
 **GitHub:** https://github.com/foxwise-ai/dodorouter  
 **Email:** support@dodorouter.com  
@@ -200,7 +200,7 @@ The hero is a full-viewport section with a video background:
 | Log In | https://api.dodorouter.com/users/log-in |
 | Terms | https://api.dodorouter.com/terms |
 | GitHub | https://github.com/foxwise-ai/dodorouter |
-| Website | https://dodorouter.com |
+| Website | https://www.dodorouter.com |
 
 ## Development Commands
 
