@@ -208,6 +208,10 @@ defmodule DodoRouterWeb.EvalLive.Show do
      |> assign(:retrying?, false)
      |> assign(:retry_progress, nil)
      |> load(evaluation)
+     # load/1 recomputes running? from the registry, but the benchmark task
+     # broadcasts before it exits, so its entry is still there when this
+     # message is handled — trust the broadcast, not the lingering entry.
+     |> assign(:running?, false)
      |> put_flash(:info, message)}
   end
 
@@ -2080,7 +2084,11 @@ defmodule DodoRouterWeb.EvalLive.Show do
   # "Running" forever is indistinguishable from one that is about to finish.
   defp run_status_label(run, false) when run.status in ["pending", "running"], do: "Interrupted"
   defp run_status_label(run, _running?), do: run_status_label(run)
-  defp planned_runs(evaluation), do: length(evaluation.candidate_targets) * evaluation.repetitions
+  # The full fan-out — sources x variants x candidates x repetitions. A
+  # candidates x repetitions denominator reads "12 of 12" from the first
+  # source request onward of a 60-run batch, and a bar that is complete
+  # while the benchmark runs is worse than no bar.
+  defp planned_runs(evaluation), do: Evaluations.planned_run_count(evaluation)
 
   # Quality tradeoff scatter: one point per ranked model that has both an
   # average score and a value on the chosen axis (speed or cost). Indexes
