@@ -941,9 +941,15 @@ defmodule DodoRouter.Proxy.Adapter do
 
   defp all_text_content?(content) when is_list(content) do
     Enum.all?(content, fn
-      %{"type" => "text"} -> true
-      %{"type" => type} when type in ["image_url", "image", "audio", "file", "video_url"] -> false
-      _ -> true
+      %{"type" => "text"} ->
+        true
+
+      %{"type" => type}
+      when type in ["image_url", "image", "audio", "file", "video_url", "document"] ->
+        false
+
+      _ ->
+        true
     end)
   end
 

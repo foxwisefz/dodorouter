@@ -764,6 +764,213 @@ defmodule DodoRouterWeb.AnthropicFormatTest do
     end
   end
 
+  describe "document passthrough (to_openai_params/1)" do
+    @pdf_block %{
+      "type" => "document",
+      "source" => %{
+        "type" => "base64",
+        "media_type" => "application/pdf",
+        "data" => "JVBERi0xLjQ="
+      }
+    }
+
+    test "user message with a document block keeps it as an OpenAI file part" do
+      anthropic = %{
+        "model" => "claude-sonnet-5",
+        "max_tokens" => 100,
+        "messages" => [
+          %{
+            "role" => "user",
+            "content" => [
+              @pdf_block,
+              %{"type" => "text", "text" => "Compare the marks in this BOM"}
+            ]
+          }
+        ]
+      }
+
+      [msg] = AnthropicFormat.to_openai_params(anthropic)["messages"]
+
+      assert msg["role"] == "user"
+
+      assert msg["content"] == [
+               %{
+                 "type" => "file",
+                 "file" => %{"file_data" => "data:application/pdf;base64,JVBERi0xLjQ="}
+               },
+               %{"type" => "text", "text" => "Compare the marks in this BOM"}
+             ]
+    end
+
+    test "document title becomes the file part's filename" do
+      anthropic = %{
+        "messages" => [
+          %{"role" => "user", "content" => [Map.put(@pdf_block, "title", "drawing.pdf")]}
+        ]
+      }
+
+      [msg] = AnthropicFormat.to_openai_params(anthropic)["messages"]
+
+      assert [%{"type" => "file", "file" => file}] = msg["content"]
+      assert file["filename"] == "drawing.pdf"
+    end
+
+    test "document cache_control rides the file part" do
+      cc = %{"type" => "ephemeral"}
+
+      anthropic = %{
+        "messages" => [
+          %{
+            "role" => "user",
+            "content" => [
+              %{"type" => "text", "text" => "read this"},
+              Map.put(@pdf_block, "cache_control", cc)
+            ]
+          }
+        ]
+      }
+
+      [msg] = AnthropicFormat.to_openai_params(anthropic)["messages"]
+
+      assert [_, file_part] = msg["content"]
+      assert file_part["cache_control"] == cc
+    end
+
+    test "non-base64 document sources pass through verbatim" do
+      url_doc = %{
+        "type" => "document",
+        "source" => %{"type" => "url", "url" => "https://x/y.pdf"}
+      }
+
+      anthropic = %{
+        "messages" => [
+          %{
+            "role" => "user",
+            "content" => [url_doc, %{"type" => "text", "text" => "summarize"}]
+          }
+        ]
+      }
+
+      [msg] = AnthropicFormat.to_openai_params(anthropic)["messages"]
+
+      assert msg["content"] == [url_doc, %{"type" => "text", "text" => "summarize"}]
+    end
+
+    test "a document-only user message still produces a user message" do
+      anthropic = %{
+        "messages" => [%{"role" => "user", "content" => [@pdf_block]}]
+      }
+
+      [msg] = AnthropicFormat.to_openai_params(anthropic)["messages"]
+
+      assert msg["role"] == "user"
+      assert [%{"type" => "file"}] = msg["content"]
+    end
+
+    test "documents inside tool_result content surface as a user message after the tool message" do
+      anthropic = %{
+        "messages" => [
+          %{
+            "role" => "user",
+            "content" => [
+              %{
+                "type" => "tool_result",
+                "tool_use_id" => "toolu_1",
+                "content" => [%{"type" => "text", "text" => "scan done"}, @pdf_block]
+              }
+            ]
+          }
+        ]
+      }
+
+      [tool_msg, doc_msg] = AnthropicFormat.to_openai_params(anthropic)["messages"]
+
+      assert tool_msg["role"] == "tool"
+      assert tool_msg["content"] == "scan done"
+
+      assert doc_msg["role"] == "user"
+
+      assert doc_msg["content"] == [
+               %{
+                 "type" => "file",
+                 "file" => %{"file_data" => "data:application/pdf;base64,JVBERi0xLjQ="}
+               }
+             ]
+    end
+  end
+
+  describe "seam: document blocks -> to_openai_params -> build_anthropic_request" do
+    alias DodoRouter.Proxy.Adapters.Anthropic
+    alias DodoRouter.Routers.RoutingStep
+
+    test "documents survive the full request round-trip byte-identical" do
+      pdf_block = %{
+        "type" => "document",
+        "title" => "drawing.pdf",
+        "source" => %{
+          "type" => "base64",
+          "media_type" => "application/pdf",
+          "data" => "JVBERi0xLjQ="
+        }
+      }
+
+      anthropic_request = %{
+        "model" => "claude-sonnet-5",
+        "max_tokens" => 100,
+        "messages" => [
+          %{
+            "role" => "user",
+            "content" => [
+              pdf_block,
+              %{"type" => "text", "text" => "Compare the marks in this BOM"}
+            ]
+          }
+        ]
+      }
+
+      body =
+        anthropic_request
+        |> AnthropicFormat.to_openai_params()
+        |> Anthropic.build_anthropic_request(%RoutingStep{model: "claude-sonnet-4-20250514"})
+
+      [user_msg] = body["messages"]
+      assert user_msg["role"] == "user"
+
+      assert Enum.at(user_msg["content"], 0) == pdf_block
+
+      assert Enum.at(user_msg["content"], 1) == %{
+               "type" => "text",
+               "text" => "Compare the marks in this BOM"
+             }
+    end
+
+    test "url-source documents ride the round-trip untouched" do
+      url_doc = %{
+        "type" => "document",
+        "source" => %{"type" => "url", "url" => "https://x/y.pdf"}
+      }
+
+      anthropic_request = %{
+        "model" => "claude-sonnet-5",
+        "max_tokens" => 100,
+        "messages" => [
+          %{
+            "role" => "user",
+            "content" => [url_doc, %{"type" => "text", "text" => "summarize"}]
+          }
+        ]
+      }
+
+      body =
+        anthropic_request
+        |> AnthropicFormat.to_openai_params()
+        |> Anthropic.build_anthropic_request(%RoutingStep{model: "claude-sonnet-4-20250514"})
+
+      [user_msg] = body["messages"]
+      assert Enum.at(user_msg["content"], 0) == url_doc
+    end
+  end
+
   describe "seam: image blocks -> to_openai_params -> build_anthropic_request" do
     test "images survive the full request round-trip, tool_result images in the same user turn" do
       alias DodoRouter.Proxy.Adapters.Anthropic

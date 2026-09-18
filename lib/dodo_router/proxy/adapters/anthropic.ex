@@ -663,6 +663,17 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
           do: Map.put(block, "cache_control", part["cache_control"]),
           else: block
 
+      %{"type" => "file", "file" => file} = part when is_map(file) ->
+        case file_part_to_anthropic(file) do
+          nil ->
+            part
+
+          block ->
+            if part["cache_control"],
+              do: Map.put(block, "cache_control", part["cache_control"]),
+              else: block
+        end
+
       part ->
         part
     end)
@@ -682,6 +693,34 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
         %{"type" => "image", "source" => %{"type" => "url", "url" => url}}
     end
   end
+
+  # OpenAI's `file` part back to Anthropic's `document` block — the reverse of
+  # AnthropicFormat's ingress conversion, so a same-format round trip restores
+  # the block byte-identically (filename was the block's `title`). A file part
+  # shape Anthropic has no source for returns nil and the part passes through
+  # unchanged, so the provider's own 400 answers rather than a rewritten one.
+  defp file_part_to_anthropic(%{"file_data" => "data:" <> _ = data_url} = file) do
+    case Regex.run(@data_uri_regex, data_url) do
+      [_, media_type, data] ->
+        block = %{
+          "type" => "document",
+          "source" => %{"type" => "base64", "media_type" => media_type, "data" => data}
+        }
+
+        if file["filename"],
+          do: Map.put(block, "title", file["filename"]),
+          else: block
+
+      nil ->
+        %{"type" => "document", "source" => %{"type" => "url", "url" => data_url}}
+    end
+  end
+
+  defp file_part_to_anthropic(%{"file_id" => file_id}) do
+    %{"type" => "document", "source" => %{"type" => "file", "file_id" => file_id}}
+  end
+
+  defp file_part_to_anthropic(_file), do: nil
 
   defp convert_tool_to_anthropic(%{"function" => func} = tool) do
     anthropic_tool = %{
