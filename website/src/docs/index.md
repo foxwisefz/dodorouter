@@ -11,7 +11,7 @@ DodoRouter is an LLM proxy and router. Point any OpenAI-, Anthropic-, or Respons
 
 <div class="docs-callout my-2">
   <p class="docs-callout-title">🤖 Reading this with an AI agent?</p>
-  <p>Fetch <code>https://dodorouter.com/llms.txt</code> for a condensed, link-based index, or <code>https://dodorouter.com/llms-full.txt</code> for every page on this site concatenated as one plain-Markdown file. Every individual page also has a raw-Markdown twin at its own URL with <code>.md</code> appended — e.g. <code>https://dodorouter.com/docs/quickstart.md</code> — so an agent can fetch just the page it needs.</p>
+  <p>Fetch <code>https://www.dodorouter.com/llms.txt</code> for a condensed, link-based index, or <code>https://www.dodorouter.com/llms-full.txt</code> for every page on this site concatenated as one plain-Markdown file. Every individual page also has a raw-Markdown twin at its own URL with <code>.md</code> appended — e.g. <code>https://www.dodorouter.com/docs/quickstart.md</code> — so an agent can fetch just the page it needs.</p>
 </div>
 
 ## Jump in

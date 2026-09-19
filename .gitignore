@@ -51,6 +51,7 @@ dodo_router-*.tar.gz
 *.db
 .beads-credential-key
 .beads/proxieddb/
+.beads/interactions.jsonl
 
 # Dev-only OAuth signing key, generated on first boot.
 /priv/dev/

@@ -1065,6 +1065,128 @@ defmodule DodoRouterWeb.EvalLiveTest do
     end
   end
 
+  describe "a benchmark that just finished" do
+    setup %{user: user} do
+      {router, _api_key} = RoutersFixtures.router_fixture(user)
+      key = ProvidersFixtures.provider_key_fixture(user, %{"label" => "Key 1"})
+      log = LogsFixtures.log_fixture(router)
+
+      {:ok, evaluation} =
+        Evaluations.create_evaluation(user, log, %{
+          name: "Finished batch",
+          criteria: "Be useful",
+          judge_model: "judge-model",
+          judge_provider_key_id: key.id,
+          candidate_targets: [
+            %{
+              "provider_key_id" => key.id,
+              "provider" => "test_provider",
+              "model" => "test-model"
+            }
+          ],
+          repetitions: 1
+        })
+
+      batch_id = Ecto.UUID.generate()
+
+      %EvaluationRun{}
+      |> EvaluationRun.changeset(%{
+        evaluation_id: evaluation.id,
+        batch_id: batch_id,
+        status: "completed",
+        score: 90,
+        candidate_provider: "test_provider",
+        candidate_model: "test-model",
+        repetition: 1
+      })
+      |> Repo.insert!()
+
+      {:ok, evaluation} =
+        evaluation
+        |> Ecto.Changeset.change(benchmark_status: "completed", last_batch_id: batch_id)
+        |> Repo.update()
+
+      %{evaluation: evaluation}
+    end
+
+    test "the finish broadcast settles the page even while the registry entry lingers", %{
+      conn: conn,
+      evaluation: evaluation
+    } do
+      {:ok, live, html} = live(conn, ~p"/evals/#{evaluation.id}")
+      refute html =~ "Benchmark running"
+
+      # The benchmark task broadcasts {:benchmark_finished, ...} and only then
+      # exits; its EvaluationRegistry entry dies with the process, a beat AFTER
+      # the broadcast. A page that recomputes running? from the registry while
+      # handling the broadcast snaps back to "running", and nothing ever
+      # corrects it — a finished benchmark spins forever.
+      {:ok, _} = Registry.register(DodoRouter.EvaluationRegistry, evaluation.id, nil)
+
+      send(live.pid, {:benchmark_finished, {:ok, []}})
+
+      html = render(live)
+      refute html =~ "Benchmark running"
+      refute has_element?(live, "#cancel-eval-button")
+    end
+  end
+
+  describe "a running multi-source benchmark" do
+    test "the progress banner counts every source request, not one candidate pass", %{
+      conn: conn,
+      user: user
+    } do
+      {router, _api_key} = RoutersFixtures.router_fixture(user)
+      key = ProvidersFixtures.provider_key_fixture(user, %{"label" => "Key 1"})
+      log1 = LogsFixtures.log_fixture(router)
+      log2 = LogsFixtures.log_fixture(router)
+
+      {:ok, evaluation} =
+        Evaluations.create_evaluation(user, log1, %{
+          name: "Two sources",
+          criteria: "Be useful",
+          judge_model: "judge-model",
+          judge_provider_key_id: key.id,
+          candidate_targets: [
+            %{
+              "provider_key_id" => key.id,
+              "provider" => "test_provider",
+              "model" => "test-model"
+            }
+          ],
+          repetitions: 1,
+          source_log_ids: [log1.id, log2.id]
+        })
+
+      batch_id = Ecto.UUID.generate()
+
+      # One of the two planned runs (sources x candidates x repetitions) done.
+      %EvaluationRun{}
+      |> EvaluationRun.changeset(%{
+        evaluation_id: evaluation.id,
+        batch_id: batch_id,
+        status: "completed",
+        score: 90,
+        candidate_provider: "test_provider",
+        candidate_model: "test-model",
+        source_log_id: log1.id,
+        repetition: 1
+      })
+      |> Repo.insert!()
+
+      {:ok, evaluation} =
+        evaluation
+        |> Ecto.Changeset.change(benchmark_status: "running", last_batch_id: batch_id)
+        |> Repo.update()
+
+      {:ok, _} = Registry.register(DodoRouter.EvaluationRegistry, evaluation.id, nil)
+
+      {:ok, _live, html} = live(conn, ~p"/evals/#{evaluation.id}")
+
+      assert html =~ "1 of 2 candidate runs finished"
+    end
+  end
+
   test "warns when the judge and a candidate share one provider key", %{conn: conn, user: user} do
     {router, _api_key} = RoutersFixtures.router_fixture(user)
     key = ProvidersFixtures.provider_key_fixture(user, %{"label" => "Key 1"})
