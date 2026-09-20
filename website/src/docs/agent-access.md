@@ -74,7 +74,7 @@ The limit travels with the connection — reconnecting or refreshing keeps it, a
 | `list_recordings` | Capture windows of real traffic; benchmark one via `create_eval` | `logs:read` |
 | `get_recording` | One capture window's aggregates | `logs:read` |
 | `get_log` | One request, with its stored bodies | `logs:read` (+ `logs:read_bodies` for text) |
-| `list_eval_targets` | Your provider keys × the models each can serve, with list prices | `evals:read` |
+| `list_eval_targets` | Your provider keys × the models each can serve, with list prices and per-key `health` (exclude any key not `"valid"` before planning runs) | `evals:read` |
 | `list_evals` | Evaluations created against this router's logs | `evals:read` |
 | `get_eval` | Status, per-model rankings, judge feedback, individual runs | `evals:read` |
 | `create_eval` | Create an evaluation (optionally start it immediately) | `evals:write` |
