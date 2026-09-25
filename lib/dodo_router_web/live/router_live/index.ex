@@ -211,10 +211,10 @@ defmodule DodoRouterWeb.RouterLive.Index do
               </div>
             </div>
 
-            <div class="flex items-center gap-2 mb-4">
-              <span class="px-2 py-1 bg-base-200 rounded text-xs font-mono text-base-content/60">
-                {router.api_key_prefix}...
-              </span>
+            <div class="mb-4">
+              <.link navigate={~p"/api-keys"} class="text-xs text-accent hover:underline">
+                Manage API keys
+              </.link>
             </div>
 
             <.router_activity activity={Map.get(@activity, router.id)} router_id={router.id} />

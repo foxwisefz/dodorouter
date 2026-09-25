@@ -5,7 +5,8 @@ defmodule DodoRouter.Routers do
 
   import Ecto.Query
   alias DodoRouter.Repo
-  alias DodoRouter.Routers.{Router, RoutingStep}
+  alias DodoRouter.Routers.{ApiKey, Router, RoutingStep}
+  alias DodoRouter.Accounts.Scope
   alias DodoRouter.Accounts.User
 
   # Router CRUD
@@ -52,7 +53,9 @@ defmodule DodoRouter.Routers do
 
     Repo.one(
       from r in Router,
-        where: r.api_key_hash == ^hash,
+        join: k in ApiKey,
+        on: k.router_id == r.id,
+        where: k.api_key_hash == ^hash and is_nil(k.revoked_at),
         join: u in assoc(r, :user),
         preload: [user: u]
     )
@@ -61,20 +64,28 @@ defmodule DodoRouter.Routers do
   def create_router(%User{} = user, attrs) do
     {api_key, hash, prefix} = generate_api_key()
 
-    result =
+    changeset =
       %Router{}
       |> Router.changeset(attrs)
       |> Ecto.Changeset.put_change(:user_id, user.id)
       |> Ecto.Changeset.put_change(:api_key_hash, hash)
       |> Ecto.Changeset.put_change(:api_key_prefix, prefix)
-      |> Repo.insert()
+
+    result =
+      Ecto.Multi.new()
+      |> Ecto.Multi.insert(:router, changeset)
+      |> Ecto.Multi.insert(:key, fn %{router: router} ->
+        %ApiKey{router_id: router.id, api_key_hash: hash, api_key_prefix: prefix}
+        |> ApiKey.changeset(%{name: "Default"})
+      end)
+      |> Repo.transaction()
 
     case result do
-      {:ok, router} ->
+      {:ok, %{router: router}} ->
         broadcast_router_change(router, :router_created)
         {:ok, router, api_key}
 
-      {:error, changeset} ->
+      {:error, _operation, changeset, _changes} ->
         {:error, changeset}
     end
   end
@@ -117,17 +128,48 @@ defmodule DodoRouter.Routers do
     Router.changeset(router, attrs)
   end
 
-  def regenerate_api_key(%Router{} = router) do
+  @doc "Lists active keys for a router owned by the scope's user."
+  def list_api_keys(%Scope{} = scope, router_id) do
+    router = get_router!(scope.user, router_id)
+
+    Repo.all(
+      from k in ApiKey,
+        where: k.router_id == ^router.id and is_nil(k.revoked_at),
+        order_by: [asc: k.inserted_at, asc: k.id]
+    )
+  end
+
+  @doc "Creates an additional key. The plaintext secret is returned only here."
+  def create_api_key(%Scope{} = scope, router_id, attrs) do
+    router = get_router!(scope.user, router_id)
     {api_key, hash, prefix} = generate_api_key()
 
     result =
-      router
-      |> Ecto.Changeset.change(%{api_key_hash: hash, api_key_prefix: prefix})
-      |> Repo.update()
+      %ApiKey{router_id: router.id, api_key_hash: hash, api_key_prefix: prefix}
+      |> ApiKey.changeset(attrs)
+      |> Repo.insert()
 
     case result do
-      {:ok, router} -> {:ok, router, api_key}
+      {:ok, key} -> {:ok, key, api_key}
       {:error, changeset} -> {:error, changeset}
+    end
+  end
+
+  @doc "Revokes only the selected key; other clients keep working."
+  def revoke_api_key(%Scope{} = scope, router_id, key_id) do
+    router = get_router!(scope.user, router_id)
+
+    case Repo.get_by(ApiKey, id: key_id, router_id: router.id) do
+      nil ->
+        {:error, :not_found}
+
+      %ApiKey{revoked_at: nil} = key ->
+        key
+        |> Ecto.Changeset.change(revoked_at: DateTime.utc_now() |> DateTime.truncate(:second))
+        |> Repo.update()
+
+      key ->
+        {:ok, key}
     end
   end
 

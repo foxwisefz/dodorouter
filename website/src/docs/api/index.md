@@ -11,7 +11,7 @@ order: 5
 
 All proxy endpoints are scoped per router: `{base_url}/r/{router_slug}/v1/…`. In every example in this reference, `{base_url}` is `https://api.dodorouter.com` for the hosted service (or your own domain if self-hosted), and `{router}` is your router's slug — swap both in before running any command.
 
-Authenticate with your router's API key, either as a Bearer token or, if your client library doesn't support custom bearer tokens, as `x-api-key`:
+Authenticate with any active API key belonging to the router in the URL, either as a Bearer token or, if your client library doesn't support custom bearer tokens, as `x-api-key`:
 
 ```http
 Authorization: Bearer sk-dodo-YOUR_KEY

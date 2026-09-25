@@ -18,7 +18,7 @@ DodoRouter emails you a one-time login link. Open it and click **Continue to Dod
 
 ## 2. Create a router
 
-On first login you're dropped straight into **New Router**. Give it a name (e.g. `my-agent`) — a URL-safe slug is derived from it automatically. Saving generates your router's API key, shown **once** in a banner. Copy it now; DodoRouter only ever stores a salted hash, so if you lose it you'll need to regenerate a new one from the **API Keys** page (which invalidates the old one).
+On first login you're dropped straight into **New Router**. Give it a name (e.g. `my-agent`) — a URL-safe slug is derived from it automatically. Saving generates your router's API key, shown **once** in a banner. Copy it now; DodoRouter only stores a hash. If you lose the secret, create another named key from the **API Keys** page. Existing keys keep working until you explicitly revoke them.
 
 ## 3. Add a provider API key
 

@@ -23,7 +23,7 @@ Add/rename/delete provider API keys, grouped by provider. Each key shows a live 
 
 ## API Keys
 
-One card per router showing its endpoint URL and masked key prefix, with a one-click **Regenerate** (old key stops working immediately; new one is shown once).
+Each router card shows its endpoint URL and active API keys, with names, masked prefixes, and creation dates. Use **Create key** to add a key for another client without interrupting existing clients. Copy the secret immediately: it is shown only once. **Revoke** disables just the selected key after confirmation. To rotate safely, create a replacement, update the client, then revoke the old key. Activity counts apply to the whole router, across all its keys.
 
 ## Agent Activity
 
