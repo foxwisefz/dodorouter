@@ -334,20 +334,6 @@ defmodule DodoRouterWeb.RouterLive.Show do
     end
   end
 
-  def handle_event("regenerate_api_key", _params, socket) do
-    case Routers.regenerate_api_key(socket.assigns.router) do
-      {:ok, router, api_key} ->
-        {:noreply,
-         socket
-         |> assign(:router, router)
-         |> assign(:new_api_key, api_key)
-         |> put_flash(:info, "API key regenerated")}
-
-      {:error, _} ->
-        {:noreply, put_flash(socket, :error, "Failed to regenerate API key")}
-    end
-  end
-
   @impl true
   def handle_info({:step_started, step_info}, socket) do
     socket =
@@ -769,8 +755,7 @@ defmodule DodoRouterWeb.RouterLive.Show do
 
               <p class="text-sm text-base-content/50">
                 Replace <code class="text-primary font-medium">YOUR_API_KEY</code>
-                with your router API key:
-                <code class="font-mono text-base-content/70">{@router.api_key_prefix}...</code>
+                with any active API key for this router.
                 <.link navigate={~p"/api-keys"} class="text-accent hover:underline ml-1">
                   Manage keys
                 </.link>

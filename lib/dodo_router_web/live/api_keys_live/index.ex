@@ -3,69 +3,84 @@ defmodule DodoRouterWeb.ApiKeysLive.Index do
 
   alias DodoRouter.Logs
   alias DodoRouter.Routers
+  alias DodoRouter.Routers.ApiKey
 
   @impl true
   def mount(_params, _session, socket) do
-    routers = Routers.list_routers(socket.assigns.current_user)
-    base_url = DodoRouterWeb.Endpoint.url()
+    scope = socket.assigns.current_scope
+    routers = Routers.list_routers(scope.user)
 
-    socket =
-      socket
-      |> assign(:page_title, "API Keys")
-      |> assign(:routers, routers)
-      |> assign(:base_url, base_url)
-      |> assign(:router_usage, Logs.usage_summary_for_routers(Enum.map(routers, & &1.id)))
-      |> assign(:regenerating_id, nil)
-      |> assign(:regenerating_request_count, nil)
-      |> assign(:new_key, nil)
-
-    {:ok, socket}
+    {:ok,
+     socket
+     |> assign(:page_title, "API Keys")
+     |> assign(:base_url, DodoRouterWeb.Endpoint.url())
+     |> assign(:router_usage, Logs.usage_summary_for_routers(Enum.map(routers, & &1.id)))
+     |> assign(:new_key, nil)
+     |> stream_configure(:routers, dom_id: &"router-#{&1.id}")
+     |> stream(:routers, Enum.map(routers, &key_card(scope, &1)))}
   end
 
   @impl true
-  def handle_event("regenerate", %{"id" => id}, socket) do
-    router = Routers.get_router!(socket.assigns.current_user, id)
-
-    case Routers.regenerate_api_key(router) do
-      {:ok, _router, api_key} ->
-        routers =
-          socket.assigns.current_user
-          |> Routers.list_routers()
-
+  def handle_event("create_key", %{"router_id" => id, "api_key" => attrs}, socket) do
+    case Routers.create_api_key(socket.assigns.current_scope, id, attrs) do
+      {:ok, key, secret} ->
         {:noreply,
          socket
-         |> assign(:routers, routers)
-         |> assign(:new_key, %{router_id: id, key: api_key})
-         |> assign(:regenerating_id, nil)
-         |> assign(:regenerating_request_count, nil)
-         |> put_flash(:info, "API key regenerated for #{router.name}")}
+         |> assign(:new_key, %{id: key.id, name: key.name, key: secret})
+         |> refresh_router(id)
+         |> put_flash(:info, "API key created")}
 
-      {:error, _} ->
-        {:noreply, put_flash(socket, :error, "Failed to regenerate API key")}
+      {:error, changeset} ->
+        {:noreply, refresh_router(socket, id, form: to_form(changeset, as: :api_key))}
     end
   end
 
-  def handle_event("confirm_regenerate", %{"id" => id}, socket) do
-    # Revealed only for the one row being confirmed, so this is a single
-    # query even on a page listing many routers — not N+1 across the list.
-    router = Routers.get_router!(socket.assigns.current_user, id)
-    request_count = Logs.stats(router, hours: 24).total_requests
-
-    {:noreply,
-     socket
-     |> assign(:regenerating_id, id)
-     |> assign(:regenerating_request_count, request_count)}
+  def handle_event("confirm_revoke", %{"router_id" => id, "key_id" => key_id}, socket) do
+    {:noreply, refresh_router(socket, id, revoking_id: key_id)}
   end
 
-  def handle_event("cancel_regenerate", _params, socket) do
-    {:noreply,
-     socket
-     |> assign(:regenerating_id, nil)
-     |> assign(:regenerating_request_count, nil)}
+  def handle_event("cancel_revoke", %{"router_id" => id}, socket) do
+    {:noreply, refresh_router(socket, id)}
+  end
+
+  def handle_event("revoke_key", %{"router_id" => id, "key_id" => key_id}, socket) do
+    case Routers.revoke_api_key(socket.assigns.current_scope, id, key_id) do
+      {:ok, _key} ->
+        socket =
+          if socket.assigns.new_key && socket.assigns.new_key.id == key_id,
+            do: assign(socket, :new_key, nil),
+            else: socket
+
+        {:noreply, socket |> refresh_router(id) |> put_flash(:info, "API key revoked")}
+
+      {:error, :not_found} ->
+        {:noreply,
+         socket |> refresh_router(id) |> put_flash(:error, "API key is no longer active")}
+    end
   end
 
   def handle_event("dismiss_key", _params, socket) do
     {:noreply, assign(socket, :new_key, nil)}
+  end
+
+  defp refresh_router(socket, id, opts \\ []) do
+    scope = socket.assigns.current_scope
+    router = Routers.get_router!(scope.user, id)
+    stream_insert(socket, :routers, key_card(scope, router, opts))
+  end
+
+  defp key_card(scope, router, opts \\ []) do
+    %{
+      id: router.id,
+      name: router.name,
+      slug: router.slug,
+      keys: Routers.list_api_keys(scope, router.id),
+      revoking_id: Keyword.get(opts, :revoking_id),
+      form:
+        Keyword.get_lazy(opts, :form, fn ->
+          to_form(ApiKey.changeset(%ApiKey{}, %{}), as: :api_key)
+        end)
+    }
   end
 
   @impl true
@@ -76,166 +91,185 @@ defmodule DodoRouterWeb.ApiKeysLive.Index do
         <div class="mb-8">
           <h1 class="text-2xl font-bold text-base-content">API Keys</h1>
           <p class="text-base-content/50 text-sm mt-1">
-            Manage your router API keys. Use these keys to authenticate with the proxy.
+            Give each client its own key. Add and revoke keys independently for each router.
           </p>
         </div>
 
-        <%!-- New Key Banner --%>
         <div
           :if={@new_key}
+          id="new-api-key"
           class="mb-6 rounded-xl border border-accent/20 bg-accent/5 p-4"
         >
-          <div class="flex items-start justify-between">
-            <div class="flex-1">
-              <p class="text-sm font-semibold text-accent mb-1">
-                New API Key Generated
-              </p>
-              <p class="text-xs text-base-content/50 mb-2">
-                Copy this now — you won't see it again.
-              </p>
+          <div class="flex items-start justify-between gap-3">
+            <div class="min-w-0 flex-1">
+              <p class="text-sm font-semibold text-accent mb-1">New API key: {@new_key.name}</p>
+              <p class="text-xs text-base-content/60 mb-2">Copy this now — you won't see it again.</p>
               <div class="flex items-center gap-2">
-                <code class="flex-1 rounded-lg bg-base-100 border border-base-300/50 px-3 py-2 text-sm font-mono text-base-content">
+                <code class="min-w-0 flex-1 break-all rounded-lg bg-base-100 border border-base-300/50 px-3 py-2 text-sm font-mono">
                   {@new_key.key}
                 </code>
                 <button
                   id="copy-new-api-key"
                   phx-hook="CopyButton"
                   data-copy={@new_key.key}
-                  class="p-2 rounded-lg bg-base-100 border border-base-300/50 hover:bg-secondary transition-colors"
-                  title="Copy"
+                  class="btn btn-sm btn-ghost"
+                  title="Copy API key"
                 >
-                  <.icon name="hero-clipboard" class="size-4 text-base-content/60" />
+                  <.icon name="hero-clipboard" class="size-4" />
                 </button>
               </div>
             </div>
             <button
+              id="dismiss-api-key"
               phx-click="dismiss_key"
-              class="p-1 rounded hover:bg-base-200 text-base-content/40 hover:text-base-content transition-colors"
+              class="btn btn-sm btn-ghost"
+              aria-label="Dismiss API key"
             >
               <.icon name="hero-x-mark" class="size-4" />
             </button>
           </div>
         </div>
 
-        <%!-- Router Keys List --%>
-        <div class="space-y-3">
-          <%= for router <- @routers do %>
-            <div class="rounded-xl border border-base-300/50 bg-base-100 p-4">
-              <div class="flex items-center justify-between">
-                <div class="flex items-center gap-3">
-                  <div class="flex h-9 w-9 items-center justify-center rounded-lg bg-accent/10 text-accent">
-                    <.icon name="hero-adjustments-horizontal" class="size-4" />
-                  </div>
-                  <div>
-                    <div class="flex items-center gap-2">
-                      <h3 class="text-sm font-semibold text-base-content">{router.name}</h3>
-                      <.link
-                        navigate={~p"/routers/#{router.id}"}
-                        class="text-xs text-accent hover:underline"
-                      >
-                        View router
-                      </.link>
-                    </div>
-                    <div class="flex items-center gap-1.5 mt-0.5">
-                      <p class="text-xs text-base-content/40 shrink-0">Endpoint:</p>
-                      <code
-                        id={"endpoint-#{router.id}"}
-                        class="font-mono text-xs text-base-content/60 truncate"
-                      >
-                        {@base_url}/r/{router.slug}/v1/chat/completions
-                      </code>
-                      <button
-                        id={"copy-endpoint-#{router.id}"}
-                        phx-hook="CopyButton"
-                        data-copy={"#{@base_url}/r/#{router.slug}/v1/chat/completions"}
-                        class="p-1 rounded hover:bg-base-200 text-base-content/40 hover:text-base-content/60 transition-colors shrink-0"
-                        title="Copy endpoint"
-                      >
-                        <.icon name="hero-clipboard" class="size-3" />
-                      </button>
-                    </div>
-                    <p class="text-xs text-base-content/40 mt-0.5">
-                      Existing key:
-                      <code class="font-mono text-base-content/60">
-                        {router.api_key_prefix}•••••••
-                      </code>
-                    </p>
-                    <.router_usage_note usage={Map.get(@router_usage, router.id)} />
-                  </div>
-                </div>
+        <div id="router-keys" phx-update="stream" class="space-y-4">
+          <div id="no-router-keys" class="hidden only:block text-center py-12">
+            <.icon name="hero-key" class="size-8 text-base-content/30 mb-3" />
+            <p class="text-sm text-base-content/50">No routers yet</p>
+            <.link navigate={~p"/routers/new"} class="text-sm text-accent hover:underline">
+              Create your first router
+            </.link>
+          </div>
+          <section
+            :for={{dom_id, router} <- @streams.routers}
+            id={dom_id}
+            class="rounded-xl border border-base-300/50 bg-base-100 p-5"
+          >
+            <div class="flex items-center justify-between gap-3">
+              <h2 class="font-semibold">{router.name}</h2>
+              <.link navigate={~p"/routers/#{router.id}"} class="text-xs text-accent hover:underline">
+                View router
+              </.link>
+            </div>
+            <div class="flex items-center gap-2 mt-2 min-w-0">
+              <code
+                id={"endpoint-#{router.id}"}
+                class="font-mono text-xs text-base-content/60 truncate"
+              >
+                {@base_url}/r/{router.slug}/v1/chat/completions
+              </code>
+              <button
+                id={"copy-endpoint-#{router.id}"}
+                phx-hook="CopyButton"
+                data-copy={"#{@base_url}/r/#{router.slug}/v1/chat/completions"}
+                class="btn btn-xs btn-ghost"
+                title="Copy endpoint"
+              >
+                <.icon name="hero-clipboard" class="size-3" />
+              </button>
+            </div>
+            <.router_usage_note usage={Map.get(@router_usage, router.id)} />
 
-                <%= if @regenerating_id == router.id do %>
-                  <div class="flex flex-col items-end gap-1.5">
-                    <span
-                      data-usage-warning
-                      class="text-xs text-base-content/60 max-w-xs text-right"
-                    >
-                      {regenerate_warning(@regenerating_request_count)}
+            <div class="mt-4 divide-y divide-base-300/50">
+              <p
+                :if={router.keys == []}
+                id={"no-keys-#{router.id}"}
+                class="py-3 text-sm text-base-content/60"
+              >
+                No active keys. Create a key to connect a client.
+              </p>
+              <div
+                :for={key <- router.keys}
+                id={"api-key-#{key.id}"}
+                class="py-3 flex flex-wrap items-center justify-between gap-3"
+              >
+                <div>
+                  <p class="text-sm font-medium">{key.name}</p>
+                  <p class="text-xs text-base-content/50 mt-1">
+                    <code>{key.api_key_prefix}•••••••</code>
+                    <span class="ml-2">
+                      Created {Calendar.strftime(key.inserted_at, "%b %d, %Y")}
                     </span>
-                    <div class="flex items-center gap-2">
-                      <button
-                        id={"confirm-regenerate-#{router.id}"}
-                        phx-click="regenerate"
-                        phx-value-id={router.id}
-                        class="px-3 py-1.5 rounded-lg bg-error text-white text-xs font-medium hover:opacity-90 transition-opacity"
-                      >
-                        Yes, revoke
-                      </button>
-                      <button
-                        phx-click="cancel_regenerate"
-                        class="px-3 py-1.5 rounded-lg bg-secondary text-base-content/70 text-xs font-medium hover:bg-secondary/80 transition-colors"
-                      >
-                        Cancel
-                      </button>
-                    </div>
+                  </p>
+                </div>
+                <%= if router.revoking_id == key.id do %>
+                  <div class="w-full rounded-lg bg-error/5 p-3">
+                    <p class="text-xs text-base-content/70 mb-2">
+                      Clients using this key will stop working immediately. Other keys stay active.
+                    </p>
+                    <button
+                      id={"confirm-revoke-#{key.id}"}
+                      phx-click="revoke_key"
+                      phx-value-router_id={router.id}
+                      phx-value-key_id={key.id}
+                      class="btn btn-sm btn-error"
+                    >
+                      Revoke key
+                    </button>
+                    <button
+                      id={"cancel-revoke-#{key.id}"}
+                      phx-click="cancel_revoke"
+                      phx-value-router_id={router.id}
+                      class="btn btn-sm btn-ghost"
+                    >
+                      Cancel
+                    </button>
                   </div>
                 <% else %>
                   <button
-                    id={"regenerate-#{router.id}"}
-                    phx-click="confirm_regenerate"
-                    phx-value-id={router.id}
-                    class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-base-300/50 text-xs font-medium text-base-content/60 hover:text-error hover:border-error/30 hover:bg-error/5 transition-colors"
+                    id={"revoke-key-#{key.id}"}
+                    phx-click="confirm_revoke"
+                    phx-value-router_id={router.id}
+                    phx-value-key_id={key.id}
+                    class="btn btn-sm btn-ghost text-base-content/60 hover:text-error"
                   >
-                    <.icon name="hero-arrow-path" class="size-3.5" /> Regenerate
+                    Revoke
                   </button>
                 <% end %>
               </div>
             </div>
-          <% end %>
-
-          <div :if={Enum.empty?(@routers)} class="text-center py-12">
-            <div class="w-12 h-12 mx-auto mb-4 rounded-xl bg-secondary flex items-center justify-center">
-              <.icon name="hero-key" class="size-6 text-base-content/30" />
-            </div>
-            <p class="text-sm text-base-content/50">No routers yet</p>
-            <a href={~p"/routers/new"} class="text-sm text-accent hover:underline mt-1 inline-block">
-              Create your first router
-            </a>
-          </div>
+            <.form
+              for={router.form}
+              id={"create-key-#{router.id}"}
+              phx-submit="create_key"
+              phx-value-router_id={router.id}
+              class="mt-4 pt-4 border-t border-base-300/50 flex flex-col sm:flex-row sm:items-end gap-3"
+            >
+              <div class="flex-1">
+                <.input
+                  field={router.form[:name]}
+                  id={"key-name-#{router.id}"}
+                  label="Key name"
+                  placeholder="e.g. Production server"
+                  required
+                  maxlength="100"
+                />
+              </div>
+              <button type="submit" class="btn btn-primary btn-sm mb-2" phx-disable-with="Creating…">
+                <.icon name="hero-plus" class="size-4" /> Create key
+              </button>
+            </.form>
+          </section>
         </div>
       </div>
     </Layouts.app>
     """
   end
 
-  # Ambient signal per row (dodo_router-f6v.4): a key sitting idle for weeks
-  # and one taking live traffic otherwise render identically. Batched once
-  # at mount via Logs.usage_summary_for_routers/2 — not one query per row.
   attr :usage, :map, default: nil
 
   defp router_usage_note(assigns) do
     ~H"""
     <p
-      class="text-xs text-base-content/40 mt-0.5"
+      class="text-xs text-base-content/40 mt-1"
       data-router-requests-24h={(@usage && @usage.request_count_24h) || 0}
     >
+      Router activity:
       <%= if @usage && @usage.last_request_at do %>
-        Last used {relative_time(@usage.last_request_at)} · {pluralize(
+        last used {relative_time(@usage.last_request_at)} · {pluralize(
           @usage.request_count_24h,
           "request"
-        )} in the last 24h
+        )} in the last 24h across all keys
       <% else %>
-        Never used
+        never used
       <% end %>
     </p>
     """
@@ -250,15 +284,5 @@ defmodule DodoRouterWeb.ApiKeysLive.Index do
       diff < 86_400 -> "#{div(diff, 3600)}h ago"
       true -> "#{div(diff, 86_400)}d ago"
     end
-  end
-
-  # States the blast radius instead of a bare "are you sure" — regenerating
-  # immediately invalidates the current key for every client using it.
-  # Zero requests in the window is the safe-rotation signal.
-  defp regenerate_warning(0), do: "No requests in the last 24h. Safe to regenerate."
-
-  defp regenerate_warning(count) do
-    "This router served #{pluralize(count, "request")} in the last 24h. " <>
-      "Regenerating immediately invalidates the current key for all of them."
   end
 end

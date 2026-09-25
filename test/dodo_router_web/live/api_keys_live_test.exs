@@ -3,89 +3,77 @@ defmodule DodoRouterWeb.ApiKeysLiveTest do
 
   import Phoenix.LiveViewTest
 
+  alias DodoRouter.Accounts.Scope
+  alias DodoRouter.Routers
   alias DodoRouter.RoutersFixtures
 
   setup :register_and_log_in_user
 
-  describe "Index" do
-    test "lists routers with endpoint and a working copy button", %{conn: conn, user: user} do
-      {router, _api_key} = RoutersFixtures.router_fixture(user)
+  test "creates an additional named key without invalidating the original and reveals it once", %{
+    conn: conn,
+    user: user
+  } do
+    {router, original} = RoutersFixtures.router_fixture(user)
+    {:ok, view, _} = live(conn, ~p"/api-keys")
 
-      {:ok, live, html} = live(conn, ~p"/api-keys")
+    assert has_element?(view, "#copy-endpoint-#{router.id}[phx-hook=CopyButton]")
+    view |> form("#create-key-#{router.id}", api_key: %{name: "Production"}) |> render_submit()
 
-      assert html =~ router.name
-      assert html =~ "/r/#{router.slug}/v1/chat/completions"
+    assert has_element?(view, "#new-api-key")
+    assert has_element?(view, "#copy-new-api-key[phx-hook=CopyButton][data-copy]")
+    assert length(Routers.list_api_keys(Scope.for_user(user), router.id)) == 2
+    assert Routers.get_router_by_api_key(original).id == router.id
+    view |> element("#dismiss-api-key") |> render_click()
+    refute has_element?(view, "#new-api-key")
+    {:ok, refreshed, _} = live(conn, ~p"/api-keys")
+    refute has_element?(refreshed, "#new-api-key")
+  end
 
-      # The copy button must use the CopyButton hook — JS.dispatch("phx:copy")
-      # has no registered listener and silently does nothing.
-      assert has_element?(live, "#copy-endpoint-#{router.id}[phx-hook=CopyButton]")
-      refute render(live) =~ "phx:copy"
-    end
+  test "invalid names do not create a key", %{conn: conn, user: user} do
+    {router, _} = RoutersFixtures.router_fixture(user)
+    {:ok, view, _} = live(conn, ~p"/api-keys")
 
-    test "regenerating reveals the new key once with a copy button", %{conn: conn, user: user} do
-      {router, _api_key} = RoutersFixtures.router_fixture(user)
+    view |> form("#create-key-#{router.id}", api_key: %{name: "   "}) |> render_submit()
 
-      {:ok, live, _html} = live(conn, ~p"/api-keys")
+    assert length(Routers.list_api_keys(Scope.for_user(user), router.id)) == 1
+    assert has_element?(view, "#create-key-#{router.id} p", "can't be blank")
+    refute has_element?(view, "#new-api-key")
+  end
 
-      live |> element("#regenerate-#{router.id}") |> render_click()
-      html = live |> element("#confirm-regenerate-#{router.id}") |> render_click()
+  test "revoking one key requires confirmation and leaves other keys working", %{
+    conn: conn,
+    user: user
+  } do
+    {router, original} = RoutersFixtures.router_fixture(user)
+    scope = Scope.for_user(user)
+    {:ok, key, secret} = Routers.create_api_key(scope, router.id, %{name: "Laptop"})
+    {:ok, view, _} = live(conn, ~p"/api-keys")
 
-      assert html =~ "New API Key Generated"
-      assert has_element?(live, "#copy-new-api-key[phx-hook=CopyButton][data-copy]")
-    end
+    view |> element("#revoke-key-#{key.id}") |> render_click()
+    assert has_element?(view, "#confirm-revoke-#{key.id}")
+    assert Routers.get_router_by_api_key(secret).id == router.id
+    view |> element("#cancel-revoke-#{key.id}") |> render_click()
+    refute has_element?(view, "#confirm-revoke-#{key.id}")
+    view |> element("#revoke-key-#{key.id}") |> render_click()
+    view |> element("#confirm-revoke-#{key.id}") |> render_click()
 
-    test "confirming regenerate states recent usage volume for that router", %{
-      conn: conn,
-      user: user
-    } do
-      {router, _api_key} = RoutersFixtures.router_fixture(user)
+    refute has_element?(view, "#api-key-#{key.id}")
+    assert is_nil(Routers.get_router_by_api_key(secret))
+    assert Routers.get_router_by_api_key(original).id == router.id
+  end
 
-      for _ <- 1..5 do
-        DodoRouter.LogsFixtures.log_fixture(router)
-      end
+  test "only lists owned routers and labels usage as router-wide", %{conn: conn, user: user} do
+    {router, _} = RoutersFixtures.router_fixture(user)
+    {other, _} = RoutersFixtures.router_fixture()
+    DodoRouter.LogsFixtures.log_fixture(router)
+    {:ok, view, _} = live(conn, ~p"/api-keys")
 
-      {:ok, live, _html} = live(conn, ~p"/api-keys")
+    assert has_element?(
+             view,
+             "#router-#{router.id} [data-router-requests-24h='1']",
+             "Router activity"
+           )
 
-      html = live |> element("#regenerate-#{router.id}") |> render_click()
-
-      assert html =~ "5 requests in the last 24h"
-    end
-
-    test "rows show 24h volume and when the key was last used", %{conn: conn, user: user} do
-      {router, _api_key} = RoutersFixtures.router_fixture(user)
-
-      for _ <- 1..3 do
-        DodoRouter.LogsFixtures.log_fixture(router)
-      end
-
-      {:ok, _live, html} = live(conn, ~p"/api-keys")
-
-      assert html =~ ~s(data-router-requests-24h="3")
-      assert html =~ "last 24h"
-      assert html =~ "Last used"
-    end
-
-    test "an unused router's row says so, not silently zero", %{conn: conn, user: user} do
-      {router, _api_key} = RoutersFixtures.router_fixture(user)
-
-      {:ok, _live, html} = live(conn, ~p"/api-keys")
-
-      assert html =~ ~s(id="endpoint-#{router.id}")
-      assert html =~ ~s(data-router-requests-24h="0")
-      assert html =~ "Never used"
-    end
-
-    test "confirming regenerate on an idle router signals it's safe", %{
-      conn: conn,
-      user: user
-    } do
-      {router, _api_key} = RoutersFixtures.router_fixture(user)
-
-      {:ok, live, _html} = live(conn, ~p"/api-keys")
-
-      html = live |> element("#regenerate-#{router.id}") |> render_click()
-
-      assert html =~ "No requests in the last 24h"
-    end
+    refute has_element?(view, "#router-#{other.id}")
   end
 end

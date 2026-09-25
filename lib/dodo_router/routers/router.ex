@@ -7,7 +7,9 @@ defmodule DodoRouter.Routers.Router do
   schema "routers" do
     field :name, :string
     field :slug, :string
-    field :api_key_hash, :string
+    # Retained for compatibility with older releases. Authentication uses
+    # router_api_keys exclusively, including for the original key.
+    field :api_key_hash, :string, redact: true
     field :api_key_prefix, :string
     field :fail_on_context_overflow, :boolean, default: false
     field :session_header, :string, default: "x-session-id"

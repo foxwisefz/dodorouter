@@ -41,7 +41,7 @@ DodoRouter is an LLM proxy and router. Point any OpenAI-, Anthropic-, or Respons
 
 ## How a request flows
 
-A DodoRouter deployment has one account, any number of **routers**, and a pool of **provider keys** (your OpenAI, Anthropic, z.ai, Moonshot, etc. credentials). Each router has its own DodoRouter API key and its own ordered list of **routing steps** — ordered pairs of (provider, model) that DodoRouter tries in sequence.
+A DodoRouter deployment has one account, any number of **routers**, and a pool of **provider keys** (your OpenAI, Anthropic, z.ai, Moonshot, etc. credentials). Each router has its own DodoRouter API keys and its own ordered list of **routing steps** — ordered pairs of (provider, model) that DodoRouter tries in sequence.
 
 Your client (a script, an SDK, or a coding-agent CLI like Claude Code) talks to DodoRouter using a completely standard OpenAI or Anthropic request. DodoRouter ignores the `model` field you send and instead dispatches to routing step 1. If that provider call fails in a way that's safe to retry (rate limit, 5xx, timeout, context overflow, auth error), DodoRouter automatically moves to step 2, then step 3, and so on, only returning an error once every step has failed. The response is converted back to the format your client expects, so the client never has to know which provider actually served the request.
 

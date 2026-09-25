@@ -9,7 +9,7 @@ order: 4
 
 ## Routers
 
-A router is the unit a client connects to. Each has a unique slug (used in the URL path), its own API key, and its own routing chain. Most people create one router per application or environment (e.g. `my-agent-prod`, `my-agent-staging`), since the routing chain, session grouping, and logs are all scoped per router.
+A router is the unit a client connects to. Each has a unique slug (used in the URL path), its own API keys, and its own routing chain. Most people create one router per application or environment (e.g. `my-agent-prod`, `my-agent-staging`), since the routing chain, session grouping, and logs are all scoped per router.
 
 ## Routing steps & fallback
 
@@ -22,7 +22,7 @@ There's one router-level toggle that changes this: **"Skip fallback on context o
 These are two different kinds of key and it's easy to mix them up:
 
 - **Provider keys** (Providers page) — your upstream credentials: an OpenAI key, an Anthropic key, a z.ai key, etc. DodoRouter uses these to call the actual LLM provider. You attach one to each routing step.
-- **Router API keys** (API Keys page) — the key *your* client uses to call DodoRouter itself, in the form `sk-dodo-…`. One per router. Regenerating it immediately invalidates the old one.
+- **Router API keys** (API Keys page) — the key *your* client uses to call DodoRouter itself, in the form `sk-dodo-…`. A router can have multiple named keys, so each client can have its own credential. Creating a key leaves existing keys working; revoking one disables only that key.
 
 ## Plan types: standard vs. coding subscriptions
 

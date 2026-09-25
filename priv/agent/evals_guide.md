@@ -66,6 +66,12 @@ can serve and their list prices per million tokens. `provider_key_id` + `model`
 is what identifies a candidate; you never send a provider name, it is derived
 from the key.
 
+Check `health` on every key you plan to use before planning runs. `"valid"`
+means the key is answering; `"invalid"` or `"quota_exceeded"` means consecutive
+auth/quota failures already flipped its standing (the provider's own error is
+in `health_detail`). `create_eval` and `run_eval` refuse known-bad keys — but
+finding out there means re-planning the benchmark, so exclude them here.
+
 The unfiltered list is every key × every model. When you already know what you
 are looking for, pass `provider` (exact slug), `model` (case-insensitive
 substring) or `limit` — a capped result carries `truncated: true` so you can
@@ -357,7 +363,7 @@ or response text — bodies stay behind `get_log` and its own scope.
 | `get_recording` | One capture window's aggregates | `logs:read` |
 | `list_recordings` | Capture windows; benchmark one via `create_eval` `recording_id` | `logs:read` |
 | `get_log` | One request, with its stored bodies | `logs:read` (bodies need `logs:read_bodies`) |
-| `list_eval_targets` | Provider keys, models, list prices | `evals:read` |
+| `list_eval_targets` | Provider keys, models, list prices, key health | `evals:read` |
 | `list_evals` | Evaluations against this router's logs | `evals:read` |
 | `get_eval` | Status, rankings, rubric feedback, runs | `evals:read` |
 | `create_eval` | Create one (`run: true` to start it) | `evals:write` |

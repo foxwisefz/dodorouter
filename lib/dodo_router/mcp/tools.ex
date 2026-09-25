@@ -242,6 +242,11 @@ defmodule DodoRouter.MCP.Tools do
           "candidate is a provider_key_id plus a model. Models come from the synced catalog, so " <>
           "anything a provider has retired is already absent — a model missing here is not " <>
           "available to name. `billing` says whether a key is metered or a subscription plan. " <>
+          "`health` is the key's standing from observed provider responses: \"valid\", " <>
+          "\"unverified\" (no traffic observed yet), or \"invalid\"/\"quota_exceeded\" after " <>
+          "consecutive auth/quota failures (with the provider's own error in `health_detail`) " <>
+          "— a key that is \"invalid\"/\"quota_exceeded\" will refuse candidate and judge " <>
+          "calls, so exclude it before planning runs. " <>
           "The unfiltered list spans every key × every model; `provider`, `model` and `limit` " <>
           "narrow it, and `truncated: true` marks a capped result.",
       scopes: ["evals:read"],
@@ -890,6 +895,13 @@ defmodule DodoRouter.MCP.Tools do
             # cannot answer produces no score at all.
             billing: Providers.billing(target.provider_key),
             judge_advice: judge_advice(target.provider_key),
+            # The same status preflight and run_eval enforce, surfaced at
+            # selection time: a key flipped to "invalid"/"quota_exceeded" by
+            # consecutive provider failures is not a candidate, and discovering
+            # that one refused run at a time is what turns a benchmark into a
+            # quota bonfire on a dead key.
+            health: target.provider_key.status || "unverified",
+            health_detail: target.provider_key.last_error_detail,
             models:
               Enum.map(target.models, fn model ->
                 %{

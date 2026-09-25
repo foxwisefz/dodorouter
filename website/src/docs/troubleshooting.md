@@ -53,7 +53,7 @@ Self-hosted only: `INFISICAL_TOKEN` / `INFISICAL_PROJECT_ID` aren't set or are i
 
 ### 401 Invalid API key
 
-You're using a provider key (from the Providers page) where a router API key is expected, or vice versa — see [Provider keys vs. router API keys](/docs/concepts/#provider-keys-vs-router-api-keys). Also check you didn't regenerate the router's key since your client last read it.
+You're using a provider key (from the Providers page) where a router API key is expected, or vice versa — see [Provider keys vs. router API keys](/docs/concepts/#provider-keys-vs-router-api-keys). Also check that the key belongs to the router in the URL and hasn't been revoked. Create a new key on the **API Keys** page if you no longer have the secret; other active keys keep working.
 
 ### 401 on `/mcp`, even with a valid router key
 

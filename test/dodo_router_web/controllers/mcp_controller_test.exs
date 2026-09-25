@@ -513,6 +513,40 @@ defmodule DodoRouterWeb.MCPControllerTest do
       assert by_label["plan key"]["judge_advice"] =~ "metered key for the judge"
     end
 
+    test "eval targets report each key's health, so a dead key is visible at selection time", %{
+      conn: conn,
+      user: user,
+      token: token
+    } do
+      healthy =
+        DodoRouter.ProvidersFixtures.provider_key_fixture(user, %{"label" => "healthy"})
+        |> Ecto.Changeset.change(status: "valid")
+        |> DodoRouter.Repo.update!()
+
+      dead =
+        DodoRouter.ProvidersFixtures.provider_key_fixture(user, %{
+          "provider_slug" => "test_provider_coding",
+          "label" => "dead"
+        })
+
+      dead
+      |> Ecto.Changeset.change(status: "invalid", last_error_detail: "401 from provider")
+      |> DodoRouter.Repo.update!()
+
+      body = json_response(call_tool(conn, token, "list_eval_targets"), 200)
+      by_label = Map.new(tool_json(body)["targets"], &{&1["label"], &1})
+
+      assert by_label["healthy"]["health"] == "valid"
+      assert by_label["healthy"]["health_detail"] == nil
+
+      # 60 consecutive 401s had already flipped this key's status — but nothing
+      # on the target row said so, and a 60-run benchmark was built on it.
+      assert by_label["dead"]["health"] == "invalid"
+      assert by_label["dead"]["health_detail"] == "401 from provider"
+
+      _ = healthy
+    end
+
     test "create_eval accepts prompt variants and rankings carry them", %{
       conn: conn,
       token: token,
