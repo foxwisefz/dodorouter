@@ -21,6 +21,7 @@ defmodule DodoRouter.Proxy.FallbackChain do
     :stream,
     :send_chunk,
     :on_step_start,
+    :on_crash,
     :client_headers,
     :fail_on_context_overflow,
     :client_format,
@@ -73,6 +74,7 @@ defmodule DodoRouter.Proxy.FallbackChain do
       stream: stream,
       send_chunk: send_chunk,
       on_step_start: on_step_start,
+      on_crash: Keyword.get(opts, :on_crash, fn _result -> :ok end),
       client_headers: client_headers,
       fail_on_context_overflow: fail_on_context_overflow,
       client_format: Keyword.get(opts, :client_format),
@@ -103,7 +105,7 @@ defmodule DodoRouter.Proxy.FallbackChain do
       "[FallbackChain] Step #{step_index + 1}: #{step.provider}/#{step.model} -> #{endpoint}"
     )
 
-    result = execute_step(step, state)
+    result = execute_step_safely(step, state)
     fidelity = Fidelity.take()
     # Adapters that return it in their own meta still win; this covers the rest.
     outbound_body = Adapter.take_outbound_body()
@@ -206,6 +208,15 @@ defmodule DodoRouter.Proxy.FallbackChain do
 
         state = %{state | attempted_steps: state.attempted_steps ++ [attempt]}
 
+        # Record the real step and all preceding failures before propagating a
+        # crash. The dispatcher cannot reconstruct this history after unwinding.
+        if crash = details[:crash] do
+          {kind, error, stacktrace} = crash
+          broadcast_step_completed(state.router_id, step, :error, latency(start_time))
+          state.on_crash.(%{state | status: :error})
+          :erlang.raise(kind, error, stacktrace)
+        end
+
         should_fallback = should_fallback?(reason, length(rest), state.fail_on_context_overflow)
 
         if should_fallback do
@@ -289,15 +300,32 @@ defmodule DodoRouter.Proxy.FallbackChain do
     )
   end
 
-  defp execute_step(%RoutingStep{} = step, state) do
-    adapter = adapter_for(step.provider)
-    api_key = get_api_key(step, state.router_id)
+  # Catch only this step's execution, never the recursive chain: catching a
+  # recursive call would report the same exception again against earlier steps.
+  defp execute_step_safely(step, state) do
+    execute_step(step, state)
+  catch
+    kind, reason ->
+      stacktrace = __STACKTRACE__
 
+      message =
+        case kind do
+          :error -> Exception.message(Exception.normalize(:error, reason, stacktrace))
+          _ -> inspect(reason)
+        end
+
+      {:error, :exception, %{body: message, crash: {kind, reason, stacktrace}}}
+  end
+
+  defp execute_step(%RoutingStep{} = step, state) do
     # Adapters record what they strip or rewrite into a per-process buffer as
     # they build the upstream request (see DodoRouter.Proxy.Fidelity). Clearing
     # it here is what keeps step N's record from carrying step N-1's drops.
     Fidelity.reset()
     Adapter.take_outbound_body()
+
+    adapter = adapter_for(step.provider)
+    api_key = get_api_key(step, state.router_id)
 
     # Streaming egress needs the serving model *before* the first chunk — an
     # Anthropic `message_start` carries it, and there is no revising it later.
