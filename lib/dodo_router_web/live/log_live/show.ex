@@ -740,7 +740,7 @@ defmodule DodoRouterWeb.LogLive.Show do
                   <%!-- "We changed nothing" is the product's central claim, so silence is the
      wrong way to say it. A clean request states it outright instead of
      rendering blank space where the panel would be. --%>
-                  <%= if @fidelity_changes == [] do %>
+                  <%= if @fidelity_changes == [] and not internal_crash?(@log) do %>
                     <div
                       id="fidelity-clean"
                       class="mb-4 flex items-center gap-2 rounded-lg border border-success/30 bg-success/5 px-4 py-2.5"
@@ -1110,7 +1110,10 @@ defmodule DodoRouterWeb.LogLive.Show do
             # Stated once, on the first hop, because "unchanged" is a claim
             # about the whole journey — not about one edge that happens to be
             # quiet while another lost a field.
-            clean_summary: if(index == 0 and changes == [], do: passthrough_summary(log))
+            clean_summary:
+              if(index == 0 and changes == [] and not internal_crash?(log),
+                do: passthrough_summary(log)
+              )
           }
         }
       end)
@@ -1202,6 +1205,10 @@ defmodule DodoRouterWeb.LogLive.Show do
         _undeterminable -> nil
       end
     end
+  end
+
+  defp internal_crash?(log) do
+    Enum.any?(log.attempted_steps || [], &(&1["error"] == "exception"))
   end
 
   attr :hop, :map, required: true
@@ -1467,9 +1474,13 @@ defmodule DodoRouterWeb.LogLive.Show do
             >
               <.icon name="hero-information-circle" class="size-3.5 shrink-0 mt-px" />
               <span>
-                Body not recorded — this adapter does not keep the bytes it sent. {if @hop.request_body,
-                  do: "The request rebuilt above is what it built them from.",
-                  else: "The normalized request above is what it built them from."}
+                <%= if @attempt["error"] == "exception" do %>
+                  No outbound body recorded. The exception does not establish whether a request reached the provider.
+                <% else %>
+                  Body not recorded — this adapter does not keep the bytes it sent. {if @hop.request_body,
+                    do: "The request rebuilt above is what it built them from.",
+                    else: "The normalized request above is what it built them from."}
+                <% end %>
               </span>
             </p>
           </.trace_section>
@@ -1480,7 +1491,11 @@ defmodule DodoRouterWeb.LogLive.Show do
                 @attempt["response_headers"] || @attempt["partial_content"] not in [nil, ""]
             }
             icon="hero-arrow-down-tray"
-            label={"Received from #{@attempt["provider"]}"}
+            label={
+              if @attempt["error"] == "exception",
+                do: "Internal failure while running #{@attempt["provider"]}",
+                else: "Received from #{@attempt["provider"]}"
+            }
           >
             <%!-- The text this provider streamed to the client before the
                  connection died — the midstream partial the next attempt
@@ -1499,15 +1514,23 @@ defmodule DodoRouterWeb.LogLive.Show do
               >{@attempt["partial_content"]}</pre>
             </.trace_toggle>
 
-            <%!-- error_body is `details[:body]`, straight off the wire — the one
-                 response artifact on an attempt the provider itself wrote, and
-                 the reason this attempt is on the page, so it opens itself. --%>
+            <p
+              :if={@attempt["error"] == "exception"}
+              id={"trace-internal-error-#{@hop.index}"}
+              class="text-xs text-base-content/60"
+            >
+              Failed inside DodoRouter. This exception is not a response from the provider.
+            </p>
             <.trace_toggle
               :if={@attempt["error_body"]}
               id={"trace-error-body-#{@hop.index}"}
               open
               tone={:error}
-              label="Error response — the provider's own bytes"
+              label={
+                if @attempt["error"] == "exception",
+                  do: "Internal proxy exception",
+                  else: "Error response — the provider's own bytes"
+              }
               meta={payload_size(@attempt["error_body"])}
             >
               <.json_panel

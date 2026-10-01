@@ -71,6 +71,22 @@ Every routing step failed with a context-overflow error — either you only have
 
 Every step in the chain returned a non-recoverable error. Open the request in Logs → it shows the per-step error for each attempt, which is almost always more specific than the top-level message.
 
+### Internal proxy exception in a fallback step
+
+An **Internal proxy exception** means DodoRouter crashed while executing that
+step; it is not an error response from the provider. The Trace keeps earlier
+attempts and their errors, then identifies the provider and model of the step
+that crashed. For example, an OpenAI authentication failure followed by an
+Anthropic conversion exception appears as two separate attempts.
+
+If no outbound body was recorded, the log cannot establish whether that step
+sent a request. It does not claim the request passed through unchanged.
+
+Older crash logs may show only one attempt labeled with the first provider,
+even when a later step crashed. Those records lost the earlier attempt history;
+the fix cannot reconstruct it. Use server logs and the request ID to recover
+the original sequence when available.
+
 ### A routing step shows "invalid" or "out of credits" next to its assigned key
 
 DodoRouter tracks key health from real dispatch outcomes. Fix or replace the key on the Providers page; the warning links straight there.

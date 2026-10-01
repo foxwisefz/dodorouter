@@ -978,6 +978,36 @@ defmodule DodoRouterWeb.LogLiveTest do
       assert html =~ "req-123"
     end
 
+    test "labels internal exceptions without claiming a provider response", %{
+      conn: conn,
+      user: user
+    } do
+      {router, _api_key} = RoutersFixtures.router_fixture(user)
+
+      log =
+        LogsFixtures.log_fixture(router, %{
+          status: "error",
+          final_provider: "anthropic",
+          attempted_steps: [
+            %{
+              "provider" => "anthropic",
+              "model" => "claude-fable-5",
+              "status" => "error",
+              "error" => "exception",
+              "error_body" => "conversion crashed"
+            }
+          ]
+        })
+
+      {:ok, view, _html} = live(conn, ~p"/logs/#{log.request_id}")
+      view |> element("[role=tab][phx-value-tab=trace]") |> render_click()
+      assert has_element?(view, "#trace-error-body-0", "Internal proxy exception")
+      refute has_element?(view, "#trace-error-body-0", "provider's own bytes")
+      refute has_element?(view, "#trace-edge-attempt-0", "Passed through unchanged")
+      refute has_element?(view, "#fidelity-clean")
+      assert has_element?(view, "#trace-internal-error-0", "Failed inside DodoRouter")
+    end
+
     test "renders error body for failed step", %{conn: conn, user: user} do
       {router, _api_key} = RoutersFixtures.router_fixture(user)
 

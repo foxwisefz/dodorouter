@@ -138,6 +138,11 @@ defmodule DodoRouter.Proxy do
             |> Keyword.put(:client_headers, client_headers)
             |> Keyword.put(:request_id, request_id)
             |> Keyword.put(:fail_on_context_overflow, router.fail_on_context_overflow)
+            |> Keyword.put(:on_crash, fn result ->
+              log_request(router, request, result, request_id, start_time, opts)
+              record_key_health(result.attempted_steps)
+              broadcast_event(router, result, request_id)
+            end)
           )
 
         log = log_request(router, request, result, request_id, start_time, opts)
@@ -166,16 +171,6 @@ defmodule DodoRouter.Proxy do
           :error ->
             {:error, :all_providers_failed, result.attempted_steps}
         end
-      catch
-        # A crash mid-chain must still leave an error log row and resolve the
-        # pending UI entry before propagating — otherwise the request vanishes
-        # from the dashboard entirely.
-        kind, reason ->
-          stacktrace = __STACKTRACE__
-          result = crash_result(kind, reason, stacktrace, first_step)
-          log_request(router, request, result, request_id, start_time, opts)
-          broadcast_event(router, result, request_id)
-          :erlang.raise(kind, reason, stacktrace)
       after
         # Runs on normal return, raise, and throw alike, so the activity count
         # cannot leak when a request dies mid-chain. (Brutal kills skip `after`;
@@ -183,31 +178,6 @@ defmodule DodoRouter.Proxy do
         DodoRouter.Activity.request_completed(router.id, request_id)
       end
     end
-  end
-
-  # Synthesizes a FallbackChain-shaped result for a request that crashed
-  # mid-chain, so log_request/broadcast_event can treat it like a failed attempt.
-  defp crash_result(kind, reason, stacktrace, first_step) do
-    message =
-      case kind do
-        :error -> Exception.message(Exception.normalize(:error, reason, stacktrace))
-        _ -> inspect(reason)
-      end
-
-    %{
-      status: :error,
-      final_response: nil,
-      response_headers: nil,
-      attempted_steps: [
-        %{
-          provider: first_step.provider,
-          model: first_step.model,
-          error: "exception",
-          error_body: message,
-          latency_ms: nil
-        }
-      ]
-    }
   end
 
   @doc """

@@ -217,6 +217,56 @@ defmodule DodoRouter.ProxyTest do
       assert log.response_body =~ "test adapter crash"
     end
 
+    for streaming <- [false, true] do
+      test "preserves the first failure and attributes a later crash (stream=#{streaming})",
+           ctx do
+        first = %{ctx.step | model: "fail-model"}
+
+        second = %{
+          ctx.step
+          | id: Ecto.UUID.generate(),
+            position: 1,
+            provider: "anthropic",
+            model: "crashing-model"
+        }
+
+        request_id = Ecto.UUID.generate()
+        request = Map.delete(ctx.request, "__crash__")
+
+        opts = [
+          steps: [first, second],
+          log_mode: :sync,
+          request_id: request_id,
+          stream: unquote(streaming),
+          on_step_start: fn
+            %{provider: "anthropic"} -> raise ArgumentError, "second step crash"
+            _ -> :ok
+          end
+        ]
+
+        assert_raise ArgumentError, "second step crash", fn ->
+          Proxy.dispatch(ctx.router, request, opts)
+        end
+
+        log = Logs.get_log_by_request_id(request_id)
+        assert log.final_provider == "anthropic"
+        assert log.final_model == "crashing-model"
+        assert [failed, crashed] = log.attempted_steps
+        assert failed["provider"] == "test_provider"
+        assert failed["http_status"] == 500
+        assert Jason.decode!(failed["error_body"]) == "simulated failure"
+        assert crashed["provider"] == "anthropic"
+        assert crashed["step_id"] == second.id
+        assert crashed["position"] == 1
+        assert crashed["error"] == "exception"
+        assert Jason.decode!(crashed["error_body"]) == "second step crash"
+        assert crashed["outbound_body"] == nil
+        assert crashed["outbound_headers"] in [nil, %{}, []]
+        assert crashed["http_status"] == nil
+        assert DodoRouter.Activity.get_router_counts(ctx.router.id) == {0, 0}
+      end
+    end
+
     test "streaming dispatch also decrements activity on crash", ctx do
       request = Map.put(ctx.request, "stream", true)
 
