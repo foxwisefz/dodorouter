@@ -45,6 +45,18 @@ This preserves the request representation; the selected upstream must still
 support the item types. It does not add translations of these native items for
 Chat Completions, Anthropic or Gemini fallback routes.
 
+## Function tools on Anthropic routes
+
+Responses-style function tools with top-level `name`, `description` and
+`parameters` are translated when a request is routed or falls back to Anthropic.
+The schema becomes `input_schema`, and any tool-level `cache_control` is retained.
+Bowser and other Responses clients can keep using `/v1/responses`; no switch to
+`/v1/messages` is required for this conversion.
+
+This covers function definitions, not Responses built-in tools or native
+function-call history items. Those have separate cross-format limitations as
+noted above.
+
 ## Streaming event sequence
 
 With `"stream": true`, DodoRouter emits the full item lifecycle a strict Responses-API client expects:

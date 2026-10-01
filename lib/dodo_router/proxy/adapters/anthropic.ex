@@ -734,6 +734,15 @@ defmodule DodoRouter.Proxy.Adapters.Anthropic do
       else: anthropic_tool
   end
 
+  # Responses ingress preserves flat function definitions for Responses
+  # upstreams. An Anthropic fallback must translate that spelling too.
+  defp convert_tool_to_anthropic(%{"type" => "function", "name" => _name} = tool) do
+    tool
+    |> Map.take(["cache_control"])
+    |> Map.put("function", Map.drop(tool, ["type", "cache_control"]))
+    |> convert_tool_to_anthropic()
+  end
+
   defp merge_anthropic_content_blocks(messages) when is_list(messages) do
     messages
     |> Enum.reduce([], fn msg, acc ->

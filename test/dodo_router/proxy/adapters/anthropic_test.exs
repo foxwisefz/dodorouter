@@ -5,6 +5,62 @@ defmodule DodoRouter.Proxy.Adapters.AnthropicTest do
   alias DodoRouter.Routers.RoutingStep
 
   describe "build_anthropic_request/2" do
+    test "converts flat Responses function tools through ingress to Anthropic" do
+      schema = %{
+        "type" => "object",
+        "properties" => %{"names" => %{"type" => "array", "items" => %{"type" => "string"}}},
+        "required" => ["names"],
+        "additionalProperties" => false
+      }
+
+      tools = [
+        %{
+          "type" => "function",
+          "name" => "discover_native_tools",
+          "description" => "Discover native executables",
+          "parameters" => schema,
+          "strict" => false,
+          "cache_control" => %{"type" => "ephemeral", "ttl" => "1h"}
+        },
+        %{"type" => "function", "name" => "list_tabs"}
+      ]
+
+      request =
+        DodoRouterWeb.ResponsesFormat.to_openai_params(%{
+          "input" => "Discover available tools",
+          "tools" => tools
+        })
+
+      step = %RoutingStep{model: "claude-fable-5"}
+      body = Anthropic.build_anthropic_request(request, step)
+
+      assert body["tools"] == [
+               %{
+                 "name" => "discover_native_tools",
+                 "description" => "Discover native executables",
+                 "input_schema" => schema,
+                 "cache_control" => %{"type" => "ephemeral", "ttl" => "1h"}
+               },
+               %{
+                 "name" => "list_tabs",
+                 "description" => "",
+                 "input_schema" => %{"type" => "object", "properties" => %{}}
+               }
+             ]
+
+      # Both supported tool spellings must produce identical Anthropic bodies.
+      nested_tools =
+        Enum.map(tools, fn tool ->
+          Map.merge(Map.take(tool, ["cache_control"]), %{
+            "type" => "function",
+            "function" => Map.drop(tool, ["type", "cache_control"])
+          })
+        end)
+
+      assert Anthropic.build_anthropic_request(Map.put(request, "tools", nested_tools), step) ==
+               body
+    end
+
     test "extracts system message to top-level system field" do
       request = %{
         "messages" => [
