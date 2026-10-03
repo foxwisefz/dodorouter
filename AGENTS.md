@@ -728,6 +728,17 @@ One known limit: a same-format adapter pointed at a merely Claude-*compatible* t
 
 **Responses input is a tagged union, not a list of messages.** Match non-`message` string `type` values before any `role`/`content` clauses in both `ResponsesFormat` and `ResponsesAPI`. Codex `additional_tools` has a developer role but no content; role-first conversion fabricates `content: null` and discards its tools. Reasoning and function-call history may have no role at all. Preserve non-message items and their order on Responses upstreams, including unfamiliar types; do not synthesize text or silently discard their payload. This does not establish cross-format fallback compatibility. Test the ingress-to-adapter seam with additional tools, opaque items with role/content, and roleless reasoning/tool history (`responses_input_fidelity_test.exs`).
 
+**Translate Responses history per attempt, before adapter sanitization.**
+`ResponsesRequest.prepare/2` leaves Responses targets untouched; other formats
+receive assistant `tool_calls` and `role: tool` results with matching IDs,
+converted text, function definitions and named tool choices. Consecutive calls
+must share one assistant turn so parallel results remain valid. Unsupported
+native items refuse the step with `unsupported_responses_item` before sending
+anything upstream; retain the original request for a compatible fallback.
+Never let `sanitize_messages` erase roleless items into empty maps. Test sync
+and streaming dispatch, parallel calls, fallback, real adapter builders and
+same-format preservation (`responses_request_test.exs`).
+
 ### 3. The response names the provider that answered
 
 Responses ingress also carries the full `reasoning` object, not just its derived

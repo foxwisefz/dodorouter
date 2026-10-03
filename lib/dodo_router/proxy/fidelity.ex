@@ -53,6 +53,7 @@ defmodule DodoRouter.Proxy.Fidelity do
   @empty %{changes: [], outbound_headers: nil}
 
   @reasons %{
+    format_conversion: "translated to the selected provider's request format",
     replaced_by_proxy: "the proxy authenticates with its own credentials",
     transport:
       "describes a hop or a body we rewrite; forwarding it breaks the request or the stream",
@@ -128,6 +129,11 @@ defmodule DodoRouter.Proxy.Fidelity do
   """
   def record_header_rewrite(name, detail) do
     record(change("request_header", name, "rewritten", :proxy_value_wins, detail))
+  end
+
+  @doc "Records a request-body representation translated for the selected format."
+  def record_body_rewrite(name, detail) do
+    record(change("request_body", name, "rewritten", :format_conversion, detail))
   end
 
   @doc """

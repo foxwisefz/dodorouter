@@ -8,6 +8,21 @@ order: 19
 
 # Troubleshooting & FAQ
 
+### Tool continuation fails with `messages[3].role is required`
+
+Earlier DodoRouter versions passed Responses `function_call` and
+`function_call_output` items into Chat Completions message sanitization, which
+erased the call arguments and result instead of translating them. A first
+turn could succeed while returning a tool error for repair failed immediately.
+Update DodoRouter: function calls, text tool results, function definitions and
+named tool choices are now translated per routing attempt.
+
+An attempt reporting `unsupported_responses_item` contains a native item that
+cannot be translated for that route. Its error names the item type and field;
+no provider request is sent for that attempt. Configure a Responses-format
+provider for reasoning items, built-in tools, `additional_tools` or non-text
+tool outputs. Do not remove required history to suppress the error.
+
 ### Codex shows zero cache reads while Dodo's logs show hits
 
 Earlier Responses egress returned only input/output/total tokens, dropping

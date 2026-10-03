@@ -103,6 +103,51 @@ defmodule DodoRouterWeb.ProxyIntegrationTest do
     end
   end
 
+  describe "Responses tool continuation" do
+    for stream <- [false, true] do
+      @stream stream
+      test "repairs a failed tool call through the HTTP endpoint (stream=#{stream})", %{
+        metadata: metadata
+      } do
+        %{router: router, api_key: api_key} = create_router_with_test_provider(metadata)
+
+        body = %{
+          "model" => "default",
+          "input" => [
+            %{"role" => "user", "content" => "Build a mod"},
+            %{
+              "type" => "function_call",
+              "call_id" => "put_mod:0",
+              "name" => "put_mod",
+              "arguments" => "{}"
+            },
+            %{
+              "type" => "function_call_output",
+              "call_id" => "put_mod:0",
+              "output" => "Syntax error"
+            }
+          ],
+          "tools" => [
+            %{"type" => "function", "name" => "put_mod", "parameters" => %{"type" => "object"}}
+          ]
+        }
+
+        assert {:ok, response} =
+                 make_request("/r/#{router.slug}/v1/responses", body, api_key, metadata,
+                   stream: @stream
+                 )
+
+        assert response.status == 200
+
+        if @stream do
+          assert response.body =~ "response.completed"
+        else
+          assert response.body["output_text"] == "Hello from test-model"
+        end
+      end
+    end
+  end
+
   describe "POST /r/:router_slug/v1/chat/completions (sync)" do
     test "returns successful response from provider", %{metadata: metadata} do
       %{router: router, api_key: api_key} = create_router_with_test_provider(metadata)
