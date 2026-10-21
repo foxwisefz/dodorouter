@@ -339,14 +339,22 @@ defmodule DodoRouter.Proxy.FallbackChain do
         |> apply_passthrough(adapter)
         |> apply_stream_passthrough(state, adapter)
 
-      if state.stream do
-        adapter.stream(request, step, api_key, state.send_chunk, state.client_headers)
-      else
-        adapter.call(request, step, api_key, state.client_headers)
+      with {:ok, request} <- prepare_request(request, state, adapter) do
+        if state.stream do
+          adapter.stream(request, step, api_key, state.send_chunk, state.client_headers)
+        else
+          adapter.call(request, step, api_key, state.client_headers)
+        end
+        |> split_response_passthrough(state, adapter)
       end
-      |> split_response_passthrough(state, adapter)
     end
   end
+
+  defp prepare_request(request, %{client_format: :responses}, adapter) do
+    DodoRouter.Proxy.ResponsesRequest.prepare(request, Registry.request_format(adapter))
+  end
+
+  defp prepare_request(request, _state, _adapter), do: {:ok, request}
 
   # The response half of the same rule. What the provider returned that the IR
   # cannot represent is split off the response before anything logs or reads

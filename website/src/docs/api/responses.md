@@ -41,11 +41,22 @@ An item's `role` does not make it a message: `additional_tools` can have a
 `developer` role without a `content` field, and DodoRouter must not fabricate
 `content: null` for it. Ordinary messages still use the message conversion path.
 
-This preserves the request representation; the selected upstream must still
-support the item types. It does not add translations of these native items for
-Chat Completions, Anthropic or Gemini fallback routes.
+The selected upstream must still support the item types. For routes using a
+different API format, DodoRouter translates function-call history into assistant
+tool calls and tool-result messages, preserving call IDs, arguments and text
+results. Consecutive parallel calls share one assistant turn. Text input and
+output blocks are converted to text; user `input_image` blocks with an image URL
+are converted to image parts. Translation happens separately for each attempt,
+so a later Responses-format step still receives the original native items.
 
-## Function tools on Anthropic routes
+Native items without a supported translation (including reasoning,
+`additional_tools`, built-in tools and non-text function-call outputs) refuse
+that step before any provider request is sent. The attempt records
+`unsupported_responses_item` with the field and item type. The router can then
+try a Responses-format fallback; it never deletes tool history to make a
+request pass. Request representation changes appear in the Trace.
+
+## Function tools on other API formats
 
 Responses-style function tools with top-level `name`, `description` and
 `parameters` are translated when a request is routed or falls back to Anthropic.
@@ -53,9 +64,11 @@ The schema becomes `input_schema`, and any tool-level `cache_control` is retaine
 Bowser and other Responses clients can keep using `/v1/responses`; no switch to
 `/v1/messages` is required for this conversion.
 
-This covers function definitions, not Responses built-in tools or native
-function-call history items. Those have separate cross-format limitations as
-noted above.
+On Chat Completions routes such as Wafer, function definitions and named
+`tool_choice` values use the nested `function` shape required by that API.
+Explicit `strict: false` is retained. Function-call history and text results
+are translated for both routes, including tool errors sent back for repair.
+Built-in tools still require a Responses-format upstream.
 
 ## Streaming event sequence
 

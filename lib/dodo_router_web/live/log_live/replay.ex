@@ -551,7 +551,11 @@ defmodule DodoRouterWeb.LogLive.Replay do
                   {format_metric(:estimated_cost_usd, @source.estimated_cost_usd)}
                 </td>
                 <td class="px-4 py-2.5 text-xs text-base-content/40 hidden md:table-cell">
-                  {format_when(@source.inserted_at)}
+                  <.local_time
+                    id={"log-time-#{@source.id}"}
+                    datetime={@source.inserted_at}
+                    format="datetime"
+                  />
                 </td>
                 <td></td>
               </tr>
@@ -589,7 +593,11 @@ defmodule DodoRouterWeb.LogLive.Replay do
                   <.metric_cell metric={candidate.deltas[:estimated_cost_usd]} />
                 </td>
                 <td class="px-4 py-2.5 text-xs text-base-content/40 hidden md:table-cell">
-                  {format_when(candidate.log.inserted_at)}
+                  <.local_time
+                    id={"log-time-#{candidate.log.id}"}
+                    datetime={candidate.log.inserted_at}
+                    format="datetime"
+                  />
                 </td>
                 <td class="px-2 py-2.5 text-base-content/30">
                   <.icon name="hero-chevron-right" class="w-4 h-4" />
@@ -1103,9 +1111,6 @@ defmodule DodoRouterWeb.LogLive.Replay do
   end
 
   defp step_effort(_log), do: nil
-
-  defp format_when(nil), do: ""
-  defp format_when(datetime), do: Calendar.strftime(datetime, "%b %d, %H:%M")
 
   # Cut position of a partial replay (its messages are a prefix of the
   # root's), or nil for a full replay

@@ -663,7 +663,7 @@ defmodule DodoRouterWeb.DashboardLive do
                     <%= for log <- @recent_logs do %>
                       <tr class="hover:bg-secondary/20 transition-colors">
                         <td class="px-4 py-2 text-sm font-mono text-base-content/50">
-                          {format_time(log.inserted_at)}
+                          <.local_time id={"log-time-#{log.id}"} datetime={log.inserted_at} />
                         </td>
                         <td class="px-4 py-2">
                           <span class={[
@@ -965,8 +965,6 @@ defmodule DodoRouterWeb.DashboardLive do
       true -> "text-error"
     end
   end
-
-  defp format_time(dt), do: Calendar.strftime(dt, "%H:%M:%S")
 
   defp router_color(idx) do
     Enum.at(@router_colors, rem(idx, length(@router_colors)))

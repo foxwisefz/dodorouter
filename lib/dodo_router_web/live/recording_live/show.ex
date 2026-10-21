@@ -186,7 +186,7 @@ defmodule DodoRouterWeb.RecordingLive.Show do
                 </div>
                 <div class="text-xs text-base-content/50">
                   {log.latency_ms}ms · {log.total_tokens || 0} tokens
-                  · {Calendar.strftime(log.inserted_at, "%H:%M:%S")}
+                  · <.local_time id={"log-time-#{log.id}"} datetime={log.inserted_at} />
                 </div>
               </div>
             </a>
