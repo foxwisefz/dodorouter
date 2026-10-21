@@ -326,6 +326,10 @@ defmodule DodoRouterWeb.ResponsesFormat do
     end)
   end
 
+  # Providers can include null instead of omitting the optional tool-call list.
+  defp build_content_parts(%{"tool_calls" => nil} = message),
+    do: build_content_parts(Map.delete(message, "tool_calls"))
+
   defp build_content_parts(%{"tool_calls" => tool_calls, "content" => content}) do
     text_parts =
       if content not in [nil, ""] do
