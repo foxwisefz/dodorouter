@@ -1,8 +1,9 @@
 # JS logic tests
 
-Pure decision logic extracted from LiveView hooks (no DOM, no bundler) is
-tested here with Node's built-in test runner — no jest/vitest/jsdom
-dependency for what is currently a single hook's worth of logic.
+Decision logic from LiveView hooks is tested here with Node's built-in test
+runner — no jest/vitest/jsdom or bundler dependency. Local-time tests exercise
+the mounted/updated callbacks with a minimal element fixture and real Intl
+timezone rules, including date rollover and daylight saving changes.
 
 Run:
 
@@ -10,6 +11,6 @@ Run:
 node --test assets/js/test/*.test.mjs
 ```
 
-Requires Node with `node:test` built in (Node 18+; this repo has been
-verified against Node 26). DOM-touching glue in the hooks themselves stays
-covered by the existing LiveView wiring tests under `test/`.
+Requires Node with `node:test` built in (Node 18.8+; this repo has been
+verified against Node 26). Server-rendered hook wiring stays covered by
+the existing LiveView tests under `test/`.

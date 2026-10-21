@@ -1051,7 +1051,11 @@ defmodule DodoRouterWeb.RouterLive.Show do
                       </span>
                     <% end %>
                     <span :if={Map.get(log, :latency_ms)} class="font-mono">{log.latency_ms}ms</span>
-                    <span class="font-mono text-xs">{format_time(log.inserted_at)}</span>
+                    <.local_time
+                      id={"#{dom_id}-time"}
+                      datetime={log.inserted_at}
+                      class="font-mono text-xs"
+                    />
                   </div>
                 </div>
                 <div
@@ -1392,8 +1396,6 @@ defmodule DodoRouterWeb.RouterLive.Show do
       content
     end
   end
-
-  defp format_time(dt), do: Calendar.strftime(dt, "%H:%M:%S")
 
   defp cache_pct(log) do
     case Usage.cache_hit_pct(log.prompt_tokens, log.cache_read_tokens, log.cache_write_tokens, 0) do

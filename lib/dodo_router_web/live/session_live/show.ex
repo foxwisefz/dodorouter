@@ -232,7 +232,11 @@ defmodule DodoRouterWeb.SessionLive.Show do
                 <div class="flex items-center gap-4 text-base-content/50 text-sm shrink-0">
                   <.log_cost log={log} />
                   <span :if={Map.get(log, :latency_ms)} class="font-mono">{log.latency_ms}ms</span>
-                  <span class="font-mono text-xs">{format_time(log.inserted_at)}</span>
+                  <.local_time
+                    id={"log-time-#{log.id}"}
+                    datetime={log.inserted_at}
+                    class="font-mono text-xs"
+                  />
                 </div>
               </div>
               <div
@@ -267,7 +271,10 @@ defmodule DodoRouterWeb.SessionLive.Show do
             <p class="text-sm text-base-content/70 mt-1">
               From
               <a href={"#turn-#{@finding.diverged_at.id}"} class="link link-warning font-medium">
-                {format_time(@finding.diverged_at.inserted_at)}
+                <.local_time
+                  id="cache-diverged-time"
+                  datetime={@finding.diverged_at.inserted_at}
+                />
               </a>
               onward, {@finding.turns} turns read back the same
               <span class="font-mono">{@finding.pinned_read}</span>
@@ -528,6 +535,4 @@ defmodule DodoRouterWeb.SessionLive.Show do
       content
     end
   end
-
-  defp format_time(dt), do: Calendar.strftime(dt, "%H:%M:%S")
 end

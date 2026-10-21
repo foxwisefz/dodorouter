@@ -32,6 +32,47 @@ defmodule DodoRouterWeb.CoreComponents do
   alias Phoenix.LiveView.JS
 
   @doc """
+  Renders an instant in the browser's local timezone after LiveView connects.
+  The server fallback explicitly says UTC; the hook adds a full local date and
+  timezone tooltip. Data attributes keep ignored elements current on patches.
+  """
+  attr :id, :string, required: true
+  attr :datetime, :any, required: true
+  attr :format, :string, default: "time", values: ~w(time datetime)
+  attr :class, :any, default: nil
+
+  def local_time(assigns) do
+    datetime = assigns.datetime && DateTime.shift_zone!(assigns.datetime, "Etc/UTC")
+
+    fallback_format =
+      if assigns.format == "datetime", do: "%b %d, %Y, %H:%M:%S UTC", else: "%H:%M:%S UTC"
+
+    assigns =
+      assigns
+      |> assign(:iso8601, datetime && DateTime.to_iso8601(datetime))
+      |> assign(:fallback, datetime && Calendar.strftime(datetime, fallback_format))
+      |> assign(:utc_label, datetime && Calendar.strftime(datetime, "%Y-%m-%d %H:%M:%S UTC"))
+
+    ~H"""
+    <time
+      :if={@datetime}
+      id={@id}
+      datetime={@iso8601}
+      data-utc={@iso8601}
+      data-format={@format}
+      data-fallback={@fallback}
+      phx-hook="LocalTime"
+      phx-update="ignore"
+      class={@class}
+      title={@utc_label}
+      aria-label={@utc_label}
+    >
+      {@fallback}
+    </time>
+    """
+  end
+
+  @doc """
   Renders flash notices.
 
   ## Examples

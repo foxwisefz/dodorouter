@@ -487,7 +487,7 @@ defmodule DodoRouterWeb.LogLive.Index do
                   </button>
                 </td>
                 <td class="px-4 py-2.5 text-sm font-mono text-base-content/50">
-                  {format_time(log.inserted_at)}
+                  <.local_time id={"#{dom_id}-time"} datetime={log.inserted_at} />
                 </td>
                 <td class="px-4 py-2.5">
                   <div class="flex items-center gap-1.5">
@@ -636,10 +636,6 @@ defmodule DodoRouterWeb.LogLive.Index do
     ~H"""
     <span class={"px-2 py-0.5 rounded text-xs font-medium #{@class}"}>{@label}</span>
     """
-  end
-
-  defp format_time(dt) do
-    Calendar.strftime(dt, "%H:%M:%S")
   end
 
   # Bare "340ms" doesn't say whether that's normal — banding it against the
