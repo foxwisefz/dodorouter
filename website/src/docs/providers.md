@@ -18,6 +18,11 @@ explicit `parallel_tool_calls` setting. This includes Codex Responses-Lite's
 
 The OpenAI Codex adapter preserves non-message [Responses input items](/docs/api/responses/#typed-input-items), including `additional_tools` and tool history. This same-format preservation does not imply support for those items on other providers' API formats.
 
+Codex can deliver parallel function-call arguments in completion events instead
+of incremental deltas. The Responses adapter preserves these arguments in both
+streamed and accumulated responses, without repeating arguments when the
+provider sends them again in a completed item or response.
+
 When supplied, OpenAI-compatible nested cache-write counts are normalized alongside cache reads. For the Codex Responses format, `input_tokens_details.cache_write_tokens` becomes the logged cache-write count; an explicit zero stays zero, while an absent count remains unknown. These figures feed [cache evidence](/docs/agent-access/#cache-evidence-without-prompt-access) and cost accounting.
 
 Each row is a distinct adapter. Where a provider offers both a pay-as-you-go API and a flat-rate coding subscription, they're listed as separate key types since they use different base URLs and pricing.
