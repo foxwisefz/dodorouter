@@ -8,6 +8,20 @@ order: 19
 
 # Troubleshooting & FAQ
 
+### OpenClaw reports an incomplete or malformed tool call through Codex
+
+Earlier DodoRouter versions could return parallel tool calls with empty
+arguments even when Codex supplied valid JSON. The Codex backend sometimes
+sends the entire argument string in `response.function_call_arguments.done`
+without any argument deltas; the old converter ignored that event.
+
+Update DodoRouter. The Responses adapter now recovers arguments from completion
+events and item snapshots, sending only bytes that have not already reached
+the client. A request marked successful or fallback in an older log can still
+contain empty tool arguments: the stored response is already converted, not
+the provider's raw stream. Upgrading the client alone does not fix this
+conversion bug.
+
 ### Tool continuation fails with `messages[3].role is required`
 
 Earlier DodoRouter versions passed Responses `function_call` and

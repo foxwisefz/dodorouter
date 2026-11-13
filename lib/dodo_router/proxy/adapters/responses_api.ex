@@ -393,7 +393,10 @@ defmodule DodoRouter.Proxy.Adapters.ResponsesAPI do
                   ]
                 })
 
-              {new_acc, chunks ++ [chunk]}
+              {new_acc, argument_chunks} =
+                apply_arguments_snapshot(new_acc, entry.item_id, item["arguments"])
+
+              {new_acc, chunks ++ [chunk | argument_chunks]}
 
             _ ->
               {sacc, chunks}
@@ -403,40 +406,36 @@ defmodule DodoRouter.Proxy.Adapters.ResponsesAPI do
           event_id = event["item_id"] || event["call_id"]
           args_delta = event["delta"]
 
-          {idx, entry} =
-            Enum.find(sacc.tool_calls, fn {_i, e} ->
-              e[:item_id] == event_id or e["id"] == event_id
-            end) ||
-              {map_size(sacc.tool_calls), nil}
+          case find_tool_call(sacc, event_id) do
+            {idx, _entry} ->
+              {new_acc, argument_chunks} = append_arguments(sacc, idx, args_delta)
+              {new_acc, chunks ++ argument_chunks}
 
-          if entry do
-            updated_fn = %{
-              entry["function"]
-              | "arguments" => entry["function"]["arguments"] <> args_delta
-            }
-
-            new_acc =
-              put_in(sacc.tool_calls[idx], %{
-                entry
-                | "function" => updated_fn
-              })
-
-            chunk =
-              build_openai_chunk(%{
-                "tool_calls" => [
-                  %{
-                    "index" => idx,
-                    "function" => %{"arguments" => args_delta}
-                  }
-                ]
-              })
-
-            {new_acc, chunks ++ [chunk]}
-          else
-            {sacc, chunks}
+            nil ->
+              {sacc, chunks}
           end
 
+        "response.function_call_arguments.done" ->
+          event_id = event["item_id"] || event["call_id"]
+
+          {new_acc, argument_chunks} =
+            apply_arguments_snapshot(sacc, event_id, event["arguments"])
+
+          {new_acc, chunks ++ argument_chunks}
+
+        "response.output_item.done" ->
+          {new_acc, argument_chunks} = apply_item_arguments(sacc, event["item"])
+          {new_acc, chunks ++ argument_chunks}
+
         "response.completed" ->
+          output = get_in(event, ["response", "output"]) || []
+
+          {sacc, chunks} =
+            Enum.reduce(output, {sacc, chunks}, fn item, {acc, chunks} ->
+              {acc, argument_chunks} = apply_item_arguments(acc, item)
+              {acc, chunks ++ argument_chunks}
+            end)
+
           usage = get_in(event, ["response", "usage"])
           finish_reason = if map_size(sacc.tool_calls) > 0, do: "tool_calls", else: "stop"
 
@@ -457,6 +456,57 @@ defmodule DodoRouter.Proxy.Adapters.ResponsesAPI do
       end
     end)
   end
+
+  defp apply_item_arguments(acc, %{"type" => "function_call"} = item) do
+    apply_arguments_snapshot(acc, item["id"] || item["call_id"], item["arguments"])
+  end
+
+  defp apply_item_arguments(acc, _item), do: {acc, []}
+
+  # Codex parallel calls can send the entire JSON only in a done event, with
+  # no argument deltas. Later snapshots repeat it. Emit only a missing suffix
+  # so streaming clients and the final response receive the same bytes once.
+  defp apply_arguments_snapshot(acc, event_id, arguments) when is_binary(arguments) do
+    case find_tool_call(acc, event_id) do
+      {idx, entry} ->
+        sent = entry["function"]["arguments"]
+
+        if String.starts_with?(arguments, sent) do
+          suffix = binary_part(arguments, byte_size(sent), byte_size(arguments) - byte_size(sent))
+          append_arguments(acc, idx, suffix)
+        else
+          # A stream cannot retract bytes already sent. Do not silently replace
+          # only the stored response with a conflicting snapshot.
+          {acc, []}
+        end
+
+      nil ->
+        {acc, []}
+    end
+  end
+
+  defp apply_arguments_snapshot(acc, _event_id, _arguments), do: {acc, []}
+
+  defp find_tool_call(acc, event_id) when is_binary(event_id) and event_id != "" do
+    Enum.find(acc.tool_calls, fn {_idx, entry} ->
+      entry[:item_id] == event_id or entry["id"] == event_id
+    end)
+  end
+
+  defp find_tool_call(_acc, _event_id), do: nil
+
+  defp append_arguments(acc, idx, delta) when is_binary(delta) and delta != "" do
+    acc = update_in(acc.tool_calls[idx]["function"]["arguments"], &(&1 <> delta))
+
+    chunk =
+      build_openai_chunk(%{
+        "tool_calls" => [%{"index" => idx, "function" => %{"arguments" => delta}}]
+      })
+
+    {acc, [chunk]}
+  end
+
+  defp append_arguments(acc, _idx, _delta), do: {acc, []}
 
   defp build_openai_chunk(delta, finish_reason \\ nil) do
     "data: " <>
