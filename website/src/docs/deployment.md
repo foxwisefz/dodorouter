@@ -23,6 +23,31 @@ _build/prod/rel/dodo_router/bin/dodo_router start
 
 Run database migrations before starting a new version: `bin/dodo_router eval DodoRouter.Release.migrate`. Health-check your deployment against `GET /health`, which returns 503 both when the database is unreachable and while the instance is intentionally draining connections during a graceful shutdown — point your load balancer's health check at it so it stops sending traffic during a rolling deploy.
 
+## GitHub Actions and Tailscale
+
+The app and website deployment workflows use `tailscale/github-action@v4` with
+the existing `TS_OAUTH_CLIENT_ID`, `TS_OAUTH_SECRET`, and `tag:github`. The OAuth
+client needs permission to create auth keys for that tag, as described in the
+[action's setup instructions](https://github.com/tailscale/github-action).
+
+The older v2 action installs Tailscale 1.42.0, whose OAuth support requires an
+experimental environment flag. On runners where `sudo -E` does not preserve
+the environment, it exits with `oauth authkeys are in experimental status`
+before authenticating. Use v4's newer client; rotating credentials does not
+repair a missing environment flag.
+
+After merging a workflow correction, start a fresh run from the updated branch.
+GitHub's **Re-run jobs** uses the original commit and therefore the old workflow.
+Website documentation changes on `main` automatically start **Deploy Website**;
+workflow-only changes require its **Run workflow** action.
+
+The **Build & Release** workflow publishes with `GITHUB_TOKEN`, whose release
+event does not trigger another workflow. Start **Deploy to Production** with
+**Run workflow**, select `main`, and enter the published version without its
+`v` prefix. Leave **Force full install** disabled for a normal hot upgrade;
+enable it only when required by an OTP/ERTS change. Confirm the running version
+at `GET /api/version` and health at `GET /health` after deployment.
+
 ## Upgrading to multiple router API keys
 
 For migration `20260925222451_create_router_api_keys`, stop all application instances, run migrations, then start the new release. This transition needs a restart rather than a hot or rolling upgrade: the old release can create or regenerate a key after the migration has copied the existing credentials, leaving the new key out of the new table.
