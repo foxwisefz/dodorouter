@@ -87,6 +87,10 @@ Verified: `GET /health` returns `{"status":"ok"}` once the DB connection is heal
 
 For deploy specifics (hot code upgrades, systemd, Castle release management), see the project's own `AGENTS.md` in the repo — those are maintainer-facing operational details rather than user-facing setup, so we won't duplicate them here. See also [Deployment](/docs/deployment/) for a minimal production boot sequence.
 
+If you use the repository's GitHub Actions deployment workflows, follow
+[GitHub Actions and Tailscale](/docs/deployment/#github-actions-and-tailscale)
+for the supported action version, OAuth setup, and release deployment steps.
+
 ## License
 
 DodoRouter is source-available under the [O'Saasy License](https://osaasy.dev). In short: you're free to use, modify, self-host, and even sell copies of it — the one thing you can't do is turn around and offer it as a competing hosted/managed service where the software itself is the product. See the full license text in the repository for the exact terms.
