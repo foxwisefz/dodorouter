@@ -238,6 +238,7 @@ defmodule DodoRouterWeb.AnthropicProxyController do
       [
         request_id: request_id,
         session: session,
+        end_user_id: conn.assigns[:end_user_id],
         client_headers: client_headers,
         recording_id: recording_id,
         idempotency_key: idempotency_key,
@@ -394,6 +395,7 @@ defmodule DodoRouterWeb.AnthropicProxyController do
           # log row gets a fresh one and the header names nothing.
           request_id: request_id,
           session: session,
+          end_user_id: conn.assigns[:end_user_id],
           recording_id: recording_id,
           client_headers: client_headers,
           dropped_query_params: dropped_query_params(conn),

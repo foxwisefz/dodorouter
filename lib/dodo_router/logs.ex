@@ -129,6 +129,7 @@ defmodule DodoRouter.Logs do
     |> maybe_filter_date_range(opts[:from], opts[:to])
     |> maybe_filter_favorite(opts[:favorites_only])
     |> maybe_filter_failures(opts[:failures_only])
+    |> maybe_filter_end_user(opts[:end_user_id])
     |> maybe_filter_session(opts[:session_id])
     |> maybe_filter_recording(opts[:recording_id])
     |> Repo.all()
@@ -149,6 +150,7 @@ defmodule DodoRouter.Logs do
     |> maybe_filter_date_range(opts[:from], opts[:to])
     |> maybe_filter_favorite(opts[:favorites_only])
     |> maybe_filter_failures(opts[:failures_only])
+    |> maybe_filter_end_user(opts[:end_user_id])
     |> maybe_filter_session(opts[:session_id])
     |> maybe_filter_recording(opts[:recording_id])
     |> Repo.aggregate(:count)
@@ -658,6 +660,56 @@ defmodule DodoRouter.Logs do
         list_cost_usd: sum(l.list_cost_usd)
       }
     )
+    |> maybe_filter_end_user(opts[:end_user_id])
+    |> Repo.all()
+  end
+
+  @doc """
+  Recent proxy usage grouped by customer-supplied end-user ID. Untagged requests
+  share the nil group. A cost is unknown if any request in the group lacks that
+  price. Sort by actual cost (default) or list cost, with unknown totals last.
+  """
+  def spend_by_end_user(%Router{} = router, opts \\ []) do
+    hours = Keyword.get(opts, :hours, 24)
+    since = DateTime.add(DateTime.utc_now(), -hours, :hour)
+    cost_field = if opts[:basis] == "list", do: :list_cost_usd, else: :cost_usd
+    limit = Keyword.get(opts, :limit, 20)
+
+    totals =
+      from(l in RequestLog,
+        where:
+          l.router_id == ^router.id and l.traffic_type == "proxy" and l.inserted_at >= ^since,
+        group_by: l.end_user_id,
+        select: %{
+          end_user_id: l.end_user_id,
+          total_requests: count(l.id),
+          total_tokens: sum(l.total_tokens),
+          cost_usd:
+            type(
+              fragment(
+                "CASE WHEN count(?) = count(*) THEN sum(?) END",
+                l.estimated_cost_usd,
+                l.estimated_cost_usd
+              ),
+              :decimal
+            ),
+          list_cost_usd:
+            type(
+              fragment(
+                "CASE WHEN count(?) = count(*) THEN sum(?) END",
+                l.list_cost_usd,
+                l.list_cost_usd
+              ),
+              :decimal
+            )
+        }
+      )
+      |> maybe_filter_end_user(opts[:end_user_id])
+
+    from(t in subquery(totals),
+      order_by: [desc_nulls_last: field(t, ^cost_field), asc_nulls_last: t.end_user_id],
+      limit: ^limit
+    )
     |> Repo.all()
   end
 
@@ -1038,6 +1090,10 @@ defmodule DodoRouter.Logs do
 
   defp maybe_filter_favorite(query, true), do: where(query, [l], l.favorite == true)
   defp maybe_filter_favorite(query, _), do: query
+
+  defp maybe_filter_end_user(query, nil), do: query
+  defp maybe_filter_end_user(query, :unattributed), do: where(query, [l], is_nil(l.end_user_id))
+  defp maybe_filter_end_user(query, id), do: where(query, [l], l.end_user_id == ^id)
 
   defp maybe_filter_session(query, nil), do: query
   defp maybe_filter_session(query, session_id), do: where(query, [l], l.session_id == ^session_id)

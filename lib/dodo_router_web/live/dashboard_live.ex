@@ -32,6 +32,15 @@ defmodule DodoRouterWeb.DashboardLive do
       |> assign(:range, valid_range(params["range"]))
       |> assign(:spend_view, "chart")
       |> assign(:cost_basis, "actual")
+      |> assign(:end_user_lookup, to_form(%{"end_user_id" => ""}, as: :lookup))
+      |> stream_configure(:end_user_spend,
+        dom_id: fn row ->
+          case row.end_user_id do
+            nil -> "end-user-unattributed"
+            id -> "end-user-id-" <> Base.url_encode64(id, padding: false)
+          end
+        end
+      )
       |> assign(:stats, nil)
       |> assign(:loading, false)
 
@@ -101,6 +110,16 @@ defmodule DodoRouterWeb.DashboardLive do
     {:noreply, socket}
   end
 
+  def handle_event("find_end_user", %{"lookup" => %{"end_user_id" => id}}, socket)
+      when is_binary(id) do
+    socket =
+      socket
+      |> assign(:end_user_lookup, to_form(%{"end_user_id" => String.trim(id)}, as: :lookup))
+      |> load_end_user_spend()
+
+    {:noreply, socket}
+  end
+
   @impl true
   def handle_info(:refresh, socket) do
     schedule_refresh()
@@ -158,6 +177,7 @@ defmodule DodoRouterWeb.DashboardLive do
       Enum.sort_by(by_provider, &decimal_float(total_cost(&1, basis)), :desc)
     )
     |> assign_recent_sessions(router, hours)
+    |> load_end_user_spend()
     |> assign(:latency_percentiles, latency_percentiles)
     |> assign(:cache_stats, Logs.cache_stats(router, hours: hours))
     |> assign(:spend_by_model, Logs.spend_by_model(router, hours: hours))
@@ -169,6 +189,22 @@ defmodule DodoRouterWeb.DashboardLive do
     |> assign(:provider_colors, provider_colors)
     |> assign(:selected_router_steps, Routers.list_routing_steps(router))
     |> assign(:recent_logs, Logs.list_logs(router, limit: 8))
+  end
+
+  defp load_end_user_spend(socket) do
+    id = socket.assigns.end_user_lookup[:end_user_id].value
+
+    rows =
+      Logs.spend_by_end_user(socket.assigns.selected_router,
+        hours: @ranges[socket.assigns.range].hours,
+        basis: socket.assigns.cost_basis,
+        limit: 10,
+        end_user_id: if(id != "", do: id)
+      )
+
+    socket
+    |> assign(:end_user_spend_empty?, rows == [])
+    |> stream(:end_user_spend, rows, reset: true)
   end
 
   defp assign_recent_sessions(socket, router, hours) do
@@ -213,8 +249,8 @@ defmodule DodoRouterWeb.DashboardLive do
   defp total_cost(row, "list"), do: row.total_list_cost_usd
   defp total_cost(row, _), do: row.total_cost_usd
 
-  defp model_cost(row, "list"), do: row.list_cost_usd
-  defp model_cost(row, _), do: row.cost_usd
+  defp row_cost(row, "list"), do: row.list_cost_usd
+  defp row_cost(row, _), do: row.cost_usd
 
   defp bucket_cost(bucket_row, "list"), do: bucket_row.list_cost_usd
   defp bucket_cost(bucket_row, _), do: bucket_row.cost_usd
@@ -628,6 +664,73 @@ defmodule DodoRouterWeb.DashboardLive do
               </div>
             </div>
 
+            <section
+              id="end-user-spend"
+              class="mb-4 rounded-lg border border-base-300/50 bg-base-100 p-4"
+            >
+              <div class="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <h2 class="text-sm font-semibold">Spend by End User</h2>
+                  <p class="text-xs text-base-content/60">
+                    {if @end_user_lookup[:end_user_id].value == "",
+                      do: "Top 10 by spend",
+                      else: "Exact end-user ID match"}
+                  </p>
+                </div>
+                <.form
+                  for={@end_user_lookup}
+                  id="end-user-spend-filter"
+                  phx-submit="find_end_user"
+                  phx-change="find_end_user"
+                >
+                  <.input
+                    type="search"
+                    field={@end_user_lookup[:end_user_id]}
+                    aria-label="Find an exact end-user ID"
+                    placeholder="Find an exact end-user ID"
+                    phx-debounce="350"
+                  />
+                </.form>
+              </div>
+              <div class="overflow-x-auto">
+                <table class="table table-sm w-full">
+                  <thead>
+                    <tr>
+                      <th scope="col">End-user ID</th>
+                      <th scope="col" class="text-right">Requests</th>
+                      <th scope="col" class="text-right">Tokens</th>
+                      <th scope="col" class="text-right">
+                        {if @cost_basis == "list", do: "List price", else: "Actual spend"}
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody id="end-user-spend-rows" phx-update="stream">
+                    <tr :for={{dom_id, row} <- @streams.end_user_spend} id={dom_id}>
+                      <td class="break-all">{row.end_user_id || "Unattributed"}</td>
+                      <td class="text-right tabular-nums">
+                        {Charts.format_compact(row.total_requests)}
+                      </td>
+                      <td class="text-right tabular-nums">
+                        {if row.total_tokens,
+                          do: Charts.format_compact(row.total_tokens),
+                          else: "Unknown"}
+                      </td>
+                      <td class="text-right tabular-nums font-semibold">
+                        {if cost = row_cost(row, @cost_basis),
+                          do: Charts.format_usd(cost),
+                          else: "Unknown"}
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+              <p :if={@end_user_spend_empty?} class="py-5 text-center text-xs text-base-content/60">
+                {if @end_user_lookup[:end_user_id].value == "",
+                  do: "No requests in this range.",
+                  else: "No requests for this end-user ID in this range."}
+              </p>
+            </section>
+
             <div class="grid grid-cols-1 lg:grid-cols-3 gap-3">
               <div class="rounded-lg border border-base-300/50 bg-base-100 overflow-hidden lg:col-span-2">
                 <div class="flex items-center justify-between border-b border-base-300/50 px-4 py-2.5">
@@ -904,14 +1007,14 @@ defmodule DodoRouterWeb.DashboardLive do
   # Top 8 models by spend; nominal categories share slot-1 hue.
   defp model_rows(spend_by_model, basis) do
     spend_by_model
-    |> Enum.filter(&(decimal_float(model_cost(&1, basis)) > 0))
-    |> Enum.sort_by(&decimal_float(model_cost(&1, basis)), :desc)
+    |> Enum.filter(&(decimal_float(row_cost(&1, basis)) > 0))
+    |> Enum.sort_by(&decimal_float(row_cost(&1, basis)), :desc)
     |> Enum.take(8)
     |> Enum.map(fn m ->
       %{
         name: m.model,
-        value: decimal_float(model_cost(m, basis)),
-        display: Charts.format_usd(model_cost(m, basis)),
+        value: decimal_float(row_cost(m, basis)),
+        display: Charts.format_usd(row_cost(m, basis)),
         subtext: "#{m.provider} · #{Charts.format_compact(m.total_requests)} requests"
       }
     end)

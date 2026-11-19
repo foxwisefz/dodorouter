@@ -13,6 +13,8 @@ Everything below lives in the left sidebar once you're logged in.
 
 A live, auto-refreshing (every 5s) overview for whichever router you select: request volume over the last hour, success rate, p95 latency, token usage, cache-hit rate, the router's routing chain at a glance, and a recent-requests table.
 
+The end-user spending table shows requests, tokens and spend for the selected router and time range. Switch between metered cost and API list price, or look up a specific customer by their exact ID. Requests without an identifier appear under **Unattributed**. A user’s spend shows **Unknown** if any request in that group lacks a price on the selected basis. The request detail page also shows the recorded ID or token fingerprint. [Tag requests with an end user](/docs/api/#track-usage-by-application-user).
+
 ## Routers
 
 Create/rename/delete routers, and open a router's own page — which is where you'll spend most of your setup time. On a router's page you get: a live-updating "Connect" panel with ready-to-copy code snippets (cURL / Python / Node, in whichever of the three API formats you pick), the routing-chain editor (add steps, reorder them with up/down arrows, assign a specific provider key per step, toggle context-overflow behavior), recent logs, and a setup checklist that walks you through the four things a router needs before it can serve a request: a provider key, a routing step, a key assigned to that step, and a first request.

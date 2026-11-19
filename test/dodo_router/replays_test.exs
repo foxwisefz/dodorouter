@@ -136,6 +136,8 @@ defmodule DodoRouter.ReplaysTest do
             Jason.encode!([
               ["anthropic-beta", "context-1m-2025-08-07"],
               ["user-agent", "claude-cli/2.1.0"],
+              ["X-Dodo-User-Token", "historical-token"],
+              ["x-dodo-user-id", "historical-user"],
               ["authorization", "[REDACTED]"]
             ])
         })
@@ -145,6 +147,8 @@ defmodule DodoRouter.ReplaysTest do
       headers = Jason.decode!(replay.request_headers)
       assert ["anthropic-beta", "context-1m-2025-08-07"] in headers
       assert ["user-agent", "claude-cli/2.1.0"] in headers
+      refute inspect(replay) =~ "historical-token"
+      refute inspect(replay) =~ "historical-user"
     end
 
     test "does not replay a redacted credential as a literal value", ctx do

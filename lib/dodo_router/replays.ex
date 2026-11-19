@@ -94,8 +94,16 @@ defmodule DodoRouter.Replays do
 
   defp replayable_headers(%RequestLog{request_headers: stored}) do
     case decode_headers(stored) do
-      nil -> []
-      headers -> Enum.reject(headers, fn {_k, v} -> String.contains?(v, @redaction_marker) end)
+      nil ->
+        []
+
+      headers ->
+        # Rows captured before end-user attribution shipped may still contain
+        # raw attribution headers. Consume them before dispatch just as on ingress.
+        Enum.reject(headers, fn {key, value} ->
+          String.downcase(key) in ["x-dodo-user-id", "x-dodo-user-token"] or
+            String.contains?(value, @redaction_marker)
+        end)
     end
   end
 

@@ -21,6 +21,19 @@ x-api-key: sk-dodo-YOUR_KEY
 
 A missing or invalid key returns `401` with `{"error":{"message":"Invalid API key",…}}` (verified). On the hosted service, a router whose owner has no active subscription returns `402` instead — not applicable to self-hosted instances unless you've enabled billing yourself.
 
+## Track usage by application user
+
+Send a stable customer ID alongside the router API key when your application makes a Chat Completions, Responses or Messages request. The same headers work for streaming requests.
+
+```http
+Authorization: Bearer sk-dodo-YOUR_KEY
+X-Dodo-User-Id: customer-42
+```
+
+For an application that identifies users by an opaque token, send `X-Dodo-User-Token` in place of `X-Dodo-User-Id`. DodoRouter converts the token to a router-specific keyed fingerprint before recording usage. It consumes both attribution headers locally. Rotating the token or the deployment’s `SECRET_KEY_BASE` changes the fingerprint for future requests. Use a stable ID to keep one spending history across rotations.
+
+Set the attribution header in trusted application code when using these figures for customer accounting. Each request still requires the router's normal authentication.
+
 ## Endpoints
 
 | Method & path | Purpose |

@@ -14,7 +14,10 @@ defmodule DodoRouterWeb.ProxyIntegrationTest do
   alias DodoRouter.Routers
   alias DodoRouter.RoutersFixtures
 
-  @endpoint_url "http://localhost:4002"
+  defp endpoint_url do
+    port = DodoRouterWeb.Endpoint.config(:http) |> Keyword.fetch!(:port)
+    "http://127.0.0.1:#{port}"
+  end
 
   setup _tags do
     # DataCase already sets up the sandbox owner.
@@ -89,13 +92,13 @@ defmodule DodoRouterWeb.ProxyIntegrationTest do
     stream = Keyword.get(opts, :stream, false)
 
     if stream do
-      Req.post("#{@endpoint_url}#{path}",
+      Req.post("#{endpoint_url()}#{path}",
         headers: headers,
         json: Map.put(body, "stream", true),
         receive_timeout: 10_000
       )
     else
-      Req.post("#{@endpoint_url}#{path}",
+      Req.post("#{endpoint_url()}#{path}",
         headers: headers,
         json: body,
         receive_timeout: 10_000
@@ -175,7 +178,7 @@ defmodule DodoRouterWeb.ProxyIntegrationTest do
       session_name = "Test Session"
 
       {:ok, response} =
-        Req.post("#{@endpoint_url}/r/#{router.slug}/v1/chat/completions",
+        Req.post("#{endpoint_url()}/r/#{router.slug}/v1/chat/completions",
           headers: [
             {"authorization", "Bearer #{api_key}"},
             {"content-type", "application/json"},
@@ -243,7 +246,7 @@ defmodule DodoRouterWeb.ProxyIntegrationTest do
       session_name = "RTK Session"
 
       {:ok, response} =
-        Req.post("#{@endpoint_url}/r/#{router.slug}/v1/chat/completions",
+        Req.post("#{endpoint_url()}/r/#{router.slug}/v1/chat/completions",
           headers: [
             {"authorization", "Bearer #{api_key}"},
             {"content-type", "application/json"},

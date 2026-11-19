@@ -66,10 +66,10 @@ The limit travels with the connection — reconnecting or refreshing keeps it, a
 |---|---|---|
 | `get_guide` | The full evaluation workflow, in prose. **An agent should read this first.** | — |
 | `list_routers` | Every router this connection reaches | — |
-| `list_logs` | Recent requests, with `evaluable` per row; filters by session, recording, model, provider and time window | `logs:read` |
+| `list_logs` | Recent requests, with `evaluable` per row; filters by end user, session, recording, model, provider and time window | `logs:read` |
 | `list_sessions` | Sessions with per-session cost, tokens and latency | `logs:read` |
 | `get_session` | One session's aggregates — "this question cost $1.40" | `logs:read` |
-| `get_spend` | Spend grouped by served model over a window | `logs:read` |
+| `get_spend` | Spend grouped by served model or application user over a window | `logs:read` |
 | `get_cache_stats` | Prompt-cache hit rate and token volumes over a window | `logs:read` |
 | `list_recordings` | Capture windows of real traffic; benchmark one via `create_eval` | `logs:read` |
 | `get_recording` | One capture window's aggregates | `logs:read` |

@@ -629,6 +629,12 @@ defmodule DodoRouterWeb.LogLive.Show do
                with it. --%>
             
     <!-- Session -->
+            <div :if={@log.end_user_id} id="log-end-user" data-group="where-it-came-from">
+              <div class="text-[10px] uppercase tracking-wider text-base-content/40 font-semibold mb-1">
+                End user
+              </div>
+              <span class="text-xs font-mono break-all">{@log.end_user_id}</span>
+            </div>
             <div :if={@log.session_id} data-group="where-it-came-from">
               <div class="text-[10px] uppercase tracking-wider text-base-content/40 font-semibold mb-1">
                 Session

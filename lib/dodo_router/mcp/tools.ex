@@ -31,6 +31,12 @@ defmodule DodoRouter.MCP.Tools do
       "Router slug. Optional when this token reaches exactly one router; required otherwise. Use list_routers to see them."
   }
 
+  @end_user_arg %{
+    "type" => ["string", "null"],
+    "description" =>
+      "Exact caller-supplied end-user ID. Pass null for untagged traffic. Omit for every user."
+  }
+
   @definitions [
     %{
       name: "get_guide",
@@ -66,6 +72,7 @@ defmodule DodoRouter.MCP.Tools do
           "status" => %{"type" => "string", "description" => "success, fallback or error."},
           "model" => %{"type" => "string", "description" => "Filter by served model."},
           "provider" => %{"type" => "string", "description" => "Filter by serving provider."},
+          "end_user_id" => @end_user_arg,
           "session_id" => %{
             "type" => "string",
             "description" => "Only requests tagged with this session id (see list_sessions)."
@@ -168,18 +175,33 @@ defmodule DodoRouter.MCP.Tools do
     },
     %{
       name: "get_spend",
-      title: "Spend by model",
+      title: "Router spend",
       description:
-        "What this router's traffic cost over a window, grouped by served model: requests, " <>
-          "tokens, cost_usd (actually metered) and list_cost_usd (the same tokens at " <>
-          "pay-as-you-go API prices) per model, highest spend first. Every row is " <>
-          "drillable: pass its model and provider to list_logs with the same window to see " <>
-          "the requests behind the number.",
+        "Requests, tokens, metered cost_usd and pay-as-you-go list_cost_usd over a window. " <>
+          "Group by served model and provider (default), or end_user to rank callers. " <>
+          "Untagged requests share a null end_user_id. An end-user cost total is null if any " <>
+          "request lacks that price. Pass the grouping fields to list_logs to inspect requests.",
       scopes: ["logs:read"],
       schema: %{
         "type" => "object",
         "properties" => %{
           "router" => @router_arg,
+          "group_by" => %{
+            "type" => "string",
+            "enum" => ["model", "end_user"],
+            "default" => "model"
+          },
+          "end_user_id" => @end_user_arg,
+          "basis" => %{
+            "type" => "string",
+            "enum" => ["actual", "list"],
+            "description" =>
+              "End-user ranking only. Defaults to actual. Unknown totals sort last."
+          },
+          "limit" => %{
+            "type" => "integer",
+            "description" => "End-user ranking only. Defaults to 20. Max 100."
+          },
           "hours" => %{
             "type" => "integer",
             "description" => "Window size in hours, 1-720. Defaults to 24."
@@ -679,12 +701,14 @@ defmodule DodoRouter.MCP.Tools do
 
   defp run("list_logs", principal, args) do
     with {:ok, router} <- resolve_router(principal, args),
+         {:ok, end_user_id} <- end_user_filter(args),
          {:ok, since} <- parse_time(args["since"], "since"),
          {:ok, until} <- parse_time(args["until"], "until") do
       limit = args |> Map.get("limit", 20) |> clamp(1, 100)
 
       filters = [
         status: presence(args["status"]),
+        end_user_id: end_user_id,
         model: presence(args["model"]),
         provider: presence(args["provider"]),
         session_id: presence(args["session_id"]),
@@ -792,27 +816,34 @@ defmodule DodoRouter.MCP.Tools do
   end
 
   defp run("get_spend", principal, args) do
-    with {:ok, router} <- resolve_router(principal, args) do
+    with {:ok, router} <- resolve_router(principal, args),
+         {:ok, end_user_id} <- end_user_filter(args) do
       hours = args |> Map.get("hours", 24) |> clamp(1, 720)
+      filter = [hours: hours, end_user_id: end_user_id]
+      result = %{router: router.slug, window_hours: hours}
 
-      {:ok,
-       %{
-         router: router.slug,
-         window_hours: hours,
-         by_model:
-           router
-           |> Logs.spend_by_model(hours: hours)
-           |> Enum.map(fn row ->
-             %{
-               model: row.model,
-               provider: row.provider,
-               requests: row.total_requests,
-               total_tokens: row.total_tokens,
-               cost_usd: money(row.cost_usd),
-               list_cost_usd: money(row.list_cost_usd)
-             }
-           end)
-       }}
+      case Map.get(args, "group_by", "model") do
+        "model" when is_map_key(args, "basis") or is_map_key(args, "limit") ->
+          {:error, "basis and limit apply only when group_by is end_user."}
+
+        "model" ->
+          rows = Enum.map(Logs.spend_by_model(router, filter), &spend_row/1)
+          {:ok, Map.put(result, :by_model, rows)}
+
+        "end_user" ->
+          basis = Map.get(args, "basis", "actual")
+          limit = args |> Map.get("limit", 20) |> clamp(1, 100)
+
+          if basis in ["actual", "list"] do
+            rows = Logs.spend_by_end_user(router, filter ++ [basis: basis, limit: limit])
+            {:ok, Map.merge(result, %{basis: basis, by_end_user: Enum.map(rows, &spend_row/1)})}
+          else
+            {:error, "basis must be actual or list."}
+          end
+
+        _ ->
+          {:error, "group_by must be model or end_user."}
+      end
     end
   end
 
@@ -1433,6 +1464,25 @@ defmodule DodoRouter.MCP.Tools do
     }
   end
 
+  defp end_user_filter(%{"end_user_id" => nil}), do: {:ok, :unattributed}
+  defp end_user_filter(%{"end_user_id" => id}) when is_binary(id), do: {:ok, id}
+
+  defp end_user_filter(%{"end_user_id" => _}),
+    do: {:error, "end_user_id must be a string or null."}
+
+  defp end_user_filter(_args), do: {:ok, nil}
+
+  defp spend_row(row) do
+    row
+    |> Map.take([:model, :provider, :end_user_id])
+    |> Map.merge(%{
+      requests: row.total_requests,
+      total_tokens: row.total_tokens,
+      cost_usd: money(row.cost_usd),
+      list_cost_usd: money(row.list_cost_usd)
+    })
+  end
+
   defp log_summary(log) do
     blocker = Replays.replay_blocker(log)
 
@@ -1448,6 +1498,7 @@ defmodule DodoRouter.MCP.Tools do
       total_tokens: log.total_tokens,
       cache_read_tokens: log.cache_read_tokens,
       session_id: log.session_id,
+      end_user_id: log.end_user_id,
       # A zero-cost row says why it cost nothing: the key the client sent,
       # and — on replays — the original whose stored answer was re-served.
       idempotency_key: log.idempotency_key,
