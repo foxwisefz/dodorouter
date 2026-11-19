@@ -1183,6 +1183,33 @@ defmodule DodoRouterWeb.MCPControllerTest do
       assert hd(bad["result"]["content"])["text"] =~ "ISO 8601"
     end
 
+    test "get_spend and list_logs drill into an exact end-user id", %{
+      conn: conn,
+      token: token,
+      router: router
+    } do
+      for id <- ["customer-1", "customer-1", "customer-10", nil] do
+        DodoRouter.LogsFixtures.log_fixture(router, %{end_user_id: id, list_cost_usd: "2"})
+      end
+
+      call = fn tool, args ->
+        tool_json(json_response(call_tool(conn, token, tool, args), 200))
+      end
+
+      args = %{"end_user_id" => "customer-1"}
+      spend = call.("get_spend", Map.merge(args, %{"group_by" => "end_user", "basis" => "list"}))
+
+      assert [%{"end_user_id" => "customer-1", "requests" => 2, "list_cost_usd" => 4.0}] =
+               spend["by_end_user"]
+
+      assert [%{"requests" => 2}] = call.("get_spend", args)["by_model"]
+
+      logs = call.("list_logs", Map.put(args, "limit", 1))
+      assert logs["total"] == 2
+      assert [%{"end_user_id" => "customer-1"}] = logs["logs"]
+      assert [%{"end_user_id" => nil}] = call.("list_logs", %{"end_user_id" => nil})["logs"]
+    end
+
     test "spend, cache and recording aggregates carry both cost figures and no bodies", %{
       conn: conn,
       token: token,

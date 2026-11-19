@@ -287,6 +287,7 @@ defmodule DodoRouterWeb.LogLiveTest do
       log =
         LogsFixtures.log_fixture(router, %{
           session_id: "task-grouping-session",
+          end_user_id: "customer-42",
           attempted_steps: [
             %{"provider" => "test_provider", "status" => "success", "latency_ms" => 100}
           ]
@@ -309,6 +310,7 @@ defmodule DodoRouterWeb.LogLiveTest do
 
       # "where it came from" carries the session
       assert has_element?(live, "[data-group='where-it-came-from']", "task-grouping-session")
+      assert has_element?(live, "#log-end-user", "customer-42")
 
       assert html =~ "Left sidebar"
     end

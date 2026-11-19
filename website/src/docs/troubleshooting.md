@@ -88,6 +88,10 @@ You're using a provider key (from the Providers page) where a router API key is 
 
 The MCP endpoint doesn't take a router API key at all — that key sends traffic, and reading traffic back is a separate grant. Connect the agent over OAuth instead: `claude mcp add --transport http dodorouter {base_url}/mcp`, then approve it in the browser. See [Agent access](/docs/agent-access/).
 
+### 400 when tagging an application user
+
+Send a single `X-Dodo-User-Id` header containing a nonblank UTF-8 ID of at most 255 bytes without control characters. [End-user attribution](/docs/api/#track-usage-by-application-user).
+
 ### 402 Payment Required
 
 Hosted service only: the account owning this router doesn't have an active subscription. Visit Billing to subscribe. Doesn't apply to self-hosted instances unless you've configured Stripe billing yourself.

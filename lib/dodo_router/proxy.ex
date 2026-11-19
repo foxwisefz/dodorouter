@@ -99,6 +99,7 @@ defmodule DodoRouter.Proxy do
       # The answer lives once, on the original row this links to.
       response_body: "null",
       truncation_flags: req_flags,
+      end_user_id: Keyword.get(opts, :end_user_id),
       session_id: session[:session_id],
       session_name: session[:session_name],
       recording_id: Keyword.get(opts, :recording_id),
@@ -258,6 +259,7 @@ defmodule DodoRouter.Proxy do
       provider_processing_ms: meta["provider_processing_ms"],
       request_body: request_body,
       response_body: response_body,
+      end_user_id: Keyword.get(opts, :end_user_id),
       session_id: session[:session_id],
       session_name: session[:session_name],
       recording_id: recording_id,

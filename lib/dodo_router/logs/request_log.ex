@@ -46,6 +46,7 @@ defmodule DodoRouter.Logs.RequestLog do
     field :response_headers, :string
 
     # Session grouping (Helicone-style)
+    field :end_user_id, :string
     field :session_id, :string
     field :session_name, :string
 
@@ -127,6 +128,7 @@ defmodule DodoRouter.Logs.RequestLog do
       :estimated_cost_usd,
       :list_cost_usd,
       :inserted_at,
+      :end_user_id,
       :session_id,
       :session_name,
       :recording_id,

@@ -107,6 +107,57 @@ defmodule DodoRouterWeb.DashboardLiveTest do
       assert html =~ "chatgpt-5.5"
     end
 
+    test "finds an end user outside the top ten in the selected router and range", %{
+      conn: conn,
+      user: user
+    } do
+      {router, _} = RoutersFixtures.router_fixture(user)
+      {other, _} = RoutersFixtures.router_fixture(user)
+
+      for n <- 1..10 do
+        LogsFixtures.log_fixture(router, %{end_user_id: "spender-#{n}", estimated_cost_usd: 1})
+      end
+
+      LogsFixtures.log_fixture(router, %{end_user_id: "customer-42", estimated_cost_usd: 0})
+
+      LogsFixtures.log_fixture(router, %{end_user_id: "customer-42", estimated_cost_usd: 2})
+      |> backdate(30)
+
+      LogsFixtures.log_fixture(other, %{end_user_id: "customer-42", estimated_cost_usd: 8})
+
+      {:ok, view, _} = live(conn, ~p"/dashboard?router_id=#{router.id}")
+      refute has_element?(view, "#end-user-spend-rows td", "customer-42")
+
+      view
+      |> form("#end-user-spend-filter", lookup: %{end_user_id: "customer-42"})
+      |> render_submit()
+
+      assert has_element?(view, "#end-user-spend-rows td", "customer-42")
+      assert has_element?(view, "#end-user-spend-rows td:last-child", "$0")
+      assert has_element?(view, "#end-user-spend-rows td:nth-child(3)", "150")
+      refute has_element?(view, "#end-user-spend-rows td", "spender-")
+
+      view |> element("#range-picker button[phx-value-range='7d']") |> render_click()
+      assert has_element?(view, "#end-user-spend-rows td:last-child", "$2.00")
+
+      view |> element("button[phx-value-router_id='#{other.id}']") |> render_click()
+      assert has_element?(view, "#end-user-spend-rows td:last-child", "$8.00")
+    end
+
+    test "shows unknown per-user spend and applies the dashboard pricing basis", %{
+      conn: conn,
+      user: user
+    } do
+      {router, _} = RoutersFixtures.router_fixture(user)
+      LogsFixtures.log_fixture(router, %{end_user_id: "plan-user", list_cost_usd: 3})
+
+      {:ok, view, _} = live(conn, ~p"/dashboard")
+      assert has_element?(view, "#end-user-spend-rows td:last-child", "Unknown")
+
+      view |> element("#cost-basis-picker button[phx-value-basis='list']") |> render_click()
+      assert has_element?(view, "#end-user-spend-rows td:last-child", "$3.00")
+    end
+
     test "KPI tiles show a signed delta against the immediately preceding window", %{
       conn: conn,
       user: user

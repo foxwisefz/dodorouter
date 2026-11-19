@@ -66,10 +66,10 @@ The limit travels with the connection — reconnecting or refreshing keeps it, a
 |---|---|---|
 | `get_guide` | The full evaluation workflow, in prose. **An agent should read this first.** | — |
 | `list_routers` | Every router this connection reaches | — |
-| `list_logs` | Recent requests, with `evaluable` per row; filters by session, recording, model, provider and time window | `logs:read` |
+| `list_logs` | Recent requests, with `evaluable` per row; filters by end user, session, recording, model, provider and time window | `logs:read` |
 | `list_sessions` | Sessions with per-session cost, tokens and latency | `logs:read` |
 | `get_session` | One session's aggregates — "this question cost $1.40" | `logs:read` |
-| `get_spend` | Spend grouped by served model over a window | `logs:read` |
+| `get_spend` | Spend grouped by served model or application user over a window | `logs:read` |
 | `get_cache_stats` | Prompt-cache hit rate and token volumes over a window | `logs:read` |
 | `list_recordings` | Capture windows of real traffic; benchmark one via `create_eval` | `logs:read` |
 | `get_recording` | One capture window's aggregates | `logs:read` |
@@ -82,6 +82,14 @@ The limit travels with the connection — reconnecting or refreshing keeps it, a
 | `retry_eval` | Re-run only the runs that failed | `evals:write` |
 | `cancel_eval` | Stop a running benchmark; stored answers stay | `evals:write` |
 | `send_feedback` | Send feedback about the agent surface to the DodoRouter team | — |
+
+To see what one customer spent, send `X-Dodo-User-Id: customer-42` on that customer's proxy requests. Then call `get_spend` with the following arguments on a connection with `logs:read`. Include `router` if the connection reaches multiple routers.
+
+```json
+{"group_by": "end_user", "end_user_id": "customer-42", "hours": 24}
+```
+
+The result includes request count, tokens, actual cost and list-price cost. Use the same `end_user_id` with `list_logs` to inspect individual requests. An explicit `null` selects unattributed requests. [Proxy request example](/docs/api/#track-usage-by-application-user).
 
 `create_eval` accepts one `request_log_id`, a `request_log_ids` set, or a `recording_id` — with a set, every candidate answers every log and the ranking aggregates across them, so the score answers "on my traffic" rather than "on this one request". A recording is the strongest source: every replayable request captured during the window becomes a source log (evenly sampled across the capture when more than 20 are replayable), so the sample is production traffic nobody hand-picked. It also takes `prompt_variants` to hold the model constant and vary the request: a variant can replace the system prompt, or patch individual messages (`message_patches`) — swap a tool-result for a compressed version, say, and measure whether reasoning survives. Each variant patches the served request, and the ranking carries one row per model × variant under the same judge. For recorded agent traffic, `comparison_mode: "next_action"` turns the benchmark into a per-decision preference test: the judge compares each candidate's proposed next move against what production actually did over the same frozen history.
 

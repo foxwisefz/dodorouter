@@ -94,8 +94,14 @@ defmodule DodoRouter.Replays do
 
   defp replayable_headers(%RequestLog{request_headers: stored}) do
     case decode_headers(stored) do
-      nil -> []
-      headers -> Enum.reject(headers, fn {_k, v} -> String.contains?(v, @redaction_marker) end)
+      nil ->
+        []
+
+      headers ->
+        Enum.reject(headers, fn {key, value} ->
+          String.downcase(key) == "x-dodo-user-id" or
+            String.contains?(value, @redaction_marker)
+        end)
     end
   end
 

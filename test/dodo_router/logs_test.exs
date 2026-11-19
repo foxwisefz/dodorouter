@@ -645,6 +645,46 @@ defmodule DodoRouter.LogsTest do
     end
   end
 
+  describe "spend_by_end_user/2" do
+    test "ranks only this router's recent proxy usage on the chosen cost basis" do
+      {router, _} = RoutersFixtures.router_fixture()
+      {other_router, _} = RoutersFixtures.router_fixture()
+      now = DateTime.utc_now()
+      attrs = %{end_user_id: "Alice", estimated_cost_usd: "0.25", list_cost_usd: "2.00"}
+
+      insert_log_at(router, now, attrs)
+      insert_log_at(router, now, attrs)
+
+      insert_log_at(router, now, %{
+        end_user_id: "alice",
+        estimated_cost_usd: "1",
+        list_cost_usd: "1"
+      })
+
+      insert_log_at(router, now, %{end_user_id: nil, estimated_cost_usd: "99", list_cost_usd: "4"})
+
+      insert_log_at(router, now, %{end_user_id: nil, estimated_cost_usd: nil, list_cost_usd: nil})
+      insert_log_at(router, now, Map.put(attrs, :traffic_type, "eval_candidate"))
+      insert_log_at(router, DateTime.add(now, -3, :hour), attrs)
+      insert_log_at(other_router, now, attrs)
+
+      assert [%{end_user_id: "alice"}] = Logs.spend_by_end_user(router, hours: 2, limit: 1)
+
+      assert [
+               alice,
+               %{end_user_id: "alice"},
+               %{end_user_id: nil, total_requests: 2, cost_usd: nil, list_cost_usd: nil}
+             ] = Logs.spend_by_end_user(router, hours: 2, basis: "list")
+
+      assert alice.end_user_id == "Alice"
+      assert alice.total_requests == 2
+      assert alice.total_tokens == 300
+      assert Decimal.equal?(alice.cost_usd, "0.50")
+      assert Decimal.equal?(alice.list_cost_usd, "4")
+      assert [^alice] = Logs.spend_by_end_user(router, hours: 2, end_user_id: "Alice", limit: 1)
+    end
+  end
+
   describe "spend_by_model/2" do
     test "orders models by spend descending" do
       {router, _api_key} = RoutersFixtures.router_fixture()

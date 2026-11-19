@@ -19,6 +19,7 @@ defmodule DodoRouterWeb.Router do
 
   pipeline :proxy_api do
     plug DodoRouterWeb.Plugs.ApiAuth
+    plug DodoRouterWeb.Plugs.EndUserIdentity
   end
 
   # The authorization endpoint runs OUR login and consent UI, so it needs a

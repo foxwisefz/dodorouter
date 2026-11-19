@@ -315,6 +315,7 @@ and quality questions without a benchmark:
   (no provider tokenizer is public), so trust the shares; treat per-bucket
   absolutes as estimates.
 - `get_spend { "hours": 24 }` — spend grouped by served model.
+- `get_spend { "group_by": "end_user", "hours": 24 }` ranks application users on the selected router by actual spend. It returns the top 20 by default. Set `limit` up to 100 or use `basis: "list"` to rank by list-price cost. Tag proxy requests with `X-Dodo-User-Id` to attribute them. To look up one customer, also pass `"end_user_id": "customer-42"`. Use that same identifier with `list_logs` to inspect the underlying requests. A null ID groups unattributed traffic. A null cost means that at least one matching request lacks the corresponding price.
 - `get_log.cache_diagnosis` explains structural cache evidence without
   `logs:read_bodies`. Start with `list_logs` filtered by `session_id`, then
   inspect the affected requests. `observation` separates zero reported reads,
@@ -358,7 +359,7 @@ or response text — bodies stay behind `get_log` and its own scope.
 | `list_logs` | Recent requests, with `evaluable` per row; the drill-down for every aggregate | `logs:read` |
 | `list_sessions` | Sessions with per-session cost/tokens/latency | `logs:read` |
 | `get_session` | One session's aggregates ("this question cost $1.40") | `logs:read` |
-| `get_spend` | Spend by served model over a window | `logs:read` |
+| `get_spend` | Spend by served model or end user over a window | `logs:read` |
 | `get_cache_stats` | Prompt-cache hit rate over a window | `logs:read` |
 | `get_recording` | One capture window's aggregates | `logs:read` |
 | `list_recordings` | Capture windows; benchmark one via `create_eval` `recording_id` | `logs:read` |
