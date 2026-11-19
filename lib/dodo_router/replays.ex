@@ -98,10 +98,8 @@ defmodule DodoRouter.Replays do
         []
 
       headers ->
-        # Rows captured before end-user attribution shipped may still contain
-        # raw attribution headers. Consume them before dispatch just as on ingress.
         Enum.reject(headers, fn {key, value} ->
-          String.downcase(key) in ["x-dodo-user-id", "x-dodo-user-token"] or
+          String.downcase(key) == "x-dodo-user-id" or
             String.contains?(value, @redaction_marker)
         end)
     end

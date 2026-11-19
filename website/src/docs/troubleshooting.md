@@ -90,7 +90,7 @@ The MCP endpoint doesn't take a router API key at all — that key sends traffic
 
 ### 400 when tagging an application user
 
-Send a single attribution header. Supply a nonblank user ID of at most 255 UTF-8 bytes or an opaque user token. The `hmac:` ID prefix is reserved for token fingerprints. [End-user attribution](/docs/api/#track-usage-by-application-user).
+Send a single `X-Dodo-User-Id` header containing a nonblank UTF-8 ID of at most 255 bytes without control characters. [End-user attribution](/docs/api/#track-usage-by-application-user).
 
 ### 402 Payment Required
 

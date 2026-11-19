@@ -30,7 +30,7 @@ Authorization: Bearer sk-dodo-YOUR_KEY
 X-Dodo-User-Id: customer-42
 ```
 
-For an application that identifies users by an opaque token, send `X-Dodo-User-Token` in place of `X-Dodo-User-Id`. DodoRouter converts the token to a router-specific keyed fingerprint before recording usage. It consumes both attribution headers locally. Rotating the token or the deployment’s `SECRET_KEY_BASE` changes the fingerprint for future requests. Use a stable ID to keep one spending history across rotations.
+Use your application's customer ID or a stable random UUID. DodoRouter records the ID locally and strips the header before forwarding the request.
 
 Set the attribution header in trusted application code when using these figures for customer accounting. Each request still requires the router's normal authentication.
 

@@ -34,7 +34,7 @@ defmodule DodoRouter.MCP.Tools do
   @end_user_arg %{
     "type" => ["string", "null"],
     "description" =>
-      "Exact caller-supplied end-user ID. Pass null for untagged traffic. Omit for every user."
+      "Exact ID from the proxy request’s X-Dodo-User-Id header. Pass null for untagged traffic. Omit for every user."
   }
 
   @definitions [
